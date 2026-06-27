@@ -11,7 +11,8 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 export const VERSION = "0.0.1";
 
-export const CONFIG_DIR = join(homedir(), ".gitmob");
+/** Local state dir. Override with GITMOB_HOME (used by tests; also handy for relocating state). */
+export const CONFIG_DIR = process.env.GITMOB_HOME ?? join(homedir(), ".gitmob");
 export const DB_PATH = join(CONFIG_DIR, "gitmob.db");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 

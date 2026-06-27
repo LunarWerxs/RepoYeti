@@ -19,8 +19,9 @@ fetch/pull/push from your phone.
 | 6 — Tauri tray | thin sidecar around the unchanged daemon binary | ⏳ deferred (the CLI binary + phone browser is the whole product) |
 
 ¹ Auth gating, the login redirect (built from live connections.icu discovery), and the sign-in UI are
-verified; the actual login round-trip needs the owner to register a "Sign in with Connections" app
-(client id) and deploy the shim — see [shim/README.md](shim/README.md) and MARCHING_ORDERS §13.
+verified; the redirect shim is **deployed** (`gitmob-auth.lunawerx.workers.dev`). The only remaining
+step for a live login round-trip is registering a "Sign in with Connections" app (client id) — see
+[shim/README.md](shim/README.md) and MARCHING_ORDERS §13.
 ² PAT/HTTPS-token auth + OS-keychain (keytar) remain intentionally deferred (SSH-key injection covers
 the common case); the named-tunnel stable-URL upgrade is documented.
 
@@ -65,9 +66,38 @@ gitmob start --tunnel    # requires "oauth" configured in ~/.gitmob/config.json 
 ```
 
 Prints a `*.trycloudflare.com` URL + a QR to scan. The daemon refuses to open a tunnel unless auth is
-configured, so the public URL is useless to anyone but the signed-in owner. See
-[shim/README.md](shim/README.md) and [MARCHING_ORDERS.md](MARCHING_ORDERS.md) §7/§13 for the one-time
-"Sign in with Connections" app + redirect-shim setup.
+configured, so the public URL is useless to anyone but the signed-in owner.
+
+### Finishing "Sign in with Connections" (one-time)
+
+The redirect **shim is already deployed**: `https://gitmob-auth.lunawerx.workers.dev` (Cloudflare Worker;
+source in [shim/](shim/)). To light up login you only need to:
+
+1. Register a **"Sign in with Connections"** app at `studio.connections.icu` (developer apps) with
+   **redirect URI** `https://gitmob-auth.lunawerx.workers.dev/cb` and scopes `openid profile email`.
+   This yields a `client_id` (and, if confidential, a `client_secret`).
+2. Add the `oauth` block to `~/.gitmob/config.json`:
+
+   ```jsonc
+   {
+     "roots": ["/your/code"],
+     "oauth": {
+       "issuer": "https://accounts.connections.icu",
+       "clientId": "<your client id>",
+       "redirectUri": "https://gitmob-auth.lunawerx.workers.dev/cb",
+       "ownerSub": "<your Connections sub>"   // or "ownerEmail": "you@example.com"
+     }
+   }
+   ```
+
+Then `gitmob start --tunnel` → scan the QR → Sign in with Connections → dashboard, from anywhere.
+
+## Testing
+
+```sh
+bun test        # 19 tests: discovery, op-queue, git-action guards, auth gating, redirect shim
+bun run typecheck
+```
 
 Safety guards return first-class error codes: `DIRTY_WORKING_TREE`, `NON_FAST_FORWARD`, `DETACHED_HEAD`,
 `SSH_AUTH_FAILED`, `SSH_PASSPHRASE_REQUIRED`, `NO_UPSTREAM`, `NO_REMOTE` — the daemon never leaves a repo

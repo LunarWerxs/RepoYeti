@@ -18,7 +18,8 @@
 > (2) **PAT/HTTPS-token auth + OS-keychain (keytar)** stay deferred (SSH-key injection covers the common
 > case), and **Phase 6 (Tauri tray)** is deferred — the CLI binary + phone browser is the whole product.
 > The only thing between "built" and a live remote login is the owner-gated §13 setup (register the
-> OAuth app, deploy the shim, set the owner sub).
+> OAuth app + set the owner sub). **The redirect shim is already deployed** at
+> `https://gitmob-auth.lunawerx.workers.dev` and git is initialized with tests (`bun test`, 19 passing).
 
 ---
 

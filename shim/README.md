@@ -8,6 +8,10 @@ It receives `GET /cb?code&state`, reads the daemon's current origin out of the s
 `<daemon-origin>/oauth/finish`. The `code` is PKCE-bound and single-use, so the shim
 never sees a usable credential. See [`../MARCHING_ORDERS.md`](../MARCHING_ORDERS.md) §7.
 
+> **✅ Deployed:** `https://gitmob-auth.lunawerx.workers.dev` — register
+> `https://gitmob-auth.lunawerx.workers.dev/cb` as the redirect URI of your
+> "Sign in with Connections" app. Re-deploy after edits with `bunx wrangler deploy`.
+
 ## Deploy (free)
 
 ```sh
