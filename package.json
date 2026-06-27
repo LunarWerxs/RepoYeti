@@ -1,0 +1,26 @@
+{
+  "name": "gitmob",
+  "version": "0.0.1",
+  "description": "System-wide remote git manager — a background daemon with a mobile dashboard.",
+  "type": "module",
+  "bin": {
+    "gitmob": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts start",
+    "dev": "bun run --watch src/index.ts start",
+    "status": "bun run src/index.ts status",
+    "spike:keytar": "bun run scripts/keytar-spike.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "jose": "^6.2.3",
+    "qrcode-terminal": "^0.12.0",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.2"
+  }
+}

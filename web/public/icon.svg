@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="GitMob">
+  <rect width="512" height="512" rx="112" fill="#0e0e12" />
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#1f1f29" stroke-width="20" />
+  <!-- git-graph: branch line from top node curving to a lower node -->
+  <path d="M196 160 V300 a44 44 0 0 0 44 44 H316" fill="none" stroke="#3ddc84" stroke-width="22" stroke-linecap="round" />
+  <circle cx="196" cy="160" r="34" fill="#3ddc84" />
+  <circle cx="316" cy="344" r="34" fill="#3ddc84" />
+  <circle cx="196" cy="344" r="20" fill="#6b6b7b" />
+</svg>

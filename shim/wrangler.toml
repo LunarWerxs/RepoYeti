@@ -1,0 +1,11 @@
+name = "gitmob-auth"
+main = "worker.ts"
+compatibility_date = "2025-01-01"
+
+# The free *.workers.dev subdomain is enough — no custom domain needed.
+workers_dev = true
+
+# Hosts the shim may bounce the OAuth code back to. Add your tunnel's domain here if
+# you use a named tunnel; the default covers free quick tunnels.
+[vars]
+ALLOWED_SUFFIXES = ".trycloudflare.com"

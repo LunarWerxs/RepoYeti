@@ -1,0 +1,18 @@
+# deps & build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local runtime state (the daemon writes to ~/.gitmob, but never commit any local db copies)
+*.db
+*.db-wal
+*.db-shm
+.gitmob/
+
+# editor / os
+.DS_Store
+.vscode/
+.idea/
+
+# bundled binaries (fetched per-platform, not committed)
+vendor/cloudflared/

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "gitmob",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "src/index.ts", "start"],
+      "port": 7171
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "gitmob-web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "build:fast": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@formkit/auto-animate": "^0.8.2",
+    "@vueuse/core": "^12.0.0",
+    "lucide-vue-next": "^0.468.0",
+    "naive-ui": "^2.40.1",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vite-plugin-pwa": "^0.21.1",
+    "vue-tsc": "^2.2.0"
+  }
+}
