@@ -1,7 +1,9 @@
 import { defineStore } from "pinia";
 import { ref, reactive, computed, watch } from "vue";
 import { useEventSource } from "@vueuse/core";
+import { toast } from "vue-sonner";
 import { api, ApiError, type AccessMode } from "./api";
+import { t } from "./i18n";
 import type {
   ActionName,
   ActionResult,
@@ -23,6 +25,39 @@ import type {
 
 /** Sync-status filter keys (multi-select; OR semantics). */
 export type StatusKey = "dirty" | "ahead" | "behind" | "clean" | "error";
+
+/** One repo that just fell further behind its remote (the `repo_behind` SSE payload). */
+interface BehindRepo {
+  id: string;
+  name: string;
+  branch: string | null;
+  behind: number;
+}
+
+/** One repo "keep in sync" just auto fast-forwarded (the `repo_synced` SSE payload). */
+interface SyncedRepo {
+  id: string;
+  name: string;
+  pulled: number;
+}
+
+// Desktop-notification opt-in is per-browser (it rides the browser's Notification permission),
+// so it lives in localStorage, not the daemon config.
+const DESKTOP_NOTIFY_KEY = "gitmob.desktopNotify";
+function loadDesktopNotifyPref(): boolean {
+  try {
+    return localStorage.getItem(DESKTOP_NOTIFY_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveDesktopNotifyPref(on: boolean): void {
+  try {
+    localStorage.setItem(DESKTOP_NOTIFY_KEY, on ? "1" : "0");
+  } catch {
+    /* private mode / storage disabled — the in-memory ref still drives this session */
+  }
+}
 
 export const useStore = defineStore("gitmob", () => {
   const repos = ref<Repo[]>([]);
@@ -96,6 +131,22 @@ export const useStore = defineStore("gitmob", () => {
   // Owner setting: whether large files may use the compact patch at all (false = always
   // side-by-side). From /api/status, kept live via `settings_changed`; on until status loads.
   const diffPatchEnabled = ref(true);
+  // Owner setting: run a periodic background fetch so the dashboard can warn when a repo falls
+  // behind its remote. From /api/status, kept live via `settings_changed`; on until status loads.
+  const syncCheckEnabled = ref(true);
+  // How often that background check runs, in seconds. From /api/status; 120 until status loads.
+  const syncIntervalSecs = ref(120);
+  // Owner setting: after the check, auto fast-forward repos that can safely take new commits.
+  // From /api/status, kept live via `settings_changed`; off until status loads (opt-in).
+  const keepInSync = ref(false);
+  // Client-only (per browser): also raise an OS notification on a fresh fall-behind. Persisted
+  // in localStorage; only fires when the browser's Notification permission is granted.
+  const desktopNotify = ref(loadDesktopNotifyPref());
+  // The browser's current Notification permission, or "unsupported" where the API is absent.
+  // Drives the Settings hint + whether `notifyBehind` may pop a system notification.
+  const notifyPermission = ref<NotificationPermission | "unsupported">(
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+  );
 
   // Min query length before the changed-files "search content" toggle greps. Server-owned
   // (from /api/status) so the UI gate never drifts from the daemon's; 3 until status loads.
@@ -235,6 +286,9 @@ export const useStore = defineStore("gitmob", () => {
       remoteEditing.value = s.remoteEditing;
       diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
       diffPatchEnabled.value = s.diffPatchEnabled ?? true;
+      syncCheckEnabled.value = s.syncCheck ?? true;
+      syncIntervalSecs.value = s.syncIntervalSecs ?? 120;
+      keepInSync.value = s.keepInSync ?? false;
       contentSearchMin.value = s.minContentSearch ?? 3;
     } catch {
       /* status is optional — leave whatever we have */
@@ -287,6 +341,105 @@ export const useStore = defineStore("gitmob", () => {
       diffPatchEnabled.value = !enabled; // roll back
       throw e;
     }
+  }
+
+  // ── background remote-sync check + behind notifications ───────────────────────
+  /** Toggle the background sync check (optimistic; rolls back on failure). */
+  async function setSyncCheck(enabled: boolean): Promise<void> {
+    syncCheckEnabled.value = enabled;
+    try {
+      await api.setSyncCheck(enabled);
+    } catch (e) {
+      syncCheckEnabled.value = !enabled; // roll back
+      throw e;
+    }
+  }
+
+  /** Set the sync-check cadence in seconds (optimistic; adopts the server's clamped value). */
+  async function setSyncInterval(secs: number): Promise<void> {
+    const prev = syncIntervalSecs.value;
+    syncIntervalSecs.value = secs;
+    try {
+      const r = await api.setSyncInterval(secs);
+      syncIntervalSecs.value = r.syncIntervalSecs;
+    } catch (e) {
+      syncIntervalSecs.value = prev; // roll back
+      throw e;
+    }
+  }
+
+  /** Toggle "keep in sync" auto fast-forward (optimistic; rolls back on failure). */
+  async function setKeepInSync(enabled: boolean): Promise<void> {
+    keepInSync.value = enabled;
+    try {
+      await api.setKeepInSync(enabled);
+    } catch (e) {
+      keepInSync.value = !enabled; // roll back
+      throw e;
+    }
+  }
+
+  /** Opt into OS notifications: request the browser permission (must run from a user gesture),
+   *  persist the preference, and reflect the resulting permission. Returns the new permission. */
+  async function enableDesktopNotify(): Promise<NotificationPermission | "unsupported"> {
+    if (typeof Notification === "undefined") {
+      notifyPermission.value = "unsupported";
+      return "unsupported";
+    }
+    let perm = Notification.permission;
+    if (perm === "default") {
+      try {
+        perm = await Notification.requestPermission();
+      } catch {
+        /* some browsers reject if not from a gesture — leave perm as-is */
+      }
+    }
+    notifyPermission.value = perm;
+    const on = perm === "granted";
+    desktopNotify.value = on;
+    saveDesktopNotifyPref(on);
+    return perm;
+  }
+
+  /** Turn OS notifications back off (browser permission is left untouched). */
+  function disableDesktopNotify(): void {
+    desktopNotify.value = false;
+    saveDesktopNotifyPref(false);
+  }
+
+  /** Warn about repos that just fell behind: always a toast, plus a system notification when the
+   *  owner opted in and the browser granted permission. Summarised when several land at once. */
+  function notifyBehind(behind: BehindRepo[]): void {
+    if (!behind?.length) return;
+    const one = behind.length === 1 ? behind[0]! : null;
+    const title = one ? t("notify.behindTitle") : t("notify.behindManyTitle");
+    const body = one
+      ? t("notify.behindBody", { name: one.name, count: one.behind }, one.behind)
+      : t("notify.behindManyBody", { count: behind.length }, behind.length);
+    toast.warning(title, { description: body });
+    if (
+      desktopNotify.value &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted"
+    ) {
+      try {
+        // A fixed tag coalesces rapid-fire warnings into one OS toast instead of a stack.
+        new Notification(title, { body, tag: "gitmob-behind" });
+      } catch {
+        /* notification construction can throw on some platforms — never break the SSE loop */
+      }
+    }
+  }
+
+  /** Reassure about repos "keep in sync" just auto fast-forwarded: a quiet success toast (no OS
+   *  notification — an auto-resolved sync isn't something that needs the owner's attention). */
+  function notifySynced(synced: SyncedRepo[]): void {
+    if (!synced?.length) return;
+    const one = synced.length === 1 ? synced[0]! : null;
+    const body = one
+      ? t("notify.syncedBody", { name: one.name, count: one.pulled }, one.pulled)
+      : t("notify.syncedManyBody", { count: synced.length }, synced.length);
+    toast.success(t("notify.syncedTitle"), { description: body });
   }
 
   // ── BYOK AI ───────────────────────────────────────────────────────────────────
@@ -385,6 +538,8 @@ export const useStore = defineStore("gitmob", () => {
         "repo_hidden_changed",
         "repo_pinned_changed",
         "repo_starred_changed",
+        "repo_behind",
+        "repo_synced",
         "daemon_status",
         "settings_changed",
       ],
@@ -415,7 +570,14 @@ export const useStore = defineStore("gitmob", () => {
           patchRepo(payload.id, { pinned: !!payload.pinned });
         else if (event.value === "repo_starred_changed")
           patchRepo(payload.id, { starred: !!payload.starred });
-        else if (event.value === "daemon_status") {
+        else if (event.value === "repo_behind") {
+          // The background sync check found repos with new remote commits → warn (toast +
+          // opt-in OS notification). The amber card state arrives separately via repo_state_changed.
+          notifyBehind((payload.repos as BehindRepo[] | undefined) ?? []);
+        } else if (event.value === "repo_synced") {
+          // "Keep in sync" auto-pulled these — quiet confirmation (the cards already updated).
+          notifySynced((payload.repos as SyncedRepo[] | undefined) ?? []);
+        } else if (event.value === "daemon_status") {
           tunnelUrl.value = typeof payload.tunnelUrl === "string" ? payload.tunnelUrl : null;
           if (typeof payload.tunnelActive === "boolean") tunnelActive.value = payload.tunnelActive;
         } else if (event.value === "settings_changed") {
@@ -423,6 +585,8 @@ export const useStore = defineStore("gitmob", () => {
           if (typeof payload.remoteEditing === "boolean") remoteEditing.value = payload.remoteEditing;
           if (typeof payload.diffPatchBytes === "number") diffPatchBytes.value = payload.diffPatchBytes;
           if (typeof payload.diffPatchEnabled === "boolean") diffPatchEnabled.value = payload.diffPatchEnabled;
+          if (typeof payload.syncCheck === "boolean") syncCheckEnabled.value = payload.syncCheck;
+          if (typeof payload.syncIntervalSecs === "number") syncIntervalSecs.value = payload.syncIntervalSecs;
         }
       } catch {
         /* ignore malformed frame */
@@ -853,6 +1017,16 @@ export const useStore = defineStore("gitmob", () => {
     setDiffPatchBytes,
     diffPatchEnabled,
     setDiffPatchEnabled,
+    syncCheckEnabled,
+    syncIntervalSecs,
+    keepInSync,
+    setSyncCheck,
+    setSyncInterval,
+    setKeepInSync,
+    desktopNotify,
+    notifyPermission,
+    enableDesktopNotify,
+    disableDesktopNotify,
     loadStatus,
     filterQuery,
     filterIdentity,

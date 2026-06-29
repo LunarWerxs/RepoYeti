@@ -17,6 +17,7 @@ import { discoverStream } from "./discovery.ts";
 import { resolveRepoIdentity } from "./identity.ts";
 import { gitFor } from "./git.ts";
 import { backendFor } from "./vcs/index.ts";
+import { loreFilePatch, loreDiscardFile, loreClone } from "./vcs/lore.ts";
 import type { VcsBackend } from "./vcs/types.ts";
 import {
   gitPullFfOnly,
@@ -365,6 +366,23 @@ export async function cloneRepo(
   if (!res.ok) return { ok: false, code: res.code, message: res.message };
   const dest = join(parentAbs, name);
   const id = upsertRepo(dest, name, "created", false);
+  watchOne(id, dest);
+  await refreshRepo(id, dest);
+  const repo = getRepo(id);
+  if (repo) broadcast("repo_added", { repo });
+  return { ok: true, code: "OK", message: "cloned", repo: repo ?? undefined };
+}
+
+/**
+ * Clone a Lore repo from a server URL into `<parentAbs>/<name>`, then index/watch/refresh it as
+ * a Lore repo (vcs="lore"). Mirrors cloneRepo (git); server auth is Lore's own session
+ * (`lore login`), so no SSH key/identity is injected. The route validates the URL + parent.
+ */
+export async function cloneLoreRepo(parentAbs: string, name: string, url: string): Promise<RepoMutation> {
+  const dest = join(parentAbs, name);
+  const res = await loreClone(parentAbs, url, dest);
+  if (!res.ok) return { ok: false, code: "ERROR", message: res.message ?? "lore clone failed" };
+  const id = upsertRepo(dest, name, "created", false, "lore");
   watchOne(id, dest);
   await refreshRepo(id, dest);
   const repo = getRepo(id);
@@ -767,6 +785,15 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
 
+  // Non-git (Lore): `lore diff <path>` yields a unified working-vs-current-revision patch —
+  // the viewer's "patch" mode. Reconstructing both whole sides isn't needed for a read-only view.
+  if (repo.vcs !== "git") {
+    const lr = await loreFilePatch(repo.absPath, r.clean);
+    return lr.ok
+      ? { ok: true, code: "OK", path: r.clean, mode: "patch", patch: lr.patch, truncated: lr.truncated }
+      : { ok: false, code: "ERROR", message: lr.message ?? "lore diff failed" };
+  }
+
   try {
     // Probe both sides' sizes cheaply (a working-tree stat + the HEAD blob size) BEFORE
     // reading megabytes off disk. A path that isn't in HEAD throws → it's newly added.
@@ -843,6 +870,20 @@ export async function discardFile(repoId: string, relPath: string): Promise<Disc
   if (repo.isSubmodule) return { ok: false, code: "SUBMODULE_NOT_ACTIONABLE", message: "submodule worktree is not actionable" };
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  // Non-git (Lore): `lore reset --purge <path>` reverts the tracked file + deletes it if untracked.
+  if (repo.vcs !== "git") {
+    if (r.clean.split("/").includes(".lore")) {
+      return { ok: false, code: "ERROR", message: "refusing to touch a .lore directory" };
+    }
+    const out = await enqueue(repoId, async (): Promise<DiscardResult> => {
+      const lr = await loreDiscardFile(repo.absPath, r.clean);
+      return lr.ok
+        ? { ok: true, code: "OK" as const, path: r.clean }
+        : { ok: false, code: "DISCARD_FAILED" as const, message: lr.message ?? "lore reset failed" };
+    });
+    if (out.ok) await refreshRepo(repo.id, repo.absPath);
+    return out;
+  }
   // Never reach into a .git dir (restoring .git/* would be nonsense / unsafe).
   if (r.clean.split("/").includes(".git")) {
     return { ok: false, code: "ERROR", message: "refusing to touch a .git directory" };

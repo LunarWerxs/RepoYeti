@@ -394,6 +394,58 @@ async function loreStashDrop(_absPath: string, _index?: number): Promise<ActionR
   return STASH_UNSUPPORTED;
 }
 
+// ── file diff / discard (power the file viewer + discard on Lore repos; called from
+//    service.ts for non-git repos, alongside the VcsBackend methods) ───────────────────
+
+/** ~1 MB of unified diff is plenty for the viewer; bound a pathological huge-file diff. */
+const LORE_PATCH_CAP = 1_000_000;
+
+/**
+ * A single file's unified diff — working tree vs the current revision — via `lore diff <path>`.
+ * Maps to the file viewer's "patch" mode for Lore repos (we don't reconstruct both sides).
+ */
+export async function loreFilePatch(
+  absPath: string,
+  relPath: string,
+): Promise<{ ok: boolean; patch: string; truncated: boolean; message?: string }> {
+  const run = await runLore(absPath, ["diff", relPath]);
+  if (run.spawnError) return { ok: false, patch: "", truncated: false, message: "lore CLI not available" };
+  if (run.code !== 0) return { ok: false, patch: "", truncated: false, message: classifyLore(run).message };
+  const truncated = run.stdout.length > LORE_PATCH_CAP;
+  return { ok: true, patch: truncated ? run.stdout.slice(0, LORE_PATCH_CAP) : run.stdout, truncated };
+}
+
+/**
+ * Discard a path's working-tree changes: `lore reset --purge <path>` reverts a tracked file to
+ * the current revision and deletes it if it was untracked — the Lore analogue of git's discard
+ * (checkout HEAD / remove untracked).
+ */
+export async function loreDiscardFile(
+  absPath: string,
+  relPath: string,
+): Promise<{ ok: boolean; message?: string }> {
+  const run = await runLore(absPath, ["reset", "--purge", relPath]);
+  if (run.spawnError) return { ok: false, message: "lore CLI not available" };
+  if (run.code !== 0) return { ok: false, message: classifyLore(run).message };
+  return { ok: true };
+}
+
+/**
+ * Clone a Lore repo from a server URL into `dest` via `lore clone <url> <dest>`, run from
+ * `cwd` (the parent dir, which must exist; `dest` must not). Server auth is the CLI's own
+ * session (`lore login`), so nothing is injected here.
+ */
+export async function loreClone(
+  cwd: string,
+  url: string,
+  dest: string,
+): Promise<{ ok: boolean; message?: string }> {
+  const run = await runLore(cwd, ["clone", url, dest]);
+  if (run.spawnError) return { ok: false, message: "lore CLI not available" };
+  if (run.code !== 0) return { ok: false, message: classifyLore(run).message };
+  return { ok: true };
+}
+
 export const loreBackend: VcsBackend = {
   kind: "lore",
   marker: ".lore",

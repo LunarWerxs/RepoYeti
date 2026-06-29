@@ -129,9 +129,23 @@ export interface AiConfig {
  */
 export type AccessMode = "local" | "remote";
 
+/**
+ * A registered Lore server (centralized server-of-record). GitMob stores only the URL + a
+ * display name — never credentials: Lore auth is delegated to the CLI's own session
+ * (`lore login <url>`). Prefer an IP literal over `localhost` in the URL (a localhost→IPv6
+ * QUIC handshake stalls ~30s before falling back to IPv4).
+ */
+export interface LoreServer {
+  id: string;
+  name: string;
+  url: string;
+}
+
 export interface GitmobConfig {
   /** Absolute root paths to recursively scan for git repos. */
   roots: string[];
+  /** Registered Lore servers the owner can clone repos from (see LoreServer). */
+  servers?: LoreServer[];
   /** Preferred HTTP port (auto-increments if taken). */
   port: number;
   /** Max BFS depth when discovering repos under a root. */
@@ -164,6 +178,23 @@ export interface GitmobConfig {
    * = patch mode on). The Settings "Always side-by-side" toggle is the inverse of this.
    */
   diffPatchEnabled?: boolean;
+  /**
+   * Background remote-sync check: periodically fetch every repo so the dashboard can warn the
+   * owner when a repo falls behind its remote. Absent = ON (a fresh install gets the check);
+   * set false to disable. The cadence is `syncIntervalSecs`. See src/remote-sync.ts.
+   */
+  syncCheck?: boolean;
+  /**
+   * How often the background sync check fetches, in seconds. Clamped to [30, 3600] on read;
+   * absent = the built-in default (120s). Owner setting (the Settings UI writes it).
+   */
+  syncIntervalSecs?: number;
+  /**
+   * "Keep in sync": after each background check, auto fast-forward repos that can safely take
+   * the new commits (clean tree, no local divergence). Absent/false = OFF — auto-pulling mutates
+   * the working copy, so it stays strictly opt-in. Only acts when `syncCheck` is on.
+   */
+  keepInSync?: boolean;
   /** OIDC config. Always present (the public Connections client is baked into DEFAULTS),
    *  so "Sign in with Connections" works with zero setup; the owner just clicks the button. */
   oauth?: OAuthConfig;

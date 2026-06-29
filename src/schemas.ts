@@ -67,6 +67,14 @@ export const CloneSchema = z.object({
   identityId: z.string().trim().nullish(),
 });
 
+// ── lore servers (registry + clone-from-server) ───────────────────────────────────
+export const ServerAddSchema = z.object({ name: z.string().trim().optional(), url: nonEmpty });
+export const ServerCloneSchema = z.object({
+  url: nonEmpty,
+  parentPath: nonEmpty,
+  name: z.string().trim().optional(),
+});
+
 export const ReorderSchema = z.object({ order: z.array(z.string()).max(10_000) });
 
 export const CommitSchema = z.object({

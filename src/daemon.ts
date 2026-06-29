@@ -86,6 +86,7 @@ import {
   registerRepo,
   createRepo,
   cloneRepo,
+  cloneLoreRepo,
   reorderRepos,
   fetchAllRepos,
   discoverRoot,
@@ -98,6 +99,15 @@ import {
   type ActionOutcome,
 } from "./service.ts";
 import { diffStatsEnabled, setDiffStatsEnabled } from "./diffstat.ts";
+import {
+  syncCheckEnabled,
+  keepInSyncEnabled,
+  getSyncIntervalSecs,
+  setSyncCheckEnabled,
+  setKeepInSync,
+  setSyncIntervalSecs,
+  SYNC_INTERVAL_DEFAULT_S,
+} from "./remote-sync.ts";
 import { jsonError, statusForCode, type ApiErrorCode } from "./contract.ts";
 import { setSecret, deleteSecret, aiKeyName } from "./secrets.ts";
 import {
@@ -108,6 +118,8 @@ import {
   RepoPathSchema,
   RootPathSchema,
   CloneSchema,
+  ServerAddSchema,
+  ServerCloneSchema,
   ReorderSchema,
   CommitSchema,
   CheckoutSchema,
@@ -137,6 +149,13 @@ export function createApp(cfg: GitmobConfig): Hono {
   if (cfg.diffPatchBytes != null) setDiffPatchBytes(cfg.diffPatchBytes);
   // Sync the compact-diff on/off flag (absent = on; false = always side-by-side).
   if (typeof cfg.diffPatchEnabled === "boolean") setDiffPatchEnabled(cfg.diffPatchEnabled);
+  // Sync the background remote-sync check (absent = on) + its cadence (absent = built-in default).
+  // The timer itself only starts once the daemon has booted (startRemoteSync in index.ts), so
+  // this just primes the runtime flags — createApp() in tests never spins a real timer.
+  setSyncCheckEnabled(cfg.syncCheck !== false);
+  setSyncIntervalSecs(cfg.syncIntervalSecs ?? SYNC_INTERVAL_DEFAULT_S);
+  // "Keep in sync" (auto fast-forward) is opt-in → absent/false = off.
+  setKeepInSync(cfg.keepInSync === true);
 
   // Auth gate — applies to /api/* only; no-op when OIDC isn't configured (local mode).
   app.use("/api/*", authMiddleware(cfg));
@@ -163,6 +182,12 @@ export function createApp(cfg: GitmobConfig): Hono {
       // The min query length for "search content" — the single source of truth, so the UI
       // gate can never silently drift from the server's grep gate.
       minContentSearch: MIN_CONTENT_SEARCH,
+      // Background remote-sync check: whether it runs + how often (seconds), so the Settings
+      // UI reflects the live state on first load without a separate request.
+      syncCheck: syncCheckEnabled(),
+      syncIntervalSecs: getSyncIntervalSecs(),
+      // "Keep in sync": whether the check also auto fast-forwards safe repos.
+      keepInSync: keepInSyncEnabled(),
     }),
   );
 
@@ -195,12 +220,34 @@ export function createApp(cfg: GitmobConfig): Hono {
       saveConfig(cfg);
       broadcast("settings_changed", { diffPatchEnabled: cfg.diffPatchEnabled });
     }
+    if (typeof b.syncCheck === "boolean") {
+      // Toggling the check starts/stops the daemon-wide fetch timer (see remote-sync.ts).
+      cfg.syncCheck = b.syncCheck;
+      setSyncCheckEnabled(b.syncCheck);
+      saveConfig(cfg);
+      broadcast("settings_changed", { syncCheck: cfg.syncCheck });
+    }
+    if (typeof b.syncIntervalSecs === "number" && Number.isFinite(b.syncIntervalSecs)) {
+      // setSyncIntervalSecs clamps to [30, 3600] → persist the clamped value, not the raw input.
+      cfg.syncIntervalSecs = setSyncIntervalSecs(b.syncIntervalSecs);
+      saveConfig(cfg);
+      broadcast("settings_changed", { syncIntervalSecs: cfg.syncIntervalSecs });
+    }
+    if (typeof b.keepInSync === "boolean") {
+      cfg.keepInSync = b.keepInSync;
+      setKeepInSync(b.keepInSync);
+      saveConfig(cfg);
+      broadcast("settings_changed", { keepInSync: cfg.keepInSync });
+    }
     return c.json({
       ok: true,
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
       diffPatchBytes: getDiffPatchBytes(),
       diffPatchEnabled: getDiffPatchEnabled(),
+      syncCheck: syncCheckEnabled(),
+      syncIntervalSecs: getSyncIntervalSecs(),
+      keepInSync: keepInSyncEnabled(),
     });
   });
   // Public: lets the PWA decide whether to show the "Sign in with Connections" screen,
@@ -352,6 +399,52 @@ export function createApp(cfg: GitmobConfig): Hono {
     saveConfig(cfg);
     const removed = forgetReposUnder(abs); // drop auto-discovered repos under it (live, over SSE)
     return c.json({ ok: true, roots: cfg.roots, removed });
+  });
+
+  // ── lore servers (registry + clone-from-server) ──────────────────────────────
+  // A registered Lore server is just a server-of-record URL + display name; auth is delegated
+  // to the Lore CLI's own session (`lore login`), so NO credentials are stored here.
+  app.get("/api/servers", (c) => c.json({ servers: cfg.servers ?? [] }));
+  app.post("/api/servers", async (c) => {
+    const p = await parseBody(c, ServerAddSchema);
+    if (!p.ok) return p.res;
+    const url = p.data.url.trim();
+    if (!looksLikeLoreUrl(url)) return jsonError(c, "BAD_REQUEST", "expected a lore:// or https:// server URL");
+    const server = { id: crypto.randomUUID(), name: p.data.name?.trim() || url, url };
+    cfg.servers = [...(cfg.servers ?? []), server];
+    saveConfig(cfg);
+    return c.json({ ok: true, server, servers: cfg.servers }, 201);
+  });
+  app.delete("/api/servers/:id", (c) => {
+    const id = c.req.param("id");
+    cfg.servers = (cfg.servers ?? []).filter((s) => s.id !== id);
+    saveConfig(cfg);
+    return c.json({ ok: true, servers: cfg.servers });
+  });
+  // Clone a Lore repo from a server URL into a folder under a scan root (mirrors /api/repos/clone).
+  app.post("/api/servers/clone", async (c) => {
+    const p = await parseBody(c, ServerCloneSchema);
+    if (!p.ok) return p.res;
+    const url = p.data.url.trim();
+    if (!looksLikeLoreUrl(url)) return jsonError(c, "BAD_REQUEST", "expected a lore:// or https:// server URL");
+    const parentAbs = resolve(p.data.parentPath.trim());
+    try {
+      if (!existsSync(parentAbs) || !statSync(parentAbs).isDirectory()) {
+        return jsonError(c, "BAD_REQUEST", "destination folder does not exist");
+      }
+    } catch {
+      return jsonError(c, "BAD_REQUEST", "destination folder is not accessible");
+    }
+    if (!cfg.roots.some((r) => isUnder(resolve(r), parentAbs))) {
+      return jsonError(c, "BAD_REQUEST", "destination must be inside a scan folder");
+    }
+    const name = p.data.name?.trim() || deriveCloneName(url);
+    if (!/^[A-Za-z0-9._-]+$/.test(name) || name === "." || name === "..") {
+      return jsonError(c, "BAD_REQUEST", "invalid target folder name");
+    }
+    if (existsSync(join(parentAbs, name))) return jsonError(c, "EXISTS", "a folder with that name already exists");
+    const result = await cloneLoreRepo(parentAbs, name, url);
+    return result.ok ? c.json(result, 201) : c.json(result, statusForCode(result.code as ApiErrorCode));
   });
 
   // ── identities (CRUD) ──────────────────────────────────────────────────────
@@ -923,6 +1016,12 @@ function looksLikeGitUrl(u: string): boolean {
   if (/^(https?|ssh|git|file):\/\/.+/i.test(u)) return true;
   if (/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:.+/.test(u)) return true; // git@github.com:org/repo.git
   return false;
+}
+
+/** A Lore server/repo URL: a lore:// or http(s):// URL. Rejects a leading dash (flag injection). */
+function looksLikeLoreUrl(u: string): boolean {
+  if (!u || u.startsWith("-")) return false;
+  return /^(lore|https?):\/\/.+/i.test(u);
 }
 
 /** Derive a target folder name from a clone URL: last path segment, sans a trailing `.git`. */

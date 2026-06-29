@@ -78,6 +78,12 @@ export interface RuntimeStatus {
   diffPatchBytes: number;
   /** Whether large files may use the compact patch view at all (false = always side-by-side). */
   diffPatchEnabled: boolean;
+  /** Whether the background remote-sync check runs (owner setting). */
+  syncCheck: boolean;
+  /** How often the background sync check fetches, in seconds (owner setting). */
+  syncIntervalSecs: number;
+  /** Whether the check also auto fast-forwards safe repos ("keep in sync"; owner setting). */
+  keepInSync: boolean;
 }
 
 export interface ModeResult {
@@ -119,6 +125,15 @@ export const api = {
   /** Toggle compact patch mode for large files (false = always side-by-side; persisted). */
   setDiffPatchEnabled: (enabled: boolean) =>
     req<{ ok: boolean; diffPatchEnabled: boolean }>("PUT", "/api/settings", { diffPatchEnabled: enabled }),
+  /** Toggle the background remote-sync check (owner setting; persisted). */
+  setSyncCheck: (enabled: boolean) =>
+    req<{ ok: boolean; syncCheck: boolean }>("PUT", "/api/settings", { syncCheck: enabled }),
+  /** Set the background sync-check cadence in seconds (server clamps to [30,3600] + persists). */
+  setSyncInterval: (secs: number) =>
+    req<{ ok: boolean; syncIntervalSecs: number }>("PUT", "/api/settings", { syncIntervalSecs: secs }),
+  /** Toggle "keep in sync" auto fast-forward (owner setting; persisted). */
+  setKeepInSync: (enabled: boolean) =>
+    req<{ ok: boolean; keepInSync: boolean }>("PUT", "/api/settings", { keepInSync: enabled }),
 
   listRepos: () => req<{ repos: Repo[] }>("GET", "/api/repos").then((r) => r.repos),
   listIdentities: () => req<{ identities: Identity[] }>("GET", "/api/identities").then((r) => r.identities),

@@ -25,6 +25,7 @@ import { initDb, upsertRepo, getRepo, getRepos, getWatchableRepos } from "./db.t
 import { discoverStream } from "./discovery.ts";
 import { createApp } from "./daemon.ts";
 import { refreshRepo, startWatching, watchOne, stopWatching } from "./service.ts";
+import { startRemoteSync, stopRemoteSync } from "./remote-sync.ts";
 import { broadcast } from "./bus.ts";
 import { setServerPort, startManagedTunnel, stopManagedTunnel } from "./runtime.ts";
 import { clearInstanceInfo, findLiveInstance, writeInstanceInfo } from "./instance.ts";
@@ -201,6 +202,12 @@ async function start(rest: string[]): Promise<void> {
   //    over SSE as it lands, so the dashboard fills in live without blocking startup.
   void hydrateInitialStatuses(known);
 
+  // 6b) start the background remote-sync check (if enabled in config). It periodically fetches
+  //     every repo so the dashboard can warn when one falls behind its remote, broadcasting
+  //     `repo_behind` on a fresh fall-behind. Started here — after hydration is kicked off — so
+  //     the first network fetch happens one interval later, not in the boot stampede.
+  startRemoteSync();
+
   // 7) discover the filesystem in the BACKGROUND — index/watch/refresh each repo as it's
   //    found and broadcast `repo_added` so the dashboard fills in live. A huge or slow root
   //    can take a while, but the daemon has already been serving since step 3.
@@ -211,6 +218,7 @@ async function start(rest: string[]): Promise<void> {
 
   const shutdown = (): void => {
     stopManagedTunnel();
+    stopRemoteSync();
     stopWatching();
     clearInstanceInfo();
     server.stop(true);

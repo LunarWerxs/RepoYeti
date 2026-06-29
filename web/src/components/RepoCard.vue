@@ -728,7 +728,7 @@ async function confirmDiscard(): Promise<void> {
         </Tooltip>
         <Tooltip v-if="st && st.behind > 0">
           <TooltipTrigger as-child>
-            <span :class="statusChip('info')">
+            <span :class="statusChip('warning')">
               <ArrowDown :size="12" /><span class="ml-0.5">{{ st.behind }}</span>
             </span>
           </TooltipTrigger>

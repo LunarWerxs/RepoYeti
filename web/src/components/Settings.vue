@@ -182,6 +182,50 @@ async function onAlwaysSideBySide(always: boolean): Promise<void> {
   }
 }
 
+// ── background remote-sync check ─────────────────────────────────────────────────
+// Cadence presets (seconds). 30 is the server's floor; 600 (10 min) a relaxed ceiling.
+const SYNC_INTERVAL_CHOICES = [30, 60, 120, 300, 600];
+const syncIntervalLabel = (secs: number): string =>
+  secs < 60
+    ? t("settings.intervalSeconds", { n: secs }, secs)
+    : t("settings.intervalMinutes", { n: secs / 60 }, secs / 60);
+// <Select> is string-valued; map through String(secs) like the diff-threshold picker.
+const syncIntervalChoice = computed<string>({
+  get: () => String(store.syncIntervalSecs),
+  set: (v: string) => void onSyncInterval(Number(v)),
+});
+async function onSyncCheck(enabled: boolean): Promise<void> {
+  try {
+    await store.setSyncCheck(enabled);
+  } catch {
+    toast.error(t("settings.syncCheckFailed"));
+  }
+}
+async function onSyncInterval(secs: number): Promise<void> {
+  try {
+    await store.setSyncInterval(secs);
+  } catch {
+    toast.error(t("settings.syncIntervalFailed"));
+  }
+}
+async function onKeepInSync(enabled: boolean): Promise<void> {
+  try {
+    await store.setKeepInSync(enabled);
+  } catch {
+    toast.error(t("settings.keepInSyncFailed"));
+  }
+}
+// Desktop notifications are per-browser: turning them ON requests the Notification permission
+// (this runs from the switch's click — a real user gesture, as browsers require).
+async function onDesktopNotify(on: boolean): Promise<void> {
+  if (!on) {
+    store.disableDesktopNotify();
+    return;
+  }
+  const perm = await store.enableDesktopNotify();
+  if (perm !== "granted") toast.error(t("settings.desktopNotifyBlocked"));
+}
+
 /** Provider catalogue from the daemon — single source of truth, no hardcoding needed. */
 const PROVIDERS = computed<AiCatalogEntry[]>(() => store.aiCatalog);
 
@@ -475,6 +519,80 @@ async function remove(id: AiProviderId): Promise<void> {
                 {{ $t("settings.diffPatchThresholdHint") }}
               </span>
             </div>
+          </CardContent>
+        </Card>
+
+        <!-- Background sync ─────────────────────────────────────────────── -->
+        <Card class="gap-3 border-border bg-secondary/20 py-4 shadow-none">
+          <CardHeader class="gap-1 px-4">
+            <CardTitle class="flex items-center gap-2 text-[13px]">
+              <RefreshCw :size="15" class="text-muted-foreground" /> {{ $t("settings.cardSync") }}
+            </CardTitle>
+            <CardDescription class="text-[12px]">{{ $t("settings.syncDescription") }}</CardDescription>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-4 px-4">
+            <label class="flex cursor-pointer items-center justify-between gap-3">
+              <span class="flex flex-col gap-0.5">
+                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.syncCheck") }}</span>
+                <span class="text-[12px] text-muted-foreground">{{ $t("settings.syncCheckHint") }}</span>
+              </span>
+              <Switch
+                :model-value="store.syncCheckEnabled"
+                :aria-label="$t('settings.syncCheck')"
+                @update:model-value="(v: boolean) => onSyncCheck(v)"
+              />
+            </label>
+            <!-- keep in sync (auto fast-forward) — only acts as part of the check → gate on it -->
+            <label
+              class="flex items-center justify-between gap-3 transition-opacity"
+              :class="store.syncCheckEnabled ? 'cursor-pointer' : 'pointer-events-none opacity-50'"
+            >
+              <span class="flex flex-col gap-0.5">
+                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.keepInSync") }}</span>
+                <span class="text-[12px] text-muted-foreground">{{ $t("settings.keepInSyncHint") }}</span>
+              </span>
+              <Switch
+                :model-value="store.keepInSync"
+                :disabled="!store.syncCheckEnabled"
+                :aria-label="$t('settings.keepInSync')"
+                @update:model-value="(v: boolean) => onKeepInSync(v)"
+              />
+            </label>
+            <!-- cadence — moot while the check is off → dim + disable it -->
+            <div
+              class="flex flex-col gap-1.5 transition-opacity"
+              :class="store.syncCheckEnabled ? '' : 'pointer-events-none opacity-50'"
+            >
+              <span class="text-[12px] text-muted-foreground">{{ $t("settings.syncInterval") }}</span>
+              <Select v-model="syncIntervalChoice" :disabled="!store.syncCheckEnabled">
+                <SelectTrigger class="w-full" :aria-label="$t('settings.syncInterval')"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="s in SYNC_INTERVAL_CHOICES" :key="s" :value="String(s)">
+                    {{ syncIntervalLabel(s) }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <span class="text-[11px] text-muted-foreground/70">{{ $t("settings.syncIntervalHint") }}</span>
+            </div>
+            <!-- desktop notifications (per-browser; rides the OS Notification permission) -->
+            <label
+              class="flex items-center justify-between gap-3 transition-opacity"
+              :class="store.notifyPermission === 'unsupported' ? 'pointer-events-none opacity-50' : 'cursor-pointer'"
+            >
+              <span class="flex flex-col gap-0.5">
+                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.desktopNotify") }}</span>
+                <span class="text-[12px] text-muted-foreground">{{ $t("settings.desktopNotifyHint") }}</span>
+              </span>
+              <Switch
+                :model-value="store.desktopNotify"
+                :disabled="store.notifyPermission === 'unsupported'"
+                :aria-label="$t('settings.desktopNotify')"
+                @update:model-value="(v: boolean) => onDesktopNotify(v)"
+              />
+            </label>
+            <p v-if="store.notifyPermission === 'denied'" class="text-[11px] text-warning">
+              {{ $t("settings.desktopNotifyBlocked") }}
+            </p>
           </CardContent>
         </Card>
 
