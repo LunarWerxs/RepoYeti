@@ -120,11 +120,6 @@ export function initDb(): Database {
       sort_order    INTEGER,
       updated_at    INTEGER NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS workspaces (
-      id                  TEXT PRIMARY KEY,
-      name                TEXT NOT NULL,
-      default_identity_id TEXT
-    );
     CREATE TABLE IF NOT EXISTS identities (
       id             TEXT PRIMARY KEY,
       display_name   TEXT NOT NULL,
@@ -134,13 +129,8 @@ export function initDb(): Database {
       pat_handle     TEXT,
       signing_handle TEXT
     );
-    CREATE TABLE IF NOT EXISTS sessions (
-      id         TEXT PRIMARY KEY,
-      owner_sub  TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL,
-      revoked    INTEGER NOT NULL DEFAULT 0
-    );
+    -- Auth uses stateless, HMAC-signed cookies (see auth.ts) — there is no session row
+    -- to store or revoke, so there is intentionally NO \`sessions\` table.
   `);
   // Migrations: add columns to pre-existing databases. Each throws "duplicate column
   // name" on DBs that already have it (incl. fresh ones) — ignore.

@@ -360,8 +360,7 @@ export const useStore = defineStore("gitmob", () => {
       await loadChanges(repoId); // some/all files were just committed
       return r;
     } catch (e) {
-      if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message, repoId };
-      return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e), repoId };
+      return { ...asResult(e), repoId };
     } finally {
       busy[repoId] = undefined;
     }
@@ -446,8 +445,7 @@ export const useStore = defineStore("gitmob", () => {
       }
       return await api[name](repoId);
     } catch (e) {
-      if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message };
-      return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
+      return asResult(e);
     } finally {
       busy[repoId] = undefined;
     }
@@ -474,8 +472,7 @@ export const useStore = defineStore("gitmob", () => {
     try {
       return await api.commit(repoId, message, amend);
     } catch (e) {
-      if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message };
-      return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
+      return asResult(e);
     } finally {
       busy[repoId] = undefined;
     }

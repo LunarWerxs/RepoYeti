@@ -22,7 +22,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run check # ApiErrorCode drift guard + architectural boundary guard
-      - run: bun test
+      - run: bun run check:coverage # runs the suite with coverage + an overall-% floor
 
   web:
     name: web (i18n + build)

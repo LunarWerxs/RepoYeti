@@ -37,6 +37,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
+    "check:coverage": "bun run scripts/check-coverage.ts",
     "check:codes": "bun run scripts/check-error-codes.ts",
     "check:boundaries": "bun run scripts/check-boundaries.ts",
     "check": "bun run check:codes && bun run check:boundaries",
