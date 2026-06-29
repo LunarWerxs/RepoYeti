@@ -145,7 +145,11 @@ async function copyLink(): Promise<void> {
           <Loader2 :size="15" class="animate-spin" /> {{ $t("remote.starting") }}
         </div>
 
-        <div v-if="store.tunnelUrl" class="flex flex-col gap-1.5">
+        <!-- min-w-0: this block is a direct grid item of DialogContent (display:grid), whose
+             default min-width:auto would otherwise let the auto column grow to the URL's
+             max-content and push the copy button off the dialog. min-w-0 lets the column
+             shrink so the <code> below can truncate. -->
+        <div v-if="store.tunnelUrl" class="flex min-w-0 flex-col gap-1.5">
           <span class="text-[12px] text-muted-foreground">{{ $t("remote.activeLabel") }}</span>
           <div class="flex items-center gap-2">
             <code

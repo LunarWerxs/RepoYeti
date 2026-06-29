@@ -16,8 +16,15 @@ dist/
 
 # editor / os
 .DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
 .vscode/
 .idea/
+
+# logs & test/coverage output
+*.log
+coverage/
 
 # bundled binaries (fetched per-platform, not committed)
 vendor/cloudflared/
