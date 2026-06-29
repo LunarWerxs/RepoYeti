@@ -145,18 +145,28 @@ Criteria used: keep only items that still match the current codebase, have clear
   - Verified real: route handlers repeatedly coerce `unknown` JSON by hand.
   - Suggested path: use a small shared schema layer, likely `zod` plus Hono validation, after the error contract is centralized.
 
-- [~] **P2 - Consolidate AI provider metadata and local adapters.** (BACKEND `AI_ADAPTERS` map DONE — see Completed 2026-06-28 second follow-up)
-  - Remaining: dedup the FRONTEND provider metadata — `web/src/types.ts` `AiProviderId` union + `web/src/components/Settings.vue` provider rows still mirror the list by hand. Expose a redacted `/api/ai/catalog` (or shared type-only import) so the UI can't drift from what the daemon accepts.
+- [x] **P2 - Consolidate AI provider metadata and local adapters.** (DONE — third pass 2026-06-28)
+  - Done: single `AI_CATALOG` in `src/config.ts` (`AI_PROVIDERS` derived from it), exposed via `GET /api/ai/catalog`;
+    `web/src/components/Settings.vue` consumes it (no more hardcoded provider rows). `AiProviderId` union kept type-only
+    with a sync comment. Backend `AI_ADAPTERS` map landed in the second pass.
 
-- [ ] **P2 - Cap changed-file responses: optimize tree + client display.** (server-side cap DONE — see Completed 2026-06-28)
-  - Remaining: `Map`-backed tree builder in `web/src/lib/util.ts`, a virtual/capped client list, and a "showing N of M" notice driven by the `total`/`truncated` already returned by `/api/repos/:id/changes` (needs a new i18n key in every `web/src/locales/*`).
+- [x] **P2 - Cap changed-file responses: optimize tree + client display.** (DONE — third pass 2026-06-28)
+  - Done: `Map`-backed tree builder in `web/src/lib/util.ts` (was O(n²) on wide trees); `api.changes` now returns
+    `total`/`truncated`; store exposes `changesMeta`; `RepoCard.vue` shows a "showing N of M" notice (en.json
+    `repo.changes.truncated`). Full DOM virtualization deferred (collapse + the 2000-row server cap already bound it).
 
 - [x] **P2 - Stream or pre-limit AI diff collection.** (DONE — see Completed 2026-06-28 second follow-up)
   - Done: `boundedGit()` streams + kills the child after the byte cap in `src/git-actions.ts`.
 
-- [ ] **P3 - Make discovery progressive and non-blocking.**
-  - Verified real: synchronous BFS discovery can delay daemon startup on large roots.
-  - Suggested path: async directory scanning with limited concurrency and SSE scan progress.
+- [x] **P3 - Make discovery progressive and non-blocking.** (DONE — third pass 2026-06-28)
+  - Done: `discoverStream()` (async, non-blocking) in `src/discovery.ts`; `index.ts` serves FIRST, then indexes/
+    watches/status-reads each repo as found and broadcasts `repo_added` over SSE; `web/src/store.ts` appends live.
+    Verified at runtime (daemon boots, "Discovery complete: N found", `/api/repos` populated). Bounded-concurrency
+    parallel scan deferred (sequential-async already unblocks the event loop).
+
+- [x] **EXTRA - English-only i18n (owner request).** (DONE — third pass 2026-06-28)
+  - Done: dropped de/es/fr/zh-CN locales + the multi-locale plumbing in `i18n.ts` + the Settings language switcher;
+    kept the `t()` layer (copy stays centralised in `en.json`); `i18n:check` stays green (English-only).
 
 - [ ] **P3 - Reduce redundant status/remote lookups.** (remote-URL caching DONE — see Completed 2026-06-28; low-value remainder)
   - Remaining: reuse a preflight status snapshot across an action's pre/post reads where safe (different points in time, so mostly N/A — keep only if profiling shows it matters).
