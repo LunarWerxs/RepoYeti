@@ -190,7 +190,7 @@ async function start(rest: string[]): Promise<void> {
   const ownerClaimed = !!(liveCfg.oauth?.ownerSub || liveCfg.oauth?.ownerEmail);
   if (wantTunnel || (accessMode(liveCfg) === "remote" && ownerClaimed)) {
     console.log("\nStarting cloudflared tunnel…");
-    startManagedTunnel((tunnelUrl) => {
+    startManagedTunnel(liveCfg, (tunnelUrl) => {
       console.log(`\n  ▸ Remote URL:  ${tunnelUrl}\n`);
       qrcode.generate(tunnelUrl, { small: true });
       console.log("  Scan to open on your phone, then Sign in with Connections.\n");

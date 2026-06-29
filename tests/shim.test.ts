@@ -26,6 +26,15 @@ test("loopback origin is allowed (Path B)", async () => {
   expect(res.status).toBe(302);
 });
 
+test("named-tunnel host (app.repoyeti.com) is allowed when its suffix is configured", async () => {
+  const named = { ALLOWED_SUFFIXES: ".trycloudflare.com,.repoyeti.com" };
+  const s = state("https://app.repoyeti.com");
+  const res = await worker.fetch(new Request(`https://shim/cb?code=C&state=${s}`), named);
+  expect(res.status).toBe(302);
+  const loc = res.headers.get("location") ?? "";
+  expect(loc.startsWith("https://app.repoyeti.com/oauth/finish")).toBe(true);
+});
+
 test("disallowed origin → 403 (no open redirect)", async () => {
   const s = state("https://evil.example.com");
   const res = await worker.fetch(new Request(`https://shim/cb?code=C&state=${s}`), env);

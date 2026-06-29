@@ -5,7 +5,8 @@ compatibility_date = "2025-01-01"
 # The free *.workers.dev subdomain is enough — no custom domain needed.
 workers_dev = true
 
-# Hosts the shim may bounce the OAuth code back to. Add your tunnel's domain here if
-# you use a named tunnel; the default covers free quick tunnels.
+# Hosts the shim may bounce the OAuth code back to. `.trycloudflare.com` covers the free quick
+# tunnel; `.repoyeti.com` covers the named tunnel's stable host (e.g. app.repoyeti.com). Add any
+# other named-tunnel domain you use here, then re-run `wrangler deploy`.
 [vars]
-ALLOWED_SUFFIXES = ".trycloudflare.com"
+ALLOWED_SUFFIXES = ".trycloudflare.com,.repoyeti.com"

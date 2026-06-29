@@ -16,6 +16,7 @@ import {
   keychainAvailable,
   aiKeyName,
   OAUTH_CLIENT_SECRET,
+  TUNNEL_TOKEN,
 } from "./secrets.ts";
 
 export const VERSION = "0.0.1";
@@ -141,6 +142,31 @@ export interface LoreServer {
   url: string;
 }
 
+/**
+ * Remote-access tunnel config. Absent (the default) = a free, ephemeral cloudflared **quick
+ * tunnel** → a rotating `*.trycloudflare.com` URL. Set `hostname` + `token` to run a **named**
+ * Cloudflare tunnel instead: a STABLE public host (e.g. "app.repoyeti.com") that doesn't rotate
+ * and — unlike trycloudflare, which DNS filters / mobile carriers widely block as abuse — resolves
+ * on any network.
+ *
+ * The public-host → local-service mapping (e.g. app.repoyeti.com → http://localhost:7171) lives in
+ * the Cloudflare dashboard (the tunnel's "public hostname"), so `cloudflared run --token` prints no
+ * URL — the daemon advertises `https://<hostname>` directly once an edge connection is up. The
+ * `token` is a connector credential (sensitive): like `oauth.clientSecret` it's kept in the OS
+ * keychain and stripped from config.json. Env `CF_TUNNEL_TOKEN` overrides it (handy for the
+ * launcher / rotation; never written to disk).
+ */
+export interface TunnelConfig {
+  /** "quick" (default) = ephemeral trycloudflare; "named" = stable host via `token`. An explicit
+   *  "quick" forces the quick tunnel even when a named tunnel is configured (without deleting it). */
+  provider?: "quick" | "named";
+  /** The stable public host a named tunnel serves, e.g. "app.repoyeti.com". */
+  hostname?: string;
+  /** Named-tunnel connector token (Cloudflare dashboard / `cloudflared tunnel token <name>`).
+   *  SECRET — keychain-stored, never written to config.json. */
+  token?: string;
+}
+
 export interface RepoYetiConfig {
   /** Absolute root paths to recursively scan for git repos. */
   roots: string[];
@@ -198,6 +224,8 @@ export interface RepoYetiConfig {
   /** OIDC config. Always present (the public Connections client is baked into DEFAULTS),
    *  so "Sign in with Connections" works with zero setup; the owner just clicks the button. */
   oauth?: OAuthConfig;
+  /** Remote-access tunnel config (quick trycloudflare by default; named for a stable host). */
+  tunnel?: TunnelConfig;
   /** Bring-your-own-key AI config (optional). */
   ai?: AiConfig;
 }
@@ -341,6 +369,19 @@ export function tunnelStartProblem(cfg: RepoYetiConfig): string | null {
 }
 
 /**
+ * Resolve named-tunnel credentials, or null to use the default quick tunnel. A named tunnel needs
+ * BOTH a stable `hostname` and a connector `token`. The token may come from the env
+ * (`CF_TUNNEL_TOKEN`, which wins — handy for the launcher / key rotation, and never on disk) or
+ * the keychain-hydrated config. `provider: "quick"` forces the quick tunnel even when both are set.
+ */
+export function namedTunnel(cfg: RepoYetiConfig): { hostname: string; token: string } | null {
+  if (cfg.tunnel?.provider === "quick") return null;
+  const hostname = cfg.tunnel?.hostname?.trim();
+  const token = (process.env.CF_TUNNEL_TOKEN ?? cfg.tunnel?.token ?? "").trim();
+  return hostname && token ? { hostname, token } : null;
+}
+
+/**
  * One-time migration of pre-rename state (back when RepoYeti was "GitMob"): move
  * ~/.gitmob → ~/.repoyeti and rename the gitmob.db files inside. Only runs for the
  * DEFAULT home — an explicit REPOYETI_HOME (tests / relocation) opts out. Best-effort:
@@ -405,6 +446,7 @@ function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
     }
   }
   if (clone.oauth) delete clone.oauth.clientSecret;
+  if (clone.tunnel) delete clone.tunnel.token;
   return clone;
 }
 
@@ -456,6 +498,15 @@ export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
     } else {
       const cs = await getSecret(OAUTH_CLIENT_SECRET);
       if (cs) cfg.oauth.clientSecret = cs;
+    }
+  }
+
+  if (cfg.tunnel) {
+    if (cfg.tunnel.token) {
+      if (await setSecret(TUNNEL_TOKEN, cfg.tunnel.token)) migrated = true;
+    } else {
+      const t = await getSecret(TUNNEL_TOKEN);
+      if (t) cfg.tunnel.token = t;
     }
   }
 

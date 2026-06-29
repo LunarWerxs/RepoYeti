@@ -37,12 +37,25 @@ And in the daemon's `~/.repoyeti/config.json`:
 
 ## Allowing a named tunnel
 
-The default only bounces to `*.trycloudflare.com` (and loopback). If you move to a
-stable/named tunnel later, add its host suffix:
+`wrangler.toml` now allows both `*.trycloudflare.com` (quick tunnel) and `*.repoyeti.com`
+(the named tunnel's stable host, e.g. `app.repoyeti.com`) — so after a `bunx wrangler deploy`
+the shim will bounce logins to either. To allow a different named-tunnel domain, add its host
+suffix to `ALLOWED_SUFFIXES` and redeploy:
 
 ```sh
-bunx wrangler deploy --var ALLOWED_SUFFIXES:".trycloudflare.com,.your-domain.com"
+bunx wrangler deploy --var ALLOWED_SUFFIXES:".trycloudflare.com,.repoyeti.com,.your-domain.com"
 ```
+
+Configure the named tunnel on the daemon side via `~/.repoyeti/config.json`:
+
+```jsonc
+"tunnel": {
+  "hostname": "app.repoyeti.com",   // the Cloudflare tunnel's public hostname
+  "token": "<cloudflared connector token>"   // kept in the OS keychain, stripped from disk
+}
+```
+
+The token may instead be supplied via the `CF_TUNNEL_TOKEN` env var (never written to disk).
 
 ## Not Cloudflare?
 

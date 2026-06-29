@@ -295,7 +295,7 @@ export function createApp(cfg: RepoYetiConfig): Hono {
       }
       cfg.mode = "remote";
       saveConfig(cfg);
-      startManagedTunnel();
+      startManagedTunnel(cfg);
     } else {
       cfg.mode = "local";
       saveConfig(cfg);
