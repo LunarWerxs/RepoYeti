@@ -36,10 +36,18 @@ if ($SelfTest) {
     $fail += "tray icon GitMob.ico missing"
   } else {
     try {
-      $ico = New-Object System.Drawing.Icon($icoPath)    # throws on a corrupt .ico
+      # Load the TRAY-sized frame (not the 256 jumbo) and force a decode — this catches a
+      # 256-only icon, which renders blank in the tray (the classic "tray icon is broken").
+      $ico = New-Object System.Drawing.Icon($icoPath, [System.Windows.Forms.SystemInformation]::SmallIconSize)
+      $null = $ico.ToBitmap()                            # forces decode of the chosen frame
       $ni  = New-Object System.Windows.Forms.NotifyIcon  # the actual tray-icon object
       $ni.Icon = $ico                                    # must accept the icon
       $ni.Dispose(); $ico.Dispose()
+      # The tray needs a small frame; a 256-only .ico has none. Require one (<=48px).
+      $icoBytes = [System.IO.File]::ReadAllBytes($icoPath)
+      $frameCount = [BitConverter]::ToUInt16($icoBytes, 4); $hasSmallFrame = $false
+      for ($fi = 0; $fi -lt $frameCount; $fi++) { $fw = $icoBytes[6 + $fi*16]; if ($fw -ne 0 -and $fw -le 48) { $hasSmallFrame = $true } }
+      if (-not $hasSmallFrame) { $fail += "tray icon has no small (<=48px) frame; a 256-only icon renders blank" }
     } catch { $fail += "tray icon failed to load: $($_.Exception.Message)" }
   }
   if ($fail.Count) { Write-Output ("GITMOB_TRAY_SELFTEST_FAIL: " + ($fail -join "; ")); exit 1 }
@@ -155,7 +163,12 @@ if (-not $script:url) {
 $tray = New-Object System.Windows.Forms.NotifyIcon
 $tray.Text = "GitMob"
 $iconPath = Join-Path $scriptDir "GitMob.ico"
-$tray.Icon = if (Test-Path $iconPath) { New-Object System.Drawing.Icon($iconPath) } else { [System.Drawing.SystemIcons]::Application }
+# Pull the TRAY-sized frame from the multi-size .ico so it renders crisply (not blank).
+# Fall back to the default frame, then a system icon, if anything goes wrong.
+$tray.Icon = if (Test-Path $iconPath) {
+  try { New-Object System.Drawing.Icon($iconPath, [System.Windows.Forms.SystemInformation]::SmallIconSize) }
+  catch { try { New-Object System.Drawing.Icon($iconPath) } catch { [System.Drawing.SystemIcons]::Application } }
+} else { [System.Drawing.SystemIcons]::Application }
 $tray.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip

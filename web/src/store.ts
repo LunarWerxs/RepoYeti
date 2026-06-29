@@ -1,8 +1,21 @@
 import { defineStore } from "pinia";
 import { ref, reactive, computed, watch } from "vue";
 import { useEventSource } from "@vueuse/core";
-import { api, ApiError } from "./api";
-import type { ActionName, ActionResult, Identity, Repo } from "./types";
+import { api, ApiError, type AccessMode } from "./api";
+import type {
+  ActionName,
+  ActionResult,
+  AiCatalogEntry,
+  AiModel,
+  AiProviderId,
+  AiSettings,
+  ChangedFile,
+  Identity,
+  Repo,
+} from "./types";
+
+/** Sync-status filter keys (multi-select; OR semantics). */
+export type StatusKey = "dirty" | "ahead" | "behind" | "clean" | "error";
 
 export const useStore = defineStore("gitmob", () => {
   const repos = ref<Repo[]>([]);
@@ -15,12 +28,124 @@ export const useStore = defineStore("gitmob", () => {
   const authEnforced = ref(false);
   const authenticated = ref(true);
   const owner = ref<string | null>(null);
+  // Access mode + local/remote auth state (see /api/auth/status).
+  const mode = ref<AccessMode>("local");
+  const ownerClaimed = ref(false);
+  const canContinueLocal = ref(true);
+  const localBypass = ref(false);
   /** repoId → the action currently in flight (drives per-button loading state). */
   const busy = reactive<Record<string, ActionName | undefined>>({});
+  /** repoId → changed-file list (for the expandable tree view), lazily loaded. */
+  const changesByRepo = reactive<Record<string, ChangedFile[]>>({});
+  const changesLoading = reactive<Record<string, boolean>>({});
+  /** repoId → { total, truncated } when the server capped an oversized changed-file list
+   *  (MAX_CHANGED_FILES); drives the "showing N of M" notice. Absent = not truncated. */
+  const changesMeta = reactive<Record<string, { total: number; truncated: boolean }>>({});
+
+  // BYOK AI settings (redacted — never holds a key). `aiEnabled` gates the Generate button.
+  // Style is hardcoded to Conventional Commits (no UI picker); owners can still override
+  // it in ~/.gitmob/config.json. The daemon mirrors this default.
+  const aiSettings = ref<AiSettings>({ providers: {}, defaultProvider: null, style: "conventional" });
+  const aiReady = ref(false);
+  /** Provider catalog from GET /api/ai/catalog — safe display metadata, no secrets. */
+  const aiCatalog = ref<AiCatalogEntry[]>([]);
+  const aiEnabled = computed(() => {
+    const dp = aiSettings.value.defaultProvider;
+    return !!(dp && aiSettings.value.providers[dp]?.model);
+  });
 
   const identityById = computed<Record<string, Identity>>(() =>
     Object.fromEntries(identities.value.map((i) => [i.id, i])),
   );
+
+  // Public cloudflared tunnel URL (null until one exists) + whether a tunnel is up.
+  // Surfaced in the connection panel so the owner can open GitMob on their phone.
+  const tunnelUrl = ref<string | null>(null);
+  const tunnelActive = ref(false);
+
+  // Owner setting: show added/removed line + char counts per file and per repo. Sourced
+  // from /api/status and kept live via the `settings_changed` SSE event. Off by default.
+  const diffStatsEnabled = ref(false);
+  // Owner setting: allow editing/saving files over the remote tunnel (local edits always on).
+  const remoteEditing = ref(true);
+  // Owner setting: changed files larger than this (bytes, either side) open as a compact
+  // patch in the viewer's Diff tab instead of a side-by-side load. From /api/status, kept
+  // live via `settings_changed`; 512 KB until status loads.
+  const diffPatchBytes = ref(512 * 1024);
+  // Owner setting: whether large files may use the compact patch at all (false = always
+  // side-by-side). From /api/status, kept live via `settings_changed`; on until status loads.
+  const diffPatchEnabled = ref(true);
+
+  // Min query length before the changed-files "search content" toggle greps. Server-owned
+  // (from /api/status) so the UI gate never drifts from the daemon's; 3 until status loads.
+  const contentSearchMin = ref(3);
+
+  // ── list filters (display-only; drag-reorder is disabled while a filter is active) ──
+  const filterQuery = ref("");
+  // undefined = all · null = "no identity" · string = a specific identity id
+  const filterIdentity = ref<string | null | undefined>(undefined);
+  // multi-select: an empty set means "any status"; multiple selected = OR (e.g. ahead OR behind).
+  const filterStatuses = ref<StatusKey[]>([]);
+  // Hidden repos are excluded from every view unless this is on (a deprecated-repo opt-out,
+  // not a "filter" — drag-reorder still works over the visible set when it's off).
+  const showHidden = ref(false);
+  const hasHidden = computed(() => repos.value.some((r) => r.hidden));
+  /** The repos any non-search view starts from: hidden ones dropped unless showHidden. */
+  const visibleRepos = computed(() =>
+    showHidden.value ? repos.value : repos.value.filter((r) => !r.hidden),
+  );
+  const filtersActive = computed(
+    () =>
+      !!filterQuery.value.trim() ||
+      filterIdentity.value !== undefined ||
+      filterStatuses.value.length > 0,
+  );
+  // ── dashboard sections (display-only buckets, precedence: pinned > starred > rest) ──
+  // A repo lands in exactly one section so it never renders twice; the card can still
+  // show both badges. Each preserves the global sort_order via `visibleRepos`.
+  const pinnedRepos = computed(() => visibleRepos.value.filter((r) => r.pinned));
+  const starredRepos = computed(() => visibleRepos.value.filter((r) => r.starred && !r.pinned));
+  const otherRepos = computed(() => visibleRepos.value.filter((r) => !r.pinned && !r.starred));
+  function matchesStatus(r: Repo, key: StatusKey): boolean {
+    const st = r.status;
+    switch (key) {
+      case "dirty":
+        return !!st && st.dirty > 0;
+      case "ahead":
+        return !!st && st.ahead > 0;
+      case "behind":
+        return !!st && st.behind > 0;
+      case "error":
+        return !!st?.error;
+      case "clean":
+        return !!st && !st.error && st.dirty === 0 && st.ahead === 0 && st.behind === 0;
+    }
+  }
+  function toggleStatus(key: StatusKey): void {
+    const i = filterStatuses.value.indexOf(key);
+    if (i >= 0) filterStatuses.value.splice(i, 1);
+    else filterStatuses.value.push(key);
+  }
+  const filteredRepos = computed(() => {
+    const q = filterQuery.value.trim().toLowerCase();
+    const statuses = filterStatuses.value;
+    return visibleRepos.value.filter((r) => {
+      if (q && !r.name.toLowerCase().includes(q)) return false;
+      if (filterIdentity.value !== undefined) {
+        const bad =
+          filterIdentity.value === null ? !!r.identityId : r.identityId !== filterIdentity.value;
+        if (bad) return false;
+      }
+      // OR across selected statuses; empty = match anything.
+      if (statuses.length && !statuses.some((s) => matchesStatus(r, s))) return false;
+      return true;
+    });
+  });
+  function clearFilters(): void {
+    filterQuery.value = "";
+    filterIdentity.value = undefined;
+    filterStatuses.value = [];
+  }
 
   async function loadAuth(): Promise<void> {
     try {
@@ -28,13 +153,33 @@ export const useStore = defineStore("gitmob", () => {
       authEnforced.value = s.authEnforced;
       authenticated.value = s.authenticated;
       owner.value = s.owner;
+      mode.value = s.mode;
+      ownerClaimed.value = s.ownerClaimed;
+      canContinueLocal.value = s.canContinueLocal;
+      localBypass.value = s.localBypass;
     } catch {
       // status endpoint unreachable — treat as open so we still try to load
       authEnforced.value = false;
       authenticated.value = true;
+      mode.value = "local";
+      localBypass.value = false;
     } finally {
       authReady.value = true;
     }
+  }
+  /** Grant the localhost-only bypass, then reload into the dashboard. */
+  async function continueLocal(): Promise<void> {
+    await api.continueLocal();
+    localBypass.value = true;
+    location.reload();
+  }
+  /** Flip local ↔ remote. Throws ApiError "NEEDS_OWNER" so the caller can send the
+   *  owner through sign-in first; otherwise updates mode + tunnel state in place. */
+  async function setMode(next: AccessMode): Promise<void> {
+    const r = await api.setMode(next);
+    mode.value = r.mode;
+    tunnelActive.value = r.tunnelActive;
+    tunnelUrl.value = r.tunnelUrl;
   }
   async function logout(): Promise<void> {
     await api.logout();
@@ -44,12 +189,123 @@ export const useStore = defineStore("gitmob", () => {
   async function loadAll(): Promise<void> {
     loading.value = true;
     try {
-      const [r, i] = await Promise.all([api.listRepos(), api.listIdentities()]);
+      const [r, i] = await Promise.all([
+        api.listRepos(),
+        api.listIdentities(),
+        loadAiSettings(),
+        loadAiCatalog(),
+        loadStatus(),
+      ]);
       repos.value = r;
       identities.value = i;
     } finally {
       loading.value = false;
     }
+  }
+
+  /** Fetch runtime status (access mode + the remote-access tunnel URL, if any). Best-effort. */
+  async function loadStatus(): Promise<void> {
+    try {
+      const s = await api.status();
+      mode.value = s.mode;
+      tunnelActive.value = s.tunnelActive;
+      tunnelUrl.value = s.tunnelUrl;
+      diffStatsEnabled.value = s.diffStats;
+      remoteEditing.value = s.remoteEditing;
+      diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
+      diffPatchEnabled.value = s.diffPatchEnabled ?? true;
+      contentSearchMin.value = s.minContentSearch ?? 3;
+    } catch {
+      /* status is optional — leave whatever we have */
+    }
+  }
+
+  /** Toggle the diff-stats setting (optimistic; rolls back on failure). */
+  async function setDiffStats(enabled: boolean): Promise<void> {
+    diffStatsEnabled.value = enabled;
+    try {
+      await api.setDiffStats(enabled);
+    } catch (e) {
+      diffStatsEnabled.value = !enabled; // roll back
+      throw e;
+    }
+  }
+
+  /** Toggle editing over remote access (optimistic; rolls back on failure). */
+  async function setRemoteEditing(enabled: boolean): Promise<void> {
+    remoteEditing.value = enabled;
+    try {
+      await api.setRemoteEditing(enabled);
+    } catch (e) {
+      remoteEditing.value = !enabled; // roll back
+      throw e;
+    }
+  }
+
+  /** Set the large-file diff threshold in bytes (optimistic; adopts the server's clamped
+   *  value on success, rolls back on failure). */
+  async function setDiffPatchBytes(bytes: number): Promise<void> {
+    const prev = diffPatchBytes.value;
+    diffPatchBytes.value = bytes;
+    try {
+      const r = await api.setDiffPatchBytes(bytes);
+      diffPatchBytes.value = r.diffPatchBytes;
+    } catch (e) {
+      diffPatchBytes.value = prev; // roll back
+      throw e;
+    }
+  }
+
+  /** Toggle compact patch mode for large files (optimistic; rolls back on failure).
+   *  false = always side-by-side. */
+  async function setDiffPatchEnabled(enabled: boolean): Promise<void> {
+    diffPatchEnabled.value = enabled;
+    try {
+      await api.setDiffPatchEnabled(enabled);
+    } catch (e) {
+      diffPatchEnabled.value = !enabled; // roll back
+      throw e;
+    }
+  }
+
+  // ── BYOK AI ───────────────────────────────────────────────────────────────────
+  async function loadAiCatalog(): Promise<void> {
+    try {
+      aiCatalog.value = await api.ai.catalog();
+    } catch {
+      /* catalog is optional — Settings UI falls back gracefully to an empty list */
+    }
+  }
+  async function loadAiSettings(): Promise<void> {
+    try {
+      aiSettings.value = await api.ai.settings();
+    } catch {
+      /* leave defaults — AI is optional */
+    } finally {
+      aiReady.value = true;
+    }
+  }
+  /** Validate + save a key; returns the models it unlocks. Throws ApiError on bad key. */
+  async function connectProvider(provider: AiProviderId, apiKey: string): Promise<AiModel[]> {
+    const r = await api.ai.connect(provider, apiKey);
+    aiSettings.value = r.settings;
+    return r.models;
+  }
+  async function listProviderModels(provider: AiProviderId): Promise<AiModel[]> {
+    return (await api.ai.models(provider)).models;
+  }
+  async function selectModel(provider: AiProviderId, model: string | null): Promise<void> {
+    aiSettings.value = await api.ai.setProvider(provider, { model });
+  }
+  async function setDefaultProvider(provider: AiProviderId): Promise<void> {
+    aiSettings.value = await api.ai.setProvider(provider, { makeDefault: true });
+  }
+  async function removeProvider(provider: AiProviderId): Promise<void> {
+    aiSettings.value = await api.ai.removeProvider(provider);
+  }
+  /** Draft a commit message from the repo's diff. Throws ApiError → caller toasts. */
+  async function genCommitMessage(repoId: string, provider?: AiProviderId): Promise<string> {
+    return (await api.ai.commitMessage(repoId, provider)).message;
   }
 
   function patchRepo(id: string, patch: Partial<Repo>): void {
@@ -61,7 +317,18 @@ export const useStore = defineStore("gitmob", () => {
   function connect(): void {
     const { status, event, data } = useEventSource(
       "/api/events",
-      ["hello", "ping", "repo_state_changed", "repo_identity_changed"],
+      [
+        "hello",
+        "ping",
+        "repo_state_changed",
+        "repo_added",
+        "repo_identity_changed",
+        "repo_hidden_changed",
+        "repo_pinned_changed",
+        "repo_starred_changed",
+        "daemon_status",
+        "settings_changed",
+      ],
       { autoReconnect: { retries: -1, delay: 2500 } },
     );
     watch(status, (s) => (connected.value = s === "OPEN"));
@@ -70,8 +337,31 @@ export const useStore = defineStore("gitmob", () => {
       try {
         const payload = JSON.parse(raw);
         if (event.value === "repo_state_changed") patchRepo(payload.id, { status: payload.status });
-        else if (event.value === "repo_identity_changed")
+        else if (event.value === "repo_added") {
+          // Background discovery found a repo after boot — append it (or refresh in place).
+          const repo = payload.repo as Repo | undefined;
+          if (repo?.id) {
+            const idx = repos.value.findIndex((r) => r.id === repo.id);
+            if (idx >= 0) repos.value[idx] = repo;
+            else repos.value.push(repo);
+          }
+        } else if (event.value === "repo_identity_changed")
           patchRepo(payload.id, { identityId: payload.identityId });
+        else if (event.value === "repo_hidden_changed")
+          patchRepo(payload.id, { hidden: !!payload.hidden });
+        else if (event.value === "repo_pinned_changed")
+          patchRepo(payload.id, { pinned: !!payload.pinned });
+        else if (event.value === "repo_starred_changed")
+          patchRepo(payload.id, { starred: !!payload.starred });
+        else if (event.value === "daemon_status") {
+          tunnelUrl.value = typeof payload.tunnelUrl === "string" ? payload.tunnelUrl : null;
+          if (typeof payload.tunnelActive === "boolean") tunnelActive.value = payload.tunnelActive;
+        } else if (event.value === "settings_changed") {
+          if (typeof payload.diffStats === "boolean") diffStatsEnabled.value = payload.diffStats;
+          if (typeof payload.remoteEditing === "boolean") remoteEditing.value = payload.remoteEditing;
+          if (typeof payload.diffPatchBytes === "number") diffPatchBytes.value = payload.diffPatchBytes;
+          if (typeof payload.diffPatchEnabled === "boolean") diffPatchEnabled.value = payload.diffPatchEnabled;
+        }
       } catch {
         /* ignore malformed frame */
       }
@@ -100,10 +390,26 @@ export const useStore = defineStore("gitmob", () => {
     }
   }
 
-  async function commit(repoId: string, message: string): Promise<ActionResult> {
+  async function loadChanges(repoId: string): Promise<void> {
+    if (changesLoading[repoId]) return; // don't stack concurrent reads for the same repo
+    changesLoading[repoId] = true;
+    try {
+      const res = await api.changes(repoId);
+      changesByRepo[repoId] = res.files ?? [];
+      if (res.truncated) changesMeta[repoId] = { total: res.total ?? res.files.length, truncated: true };
+      else delete changesMeta[repoId];
+    } catch {
+      changesByRepo[repoId] = [];
+      delete changesMeta[repoId];
+    } finally {
+      changesLoading[repoId] = false;
+    }
+  }
+
+  async function commit(repoId: string, message: string, amend = false): Promise<ActionResult> {
     busy[repoId] = "commit";
     try {
-      return await api.commit(repoId, message);
+      return await api.commit(repoId, message, amend);
     } catch (e) {
       if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message };
       return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
@@ -117,12 +423,65 @@ export const useStore = defineStore("gitmob", () => {
     await api.assignIdentity(repoId, identityId);
   }
 
+  /** Hide/unhide a repo from the dashboard (optimistic; rolls back on failure). */
+  async function setHidden(repoId: string, hidden: boolean): Promise<void> {
+    patchRepo(repoId, { hidden }); // optimistic
+    try {
+      await api.setHidden(repoId, hidden);
+    } catch (e) {
+      patchRepo(repoId, { hidden: !hidden }); // roll back
+      throw e;
+    }
+  }
+
+  /** Pin/unpin a repo into the "Pinned" section (optimistic; rolls back on failure). */
+  async function setPinned(repoId: string, pinned: boolean): Promise<void> {
+    patchRepo(repoId, { pinned }); // optimistic
+    try {
+      await api.setPinned(repoId, pinned);
+    } catch (e) {
+      patchRepo(repoId, { pinned: !pinned }); // roll back
+      throw e;
+    }
+  }
+
+  /** Star/unstar a repo into the "Starred" section (optimistic; rolls back on failure). */
+  async function setStarred(repoId: string, starred: boolean): Promise<void> {
+    patchRepo(repoId, { starred }); // optimistic
+    try {
+      await api.setStarred(repoId, starred);
+    } catch (e) {
+      patchRepo(repoId, { starred: !starred }); // roll back
+      throw e;
+    }
+  }
+
   async function addRepo(mode: "register" | "create", path: string): Promise<Repo> {
     const repo = mode === "register" ? await api.registerRepo(path) : await api.createRepo(path);
     const idx = repos.value.findIndex((r) => r.id === repo.id);
     if (idx >= 0) repos.value[idx] = repo;
     else repos.value.push(repo);
     return repo;
+  }
+
+  /**
+   * Persist a drag-to-reorder. First reorder the local `repos` to match so a later
+   * rebuild — triggered by any pin/star/hide toggle or live SSE patch — re-derives the
+   * order the user just dragged into place, instead of snapping back to the server's
+   * pre-drag sort_order. The API call is then best-effort. `orderedIds` is the full set
+   * (the section lists plus the hidden tail), so every repo gets a position.
+   */
+  async function persistRepoOrder(orderedIds: string[]): Promise<void> {
+    const pos = new Map(orderedIds.map((id, i) => [id, i]));
+    repos.value = [...repos.value].sort(
+      (a, b) =>
+        (pos.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+    try {
+      await api.reorderRepos(orderedIds);
+    } catch {
+      /* order is a nicety — never block the UI on it */
+    }
   }
 
   // ── identity CRUD ───────────────────────────────────────────────────────────
@@ -148,11 +507,61 @@ export const useStore = defineStore("gitmob", () => {
     loading,
     connected,
     busy,
+    changesByRepo,
+    changesLoading,
+    changesMeta,
+    loadChanges,
+    aiSettings,
+    aiCatalog,
+    aiReady,
+    aiEnabled,
+    loadAiSettings,
+    loadAiCatalog,
+    connectProvider,
+    listProviderModels,
+    selectModel,
+    setDefaultProvider,
+    removeProvider,
+    genCommitMessage,
     authReady,
     authEnforced,
     authenticated,
     owner,
+    mode,
+    ownerClaimed,
+    canContinueLocal,
+    localBypass,
+    continueLocal,
+    setMode,
     identityById,
+    tunnelUrl,
+    tunnelActive,
+    diffStatsEnabled,
+    contentSearchMin,
+    setDiffStats,
+    remoteEditing,
+    setRemoteEditing,
+    diffPatchBytes,
+    setDiffPatchBytes,
+    diffPatchEnabled,
+    setDiffPatchEnabled,
+    loadStatus,
+    filterQuery,
+    filterIdentity,
+    filterStatuses,
+    toggleStatus,
+    filtersActive,
+    filteredRepos,
+    clearFilters,
+    showHidden,
+    hasHidden,
+    visibleRepos,
+    pinnedRepos,
+    starredRepos,
+    otherRepos,
+    setHidden,
+    setPinned,
+    setStarred,
     loadAuth,
     logout,
     loadAll,
@@ -161,6 +570,7 @@ export const useStore = defineStore("gitmob", () => {
     commit,
     assignIdentity,
     addRepo,
+    persistRepoOrder,
     createIdentity,
     updateIdentity,
     removeIdentity,

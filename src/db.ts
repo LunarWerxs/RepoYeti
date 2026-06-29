@@ -9,6 +9,7 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { DB_PATH, ensureConfigDir } from "./config.ts";
+import type { DiffStat } from "./diffstat.ts";
 
 export type RepoSource = "auto" | "pinned" | "created";
 
@@ -23,6 +24,12 @@ export interface RepoStatus {
   error: string | null;
   /** When `behind` was last refreshed by an explicit fetch (null until then). */
   fetchedAt: number | null;
+  /**
+   * Aggregate working-tree-vs-HEAD line/char delta. Null when the diff-stats setting is
+   * off (the default) or the tree is clean — computing it is gated behind that setting.
+   * Optional so a status literal can omit it; readStatus always sets it (null or a value).
+   */
+  diff?: DiffStat | null;
   updatedAt: number;
 }
 
@@ -34,6 +41,10 @@ interface RepoRow {
   workspace_id: string | null;
   identity_id: string | null;
   is_submodule: number;
+  hidden: number;
+  /** User "favorite" flags — organisation only. Distinct from source='pinned'. */
+  pinned: number;
+  starred: number;
   last_status: string | null;
   updated_at: number;
 }
@@ -47,6 +58,12 @@ export interface RepoView {
   isSubmodule: boolean;
   /** Repo-level identity override (null → inherit/none). */
   identityId: string | null;
+  /** Owner-hidden from the dashboard (e.g. a deprecated repo). Display-only. */
+  hidden: boolean;
+  /** Favorited into the "Pinned" section. Organisation flag — NOT source='pinned'. */
+  pinned: boolean;
+  /** Favorited into the "Starred" section. Organisation flag, independent of pinned. */
+  starred: boolean;
   status: RepoStatus | null;
   updatedAt: number;
 }
@@ -91,7 +108,11 @@ export function initDb(): Database {
       workspace_id  TEXT,
       identity_id   TEXT,
       is_submodule  INTEGER NOT NULL DEFAULT 0,
+      hidden        INTEGER NOT NULL DEFAULT 0,
+      pinned        INTEGER NOT NULL DEFAULT 0,
+      starred       INTEGER NOT NULL DEFAULT 0,
       last_status   TEXT,
+      sort_order    INTEGER,
       updated_at    INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS workspaces (
@@ -116,6 +137,28 @@ export function initDb(): Database {
       revoked    INTEGER NOT NULL DEFAULT 0
     );
   `);
+  // Migrations: add columns to pre-existing databases. Each throws "duplicate column
+  // name" on DBs that already have it (incl. fresh ones) — ignore.
+  try {
+    handle.exec("ALTER TABLE repos ADD COLUMN sort_order INTEGER;");
+  } catch {
+    /* column already present */
+  }
+  try {
+    handle.exec("ALTER TABLE repos ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;");
+  } catch {
+    /* column already present */
+  }
+  try {
+    handle.exec("ALTER TABLE repos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;");
+  } catch {
+    /* column already present */
+  }
+  try {
+    handle.exec("ALTER TABLE repos ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;");
+  } catch {
+    /* column already present */
+  }
   db = handle;
   return db;
 }
@@ -137,7 +180,13 @@ export function upsertRepo(
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(abs_path) DO UPDATE SET
          name = excluded.name,
-         is_submodule = excluded.is_submodule
+          source = CASE
+            WHEN repos.source = 'created' OR excluded.source = 'created' THEN 'created'
+            WHEN repos.source = 'pinned' OR excluded.source = 'pinned' THEN 'pinned'
+            ELSE excluded.source
+          END,
+          is_submodule = excluded.is_submodule,
+          updated_at = excluded.updated_at
        RETURNING id`,
     )
     .get(randomUUID(), absPath, name, source, isSubmodule ? 1 : 0, Date.now()) as
@@ -160,16 +209,41 @@ function toView(r: RepoRow): RepoView {
     source: r.source,
     isSubmodule: r.is_submodule === 1,
     identityId: r.identity_id,
+    hidden: r.hidden === 1,
+    pinned: r.pinned === 1,
+    starred: r.starred === 1,
     status: r.last_status ? (JSON.parse(r.last_status) as RepoStatus) : null,
     updatedAt: r.updated_at,
   };
 }
 
 export function getRepos(): RepoView[] {
+  // Manual drag order (sort_order) wins; repos never reordered yet (NULL) fall back
+  // to the old grouping — real repos before submodule worktrees, then name.
   const rows = getDb()
-    .query(`SELECT * FROM repos ORDER BY is_submodule ASC, name COLLATE NOCASE ASC`)
+    .query(
+      `SELECT * FROM repos
+       ORDER BY (sort_order IS NULL) ASC, sort_order ASC, is_submodule ASC, name COLLATE NOCASE ASC`,
+    )
     .all() as RepoRow[];
   return rows.map(toView);
+}
+
+/**
+ * Persist a full drag-to-reorder: assign each id its position as sort_order.
+ * Clears every repo's sort_order first so any repo NOT in the list (e.g. one
+ * discovered mid-drag) falls back to the name/submodule tiebreaker instead of
+ * floating to a stale position.
+ */
+export function setRepoOrder(orderedIds: string[]): void {
+  const d = getDb();
+  const clear = d.query(`UPDATE repos SET sort_order = NULL`);
+  const upd = d.query(`UPDATE repos SET sort_order = ? WHERE id = ?`);
+  const tx = d.transaction((ids: string[]) => {
+    clear.run();
+    ids.forEach((id, i) => upd.run(i, id));
+  });
+  tx(orderedIds);
 }
 
 export function getRepo(id: string): RepoView | null {
@@ -260,4 +334,25 @@ export function setRepoIdentity(repoId: string, identityId: string | null): void
   getDb()
     .query(`UPDATE repos SET identity_id = ?, updated_at = ? WHERE id = ?`)
     .run(identityId, Date.now(), repoId);
+}
+
+/** Hide (or unhide) a repo from the dashboard. Display-only — never affects watching. */
+export function setRepoHidden(repoId: string, hidden: boolean): void {
+  getDb()
+    .query(`UPDATE repos SET hidden = ?, updated_at = ? WHERE id = ?`)
+    .run(hidden ? 1 : 0, Date.now(), repoId);
+}
+
+/** Pin (or unpin) a repo into the "Pinned" section. Organisation only — display-only. */
+export function setRepoPinned(repoId: string, pinned: boolean): void {
+  getDb()
+    .query(`UPDATE repos SET pinned = ?, updated_at = ? WHERE id = ?`)
+    .run(pinned ? 1 : 0, Date.now(), repoId);
+}
+
+/** Star (or unstar) a repo into the "Starred" section. Independent of pinned. */
+export function setRepoStarred(repoId: string, starred: boolean): void {
+  getDb()
+    .query(`UPDATE repos SET starred = ?, updated_at = ? WHERE id = ?`)
+    .run(starred ? 1 : 0, Date.now(), repoId);
 }

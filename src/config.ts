@@ -3,11 +3,20 @@
  *
  * All local state lives under ~/.gitmob (never inside any tracked repo). The
  * config file holds only non-secret operational settings (roots, port, limits);
- * secrets live in the OS keychain in later phases, never here.
+ * secrets (AI keys, OAuth client_secret) live in the OS keychain via secrets.ts —
+ * `hydrateSecrets()` loads them into memory at boot and `saveConfig()` strips them
+ * from disk. They only fall back into config.json (0600) if no OS keychain exists.
  */
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import {
+  getSecret,
+  setSecret,
+  keychainAvailable,
+  aiKeyName,
+  OAUTH_CLIENT_SECRET,
+} from "./secrets.ts";
 
 export const VERSION = "0.0.1";
 
@@ -37,6 +46,83 @@ export interface OAuthConfig {
   scopes?: string;
 }
 
+/**
+ * Bring-your-own-key AI config. The owner pastes a provider API key; GitMob uses it
+ * SERVER-SIDE only (list models + draft commit messages) and never returns it to any
+ * client. The key bytes live in the OS keychain (see secrets.ts) — config.json on disk
+ * carries only the selected model; `apiKey` is hydrated into this in-memory shape at boot
+ * by `hydrateSecrets()` and stripped again by `saveConfig()`.
+ */
+export type AiProviderId =
+  | "anthropic"
+  | "openai"
+  | "gemini"
+  | "deepseek"
+  | "groq"
+  | "openrouter";
+
+/**
+ * Safe display metadata for one AI provider — contains NO secrets.
+ * Served to the web via GET /api/ai/catalog so the Settings UI never drifts
+ * from what the daemon actually accepts.
+ */
+export interface AiCatalogEntry {
+  id: AiProviderId;
+  /** Human-readable provider name shown in the Settings UI. */
+  label: string;
+  /** The console/key-management URL (without "https://") shown as a link. */
+  url: string;
+  /** API-key format hint shown in the password input placeholder. */
+  keyPlaceholder: string;
+  /** True when the provider offers a free tier (shows a "Free tier" badge). */
+  free?: boolean;
+}
+
+/**
+ * Single source of truth for every AI provider GitMob supports.
+ * Derive AI_PROVIDERS from this so they can never diverge.
+ * Order = display order in the Settings UI (free providers first).
+ */
+export const AI_CATALOG: readonly AiCatalogEntry[] = [
+  { id: "groq",       label: "Groq",      url: "console.groq.com/keys",    keyPlaceholder: "gsk_…",     free: true },
+  { id: "openrouter", label: "OpenRouter", url: "openrouter.ai/keys",       keyPlaceholder: "sk-or-…",   free: true },
+  { id: "gemini",     label: "Gemini",     url: "aistudio.google.com",      keyPlaceholder: "AIza…",     free: true },
+  { id: "anthropic",  label: "Claude",     url: "console.anthropic.com",    keyPlaceholder: "sk-ant-…"              },
+  { id: "openai",     label: "ChatGPT",    url: "platform.openai.com",      keyPlaceholder: "sk-…"                  },
+  { id: "deepseek",   label: "DeepSeek",   url: "platform.deepseek.com",    keyPlaceholder: "sk-…"                  },
+];
+
+/** Static catalogue — drives route validation. Derived from AI_CATALOG so they stay in sync. */
+export const AI_PROVIDERS: readonly AiProviderId[] = AI_CATALOG.map((e) => e.id);
+
+export type CommitStyle = "conventional" | "concise" | "detailed";
+
+export interface AiProviderCfg {
+  /** Secret API key — kept in the OS keychain, hydrated into memory at boot, never on disk
+   *  and never returned to a client. Optional because the on-disk shape omits it. */
+  apiKey?: string;
+  /** The model selected for this provider (null until the owner picks one). */
+  model: string | null;
+}
+
+export interface AiConfig {
+  providers: Partial<Record<AiProviderId, AiProviderCfg>>;
+  /** Which configured provider the "Generate" button uses. */
+  defaultProvider?: AiProviderId;
+  /** Commit-message style for the prompt (default "conventional"). Owners can override
+   *  here in config.json; the UI no longer exposes a picker (conventional is the norm). */
+  style?: CommitStyle;
+}
+
+/**
+ * Access mode (owner-toggleable in Settings):
+ *  - "local"  → localhost-only; local requests need no login (the daemon binds 127.0.0.1).
+ *  - "remote" → a Cloudflare tunnel is exposed; requests arriving over it ALWAYS require a
+ *    signed-in owner. Local requests may still "continue local" without logging in.
+ * Default "local" — a fresh install is frictionless and nudges the owner toward remote.
+ */
+export type AccessMode = "local" | "remote";
+
 export interface GitmobConfig {
   /** Absolute root paths to recursively scan for git repos. */
   roots: string[];
@@ -46,20 +132,168 @@ export interface GitmobConfig {
   maxDepth: number;
   /** Hard cap on auto-discovered repos (inotify-budget guard on Linux). */
   maxRepos: number;
-  /** OIDC config; when set, auth is enforced. */
+  /** Local-only vs remote-exposed. See AccessMode. Defaults to "local". */
+  mode?: AccessMode;
+  /**
+   * Show added/removed line + character counts per file and per repo (off by default).
+   * Gated here because computing it adds a `git diff` parse to every status read; see
+   * src/diffstat.ts.
+   */
+  diffStats?: boolean;
+  /**
+   * Allow editing & saving files through the viewer over the remote tunnel. Local (loopback)
+   * edits are always allowed. Defaults to true (absent = enabled).
+   */
+  remoteEditing?: boolean;
+  /**
+   * File-viewer Diff-tab threshold (bytes): a changed file larger than this on either side
+   * ships as a compact server-computed `git diff` patch instead of both whole copies for a
+   * side-by-side view. Owner setting (the Settings UI writes it); clamped on read. See
+   * getDiffPatchBytes / setDiffPatchBytes in src/service.ts. Absent = the built-in default.
+   */
+  diffPatchBytes?: number;
+  /**
+   * When false, the file viewer never switches large files to the compact patch — every diff
+   * loads full side-by-side (and may be truncated past the read cap). Defaults to true (absent
+   * = patch mode on). The Settings "Always side-by-side" toggle is the inverse of this.
+   */
+  diffPatchEnabled?: boolean;
+  /** OIDC config. Always present (the public Connections client is baked into DEFAULTS),
+   *  so "Sign in with Connections" works with zero setup; the owner just clicks the button. */
   oauth?: OAuthConfig;
+  /** Bring-your-own-key AI config (optional). */
+  ai?: AiConfig;
 }
+
+/** The redacted AI view safe to send to any client — keys are dropped entirely. */
+export interface RedactedAiConfig {
+  providers: Partial<
+    Record<AiProviderId, { configured: true; model: string | null; builtin?: boolean }>
+  >;
+  defaultProvider: AiProviderId | null;
+  style: CommitStyle;
+}
+
+/**
+ * Free built-in AI so "✨ Generate" works out of the box with ZERO setup: an
+ * intentionally-PUBLIC, throwaway Groq key + a default model. The owner's own
+ * key/provider ALWAYS wins over this (see resolveApiKey / isBuiltinProvider).
+ * Abuse only burns this key's rate limit — rotate by swapping the constant below.
+ *
+ * The key is read at call time from GITMOB_BUILTIN_GROQ_KEY (handy for dev / tests /
+ * rotation) and otherwise falls back to the hardcoded constant. It counts as ACTIVE
+ * only when it looks like a real Groq key (`gsk_…`), so the placeholder leaves the
+ * feature DORMANT until a real key is dropped in, and `GITMOB_BUILTIN_GROQ_KEY=""`
+ * force-disables it (used by the tests to assert the unconfigured baseline).
+ */
+const BUILTIN_GROQ_KEY = "gsk_REPLACE_WITH_YOUR_THROWAWAY_GROQ_KEY";
+export const BUILTIN_AI = {
+  provider: "groq" as AiProviderId,
+  model: process.env.GITMOB_BUILTIN_GROQ_MODEL ?? "llama-3.1-8b-instant",
+};
+
+/** The active built-in key, or null when unset / placeholder / force-disabled. Read at call time. */
+export function builtinApiKey(): string | null {
+  const k = (process.env.GITMOB_BUILTIN_GROQ_KEY ?? BUILTIN_GROQ_KEY).trim();
+  return k.startsWith("gsk_") && !k.includes("REPLACE") ? k : null;
+}
+
+/** True when `provider` is served by the built-in key (the owner has set no key of their own). */
+export function isBuiltinProvider(cfg: GitmobConfig, provider: AiProviderId): boolean {
+  return (
+    provider === BUILTIN_AI.provider &&
+    !cfg.ai?.providers?.[provider]?.apiKey &&
+    builtinApiKey() !== null
+  );
+}
+
+/** Effective API key for a provider: the owner's key wins, else the built-in key (Groq only). */
+export function resolveApiKey(cfg: GitmobConfig, provider: AiProviderId): string | null {
+  const own = cfg.ai?.providers?.[provider]?.apiKey;
+  if (own) return own;
+  if (provider === BUILTIN_AI.provider) return builtinApiKey();
+  return null;
+}
+
+/** Effective model for a provider: the owner's selection wins, else the built-in default model. */
+export function resolveModel(cfg: GitmobConfig, provider: AiProviderId): string | null {
+  const own = cfg.ai?.providers?.[provider]?.model;
+  if (own) return own;
+  if (isBuiltinProvider(cfg, provider)) return BUILTIN_AI.model;
+  return null;
+}
+
+/** Which provider "Generate" uses: the owner's choice if usable, else the first usable provider. */
+export function effectiveDefaultProvider(cfg: GitmobConfig): AiProviderId | null {
+  const pref = cfg.ai?.defaultProvider;
+  if (pref && resolveApiKey(cfg, pref) && resolveModel(cfg, pref)) return pref;
+  for (const id of AI_PROVIDERS) {
+    if (resolveApiKey(cfg, id) && resolveModel(cfg, id)) return id;
+  }
+  return null;
+}
+
+/** Map the AI config to a key-free shape for the API. NEVER include `apiKey`. */
+export function redactAi(cfg: GitmobConfig): RedactedAiConfig {
+  const out: RedactedAiConfig = { providers: {}, defaultProvider: null, style: cfg.ai?.style ?? "conventional" };
+  for (const id of AI_PROVIDERS) {
+    // "configured" = the owner set a key OR the built-in key covers it (Groq).
+    if (resolveApiKey(cfg, id)) {
+      const builtin = isBuiltinProvider(cfg, id);
+      out.providers[id] = {
+        configured: true,
+        model: resolveModel(cfg, id),
+        ...(builtin ? { builtin: true } : {}),
+      };
+    }
+  }
+  out.defaultProvider = effectiveDefaultProvider(cfg);
+  return out;
+}
+
+/**
+ * The public "Sign in with Connections" OAuth client for GitMob, baked in so login works
+ * with zero owner setup. These are PUBLIC by nature (a PKCE client — no secret): the
+ * client id and the fixed redirect "shim" are registered in the Connections IdP. The shim
+ * is a tiny Cloudflare Worker that bounces the login back to whatever origin this daemon is
+ * reached at (its tunnel URL rotates each run). An owner can override `oauth` in config.json.
+ */
+const CONNECTIONS_OAUTH: OAuthConfig = {
+  issuer: "https://accounts.connections.icu",
+  clientId: "a790090c23b353c15ed973fd5fe20563",
+  redirectUri: "https://gitmob-auth.lunawerx.workers.dev/cb",
+  scopes: "openid profile email",
+};
 
 const DEFAULTS: GitmobConfig = {
   roots: [],
   port: 7171,
   maxDepth: 6,
   maxRepos: 200,
+  mode: "local",
+  oauth: { ...CONNECTIONS_OAUTH },
 };
 
-/** Auth is enforced exactly when OIDC is configured. */
+/** Effective access mode (defaults to local). */
+export function accessMode(cfg: GitmobConfig): AccessMode {
+  return cfg.mode === "remote" ? "remote" : "local";
+}
+
+/** True when a sign-in flow is possible at all (an OIDC client is configured). With the
+ *  baked-in Connections client this is true for every real install; only bare test configs
+ *  (no `oauth`) are unauthenticated/local-open. The middleware layers `mode` on top. */
 export function authEnforced(cfg: GitmobConfig): boolean {
   return !!(cfg.oauth && cfg.oauth.issuer && cfg.oauth.clientId && cfg.oauth.redirectUri);
+}
+
+export function ownerConfigured(cfg: GitmobConfig): boolean {
+  return !!(cfg.oauth?.ownerSub || cfg.oauth?.ownerEmail);
+}
+
+export function tunnelStartProblem(cfg: GitmobConfig): string | null {
+  if (!authEnforced(cfg)) return "auth";
+  if (!ownerConfigured(cfg)) return "owner";
+  return null;
 }
 
 export function ensureConfigDir(): void {
@@ -81,11 +315,78 @@ export function loadConfig(): GitmobConfig {
   }
 }
 
+/**
+ * The on-disk projection of a config: secret bytes removed when the keychain is the store.
+ * AI `apiKey`s and any confidential OAuth `clientSecret` live in the OS keychain, so they
+ * must never be written to config.json. If the keychain is UNAVAILABLE on this host, we
+ * keep the legacy behavior — leave the secrets in config.json (0600) — so a key isn't
+ * silently lost; `secrets.ts` has already warned once in that case.
+ */
+function stripSecretsForDisk(cfg: GitmobConfig): GitmobConfig {
+  if (!keychainAvailable()) return cfg; // degraded host → keep plaintext (no regression)
+  const clone = JSON.parse(JSON.stringify(cfg)) as GitmobConfig;
+  if (clone.ai?.providers) {
+    for (const p of Object.values(clone.ai.providers)) {
+      if (p) delete p.apiKey;
+    }
+  }
+  if (clone.oauth) delete clone.oauth.clientSecret;
+  return clone;
+}
+
 export function saveConfig(cfg: GitmobConfig): void {
   ensureConfigDir();
-  // 0600 — config may hold a confidential OAuth client_secret. (Never committed:
-  // it lives in ~/.gitmob, which is gitignored.)
-  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  // 0600 belt-and-suspenders; with the keychain available the file holds no secret at all.
+  const onDisk = stripSecretsForDisk(cfg);
+  const tmp = `${CONFIG_PATH}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(onDisk, null, 2), { mode: 0o600 });
+    renameSync(tmp, CONFIG_PATH);
+  } catch (e) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      /* best-effort temp cleanup */
+    }
+    throw e;
+  }
+}
+
+/**
+ * Load secrets from the OS keychain into the in-memory config, and MIGRATE any secrets
+ * still sitting in a legacy plaintext config.json into the keychain (then re-save to strip
+ * them). Call once at daemon boot, before serving, so every sync call site (resolveApiKey,
+ * redactAi, …) sees the hydrated key without becoming async. Idempotent + best-effort: on a
+ * keychain-less host it leaves the plaintext config untouched.
+ */
+export async function hydrateSecrets(cfg: GitmobConfig): Promise<void> {
+  let migrated = false;
+
+  if (cfg.ai?.providers) {
+    for (const [id, p] of Object.entries(cfg.ai.providers)) {
+      if (!p) continue;
+      if (p.apiKey) {
+        // Legacy plaintext key on disk → move it into the keychain (then it gets stripped).
+        if (await setSecret(aiKeyName(id), p.apiKey)) migrated = true;
+      } else {
+        // No key in memory → hydrate from the keychain if one is stored.
+        const k = await getSecret(aiKeyName(id));
+        if (k) p.apiKey = k;
+      }
+    }
+  }
+
+  if (cfg.oauth) {
+    if (cfg.oauth.clientSecret) {
+      if (await setSecret(OAUTH_CLIENT_SECRET, cfg.oauth.clientSecret)) migrated = true;
+    } else {
+      const cs = await getSecret(OAUTH_CLIENT_SECRET);
+      if (cs) cfg.oauth.clientSecret = cs;
+    }
+  }
+
+  // Re-persist so the now-migrated plaintext secrets are stripped from config.json.
+  if (migrated) saveConfig(cfg);
 }
 
 /** Add an absolute root to the config (idempotent). Returns the updated config. */

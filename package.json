@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "bun run src/index.ts start",
-    "dev": "bun run --watch src/index.ts start",
+    "dev": "bun run scripts/dev.ts",
     "status": "bun run src/index.ts status",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

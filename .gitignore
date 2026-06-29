@@ -3,6 +3,11 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# local secrets / env (bun auto-loads .env at startup) — NEVER commit
+.env
+.env.*
+!.env.example
+
 # local runtime state (the daemon writes to ~/.gitmob, but never commit any local db copies)
 *.db
 *.db-wal
@@ -16,3 +21,7 @@ dist/
 
 # bundled binaries (fetched per-platform, not committed)
 vendor/cloudflared/
+
+# tray launcher: the .lnk stores absolute paths — regenerate it per machine with
+# misc\Create-Shortcut.ps1 (the scripts + icon under misc/ are committed).
+/GitMob.lnk

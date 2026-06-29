@@ -14,6 +14,9 @@
  * `git -c user.name/user.email` — never by mutating global or repo config.
  */
 import { simpleGit, type SimpleGit } from "simple-git";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import type { Identity } from "./db.ts";
 
 export function safeGitEnv(): Record<string, string> {
@@ -24,6 +27,7 @@ export function safeGitEnv(): Record<string, string> {
   delete env.GIT_EDITOR;
   delete env.GIT_SEQUENCE_EDITOR;
   delete env.GIT_PAGER;
+  delete env.PAGER;
   // We inject SSH auth via `-c core.sshCommand` per operation (see identityConfigArgs),
   // not via this env var — simple-git refuses to run with GIT_SSH_COMMAND in the env.
   delete env.GIT_SSH_COMMAND;
@@ -50,8 +54,23 @@ export function gitFor(absPath: string, blockMs = 30_000): SimpleGit {
  *  -o BatchMode=yes    fail fast instead of hanging on a passphrase prompt
  * The key path is normalised to forward slashes (OpenSSH-friendly on Windows) and quoted.
  */
+function expandHome(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed === "~") return homedir();
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) return join(homedir(), trimmed.slice(2));
+  return trimmed;
+}
+
 export function sshCommandFor(keyPath: string): string {
-  const norm = keyPath.replace(/\\/g, "/");
+  const expanded = expandHome(keyPath);
+  if (/["'`$\r\n\0]/.test(expanded)) {
+    throw new Error("SSH key path contains unsupported shell characters");
+  }
+  const abs = resolve(expanded);
+  if (!existsSync(abs) || !statSync(abs).isFile()) {
+    throw new Error(`SSH key path is not a file: ${abs}`);
+  }
+  const norm = abs.replace(/\\/g, "/");
   return `ssh -i "${norm}" -o IdentitiesOnly=yes -o BatchMode=yes`;
 }
 

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { gitPullFfOnly, gitCommitAll } from "../src/git-actions.ts";
+import { safeGitEnv, sshCommandFor } from "../src/git.ts";
 import type { Identity } from "../src/db.ts";
 
 const ID: Identity = {
@@ -51,4 +52,33 @@ test("commit stages all, attributes to the identity, and never mutates repo conf
   // tree is clean again after the commit
   const porcelain = (await $`git -C ${dir} status --porcelain`.text()).trim();
   expect(porcelain).toBe("");
+});
+
+test("git environment strips ambient pager settings", () => {
+  const oldPager = process.env.PAGER;
+  const oldGitPager = process.env.GIT_PAGER;
+  process.env.PAGER = "cat";
+  process.env.GIT_PAGER = "cat";
+  try {
+    const env = safeGitEnv();
+    expect(env.PAGER).toBeUndefined();
+    expect(env.GIT_PAGER).toBeUndefined();
+  } finally {
+    if (oldPager === undefined) delete process.env.PAGER;
+    else process.env.PAGER = oldPager;
+    if (oldGitPager === undefined) delete process.env.GIT_PAGER;
+    else process.env.GIT_PAGER = oldGitPager;
+  }
+});
+
+test("sshCommandFor validates and quotes identity key paths", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gm-key-"));
+  const key = join(dir, "id key");
+  writeFileSync(key, "not-a-real-key");
+
+  const cmd = sshCommandFor(key);
+  expect(cmd).toContain(`-i "${key.replace(/\\/g, "/")}"`);
+  expect(cmd).toContain("-o IdentitiesOnly=yes");
+  expect(() => sshCommandFor(`${key}" -o ProxyCommand=bad`)).toThrow(/unsupported/);
+  expect(() => sshCommandFor(join(dir, "missing"))).toThrow(/not a file/);
 });

@@ -1,91 +1,89 @@
 <script setup lang="ts">
-import { NButton, NIcon, NTooltip } from "naive-ui";
-import { Wifi, WifiOff, Users, RefreshCw, Plus } from "lucide-vue-next";
+import { RefreshCw, Plus, Settings, Cloud, CloudOff } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { useStore } from "../store";
 
 defineProps<{ connected: boolean; repoCount: number }>();
-defineEmits<{ manage: []; reload: []; add: [] }>();
+defineEmits<{ reload: []; add: []; settings: []; remote: [] }>();
+
+const store = useStore();
 </script>
 
 <template>
-  <header class="hdr safe-top">
-    <div class="brand">
-      <img src="/icon.svg" alt="" width="28" height="28" />
-      <div class="titles">
-        <div class="title">GitMob</div>
-        <div class="sub">{{ repoCount }} repo{{ repoCount === 1 ? "" : "s" }}</div>
+  <header
+    class="safe-top sticky top-0 z-30 border-b border-border/70 bg-background/70 backdrop-blur-xl"
+  >
+    <div class="mx-auto flex max-w-3xl items-center justify-between gap-2 px-3 py-2.5 sm:px-4">
+      <div class="flex items-center gap-2.5">
+        <img src="/icon.svg" alt="" width="30" height="30" class="rounded-lg" />
+        <div class="leading-tight">
+          <div class="text-[17px] font-bold tracking-tight">{{ $t("app.name") }}</div>
+          <div class="text-[12px] text-muted-foreground">
+            {{ $t("header.repoCount", { count: repoCount }, repoCount) }}
+          </div>
+        </div>
       </div>
-    </div>
 
-    <div class="actions">
-      <NTooltip>
-        <template #trigger>
-          <span class="conn" :class="{ on: connected }" aria-label="connection status">
-            <NIcon :size="17" :component="connected ? Wifi : WifiOff" />
+      <div class="flex items-center gap-1">
+        <!-- remote-access button, with the live/offline dot pinned to its top-right corner -->
+        <div class="relative">
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                :class="store.mode === 'remote' ? 'text-info' : 'text-muted-foreground'"
+                :aria-label="$t('header.connection')"
+                @click="$emit('remote')"
+              >
+                <Cloud v-if="store.mode === 'remote'" />
+                <CloudOff v-else />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {{ store.mode === "remote" ? $t("header.connectionRemote") : $t("header.connectionLocal") }}
+            </TooltipContent>
+          </Tooltip>
+          <span
+            class="pointer-events-none absolute right-1.5 top-1.5 flex size-2"
+            role="status"
+            :aria-label="connected ? $t('header.connectedStatus') : $t('header.reconnecting')"
+          >
+            <span
+              v-if="connected"
+              class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60"
+            />
+            <span
+              class="relative inline-flex size-2 rounded-full ring-2 ring-background"
+              :class="connected ? 'bg-emerald-500' : 'bg-red-500'"
+            />
           </span>
-        </template>
-        {{ connected ? "Live — receiving updates" : "Reconnecting…" }}
-      </NTooltip>
+        </div>
 
-      <NButton quaternary circle aria-label="reload" @click="$emit('reload')">
-        <template #icon><NIcon :component="RefreshCw" /></template>
-      </NButton>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button variant="ghost" size="icon" :aria-label="$t('header.reload')" @click="$emit('reload')">
+              <RefreshCw />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("header.reload") }}</TooltipContent>
+        </Tooltip>
 
-      <NButton secondary circle aria-label="add repository" @click="$emit('add')">
-        <template #icon><NIcon :component="Plus" /></template>
-      </NButton>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button variant="ghost" size="icon" :aria-label="$t('header.settings')" @click="$emit('settings')">
+              <Settings />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("header.settingsTooltip") }}</TooltipContent>
+        </Tooltip>
 
-      <NButton secondary strong aria-label="manage identities" @click="$emit('manage')">
-        <template #icon><NIcon :component="Users" /></template>
-      </NButton>
+        <Button class="ml-1" size="sm" :aria-label="$t('header.addRepository')" @click="$emit('add')">
+          <Plus />
+          <span class="hidden sm:inline">{{ $t("header.add") }}</span>
+        </Button>
+      </div>
     </div>
   </header>
 </template>
-
-<style scoped>
-.hdr {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 14px;
-  background: rgba(14, 14, 18, 0.82);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid #1f1f27;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.titles {
-  line-height: 1.1;
-}
-.title {
-  font-weight: 700;
-  font-size: 17px;
-  letter-spacing: 0.2px;
-}
-.sub {
-  font-size: 12px;
-  color: #7c7c8a;
-  margin-top: 1px;
-}
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.conn {
-  display: inline-flex;
-  padding: 5px;
-  border-radius: 8px;
-  color: #6a6a78;
-  transition: color 0.2s ease;
-}
-.conn.on {
-  color: #3ddc84;
-}
-</style>

@@ -6,6 +6,12 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "src/index.ts", "start"],
       "port": 7171
+    },
+    {
+      "name": "gitmob-web",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "web", "dev"],
+      "port": 4319
     }
   ]
 }

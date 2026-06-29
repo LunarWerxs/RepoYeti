@@ -11,11 +11,38 @@
  * bundled/installed cloudflared; Phase 5 pins a per-platform binary.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 
 export interface TunnelHandle {
   stop(): void;
+}
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function resolveCloudflaredExecutable(
+  execPath = process.execPath,
+  platform = process.platform,
+): string {
+  const exe = platform === "win32" ? "cloudflared.exe" : "cloudflared";
+  const binDir = dirname(execPath);
+  const candidates = [
+    join(binDir, "vendor", exe),
+    join(binDir, "vendor", "cloudflared", exe),
+    join(binDir, "vendor", "cloudflared"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate) && isFile(candidate)) return candidate;
+  }
+  return exe;
 }
 
 export function startTunnel(
@@ -26,7 +53,7 @@ export function startTunnel(
   let proc: ChildProcess;
   try {
     proc = spawn(
-      "cloudflared",
+      resolveCloudflaredExecutable(),
       ["tunnel", "--no-autoupdate", "--url", `http://127.0.0.1:${port}`],
       { stdio: ["ignore", "pipe", "pipe"] },
     );

@@ -25,6 +25,7 @@ import {
   CONFIG_DIR,
   ensureConfigDir,
   authEnforced,
+  accessMode,
   saveConfig,
   type GitmobConfig,
   type OAuthConfig,
@@ -33,6 +34,7 @@ import {
 const COOKIE = "gm_session";
 const SESSION_TTL_MS = 90 * 24 * 3600 * 1000;
 const TX_TTL_MS = 10 * 60 * 1000;
+const AUTH_FETCH_TIMEOUT_MS = 15_000;
 
 export interface Session {
   sub: string;
@@ -55,12 +57,14 @@ function key(): Buffer {
   return KEY;
 }
 
-function sign(payload: string): string {
+/** @internal exported for security tests only — not part of the public API. */
+export function sign(payload: string): string {
   const body = Buffer.from(payload).toString("base64url");
   const mac = createHmac("sha256", key()).update(body).digest("base64url");
   return `${body}.${mac}`;
 }
-function unsign(token: string | undefined): string | null {
+/** @internal exported for security tests only — not part of the public API. */
+export function unsign(token: string | undefined): string | null {
   if (!token) return null;
   const [body, mac] = token.split(".");
   if (!body || !mac) return null;
@@ -73,10 +77,16 @@ function unsign(token: string | undefined): string | null {
 
 // ── OIDC discovery + JWKS (cached) ─────────────────────────────────────────────
 let discoveryCache: { issuer: string; doc: Record<string, string> } | null = null;
-async function discover(issuer: string): Promise<Record<string, string>> {
+function authFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  return fetch(input, { ...init, signal: AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS) });
+}
+async function discover(
+  issuer: string,
+  doFetch: FetchLike = authFetch,
+): Promise<Record<string, string>> {
   const iss = issuer.replace(/\/$/, "");
   if (discoveryCache?.issuer === iss) return discoveryCache.doc;
-  const res = await fetch(`${iss}/.well-known/openid-configuration`);
+  const res = await doFetch(`${iss}/.well-known/openid-configuration`);
   if (!res.ok) throw new Error(`OIDC discovery failed: ${res.status}`);
   const doc = (await res.json()) as Record<string, string>;
   discoveryCache = { issuer: iss, doc };
@@ -90,7 +100,8 @@ function jwks(uri: string) {
 }
 
 // ── PKCE transactions ──────────────────────────────────────────────────────────
-const txs = new Map<string, { verifier: string; ts: number }>();
+/** @internal exported for security tests only — not part of the public API. */
+export const txs = new Map<string, { verifier: string; ts: number }>();
 function pkce(): { verifier: string; challenge: string } {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -101,7 +112,8 @@ function gcTx(): void {
   for (const [k, v] of txs) if (now - v.ts > TX_TTL_MS) txs.delete(k);
 }
 
-function ownerMatches(o: OAuthConfig, sub: string, email: string): boolean {
+/** @internal exported for security tests only — not part of the public API. */
+export function ownerMatches(o: OAuthConfig, sub: string, email: string): boolean {
   if (o.ownerSub && sub === o.ownerSub) return true;
   if (o.ownerEmail && email && email.toLowerCase() === o.ownerEmail.toLowerCase()) return true;
   return false;
@@ -147,6 +159,54 @@ export function readSession(c: Context, o: OAuthConfig): Session | null {
   }
 }
 
+// ── local-bypass ("Continue local for now") ─────────────────────────────────────
+// In remote mode the dashboard demands a login, but someone physically at the machine
+// can opt to keep using it locally. This is gated HARD on the request being loopback:
+// a request that arrived over the tunnel carries Cloudflare/forwarding headers it cannot
+// strip, so a remote caller can NEVER use the bypass — only true localhost can.
+const LOCAL_COOKIE = "gm_local";
+const LOCAL_TTL_MS = 30 * 24 * 3600 * 1000;
+
+/** True when the request came in over the tunnel (Cloudflare adds these; localhost has none). */
+export function isRemoteRequest(c: Context): boolean {
+  return !!(
+    c.req.header("cf-connecting-ip") ||
+    c.req.header("x-forwarded-for") ||
+    c.req.header("x-forwarded-proto")
+  );
+}
+
+function setLocalBypass(c: Context): void {
+  setCookie(c, LOCAL_COOKIE, sign(JSON.stringify({ exp: Date.now() + LOCAL_TTL_MS })), {
+    httpOnly: true,
+    sameSite: "Lax",
+    secure: false, // local http only — never sent over the tunnel anyway
+    path: "/",
+    maxAge: Math.floor(LOCAL_TTL_MS / 1000),
+  });
+}
+
+/** A live local-bypass cookie — only meaningful for a local request (callers gate on that). */
+export function hasLocalBypass(c: Context): boolean {
+  const raw = unsign(getCookie(c, LOCAL_COOKIE));
+  if (!raw) return false;
+  try {
+    const { exp } = JSON.parse(raw) as { exp: number };
+    return !!exp && exp > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+/** POST /api/auth/continue-local — grant the local bypass. Refused for tunnel traffic. */
+export function handleContinueLocal(c: Context): Response {
+  if (isRemoteRequest(c)) {
+    return c.json({ ok: false, code: "REMOTE_FORBIDDEN", message: "local bypass is not available remotely" }, 403);
+  }
+  setLocalBypass(c);
+  return c.json({ ok: true });
+}
+
 // ── HTML for the auth-complete error page ──────────────────────────────────────
 function errPage(message: string): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -181,8 +241,23 @@ export async function handleLogin(c: Context, cfg: GitmobConfig): Promise<Respon
   return c.redirect(url.toString());
 }
 
+/** Minimal fetch signature used by the auth seam — a subset of the global fetch. */
+type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+/** Options accepted by handleComplete for testing.  Production callers omit both. */
+export interface HandleCompleteOptions {
+  /** Override the fetch implementation used for OIDC discovery + token exchange. */
+  fetchImpl?: FetchLike;
+  /** Override the JWKS key resolver passed to jwtVerify (skips createRemoteJWKSet). */
+  jwksSet?: Parameters<typeof jwtVerify>[1];
+}
+
 /** Shared by /oauth/finish (shim bounce) and /oauth/callback (loopback). */
-export async function handleComplete(c: Context, cfg: GitmobConfig): Promise<Response> {
+export async function handleComplete(
+  c: Context,
+  cfg: GitmobConfig,
+  opts?: HandleCompleteOptions,
+): Promise<Response> {
   const o = cfg.oauth!;
   const code = c.req.query("code");
   const state = c.req.query("state");
@@ -200,8 +275,11 @@ export async function handleComplete(c: Context, cfg: GitmobConfig): Promise<Res
   if (!tx) return c.html(errPage("This sign-in link expired. Start again."), 400);
   txs.delete(nonce);
 
+  // Allow a test-supplied fetch so unit tests can inject a mock IdP without a live network.
+  const doFetch: FetchLike = opts?.fetchImpl ?? authFetch;
+
   try {
-    const doc = await discover(o.issuer);
+    const doc = await discover(o.issuer, doFetch);
     const body = new URLSearchParams({
       grant_type: "authorization_code",
       code,
@@ -210,7 +288,7 @@ export async function handleComplete(c: Context, cfg: GitmobConfig): Promise<Res
       code_verifier: tx.verifier,
     });
     if (o.clientSecret) body.set("client_secret", o.clientSecret);
-    const tr = await fetch(doc.token_endpoint!, {
+    const tr = await doFetch(doc.token_endpoint!, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -219,7 +297,8 @@ export async function handleComplete(c: Context, cfg: GitmobConfig): Promise<Res
     const tok = (await tr.json()) as { id_token?: string };
     if (!tok.id_token) return c.html(errPage("Connections returned no identity token."), 502);
 
-    const { payload } = await jwtVerify(tok.id_token, jwks(doc.jwks_uri!), {
+    const keySet = opts?.jwksSet ?? jwks(doc.jwks_uri!);
+    const { payload } = await jwtVerify(tok.id_token, keySet, {
       issuer: o.issuer.replace(/\/$/, ""),
       audience: o.clientId,
     });
@@ -250,13 +329,36 @@ export function handleLogout(c: Context): Response {
   return c.json({ ok: true });
 }
 
-/** Middleware: gate /api/* on a valid owner session when auth is enforced. */
+/** Middleware gating /api/*. The invariants:
+ *  - No OIDC client at all (bare test configs) → fully open.
+ *  - A request over the tunnel ALWAYS requires a signed-in owner, in any mode.
+ *  - A local (loopback) request: open in "local" mode; in "remote" mode it needs either an
+ *    owner session or the local bypass ("Continue local for now").
+ *  Public endpoints (health + the status probes the gate itself relies on) always pass. */
 export function authMiddleware(cfg: GitmobConfig) {
   return async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
     if (!authEnforced(cfg)) return next();
     const path = new URL(c.req.url).pathname;
-    if (path === "/api/auth/status" || path === "/api/health") return next();
-    if (!readSession(c, cfg.oauth!)) return c.body(null, 401);
-    return next();
+    // Public: health + the probes the gate itself relies on. continue-local is here too —
+    // it self-guards on loopback, so it must be reachable from the (otherwise-gated) gate.
+    if (
+      path === "/api/auth/status" ||
+      path === "/api/auth/me" ||
+      path === "/api/health" ||
+      path === "/api/status" ||
+      path === "/api/auth/continue-local"
+    ) {
+      return next();
+    }
+
+    if (isRemoteRequest(c)) {
+      // Over-the-tunnel: owner session required, no exceptions.
+      if (!readSession(c, cfg.oauth!)) return c.body(null, 401);
+      return next();
+    }
+    // Local request.
+    if (accessMode(cfg) !== "remote") return next(); // local mode → open on this machine
+    if (readSession(c, cfg.oauth!) || hasLocalBypass(c)) return next();
+    return c.body(null, 401);
   };
 }

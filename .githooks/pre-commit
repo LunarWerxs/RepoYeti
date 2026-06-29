@@ -1,0 +1,11 @@
+#!/bin/sh
+# GitMob pre-commit gate: enforce web i18n compliance (fast — no full build).
+# Enable once with:  git config core.hooksPath .githooks
+# Bypass a single commit with:  git commit --no-verify
+if [ -f web/scripts/i18n-check.mjs ] && [ -d web/node_modules ]; then
+  echo "› i18n-check…"
+  if ! (cd web && node scripts/i18n-check.mjs); then
+    echo "✗ i18n-check failed — fix the above, or 'git commit --no-verify' to bypass." >&2
+    exit 1
+  fi
+fi

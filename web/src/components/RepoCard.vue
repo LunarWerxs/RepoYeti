@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { NCard, NTag, NIcon, NButton, NSelect, NTooltip, NPopover, NInput, useMessage } from "naive-ui";
+import { computed, ref, watch, onBeforeUnmount } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   GitBranch,
   ArrowUp,
@@ -15,297 +15,888 @@ import {
   AlertTriangle,
   Check,
   GitCommitHorizontal,
-} from "lucide-vue-next";
+  Sparkles,
+  ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  GripVertical,
+  GripHorizontal,
+  User,
+  Loader2,
+  MoreVertical,
+  EyeOff,
+  Eye,
+  Pin,
+  PinOff,
+  Star,
+  StarOff,
+  Search,
+  X,
+} from "@lucide/vue";
+import { toast } from "vue-sonner";
 import { useStore } from "../store";
-import { fromNow } from "../util";
-import type { Repo } from "../types";
+import { api, ApiError } from "../api";
+import { fromNow, buildChangeTree } from "@/lib/util";
+import { provideTreeCollapse } from "@/lib/changes-tree";
+import { cn } from "@/lib/utils";
+import {
+  changesTreeStyle,
+  setChangesOverride,
+  clearChangesOverride,
+  hasChangesOverride,
+  MIN_CHANGES_PX,
+  MAX_CHANGES_PX,
+} from "@/lib/changes-view";
+import { identityInitials, identityTint } from "@/lib/identity-display";
+import { shortcutsActive } from "@/lib/hotkeys";
+import ChangesTree from "./ChangesTree.vue";
+import DiffStat from "./DiffStat.vue";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import type { Repo, TreeNode } from "../types";
 
-const props = defineProps<{ repo: Repo }>();
+const props = withDefaults(defineProps<{ repo: Repo; draggable?: boolean }>(), {
+  draggable: true,
+});
 const store = useStore();
-const message = useMessage();
+const { t } = useI18n();
 
 const st = computed(() => props.repo.status);
 const hasRemote = computed(() => !!st.value?.remote);
 const busyAction = computed(() => store.busy[props.repo.id]);
+const anyBusy = computed(() => !!busyAction.value);
 const isClean = computed(
-  () => st.value && !st.value.error && st.value.ahead === 0 && st.value.behind === 0 && st.value.dirty === 0,
+  () =>
+    st.value &&
+    !st.value.error &&
+    st.value.ahead === 0 &&
+    st.value.behind === 0 &&
+    st.value.dirty === 0,
 );
 
-const identityOptions = computed(() => [
-  { label: "No identity", value: "__none__" },
-  ...store.identities.map((i) => ({ label: `${i.displayName} · ${i.gitEmail}`, value: i.id })),
-]);
-const identityValue = computed(() => props.repo.identityId ?? "__none__");
+// ── status-pill morph ─────────────────────────────────────────────────────────
+// The collapsed header and the expanded view share ONE set of status indicators
+// instead of swapping two markups (which snaps). Collapsed they read as bare
+// coloured "icon + count" text; expanded they fill into pills with a trailing word
+// ("ahead" / "changed" / "clean"). Background, padding, and the word reveal all
+// animate off `expanded`, so toggling grows the pill in/out smoothly.
+type StatusTone = "success" | "info" | "warning" | "muted";
+const STATUS_BG: Record<StatusTone, string> = {
+  success: "bg-success/15",
+  info: "bg-info/15",
+  warning: "bg-warning/15",
+  muted: "bg-secondary",
+};
+const STATUS_TEXT: Record<StatusTone, string> = {
+  success: "text-success",
+  info: "text-info",
+  warning: "text-warning",
+  muted: "text-muted-foreground",
+};
+function statusChip(tone: StatusTone): string {
+  return cn(
+    "inline-flex items-center rounded-md transition-all duration-200 ease-out",
+    STATUS_TEXT[tone],
+    expanded.value ? `${STATUS_BG[tone]} px-1.5 py-0.5` : "bg-transparent px-0 py-0",
+  );
+}
+// Trailing word: width-0 + transparent when collapsed (and on mobile, where the pill
+// stays count-only); on ≥sm screens it slides + fades in once expanded. max-width
+// (not a grid 1fr track) keeps the reveal animatable on every browser we target.
+const statusWord = computed(() =>
+  cn(
+    "overflow-hidden whitespace-nowrap opacity-0 max-w-0 transition-[max-width,opacity] duration-200 ease-out",
+    expanded.value && "sm:max-w-[7rem] sm:opacity-100",
+  ),
+);
 
-function onIdentity(val: string): void {
-  void store.assignIdentity(props.repo.id, val === "__none__" ? null : val);
+// ── identity (avatar dropdown) ────────────────────────────────────────────────
+const identity = computed(() =>
+  props.repo.identityId ? (store.identityById[props.repo.identityId] ?? null) : null,
+);
+function onIdentity(id: string | null): void {
+  void store.assignIdentity(props.repo.id, id);
 }
 
+// ── collapse + changed-files tree ─────────────────────────────────────────────
+const expanded = ref(false);
+const changeTree = computed(() => buildChangeTree(store.changesByRepo[props.repo.id] ?? []));
+
+// Per-folder collapse state, shared with the recursive ChangesTree via provide/inject
+// (persisted per repo — see @/lib/changes-tree).
+const treeCollapse = provideTreeCollapse(props.repo.id);
+function collectDirPaths(nodes: TreeNode[], acc: string[] = []): string[] {
+  for (const n of nodes) {
+    if (n.type === "dir") {
+      acc.push(n.path);
+      if (n.children) collectDirPaths(n.children, acc);
+    }
+  }
+  return acc;
+}
+const dirPaths = computed(() => collectDirPaths(changeTree.value));
+// True once every folder is collapsed → the button flips to "expand all".
+const allCollapsed = computed(
+  () => dirPaths.value.length > 0 && dirPaths.value.every((p) => treeCollapse.collapsed.has(p)),
+);
+function toggleCollapseAll(): void {
+  if (allCollapsed.value) treeCollapse.expandAll();
+  else treeCollapse.collapseAll(dirPaths.value);
+}
+
+// ── changed-files search ──────────────────────────────────────────────────────
+// Filename filtering is instant + local. The "Search content" toggle additionally greps
+// inside the changed files via the daemon — debounced, cancellable, and only at ≥3 chars.
+const treeQuery = ref("");
+const searching = computed(() => treeQuery.value.trim().length > 0);
+
+const contentMode = ref(false);
+const contentMatches = ref<Set<string>>(new Set());
+const contentLoading = ref(false);
+// Server-owned threshold (from /api/status) so the UI gate can't drift from the daemon's.
+const minContentChars = computed(() => store.contentSearchMin);
+let searchAbort: AbortController | null = null;
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function runContentSearch(): void {
+  const ctrl = new AbortController();
+  searchAbort = ctrl;
+  // Safety net: never let a hung/slow daemon strand the spinner. boundedGit already kills
+  // its git child at 30s; this is the independent client-side cap on the whole round-trip.
+  const killTimer = setTimeout(() => ctrl.abort(), 10_000);
+  api
+    .searchContent(props.repo.id, treeQuery.value.trim(), ctrl.signal)
+    .then((paths) => {
+      if (!ctrl.signal.aborted) contentMatches.value = new Set(paths);
+    })
+    .catch(() => {
+      if (!ctrl.signal.aborted) contentMatches.value = new Set();
+    })
+    .finally(() => {
+      clearTimeout(killTimer);
+      if (searchAbort === ctrl) {
+        contentLoading.value = false;
+        searchAbort = null;
+      }
+    });
+}
+
+// Each keystroke (or toggle) cancels any in-flight request and drops stale matches, then
+// re-arms the debounce. Below the threshold (or with content mode off) we don't hit git.
+watch([treeQuery, contentMode], () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchAbort?.abort();
+  searchAbort = null;
+  contentMatches.value = new Set();
+  if (!contentMode.value || treeQuery.value.trim().length < minContentChars.value) {
+    contentLoading.value = false;
+    return;
+  }
+  contentLoading.value = true; // show the spinner immediately, even during the debounce
+  searchTimer = setTimeout(runContentSearch, 180);
+});
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchAbort?.abort();
+});
+
+// A file is kept when its path matches the query, or — in content mode at ≥3 chars — when
+// its content matched. A folder is kept when its own name matches (then it shows all its
+// contents) or it has a kept descendant. The tree is force-expanded while searching.
+function filterTreeBy(nodes: TreeNode[], keep: (n: TreeNode) => boolean): TreeNode[] {
+  const out: TreeNode[] = [];
+  for (const n of nodes) {
+    if (n.type === "dir") {
+      if (keep(n)) {
+        out.push(n); // folder itself matches → show it with all its contents
+      } else {
+        const kids = n.children ? filterTreeBy(n.children, keep) : [];
+        if (kids.length) out.push({ ...n, children: kids });
+      }
+    } else if (keep(n)) {
+      out.push(n);
+    }
+  }
+  return out;
+}
+const filteredTree = computed(() => {
+  const q = treeQuery.value.trim().toLowerCase();
+  if (!q) return changeTree.value;
+  const useContent = contentMode.value && q.length >= minContentChars.value;
+  const matches = contentMatches.value;
+  return filterTreeBy(
+    changeTree.value,
+    (n) => n.path.toLowerCase().includes(q) || (useContent && n.type === "file" && matches.has(n.path)),
+  );
+});
+
+function toggle(): void {
+  expanded.value = !expanded.value;
+  if (expanded.value && (st.value?.dirty ?? 0) > 0) void store.loadChanges(props.repo.id);
+}
+watch(
+  () => st.value?.dirty,
+  () => {
+    if (expanded.value && (st.value?.dirty ?? 0) > 0) void store.loadChanges(props.repo.id);
+  },
+);
+
+// ── drag-to-resize the changed-files tree ─────────────────────────────────────
+// The grip below the tree pins an explicit height (persisted per repo); double-click
+// it (or press Delete) to fall back to the global Settings preset. See @/lib/changes-view.
+const treeScroll = ref<HTMLElement | null>(null);
+// Live px while a drag is in flight; persisted once on release so we don't thrash
+// localStorage (the deep useLocalStorage watcher serialises on every mutation).
+const dragHeight = ref<number | null>(null);
+const treeStyle = computed(() =>
+  dragHeight.value != null ? { height: `${dragHeight.value}px` } : changesTreeStyle(props.repo.id),
+);
+const resized = computed(() => hasChangesOverride(props.repo.id));
+const clampPx = (px: number): number =>
+  Math.min(MAX_CHANGES_PX, Math.max(MIN_CHANGES_PX, Math.round(px)));
+let dragStartY = 0;
+let dragStartH = 0;
+
+function onGripMove(e: PointerEvent): void {
+  dragHeight.value = clampPx(dragStartH + (e.clientY - dragStartY));
+}
+function onGripUp(): void {
+  window.removeEventListener("pointermove", onGripMove);
+  window.removeEventListener("pointerup", onGripUp);
+  if (dragHeight.value != null) {
+    setChangesOverride(props.repo.id, dragHeight.value); // commit the final height
+    dragHeight.value = null;
+  }
+}
+function onGripDown(e: PointerEvent): void {
+  if (!treeScroll.value) return;
+  dragStartY = e.clientY;
+  dragStartH = treeScroll.value.clientHeight;
+  // Capture so the drag keeps tracking even if the pointer leaves the viewport.
+  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  window.addEventListener("pointermove", onGripMove);
+  window.addEventListener("pointerup", onGripUp);
+  e.preventDefault();
+}
+function resetTreeHeight(): void {
+  dragHeight.value = null;
+  clearChangesOverride(props.repo.id);
+}
+// Keyboard: ↑/↓ nudge the height in 24px steps from the current rendered size.
+function nudgeHeight(delta: number): void {
+  const base = treeScroll.value?.clientHeight;
+  if (base) setChangesOverride(props.repo.id, base + delta);
+}
+onBeforeUnmount(onGripUp);
+
 // Translate first-class error codes into one calm, actionable sentence.
-const FRIENDLY: Record<string, string> = {
-  DIRTY_WORKING_TREE: "Uncommitted changes — resolve at your desk.",
-  NON_FAST_FORWARD: "Remote has diverged — resolve at your desk.",
-  DETACHED_HEAD: "Detached HEAD — resolve at your desk.",
-  NO_UPSTREAM: "This branch has no upstream set.",
-  NO_REMOTE: "No remote configured.",
-  NOTHING_TO_COMMIT: "Nothing to commit.",
-  SSH_AUTH_FAILED: "Authentication failed — check this repo's identity / SSH key.",
-  SSH_PASSPHRASE_REQUIRED: "SSH key needs a passphrase — use ssh-agent or a passphrase-free key.",
-};
+function friendly(code: string): string {
+  const map: Record<string, string> = {
+    DIRTY_WORKING_TREE: t("repo.err.dirtyWorkingTree"),
+    NON_FAST_FORWARD: t("repo.err.nonFastForward"),
+    DETACHED_HEAD: t("repo.err.detachedHead"),
+    NO_UPSTREAM: t("repo.err.noUpstream"),
+    NO_REMOTE: t("repo.err.noRemote"),
+    NOTHING_TO_COMMIT: t("repo.err.nothingToCommit"),
+    SSH_AUTH_FAILED: t("repo.err.sshAuthFailed"),
+    SSH_PASSPHRASE_REQUIRED: t("repo.err.sshPassphraseRequired"),
+  };
+  return map[code] ?? "";
+}
 
 async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
   const r = await store.doAction(props.repo.id, name);
   if (r.ok) {
-    if (name !== "refresh") message.success(r.message || `${name} done`);
+    if (name !== "refresh") toast.success(r.message || t("repo.actions.done", { action: name }));
   } else {
-    message.error(FRIENDLY[r.code] ?? r.message ?? `${name} failed`);
+    toast.error(friendly(r.code) || r.message || t("repo.actions.failed", { action: name }));
   }
 }
 
-// ── commit (stage-all + commit) ───────────────────────────────────────────────
-const showCommit = ref(false);
+// ── commit (stage-all + commit, optional AI draft) ────────────────────────────
+// The split button commits in one of four modes; `committing` spans the whole flow
+// (commit + any follow-on pull/push) so the button stays busy throughout, not just
+// for the commit leg.
+type CommitMode = "commit" | "amend" | "push" | "sync";
 const commitMsg = ref("");
-async function doCommit(): Promise<void> {
+const generating = ref(false);
+const committing = ref(false);
+
+async function generate(): Promise<void> {
+  generating.value = true;
+  try {
+    commitMsg.value = await store.genCommitMessage(props.repo.id);
+  } catch (e) {
+    const msg = e instanceof ApiError ? (friendly(e.code) || e.message) : t("repo.commit.generateFailed");
+    toast.error(msg);
+  } finally {
+    generating.value = false;
+  }
+}
+
+async function doCommit(mode: CommitMode = "commit"): Promise<void> {
   const msg = commitMsg.value.trim();
-  if (!msg) return;
-  const r = await store.commit(props.repo.id, msg);
-  if (r.ok) {
-    message.success("Committed");
+  if (!msg || committing.value) return;
+  committing.value = true;
+  try {
+    const r = await store.commit(props.repo.id, msg, mode === "amend");
+    if (!r.ok) {
+      toast.error(friendly(r.code) || r.message || t("repo.commit.failed"));
+      return;
+    }
     commitMsg.value = "";
-    showCommit.value = false;
-  } else {
-    message.error(FRIENDLY[r.code] ?? r.message ?? "commit failed");
+    // Commit & Sync fast-forward-pulls before pushing so a diverged remote surfaces
+    // as NON_FAST_FORWARD instead of a failed push.
+    if (mode === "sync") {
+      const pull = await store.doAction(props.repo.id, "pull");
+      if (!pull.ok) {
+        toast.error(friendly(pull.code) || pull.message || t("repo.actions.failed", { action: "pull" }));
+        return;
+      }
+    }
+    if (mode === "push" || mode === "sync") {
+      const push = await store.doAction(props.repo.id, "push");
+      if (!push.ok) {
+        toast.error(friendly(push.code) || push.message || t("repo.actions.failed", { action: "push" }));
+        return;
+      }
+    }
+    // Static t() calls (not a computed key) so the i18n parity check sees them used.
+    toast.success(
+      {
+        commit: t("repo.commit.success"),
+        amend: t("repo.commit.amended"),
+        push: t("repo.commit.pushed"),
+        sync: t("repo.commit.synced"),
+      }[mode],
+    );
+  } finally {
+    committing.value = false;
+  }
+}
+
+// Power-user shortcut: Ctrl/⌘+Enter commits from the message box (plain Enter is a
+// newline). Gated by Settings → Keyboard shortcuts (master + power-user toggles).
+function onCommitKey(e: KeyboardEvent): void {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && shortcutsActive(true)) {
+    e.preventDefault();
+    void doCommit("commit");
+  }
+}
+
+// The changed-files grip's keyboard resize (↑/↓/Del) only fires when shortcuts are on.
+function gripKey(action: () => void): void {
+  if (shortcutsActive()) action();
+}
+
+// ── hide / unhide from the dashboard ──────────────────────────────────────────
+async function toggleHidden(): Promise<void> {
+  const next = !props.repo.hidden;
+  try {
+    await store.setHidden(props.repo.id, next);
+    toast.success(next ? t("repo.toastHidden") : t("repo.toastShown"));
+  } catch {
+    toast.error(t("repo.toastHideFailed"));
+  }
+}
+
+// ── pin / star into the Pinned / Starred sections ─────────────────────────────
+async function togglePinned(): Promise<void> {
+  const next = !props.repo.pinned;
+  try {
+    await store.setPinned(props.repo.id, next);
+    toast.success(next ? t("repo.toastPinned") : t("repo.toastUnpinned"));
+  } catch {
+    toast.error(t("repo.toastFavFailed"));
+  }
+}
+async function toggleStarred(): Promise<void> {
+  const next = !props.repo.starred;
+  try {
+    await store.setStarred(props.repo.id, next);
+    toast.success(next ? t("repo.toastStarred") : t("repo.toastUnstarred"));
+  } catch {
+    toast.error(t("repo.toastFavFailed"));
   }
 }
 </script>
 
 <template>
-  <NCard size="small" :bordered="true" class="repo" :class="{ err: !!st?.error }">
-    <!-- name + branch -->
-    <div class="top">
-      <div class="who">
-        <div class="name">{{ repo.name }}</div>
-        <div class="path mono">{{ repo.absPath }}</div>
+  <Collapsible
+    :open="expanded"
+    :class="
+      cn(
+        'overflow-hidden rounded-md border border-border bg-card transition-colors',
+        expanded && 'border-border/80 bg-card/90 ring-1 ring-white/5',
+        st?.error && 'border-destructive/40',
+        repo.hidden && 'opacity-60',
+      )
+    "
+  >
+    <!-- ── collapsed header row — the whole row toggles + highlights on hover ── -->
+    <div
+      class="flex cursor-pointer items-center gap-1.5 p-2 transition-colors hover:bg-accent/30 sm:gap-2 sm:p-2.5"
+      @click="toggle"
+    >
+      <!-- drag handle (hidden in filtered view, where reordering is disabled) -->
+      <button
+        v-if="draggable"
+        class="drag-handle flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/60 outline-none transition-colors hover:bg-accent hover:text-muted-foreground active:bg-accent/70 active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring/40"
+        :aria-label="$t('repo.dragToReorder')"
+        @click.stop
+      >
+        <GripVertical :size="16" />
+      </button>
+
+      <!-- name + branch -->
+      <div class="flex min-w-0 flex-1 items-center gap-2 px-0.5">
+        <span class="truncate text-[15px] leading-tight font-semibold text-foreground">
+          {{ repo.name }}
+        </span>
+        <span
+          v-if="st?.branch"
+          :class="
+            cn(
+              'mono hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] sm:inline-flex',
+              st.detached ? 'bg-warning/15 text-warning' : 'bg-secondary text-muted-foreground',
+            )
+          "
+        >
+          <GitBranch :size="11" />{{ st.detached ? "detached" : st.branch }}
+        </span>
+        <span
+          v-if="repo.pinned"
+          class="flex shrink-0 items-center rounded-md bg-primary/15 px-1.5 py-0.5 text-primary"
+          :title="$t('repo.badge.pinned')"
+        >
+          <Pin :size="11" />
+        </span>
+        <span
+          v-if="repo.starred"
+          class="flex shrink-0 items-center rounded-md bg-amber-400/15 px-1.5 py-0.5 text-amber-400"
+          :title="$t('repo.badge.starred')"
+        >
+          <Star :size="11" class="fill-current" />
+        </span>
+        <span
+          v-if="repo.hidden"
+          class="flex shrink-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground"
+          :title="$t('repo.badge.hidden')"
+        >
+          <EyeOff :size="11" />
+        </span>
       </div>
-      <NTag v-if="st?.branch" :type="st.detached ? 'warning' : 'default'" size="small" round class="branch">
-        <template #icon><NIcon :component="GitBranch" /></template>
-        <span class="mono">{{ st.detached ? "detached" : st.branch }}</span>
-      </NTag>
-    </div>
 
-    <!-- status badges -->
-    <div class="badges">
-      <NTag v-if="st && st.ahead > 0" size="small" type="success" :bordered="false">
-        <template #icon><NIcon :component="ArrowUp" /></template>{{ st.ahead }}
-      </NTag>
-      <NTooltip v-if="st && st.behind > 0">
-        <template #trigger>
-          <NTag size="small" type="info" :bordered="false">
-            <template #icon><NIcon :component="ArrowDown" /></template>{{ st.behind }}
-          </NTag>
-        </template>
-        Behind by {{ st.behind }} as of last fetch{{ st.fetchedAt ? ` · ${fromNow(st.fetchedAt)}` : "" }}
-      </NTooltip>
-      <NTag v-if="st && st.dirty > 0" size="small" type="warning" :bordered="false">
-        <template #icon><NIcon :component="Pencil" /></template>{{ st.dirty }}
-      </NTag>
-      <NTag v-if="isClean" size="small" :bordered="false" class="clean">
-        <template #icon><NIcon :component="Check" /></template>clean
-      </NTag>
+      <!-- status indicators — ONE set that morphs between bare "icon + count" text
+           (collapsed) and filled pills with a trailing word (expanded); see statusChip
+           / statusWord. Order mirrors the pull→push flow: behind, ahead, dirty, clean. -->
+      <div class="flex shrink-0 items-center gap-1.5 text-[12px] font-medium">
+        <!-- aggregate line delta (left of ahead/changed); chars + breakdown on hover.
+             Shown only when the diff-stats setting is on and the tree is dirty. -->
+        <Tooltip v-if="store.diffStatsEnabled && st?.diff && st.dirty > 0">
+          <TooltipTrigger as-child>
+            <span class="inline-flex items-center"><DiffStat :stat="st?.diff" show="lines" /></span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {{ $t("repo.diffStat.lines", { added: st?.diff?.addedLines ?? 0, removed: st?.diff?.removedLines ?? 0 }) }}
+            ·
+            {{ $t("repo.diffStat.chars", { added: (st?.diff?.addedChars ?? 0).toLocaleString(), removed: (st?.diff?.removedChars ?? 0).toLocaleString() }) }}
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip v-if="st && st.behind > 0">
+          <TooltipTrigger as-child>
+            <span :class="statusChip('info')">
+              <ArrowDown :size="12" /><span class="ml-0.5">{{ st.behind }}</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {{ $t("repo.badge.behindTooltip", { count: st.behind }) }}{{ st.fetchedAt ? ` · ${fromNow(st.fetchedAt)}` : "" }}
+          </TooltipContent>
+        </Tooltip>
+        <span
+          v-if="st && st.ahead > 0"
+          :class="statusChip('success')"
+          :title="$t('repo.badge.aheadLabel', { count: st.ahead })"
+        >
+          <ArrowUp :size="12" /><span class="ml-0.5">{{ st.ahead }}</span
+          ><span :class="statusWord">&nbsp;{{ $t("repo.badge.ahead") }}</span>
+        </span>
+        <span
+          v-if="st && st.dirty > 0"
+          :class="statusChip('warning')"
+          :title="$t('repo.badge.changedLabel', { count: st.dirty })"
+        >
+          <Pencil :size="12" /><span class="ml-0.5">{{ st.dirty }}</span
+          ><span :class="statusWord">&nbsp;{{ $t("repo.badge.changed") }}</span>
+        </span>
+        <span v-if="isClean" :class="statusChip('muted')" :title="$t('repo.badge.clean')">
+          <Check :size="12" /><span :class="statusWord">&nbsp;{{ $t("repo.badge.clean") }}</span>
+        </span>
+        <AlertTriangle v-if="st?.error" :size="14" class="text-destructive" />
+      </div>
 
-      <span class="spacer" />
+      <!-- identity avatar → dropdown picker (stops row toggle; no Tooltip wrapper —
+           stacking two as-child triggers on one element breaks reka's popper anchor) -->
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          :title="identity ? `${identity.displayName} · ${identity.gitEmail}` : $t('repo.identity.setTitle')"
+          :class="
+            cn(
+              'flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-ring/50',
+              identity ? identityTint(identity.id) : 'bg-secondary text-muted-foreground hover:bg-accent',
+            )
+          "
+          :aria-label="$t('repo.identity.setTitle')"
+          @click.stop
+        >
+          <span v-if="identity">{{ identityInitials(identity.displayName) }}</span>
+          <User v-else :size="15" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" class="w-64">
+          <DropdownMenuLabel>{{ $t("repo.identity.dropdownLabel") }}</DropdownMenuLabel>
+          <DropdownMenuItem class="text-muted-foreground" @select="onIdentity(null)">
+            <User :size="15" />
+            <span>{{ $t("repo.identity.noIdentity") }}</span>
+            <Check v-if="!repo.identityId" :size="15" class="ml-auto text-primary" />
+          </DropdownMenuItem>
+          <template v-if="store.identities.length">
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              v-for="i in store.identities"
+              :key="i.id"
+              @select="onIdentity(i.id)"
+            >
+              <span
+                :class="
+                  cn(
+                    'flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold',
+                    identityTint(i.id),
+                  )
+                "
+                >{{ identityInitials(i.displayName) }}</span
+              >
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-[13px]">{{ i.displayName }}</div>
+                <div class="mono truncate text-[11px] text-muted-foreground">{{ i.gitEmail }}</div>
+              </div>
+              <Check v-if="repo.identityId === i.id" :size="15" class="ml-1 shrink-0 text-primary" />
+            </DropdownMenuItem>
+          </template>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      <NTooltip>
-        <template #trigger>
-          <span class="remote" :class="{ on: hasRemote }">
-            <NIcon :size="16" :component="hasRemote ? Cloud : CloudOff" />
-          </span>
-        </template>
-        {{ hasRemote ? st?.remote : "no remote configured" }}
-      </NTooltip>
-    </div>
-
-    <!-- error line (progressive disclosure: full reason only when there is one) -->
-    <div v-if="st?.error" class="errline">
-      <NIcon :component="AlertTriangle" :size="14" />
-      <span>{{ st.error }}</span>
-    </div>
-
-    <!-- identity -->
-    <NSelect
-      size="small"
-      class="idsel"
-      :value="identityValue"
-      :options="identityOptions"
-      :consistent-menu-width="false"
-      @update:value="onIdentity"
-    />
-
-    <!-- actions -->
-    <div class="actions">
-      <NPopover
-        v-if="st && st.dirty > 0"
-        trigger="manual"
-        :show="showCommit"
-        placement="top-start"
-        @clickoutside="showCommit = false"
+      <!-- expand chevron (keyboard/AT toggle; .stop so the row handler doesn't double-fire) -->
+      <button
+        class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-all hover:bg-accent hover:text-foreground active:scale-90 active:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring/40"
+        :aria-label="expanded ? $t('repo.collapse') : $t('repo.expand')"
+        :aria-expanded="expanded"
+        @click.stop="toggle"
       >
-        <template #trigger>
-          <NButton
-            size="small"
-            tertiary
-            type="warning"
-            :loading="busyAction === 'commit'"
-            @click="showCommit = !showCommit"
+        <ChevronDown :size="17" :class="cn('transition-transform duration-200', expanded && 'rotate-180')" />
+      </button>
+    </div>
+
+    <!-- ── expanded body ───────────────────────────────────────────────────── -->
+    <CollapsibleContent>
+      <div class="flex flex-col gap-3 border-t border-border/60 px-3 pt-3 pb-3.5">
+        <!-- path (location) + remote-presence cloud, kept on one line -->
+        <div class="flex items-center gap-2">
+          <div
+            class="mono min-w-0 flex-1 truncate text-left text-[11.5px] text-muted-foreground"
+            dir="rtl"
+            :title="repo.absPath"
           >
-            <template #icon><NIcon :component="GitCommitHorizontal" /></template>
-            Commit
-          </NButton>
-        </template>
-        <div class="commitbox">
-          <NInput
-            v-model:value="commitMsg"
-            size="small"
-            placeholder="Commit message"
-            :maxlength="200"
-            @keyup.enter="doCommit"
-          />
-          <NButton
-            size="small"
-            type="primary"
-            block
-            :disabled="!commitMsg.trim()"
-            :loading="busyAction === 'commit'"
-            @click="doCommit"
-          >
-            Commit {{ st?.dirty }} change{{ st?.dirty === 1 ? "" : "s" }}
-          </NButton>
+            {{ repo.absPath }}
+          </div>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span :class="cn('inline-flex shrink-0', hasRemote ? 'text-info/80' : 'text-muted-foreground/50')">
+                <Cloud v-if="hasRemote" :size="16" />
+                <CloudOff v-else :size="16" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{{ hasRemote ? st?.remote : $t("repo.badge.noRemote") }}</TooltipContent>
+          </Tooltip>
         </div>
-      </NPopover>
 
-      <NButton
-        size="small"
-        tertiary
-        :disabled="!hasRemote"
-        :loading="busyAction === 'fetch'"
-        @click="run('fetch')"
-      >
-        <template #icon><NIcon :component="DownloadCloud" /></template>
-        Fetch
-      </NButton>
-      <NButton
-        size="small"
-        :type="st && st.behind > 0 ? 'primary' : 'default'"
-        :disabled="!hasRemote"
-        :loading="busyAction === 'pull'"
-        @click="run('pull')"
-      >
-        <template #icon><NIcon :component="ArrowDownToLine" /></template>
-        Pull
-      </NButton>
-      <NButton
-        size="small"
-        :type="st && st.ahead > 0 ? 'primary' : 'default'"
-        :disabled="!hasRemote"
-        :loading="busyAction === 'push'"
-        @click="run('push')"
-      >
-        <template #icon><NIcon :component="ArrowUpFromLine" /></template>
-        Push
-      </NButton>
+        <!-- error line -->
+        <div
+          v-if="st?.error"
+          class="flex items-center gap-1.5 rounded-lg bg-destructive/10 px-2.5 py-2 text-[12.5px] text-destructive"
+        >
+          <AlertTriangle :size="14" class="shrink-0" />
+          <span class="min-w-0 break-words">{{ st.error }}</span>
+        </div>
 
-      <span class="spacer" />
+        <!-- changed-files tree (height from Settings preset; drag the grip to resize) -->
+        <div
+          v-if="st && st.dirty > 0"
+          class="overflow-hidden rounded-md border border-border bg-background/40"
+        >
+          <!-- tree toolbar: filter the changed files + collapse-all ⇄ expand-all -->
+          <div class="flex items-center gap-1.5 border-b border-border/40 px-1.5 py-1">
+            <div class="relative min-w-0 flex-1">
+              <Search
+                class="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                v-model="treeQuery"
+                type="text"
+                :placeholder="$t('repo.changes.searchPlaceholder')"
+                :aria-label="$t('repo.changes.searchPlaceholder')"
+                class="h-6 w-full rounded bg-transparent pr-6 pl-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
+              />
+              <Loader2
+                v-if="contentLoading"
+                :size="13"
+                class="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 animate-spin text-muted-foreground"
+              />
+              <button
+                v-else-if="treeQuery"
+                type="button"
+                :aria-label="$t('repo.changes.searchClear')"
+                :title="$t('repo.changes.searchClear')"
+                class="absolute top-1/2 right-1 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                @click="treeQuery = ''"
+              >
+                <X :size="12" />
+              </button>
+            </div>
+            <!-- search-content toggle: greps inside the changed files (fires at ≥3 chars) -->
+            <button
+              type="button"
+              role="checkbox"
+              :aria-checked="contentMode"
+              :title="$t('repo.changes.searchContent')"
+              class="flex h-6 shrink-0 items-center gap-1.5 rounded px-1.5 text-[12px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40"
+              :class="contentMode ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'"
+              @click="contentMode = !contentMode"
+            >
+              <span
+                class="flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border transition-colors"
+                :class="contentMode ? 'border-primary bg-primary text-primary-foreground' : 'border-border'"
+              >
+                <Check v-if="contentMode" :size="11" />
+              </span>
+              <span class="whitespace-nowrap">{{ $t("repo.changes.searchContent") }}</span>
+            </button>
+            <button
+              v-if="dirPaths.length && !searching"
+              type="button"
+              class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              :aria-label="allCollapsed ? $t('repo.changes.expandAll') : $t('repo.changes.collapseAll')"
+              :title="allCollapsed ? $t('repo.changes.expandAll') : $t('repo.changes.collapseAll')"
+              @click="toggleCollapseAll"
+            >
+              <component :is="allCollapsed ? ChevronsUpDown : ChevronsDownUp" :size="14" />
+            </button>
+          </div>
+          <div ref="treeScroll" class="scroll-slim overflow-y-auto p-1" :style="treeStyle">
+            <div
+              v-if="store.changesLoading[repo.id]"
+              class="flex items-center gap-2 px-2.5 py-2 text-[12.5px] text-muted-foreground"
+            >
+              <Loader2 :size="14" class="animate-spin" /> {{ $t("repo.changes.loading") }}
+            </div>
+            <div
+              v-else-if="searching && !filteredTree.length && !contentLoading"
+              class="px-2.5 py-2 text-[12px] text-muted-foreground"
+            >
+              {{ $t("repo.changes.searchNoMatch") }}
+            </div>
+            <ChangesTree v-else :nodes="filteredTree" :repo-id="repo.id" :force-expand="searching" />
+            <!-- Server capped an oversized changed-file list (MAX_CHANGED_FILES) — say so. -->
+            <div
+              v-if="store.changesMeta[repo.id]?.truncated"
+              class="px-2.5 py-1.5 text-[11.5px] text-amber-500/80"
+            >
+              {{
+                $t("repo.changes.truncated", {
+                  shown: store.changesByRepo[repo.id]?.length ?? 0,
+                  total: store.changesMeta[repo.id]?.total,
+                })
+              }}
+            </div>
+          </div>
+          <!-- resize grip: drag (or ↑/↓) to set an explicit height; double-click / Delete to reset -->
+          <button
+            type="button"
+            :aria-label="resized ? $t('repo.changes.gripAriaResized') : $t('repo.changes.gripAria')"
+            :title="resized ? $t('repo.changes.gripTitleResized') : $t('repo.changes.gripTitle')"
+            class="group/grip flex h-3 w-full cursor-ns-resize touch-none items-center justify-center border-t border-border/40 outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40"
+            @pointerdown="onGripDown"
+            @dblclick="resetTreeHeight"
+            @keydown.up.prevent="gripKey(() => nudgeHeight(-24))"
+            @keydown.down.prevent="gripKey(() => nudgeHeight(24))"
+            @keydown.delete.prevent="gripKey(resetTreeHeight)"
+            @keydown.backspace.prevent="gripKey(resetTreeHeight)"
+          >
+            <GripHorizontal
+              :size="14"
+              :class="
+                cn(
+                  'text-muted-foreground/40 transition-colors group-hover/grip:text-muted-foreground',
+                  resized && 'text-primary/50',
+                )
+              "
+            />
+          </button>
+        </div>
 
-      <NButton
-        size="small"
-        quaternary
-        circle
-        aria-label="refresh"
-        :loading="busyAction === 'refresh'"
-        @click="run('refresh')"
-      >
-        <template #icon><NIcon :component="RefreshCw" /></template>
-      </NButton>
-    </div>
-  </NCard>
+        <!-- commit: auto-growing message box with an inline AI draft button, then a
+             split Commit button whose chevron opens the other commit modes. Items align
+             to the top so the buttons stay put as the textarea grows downward. -->
+        <div v-if="st && st.dirty > 0" class="flex items-start gap-2">
+          <div class="relative min-w-0 flex-1">
+            <!-- field-sizing-content grows the textarea to fit wrapped/multi-line text
+                 (min one row, capped at max-h-40 then scrolls). Enter inserts a newline;
+                 committing is only ever via the Commit button / flyout. -->
+            <Textarea
+              v-model="commitMsg"
+              :placeholder="$t('repo.commit.placeholder')"
+              :maxlength="300"
+              rows="1"
+              :class="cn('max-h-40 min-h-9 resize-none py-1.5 leading-snug', store.aiEnabled && 'pr-10')"
+              @keydown="onCommitKey"
+            />
+            <button
+              v-if="store.aiEnabled"
+              type="button"
+              :disabled="generating"
+              :title="$t('repo.commit.generateTitle')"
+              :aria-label="$t('repo.commit.generateTitle')"
+              class="absolute top-1.5 right-1 flex size-7 items-center justify-center rounded-md text-violet-300 outline-none transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/40"
+              @click="generate"
+            >
+              <Loader2 v-if="generating" :size="16" class="animate-spin" />
+              <Sparkles v-else :size="16" />
+            </button>
+          </div>
+
+          <div class="flex shrink-0">
+            <Button
+              class="rounded-r-none"
+              :disabled="!commitMsg.trim() || committing"
+              @click="doCommit()"
+            >
+              <Loader2 v-if="committing" class="animate-spin" />
+              <GitCommitHorizontal v-else />
+              <span>{{ $t("repo.commit.commit") }}</span>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button
+                  class="rounded-l-none border-l border-l-black/15 px-1.5 dark:border-l-white/20"
+                  :disabled="!commitMsg.trim() || committing"
+                  :aria-label="$t('repo.commit.menuLabel')"
+                >
+                  <ChevronDown :size="16" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" class="w-52">
+                <DropdownMenuItem @select="doCommit('commit')">
+                  <GitCommitHorizontal :size="15" />
+                  <span>{{ $t("repo.commit.commit") }}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem @select="doCommit('amend')">
+                  <Pencil :size="15" />
+                  <span>{{ $t("repo.commit.amend") }}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem :disabled="!hasRemote" @select="doCommit('push')">
+                  <ArrowUpFromLine :size="15" />
+                  <span>{{ $t("repo.commit.commitPush") }}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem :disabled="!hasRemote" @select="doCommit('sync')">
+                  <RefreshCw :size="15" />
+                  <span>{{ $t("repo.commit.commitSync") }}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        <!-- git actions -->
+        <div class="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            :disabled="!hasRemote || anyBusy"
+            @click="run('fetch')"
+          >
+            <Loader2 v-if="busyAction === 'fetch'" class="animate-spin" />
+            <DownloadCloud v-else />
+            {{ $t("repo.actions.fetch") }}
+          </Button>
+          <Button
+            :variant="st && st.behind > 0 ? 'default' : 'outline'"
+            size="sm"
+            :disabled="!hasRemote || anyBusy"
+            @click="run('pull')"
+          >
+            <Loader2 v-if="busyAction === 'pull'" class="animate-spin" />
+            <ArrowDownToLine v-else />
+            {{ $t("repo.actions.pull") }}
+          </Button>
+          <Button
+            :variant="st && st.ahead > 0 ? 'default' : 'outline'"
+            size="sm"
+            :disabled="!hasRemote || anyBusy"
+            @click="run('push')"
+          >
+            <Loader2 v-if="busyAction === 'push'" class="animate-spin" />
+            <ArrowUpFromLine v-else />
+            {{ $t("repo.actions.push") }}
+          </Button>
+          <span class="flex-1" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            :aria-label="$t('repo.actions.refresh')"
+            :disabled="anyBusy"
+            @click="run('refresh')"
+          >
+            <RefreshCw :class="busyAction === 'refresh' && 'animate-spin'" />
+          </Button>
+          <!-- overflow menu (hide / unhide this repo from the dashboard) -->
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              :aria-label="$t('repo.moreActions')"
+            >
+              <MoreVertical :size="16" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-44">
+              <DropdownMenuItem @select="togglePinned">
+                <PinOff v-if="repo.pinned" :size="15" />
+                <Pin v-else :size="15" />
+                <span>{{ repo.pinned ? $t("repo.unpin") : $t("repo.pin") }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem @select="toggleStarred">
+                <StarOff v-if="repo.starred" :size="15" />
+                <Star v-else :size="15" />
+                <span>{{ repo.starred ? $t("repo.unstar") : $t("repo.star") }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @select="toggleHidden">
+                <Eye v-if="repo.hidden" :size="15" />
+                <EyeOff v-else :size="15" />
+                <span>{{ repo.hidden ? $t("repo.unhide") : $t("repo.hide") }}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </CollapsibleContent>
+  </Collapsible>
 </template>
-
-<style scoped>
-.repo {
-  transition: border-color 0.2s ease;
-}
-.repo.err {
-  border-color: rgba(240, 106, 106, 0.4);
-}
-.top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-.who {
-  min-width: 0;
-}
-.name {
-  font-weight: 650;
-  font-size: 15.5px;
-  color: #edeef2;
-  line-height: 1.2;
-}
-.path {
-  font-size: 11.5px;
-  color: #6c6c7a;
-  margin-top: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  direction: rtl; /* keep the repo's own folder visible when truncated */
-  text-align: left;
-}
-.branch {
-  flex: 0 0 auto;
-}
-.badges {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-}
-.clean {
-  color: #7c7c8a;
-}
-.spacer {
-  flex: 1 1 auto;
-}
-.remote {
-  display: inline-flex;
-  color: #4c4c58;
-}
-.remote.on {
-  color: #6f93c0;
-}
-.errline {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  font-size: 12.5px;
-  color: #f08a8a;
-}
-.idsel {
-  margin-top: 12px;
-}
-.actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-.commitbox {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 240px;
-}
-</style>

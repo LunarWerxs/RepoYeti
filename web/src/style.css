@@ -1,40 +1,210 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Shared dark-variant selector (matches `.dark` itself or any descendant — the
+   :where form is needed because reka-ui portals can land `.dark` on the element). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* GitMob keeps its green git-graph accent; light + dark are both supported (the
+   accent is tuned per mode for contrast). Dark is the default — see index.html.
+   Token names + the dark-mode mechanism are shared with DevWebUI; see
+   web/UI_UNIFICATION.md. */
 :root {
+  --radius: 0.55rem;
+  color-scheme: light;
+
+  /* Surfaces — clean light stack. */
+  --background: #ffffff;
+  --foreground: #0b0b0f;
+  --card: #ffffff;
+  --card-foreground: #0b0b0f;
+  --popover: #ffffff;
+  --popover-foreground: #0b0b0f;
+
+  /* Green brand accent, deepened for legibility on light surfaces. */
+  --primary: #15a35c;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f2f2f5;
+  --secondary-foreground: #1a1a20;
+  --muted: #f4f4f7;
+  --muted-foreground: #6b6b76;
+  --accent: #ececf1;
+  --accent-foreground: #1a1a20;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --success: #15803d;
+  --warning: #b45309;
+  --info: #1d4ed8;
+
+  --border: #e4e4e9;
+  --input: #e0e0e6;
+  --ring: #15a35c;
+
+  --brand-glow: radial-gradient(120% 120% at 50% 0%, rgba(61, 220, 132, 0.08), transparent 60%);
+}
+
+.dark {
   color-scheme: dark;
+
+  /* Surfaces — a hyper-clean near-black "terminal / Notion-dark" stack. */
+  --background: #0b0b0f;
+  --foreground: #e6e6ea;
+  --card: #141419;
+  --card-foreground: #edeef2;
+  --popover: #1b1b23;
+  --popover-foreground: #edeef2;
+
+  /* The bright git-graph green reads well as text/fills on near-black. */
+  --primary: #3ddc84;
+  --primary-foreground: #06140c;
+
+  --secondary: #1b1b24;
+  --secondary-foreground: #e6e6ea;
+  --muted: #17171e;
+  --muted-foreground: #82828f;
+  --accent: #20202b;
+  --accent-foreground: #f2f2f6;
+
+  --destructive: #f06a6a;
+  --destructive-foreground: #1a0b0b;
+  --success: #3ddc84;
+  --warning: #f0a83c;
+  --info: #5b9bf0;
+
+  --border: #26262f;
+  --input: #2b2b35;
+  --ring: #3ddc84;
+
+  --brand-glow: radial-gradient(120% 120% at 50% 0%, rgba(61, 220, 132, 0.1), transparent 60%);
 }
 
-* {
-  box-sizing: border-box;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --animate-collapsible-down: collapsible-down 0.22s ease-out;
+  --animate-collapsible-up: collapsible-up 0.2s ease-out;
 }
 
-html,
-body {
-  height: 100%;
-  margin: 0;
+@keyframes collapsible-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--reka-collapsible-content-height);
+  }
+}
+@keyframes collapsible-up {
+  from {
+    height: var(--reka-collapsible-content-height);
+  }
+  to {
+    height: 0;
+  }
 }
 
-body {
-  background: #0e0e12;
-  color: #e6e6ea;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  /* don't bounce the whole page on mobile */
-  overscroll-behavior-y: none;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overscroll-behavior-y: none;
+  }
+  #app {
+    min-height: 100%;
+  }
+  /* Tailwind v4's Preflight dropped the `cursor: pointer` that v3 put on buttons, so every
+     clickable control (icon buttons, file-tree rows, menu/sheet triggers) fell back to the
+     default arrow. Restore it for interactive elements that don't opt into a more specific
+     cursor — drag handles (cursor-grab), the resize grip (cursor-ns-resize) and menu items
+     (cursor-default) all set a utility class, which wins over this base-layer rule. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  label[for],
+  summary,
+  select:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
-#app {
-  min-height: 100%;
-}
-
+/* Monospace helper kept for repo paths / git refs. */
 .mono {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
 }
 
-/* respect the iOS safe area / notch when installed to the home screen */
+/* iOS safe-area helpers (PWA installed to the home screen / notch). */
 .safe-top {
   padding-top: env(safe-area-inset-top);
 }
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Thin, unobtrusive scrollbars inside scroll regions (sheets, file trees). */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.scroll-slim::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+/* The element being dragged in the repo list (set by @formkit/drag-and-drop). */
+.dragging {
+  opacity: 0.45;
+}
+
+/* File viewer — the "word-level diff" toggle. The Monaco diff editor highlights the exact
+   changed characters within a line (`.char-insert` / `.char-delete`) on top of the whole-
+   line background (`.line-insert` / `.line-delete`). When the user turns word-level off,
+   MonacoDiffViewer adds this class to suppress the inner highlight, leaving line-level only. */
+.gm-line-level-diff .char-insert,
+.gm-line-level-diff .char-delete {
+  background-color: transparent !important;
 }

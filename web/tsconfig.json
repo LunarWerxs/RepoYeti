@@ -3,6 +3,8 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "jsx": "preserve",
     "strict": true,
@@ -10,7 +12,8 @@
     "noUnusedParameters": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "verbatimModuleSyntax": false,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
     "noEmit": true,
     "types": ["vite-plugin-pwa/client"]
   },

@@ -1,33 +1,27 @@
 <script setup lang="ts">
 import { reactive, ref, computed } from "vue";
-import {
-  NDrawer,
-  NDrawerContent,
-  NButton,
-  NIcon,
-  NInput,
-  NForm,
-  NFormItem,
-  NEmpty,
-  NPopconfirm,
-  NText,
-  useMessage,
-} from "naive-ui";
-import { Plus, Pencil, Trash2, KeyRound, Save, X, LogOut } from "lucide-vue-next";
+import { Plus, Pencil, Trash2, KeyRound, Save, X, LogOut, Check, Users } from "@lucide/vue";
+import { toast } from "vue-sonner";
+import { useI18n } from "vue-i18n";
 import { useStore } from "../store";
+import { cn } from "@/lib/utils";
+import { identityInitials, identityTint } from "@/lib/identity-display";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { Identity } from "../types";
 
-defineProps<{ show: boolean }>();
-const emit = defineEmits<{ "update:show": [boolean] }>();
+const { t } = useI18n();
+
 const store = useStore();
-const message = useMessage();
 
 const editingId = ref<string | null>(null);
 const showForm = ref(false);
 const saving = ref(false);
+const confirmId = ref<string | null>(null);
 const form = reactive({ displayName: "", gitUsername: "", gitEmail: "", sshKeyPath: "" });
 
-const formTitle = computed(() => (editingId.value ? "Edit identity" : "New identity"));
+const formTitle = computed(() => (editingId.value ? t("identity.form.titleEdit") : t("identity.form.titleNew")));
 const valid = computed(
   () => !!(form.displayName.trim() && form.gitUsername.trim() && form.gitEmail.trim()),
 );
@@ -68,14 +62,14 @@ async function save(): Promise<void> {
     };
     if (editingId.value) {
       await store.updateIdentity(editingId.value, payload);
-      message.success("Identity updated");
+      toast.success(t("identity.toast.updated"));
     } else {
       await store.createIdentity(payload);
-      message.success("Identity created");
+      toast.success(t("identity.toast.created"));
     }
     cancel();
   } catch (e) {
-    message.error(e instanceof Error ? e.message : "Save failed");
+    toast.error(e instanceof Error ? e.message : t("identity.toast.saveFailed"));
   } finally {
     saving.value = false;
   }
@@ -84,198 +78,132 @@ async function save(): Promise<void> {
 async function remove(id: string): Promise<void> {
   try {
     await store.removeIdentity(id);
-    message.success("Identity deleted");
+    toast.success(t("identity.toast.deleted"));
   } catch (e) {
-    message.error(e instanceof Error ? e.message : "Delete failed");
+    toast.error(e instanceof Error ? e.message : t("identity.toast.deleteFailed"));
+  } finally {
+    confirmId.value = null;
   }
 }
 </script>
 
 <template>
-  <NDrawer
-    :show="show"
-    placement="bottom"
-    height="88vh"
-    :auto-focus="false"
-    @update:show="emit('update:show', $event)"
-  >
-    <NDrawerContent title="Identities" closable>
-      <div class="wrap">
-        <div v-if="store.authEnforced" class="account">
-          <div class="acctmain">
-            <div class="acctlabel">Signed in with Connections</div>
-            <div class="acctowner mono">{{ store.owner }}</div>
+  <Card class="gap-4 border-border bg-secondary/20 py-4 shadow-none">
+    <CardHeader class="gap-1.5 px-4">
+      <CardTitle class="flex items-center gap-2 text-[13px]">
+        <Users :size="15" class="text-muted-foreground" /> {{ $t("identity.title") }}
+      </CardTitle>
+      <CardDescription class="text-[12px] leading-relaxed">
+        {{ $t("identity.description") }}
+      </CardDescription>
+    </CardHeader>
+
+    <CardContent class="flex flex-col gap-3 px-4">
+        <!-- signed-in account -->
+        <div
+          v-if="store.authEnforced"
+          class="flex items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/10 px-3 py-2.5"
+        >
+          <div class="min-w-0">
+            <div class="text-[11px] text-primary/80">{{ $t("identity.signedInWith") }}</div>
+            <div class="mono truncate text-[13px] text-foreground/90">{{ store.owner }}</div>
           </div>
-          <NButton size="small" tertiary @click="store.logout()">
-            <template #icon><NIcon :component="LogOut" /></template>Sign out
-          </NButton>
+          <Button variant="ghost" size="sm" @click="store.logout()">
+            <LogOut />
+            {{ $t("identity.signOut") }}
+          </Button>
         </div>
 
-        <NText depth="3" class="intro">
-          Git identities you can attach to repos. SSH keys are referenced by path — never read or copied.
-        </NText>
-
-        <div v-if="store.identities.length" v-auto-animate class="ids">
-          <div v-for="i in store.identities" :key="i.id" class="idrow">
-            <div class="idmain">
-              <div class="idname">{{ i.displayName }}</div>
-              <div class="idmeta mono">{{ i.gitUsername }} · {{ i.gitEmail }}</div>
-              <div v-if="i.sshKeyPath" class="idkey mono">
-                <NIcon :component="KeyRound" :size="12" /> {{ i.sshKeyPath }}
+        <!-- identity list -->
+        <div v-if="store.identities.length" v-auto-animate class="flex flex-col gap-2">
+          <div
+            v-for="i in store.identities"
+            :key="i.id"
+            class="flex items-center gap-3 rounded-xl border border-border bg-secondary/40 p-2.5"
+          >
+            <span
+              :class="cn('flex size-9 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold', identityTint(i.id))"
+            >
+              {{ identityInitials(i.displayName) }}
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-[14px] font-medium">{{ i.displayName }}</div>
+              <div class="mono truncate text-[12px] text-muted-foreground">
+                {{ i.gitUsername }} · {{ i.gitEmail }}
+              </div>
+              <div v-if="i.sshKeyPath" class="mono mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground/80">
+                <KeyRound :size="11" class="shrink-0" /> {{ i.sshKeyPath }}
               </div>
             </div>
-            <div class="idactions">
-              <NButton size="small" quaternary circle aria-label="edit" @click="openEdit(i)">
-                <template #icon><NIcon :component="Pencil" /></template>
-              </NButton>
-              <NPopconfirm @positive-click="remove(i.id)">
-                <template #trigger>
-                  <NButton size="small" quaternary circle type="error" aria-label="delete">
-                    <template #icon><NIcon :component="Trash2" /></template>
-                  </NButton>
-                </template>
-                Delete “{{ i.displayName }}”? Repos using it revert to no identity.
-              </NPopconfirm>
-            </div>
-          </div>
-        </div>
-        <NEmpty v-else description="No identities yet" class="emptyids" />
 
-        <div v-if="showForm" class="formcard">
-          <div class="formhead">{{ formTitle }}</div>
-          <NForm size="small" label-placement="top" :show-feedback="false">
-            <NFormItem label="Display name" required>
-              <NInput v-model:value="form.displayName" placeholder="Personal GitHub" />
-            </NFormItem>
-            <div class="two">
-              <NFormItem label="Git username" required>
-                <NInput v-model:value="form.gitUsername" placeholder="octocat" />
-              </NFormItem>
-              <NFormItem label="Git email" required>
-                <NInput v-model:value="form.gitEmail" placeholder="me@example.com" />
-              </NFormItem>
+            <!-- inline delete confirm -->
+            <div v-if="confirmId === i.id" class="flex shrink-0 items-center gap-1">
+              <Button variant="destructive" size="sm" @click="remove(i.id)">
+                <Check />
+                {{ $t("identity.action.confirmDelete") }}
+              </Button>
+              <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.cancel')" @click="confirmId = null">
+                <X />
+              </Button>
             </div>
-            <NFormItem label="SSH key path (optional)">
-              <NInput v-model:value="form.sshKeyPath" placeholder="~/.ssh/id_ed25519" />
-            </NFormItem>
-          </NForm>
-          <div class="formactions">
-            <NButton size="small" tertiary @click="cancel">
-              <template #icon><NIcon :component="X" /></template>Cancel
-            </NButton>
-            <NButton size="small" type="primary" :disabled="!valid" :loading="saving" @click="save">
-              <template #icon><NIcon :component="Save" /></template>Save
-            </NButton>
+            <div v-else class="flex shrink-0 items-center gap-0.5">
+              <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.edit')" @click="openEdit(i)">
+                <Pencil />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="text-muted-foreground hover:text-destructive"
+                :aria-label="$t('identity.action.delete')"
+                @click="confirmId = i.id"
+              >
+                <Trash2 />
+              </Button>
+            </div>
           </div>
         </div>
-        <NButton v-else block dashed class="addbtn" @click="openNew">
-          <template #icon><NIcon :component="Plus" /></template>Add identity
-        </NButton>
-      </div>
-    </NDrawerContent>
-  </NDrawer>
+        <div v-else class="rounded-xl border border-dashed border-border py-8 text-center text-[13px] text-muted-foreground">
+          {{ $t("identity.empty") }}
+        </div>
+
+        <!-- create / edit form -->
+        <div v-if="showForm" class="rounded-xl border border-border bg-secondary/40 p-3.5">
+          <div class="mb-3 text-[13px] font-semibold text-foreground/90">{{ formTitle }}</div>
+          <div class="flex flex-col gap-3">
+            <label class="block">
+              <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.displayName") }}</span>
+              <Input v-model="form.displayName" :placeholder="$t('identity.placeholder.displayName')" />
+            </label>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.gitUsername") }}</span>
+                <Input v-model="form.gitUsername" :placeholder="$t('identity.placeholder.gitUsername')" />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.gitEmail") }}</span>
+                <Input v-model="form.gitEmail" :placeholder="$t('identity.placeholder.gitEmail')" />
+              </label>
+            </div>
+            <label class="block">
+              <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.sshKeyPath") }}</span>
+              <Input v-model="form.sshKeyPath" :placeholder="$t('identity.placeholder.sshKeyPath')" class="mono" />
+            </label>
+          </div>
+          <div class="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" @click="cancel">
+              <X />
+              {{ $t("identity.action.cancel") }}
+            </Button>
+            <Button size="sm" :disabled="!valid || saving" @click="save">
+              <Save />
+              {{ $t("identity.action.save") }}
+            </Button>
+          </div>
+        </div>
+        <Button v-else variant="outline" class="w-full border-dashed" @click="openNew">
+          <Plus />
+          {{ $t("identity.action.add") }}
+        </Button>
+    </CardContent>
+  </Card>
 </template>
-
-<style scoped>
-.wrap {
-  max-width: 640px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-bottom: env(safe-area-inset-bottom);
-}
-.account {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  background: #15211a;
-  border: 1px solid #1f3a2a;
-  border-radius: 11px;
-}
-.acctlabel {
-  font-size: 11px;
-  color: #6aa583;
-}
-.acctowner {
-  font-size: 13px;
-  color: #cfe9d9;
-  margin-top: 2px;
-}
-.intro {
-  font-size: 12.5px;
-}
-.ids {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.idrow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  background: #1b1b24;
-  border: 1px solid #262630;
-  border-radius: 11px;
-}
-.idmain {
-  min-width: 0;
-}
-.idname {
-  font-weight: 600;
-  font-size: 14px;
-}
-.idmeta {
-  font-size: 12px;
-  color: #8b8b97;
-  margin-top: 2px;
-}
-.idkey {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: #6c6c7a;
-  margin-top: 3px;
-}
-.idactions {
-  display: flex;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-.formcard {
-  background: #1b1b24;
-  border: 1px solid #262630;
-  border-radius: 12px;
-  padding: 14px;
-}
-.formhead {
-  font-weight: 600;
-  font-size: 13px;
-  margin-bottom: 10px;
-  color: #cfcfd8;
-}
-.two {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.formactions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 14px;
-}
-.addbtn {
-  margin-top: 2px;
-}
-@media (max-width: 460px) {
-  .two {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

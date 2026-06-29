@@ -14,7 +14,7 @@ fetch/pull/push from your phone.
 | **1 — daemon core** | discovery · `.git` watchers · SQLite · status engine · op-queue · REST + SSE | ✅ built & verified |
 | **2 — auth** | "Sign in with Connections" (public OIDC, config-gated) + redirect shim | ✅ built & verified¹ |
 | **3 — identity + safe git ops** | identity CRUD · per-op `-c core.sshCommand`/`user.*` · fetch/pull(FF-only)/push(no-force)/commit guards | ✅ built & verified |
-| **4 — tunnel + PWA** | cloudflared (+QR) · Vue 3 dashboard (Naive UI / VueUse / auto-animate) | ✅ built & verified |
+| **4 — tunnel + PWA** | cloudflared (+QR) · Vue 3 dashboard (reka-ui / Tailwind v4 / VueUse / vue-sonner / auto-animate) | ✅ built & verified |
 | **5 — hardening + dist** | `bun --compile` single binary · register/create repo · stage-all+commit · port/timeout guards | ✅ built & verified² |
 | 6 — Tauri tray | thin sidecar around the unchanged daemon binary | ⏳ deferred (the CLI binary + phone browser is the whole product) |
 
@@ -27,8 +27,17 @@ the common case); the named-tunnel stable-URL upgrade is documented.
 
 ## Stack
 
-Bun · `bun:sqlite` (WAL) · `simple-git` · Hono · SSE down / REST up · Vue 3 PWA (Phase 4).
+**Daemon:** Bun · `bun:sqlite` (WAL) · `simple-git` · Hono · SSE down / REST up.
+**Web (PWA):** Vue 3 · Vite · Tailwind v4 · reka-ui (shadcn-vue) · vue-i18n · Pinia.
 The daemon is the primary artifact; the CLI is its launcher; a future Tauri tray wraps the same binary.
+
+## Dashboard features
+
+- **Live repo grid** — branch / dirty / ahead / behind per repo, pushed over SSE; drag to reorder, filter by name / identity / sync state.
+- **Safe git actions** — fetch / pull (fast-forward only) / push (no force) / stage-all + commit, each identity-attributed.
+- **AI commit messages (BYOK)** — draft a message from the repo's diff via your own key (Groq · OpenRouter · Gemini · Claude · ChatGPT · DeepSeek). Keys stay on the daemon; nothing leaves the machine without an explicit generate.
+- **VS Code-style changes tree** — real `vscode-icons` file-type glyphs, resizable per repo (drag / ↑↓ / double-click reset) with a Small / Medium / Tall default.
+- **Internationalised** — English base + Spanish / French / German / Simplified Chinese (machine-translated drafts); switch language in Settings → Appearance.
 
 ## Run (Phase 1)
 
@@ -99,6 +108,16 @@ bun test        # 19 tests: discovery, op-queue, git-action guards, auth gating,
 bun run typecheck
 ```
 
+The web dashboard lives in [`web/`](web/) (Vite proxies `/api` + `/oauth` to the daemon on `:7171`):
+
+```sh
+cd web
+bun install
+bun run dev          # dev server on :4319 (proxied to the running daemon)
+bun run build        # type-check (vue-tsc) + production build → web/dist (served by the daemon)
+bun run i18n:check   # fail on untranslated strings / missing keys / locale key-parity drift
+```
+
 Safety guards return first-class error codes: `DIRTY_WORKING_TREE`, `NON_FAST_FORWARD`, `DETACHED_HEAD`,
 `SSH_AUTH_FAILED`, `SSH_PASSPHRASE_REQUIRED`, `NO_UPSTREAM`, `NO_REMOTE` — the daemon never leaves a repo
 half-merged. Identity is injected **per operation** (`-c core.sshCommand` + `-c user.*`); global/repo git
@@ -112,3 +131,15 @@ Local state lives under `~/.gitmob/` (`config.json`, `gitmob.db`). Nothing is wr
 - Read commands run with `GIT_OPTIONAL_LOCKS=0` so status never rewrites `.git/index` (no watch loop).
 - Per-repo operation queue serializes all git ops on a repo — the primitive that prevents half-merged state.
 - `behind` is from the last fetch only; the daemon never auto-fetches on a watch event.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) — running locally, the test/typecheck/`i18n:check` gates,
+and how to add a UI translation. Changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE) © LunarWerx Studios. The bundled file-type icons are
+[`vscode-icons`](https://github.com/vscode-icons/vscode-icons) (icon artwork under CC BY-SA).
+
+> Built with support from **[LunarWerx Studios](https://lunarwerx.com/)**.

@@ -14,6 +14,12 @@ import { join } from "node:path";
 
 export interface WatchHandle {
   close(): void;
+  /**
+   * True when the primary `.git` watch was actually installed — i.e. live updates work.
+   * False means `fs.watch` was unsupported or hit an OS limit (e.g. inotify budget); the
+   * caller should fall back to polling instead of silently going stale.
+   */
+  readonly watching: boolean;
 }
 
 export function watchRepo(absPath: string, onChange: () => void, debounceMs = 250): WatchHandle {
@@ -27,19 +33,24 @@ export function watchRepo(absPath: string, onChange: () => void, debounceMs = 25
     timer = setTimeout(onChange, debounceMs);
   };
 
-  const addDir = (dir: string): void => {
-    if (!existsSync(dir)) return;
+  const addDir = (dir: string): boolean => {
+    if (!existsSync(dir)) return false;
     try {
       watchers.push(watch(dir, { persistent: true }, () => trigger()));
+      return true;
     } catch {
-      /* watch unsupported / limit hit — degrade quietly (Phase 5 adds poll fallback) */
+      /* watch unsupported / limit hit — report unhealthy so the caller can poll */
+      return false;
     }
   };
 
-  addDir(gitDir);
+  // The `.git` dir carries the signals we care about; `.git/logs` is a bonus. Health
+  // hinges on the former — if even that couldn't be installed, this repo needs polling.
+  const gitWatched = addDir(gitDir);
   addDir(logsDir);
 
   return {
+    watching: gitWatched,
     close(): void {
       if (timer) clearTimeout(timer);
       for (const w of watchers) {
