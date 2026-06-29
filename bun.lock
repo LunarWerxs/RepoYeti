@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "gitmob",
+      "name": "repoyeti",
       "dependencies": {
         "hono": "^4.6.14",
         "jose": "^6.2.3",

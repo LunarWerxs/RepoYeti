@@ -1,5 +1,5 @@
 {
-  "name": "gitmob",
+  "name": "repoyeti",
   "version": "0.0.1",
   "description": "System-wide remote git manager — a background daemon with a mobile dashboard.",
   "type": "module",
@@ -7,11 +7,11 @@
   "author": "L0garithmic <2claude@lunarwerx.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LunarWerxs/gitmob.git"
+    "url": "git+https://github.com/LunarWerxs/repoyeti.git"
   },
-  "homepage": "https://github.com/LunarWerxs/gitmob#readme",
+  "homepage": "https://github.com/LunarWerxs/repoyeti#readme",
   "bugs": {
-    "url": "https://github.com/LunarWerxs/gitmob/issues"
+    "url": "https://github.com/LunarWerxs/repoyeti/issues"
   },
   "keywords": [
     "git",
@@ -27,7 +27,7 @@
     "bun": ">=1.1.0"
   },
   "bin": {
-    "gitmob": "./src/index.ts"
+    "repoyeti": "./src/index.ts"
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",

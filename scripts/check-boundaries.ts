@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Architectural boundary guard (zero-dependency, like check-error-codes.ts). Enforces GitMob's
+ * Architectural boundary guard (zero-dependency, like check-error-codes.ts). Enforces RepoYeti's
  * intended layering so it can't silently drift as the codebase grows:
  *   - daemon.ts (HTTP routes) must go through service.ts — never import git-actions/status/inspect.
  *   - read-only layers (status.ts, inspect.ts) must not import the orchestration layer (service.ts).

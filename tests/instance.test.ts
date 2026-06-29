@@ -8,8 +8,8 @@ import {
   writeInstanceInfo,
 } from "../src/instance.ts";
 
-// GITMOB_HOME is pointed at a throwaway dir by tests/setup.ts, so these never touch
-// the real ~/.gitmob/runtime.json.
+// REPOYETI_HOME is pointed at a throwaway dir by tests/setup.ts, so these never touch
+// the real ~/.repoyeti/runtime.json.
 
 test("writeInstanceInfo / readInstanceInfo roundtrip, then clear", () => {
   writeInstanceInfo(7777);
@@ -40,12 +40,12 @@ test("findLiveInstance: null for a stale pointer (nobody listening)", async () =
   clearInstanceInfo();
 });
 
-test("findLiveInstance: returns the pointer when a gitmob daemon answers /api/health", async () => {
+test("findLiveInstance: returns the pointer when a repoyeti daemon answers /api/health", async () => {
   const server = Bun.serve({
     port: 0,
     fetch(req) {
       if (new URL(req.url).pathname === "/api/health")
-        return Response.json({ ok: true, service: "gitmob", version: "test" });
+        return Response.json({ ok: true, service: "repoyeti", version: "test" });
       return new Response("not found", { status: 404 });
     },
   });
@@ -59,7 +59,7 @@ test("findLiveInstance: returns the pointer when a gitmob daemon answers /api/he
   }
 });
 
-test("findLiveInstance: null when the port is held by a NON-gitmob server", async () => {
+test("findLiveInstance: null when the port is held by a NON-repoyeti server", async () => {
   const other = Bun.serve({
     port: 0,
     fetch: () => Response.json({ ok: true, service: "something-else" }),

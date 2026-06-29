@@ -1,4 +1,4 @@
-# GitMob OAuth redirect shim
+# RepoYeti OAuth redirect shim
 
 A ~50-line Cloudflare Worker that is the **stable OAuth redirect URL** for "Sign in
 with Connections", so the daemon can stay on a free, rotating quick-tunnel URL.
@@ -8,8 +8,8 @@ It receives `GET /cb?code&state`, reads the daemon's current origin out of the s
 `<daemon-origin>/oauth/finish`. The `code` is PKCE-bound and single-use, so the shim
 never sees a usable credential. See [`../MARCHING_ORDERS.md`](../MARCHING_ORDERS.md) §7.
 
-> **✅ Deployed:** `https://gitmob-auth.lunawerx.workers.dev` — register
-> `https://gitmob-auth.lunawerx.workers.dev/cb` as the redirect URI of your
+> **✅ Deployed:** `https://repoyeti-auth.lunawerx.workers.dev` — register
+> `https://repoyeti-auth.lunawerx.workers.dev/cb` as the redirect URI of your
 > "Sign in with Connections" app. Re-deploy after edits with `bunx wrangler deploy`.
 
 ## Deploy (free)
@@ -17,20 +17,20 @@ never sees a usable credential. See [`../MARCHING_ORDERS.md`](../MARCHING_ORDERS
 ```sh
 cd shim
 bunx wrangler login          # one-time
-bunx wrangler deploy         # → https://gitmob-auth.<your-account>.workers.dev
+bunx wrangler deploy         # → https://repoyeti-auth.<your-account>.workers.dev
 ```
 
-Then, in the GitMob app you register at `studio.connections.icu`:
+Then, in the RepoYeti app you register at `studio.connections.icu`:
 
-- **Redirect URI** → `https://gitmob-auth.<your-account>.workers.dev/cb`
+- **Redirect URI** → `https://repoyeti-auth.<your-account>.workers.dev/cb`
 
-And in the daemon's `~/.gitmob/config.json`:
+And in the daemon's `~/.repoyeti/config.json`:
 
 ```jsonc
 "oauth": {
   "issuer": "https://accounts.connections.icu",
   "clientId": "<your app client id>",
-  "redirectUri": "https://gitmob-auth.<your-account>.workers.dev/cb",
+  "redirectUri": "https://repoyeti-auth.<your-account>.workers.dev/cb",
   "ownerSub": "<your Connections sub>"   // or "ownerEmail": "you@example.com"
 }
 ```

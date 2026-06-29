@@ -8,11 +8,11 @@ dist/
 .env.*
 !.env.example
 
-# local runtime state (the daemon writes to ~/.gitmob, but never commit any local db copies)
+# local runtime state (the daemon writes to ~/.repoyeti, but never commit any local db copies)
 *.db
 *.db-wal
 *.db-shm
-.gitmob/
+.repoyeti/
 
 # editor / os
 .DS_Store
@@ -31,4 +31,4 @@ vendor/cloudflared/
 
 # tray launcher: the .lnk stores absolute paths — regenerate it per machine with
 # misc\Create-Shortcut.ps1 (the scripts + icon under misc/ are committed).
-/GitMob.lnk
+/RepoYeti.lnk

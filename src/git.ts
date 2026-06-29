@@ -1,6 +1,6 @@
 /**
  * One place to construct a `SimpleGit` bound to a repo with a safe, daemon-correct
- * environment. Every git invocation in gitmob goes through here so the security and
+ * environment. Every git invocation in repoyeti goes through here so the security and
  * watcher-friendliness seams are consistent.
  *
  *  - GIT_OPTIONAL_LOCKS=0  → read-only commands (status) never rewrite .git/index,

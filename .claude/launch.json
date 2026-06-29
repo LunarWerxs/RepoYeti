@@ -2,13 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "gitmob",
+      "name": "repoyeti",
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "src/index.ts", "start"],
       "port": 7171
     },
     {
-      "name": "gitmob-web",
+      "name": "repoyeti-web",
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "--cwd", "web", "dev"],
       "port": 4319

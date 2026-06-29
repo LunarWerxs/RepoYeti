@@ -1,13 +1,13 @@
 import { test, expect } from "bun:test";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 
 // Local mode (no OIDC) → /api/* is not gated, so we can exercise the AI routes directly.
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
 // Keep the unconfigured-baseline assertions deterministic regardless of whether a real
 // built-in Groq key is present in the constant; the built-in-on path has its own test.
-process.env.GITMOB_BUILTIN_GROQ_KEY = "";
+process.env.REPOYETI_BUILTIN_GROQ_KEY = "";
 const post = (app: ReturnType<typeof createApp>, path: string, body: unknown) =>
   app.request(path, {
     method: "POST",
@@ -26,8 +26,8 @@ test("GET /api/ai/settings starts with no configured AI provider", async () => {
 });
 
 test("with the built-in key present, Groq is available and the zero-config default", async () => {
-  const prev = process.env.GITMOB_BUILTIN_GROQ_KEY;
-  process.env.GITMOB_BUILTIN_GROQ_KEY = "gsk_test_builtin_key";
+  const prev = process.env.REPOYETI_BUILTIN_GROQ_KEY;
+  process.env.REPOYETI_BUILTIN_GROQ_KEY = "gsk_test_builtin_key";
   try {
     const res = await createApp(localCfg()).request("/api/ai/settings");
     expect(res.status).toBe(200);
@@ -37,8 +37,8 @@ test("with the built-in key present, Groq is available and the zero-config defau
     expect(JSON.stringify(j)).not.toContain("apiKey");
     expect(JSON.stringify(j)).not.toContain("gsk_test_builtin_key");
   } finally {
-    if (prev === undefined) delete process.env.GITMOB_BUILTIN_GROQ_KEY;
-    else process.env.GITMOB_BUILTIN_GROQ_KEY = prev;
+    if (prev === undefined) delete process.env.REPOYETI_BUILTIN_GROQ_KEY;
+    else process.env.REPOYETI_BUILTIN_GROQ_KEY = prev;
   }
 });
 

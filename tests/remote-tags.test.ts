@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 import { gitRemoteSet, gitRemoteRemove, gitTagCreate } from "../src/git-actions.ts";
 import { readTags } from "../src/inspect.ts";
 import { upsertRepo } from "../src/db.ts";
 
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 const J = (method: string, body: unknown) => ({
   method,
   headers: { "content-type": "application/json" },

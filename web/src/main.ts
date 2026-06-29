@@ -12,12 +12,12 @@ import "vue-sonner/style.css";
 // pull the fresh build instead of showing a dead editor. A short timestamp guard prevents a
 // reload loop if the new build is genuinely broken (chunk truly missing).
 window.addEventListener("vite:preloadError", (event) => {
-  const KEY = "gitmob:last-chunk-reload";
+  const KEY = "repoyeti:last-chunk-reload";
   const now = Date.now();
   if (now - Number(sessionStorage.getItem(KEY) ?? 0) < 10_000) {
     // Already reloaded moments ago and it still failed — the build itself is broken, not
     // just stale. Stop reloading; let the async-component error UI show and log for triage.
-    console.error("[gitmob] chunk failed to load again right after a reload", event);
+    console.error("[repoyeti] chunk failed to load again right after a reload", event);
     return;
   }
   sessionStorage.setItem(KEY, String(now));

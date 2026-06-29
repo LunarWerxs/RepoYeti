@@ -28,20 +28,20 @@ import {
   txs,
   handleComplete,
 } from "../src/auth.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 
-// ── Temp GITMOB_HOME so tests never pollute ~/.gitmob ─────────────────────────
-const TEST_HOME = join(tmpdir(), `gitmob-auth-oidc-test-${process.pid}`);
-const ORIG_HOME = process.env.GITMOB_HOME;
+// ── Temp REPOYETI_HOME so tests never pollute ~/.repoyeti ─────────────────────────
+const TEST_HOME = join(tmpdir(), `repoyeti-auth-oidc-test-${process.pid}`);
+const ORIG_HOME = process.env.REPOYETI_HOME;
 
 beforeAll(() => {
   mkdirSync(TEST_HOME, { recursive: true });
-  process.env.GITMOB_HOME = TEST_HOME;
+  process.env.REPOYETI_HOME = TEST_HOME;
 });
 
 afterAll(() => {
-  if (ORIG_HOME === undefined) delete process.env.GITMOB_HOME;
-  else process.env.GITMOB_HOME = ORIG_HOME;
+  if (ORIG_HOME === undefined) delete process.env.REPOYETI_HOME;
+  else process.env.REPOYETI_HOME = ORIG_HOME;
   rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
@@ -59,7 +59,7 @@ const OAUTH_CFG = {
   ownerEmail: OWNER_EMAIL,
 };
 
-const BASE_CFG: GitmobConfig = {
+const BASE_CFG: RepoYetiConfig = {
   roots: [],
   port: 7171,
   maxDepth: 6,

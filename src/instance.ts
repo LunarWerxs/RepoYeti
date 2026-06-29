@@ -1,10 +1,10 @@
 /**
  * Running-instance pointer. The daemon may bind a different port than requested
  * (the preferred one was busy — see `listen()` in index.ts), so it records the
- * port it ACTUALLY bound in ~/.gitmob/runtime.json. The launcher reads this to
+ * port it ACTUALLY bound in ~/.repoyeti/runtime.json. The launcher reads this to
  * open the browser at the right URL and to detect an already-running instance via
  * /api/health, and the Vite dev proxy can follow it too. Best-effort throughout:
- * a write/read failure never blocks the daemon. Honours GITMOB_HOME (so tests and
+ * a write/read failure never blocks the daemon. Honours REPOYETI_HOME (so tests and
  * relocated state point the pointer at the same dir as the rest of the config).
  */
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -61,10 +61,10 @@ export function clearInstanceInfo(): void {
 }
 
 /**
- * Resolve a LIVE GitMob instance from the pointer, or null. Reads runtime.json and
+ * Resolve a LIVE RepoYeti instance from the pointer, or null. Reads runtime.json and
  * probes `${url}/api/health` (which is auth-exempt) so a stale pointer — the daemon
  * crashed, or the port was recycled by some other app — reads as "nothing running":
- * only a real, answering GitMob daemon counts. Used to enforce single-instance.
+ * only a real, answering RepoYeti daemon counts. Used to enforce single-instance.
  */
 export async function findLiveInstance(timeoutMs = 1000): Promise<InstanceInfo | null> {
   const info = readInstanceInfo();
@@ -73,8 +73,8 @@ export async function findLiveInstance(timeoutMs = 1000): Promise<InstanceInfo |
     const res = await fetch(`${info.url}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const body = (await res.json()) as { ok?: boolean; service?: string };
-    return body?.ok && body.service === "gitmob" ? info : null;
+    return body?.ok && body.service === "repoyeti" ? info : null;
   } catch {
-    return null; // unreachable / not GitMob / timed out → treat as not running
+    return null; // unreachable / not RepoYeti / timed out → treat as not running
   }
 }

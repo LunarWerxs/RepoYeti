@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "gitmob-web",
+      "name": "repoyeti-web",
       "dependencies": {
         "@formkit/auto-animate": "^0.8.2",
         "@formkit/drag-and-drop": "^0.6.1",

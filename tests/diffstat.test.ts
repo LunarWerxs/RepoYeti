@@ -6,7 +6,7 @@ import { $ } from "bun";
 import { parsePatchStats, computeDiffStats } from "../src/diffstat.ts";
 import { readStatus, readChanges } from "../src/status.ts";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 
 // ── pure patch parser ───────────────────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ test("readStatus only computes the aggregate diff when withDiff is on", async ()
 
 // ── settings route ──────────────────────────────────────────────────────────────
 
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
 test("GET /api/status defaults diffStats to false; PUT /api/settings flips it", async () => {
   const app = createApp(localCfg());

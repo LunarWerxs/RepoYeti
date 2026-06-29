@@ -11,11 +11,11 @@ import { VitePWA } from "vite-plugin-pwa";
 // The daemon serves the built app from `web/dist` at its own origin, so the PWA
 // talks to /api and /oauth on the same host (no CORS). In dev, Vite proxies them
 // to the daemon — at whatever port it ACTUALLY bound (it hops past a busy 7171 and
-// records the real port in ~/.gitmob/runtime.json), falling back to :7171. Start
+// records the real port in ~/.repoyeti/runtime.json), falling back to :7171. Start
 // the daemon before `bun run --cwd web dev` so the pointer exists when Vite reads it.
 function daemonTarget(): string {
   try {
-    const home = process.env.GITMOB_HOME ?? join(homedir(), ".gitmob");
+    const home = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
     const info = JSON.parse(readFileSync(join(home, "runtime.json"), "utf8")) as { url?: string };
     if (info?.url) return info.url;
   } catch {
@@ -38,8 +38,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["icon.svg"],
       manifest: {
-        name: "GitMob",
-        short_name: "GitMob",
+        name: "RepoYeti",
+        short_name: "RepoYeti",
         description: "System-wide remote git manager",
         theme_color: "#0e0e12",
         background_color: "#0e0e12",

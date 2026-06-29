@@ -29,11 +29,11 @@
   },
   "addRepo": {
     "cancel": "Cancel",
-    "description": "Point GitMob at an existing repo, create a new one, or clone a remote.",
+    "description": "Point RepoYeti at an existing repo, create a new one, or clone a remote.",
     "hintCreateAfter": " it.",
     "hintCreateBefore": "Make a new folder and ",
     "hintRegister": "Index an existing git repo by its absolute path.",
-    "hintClone": "Clone a remote repository into a folder GitMob scans.",
+    "hintClone": "Clone a remote repository into a folder RepoYeti scans.",
     "modeCreate": "Create new",
     "modeRegister": "Point to folder",
     "modeClone": "Clone",
@@ -57,7 +57,7 @@
     "toastFailed": "Failed"
   },
   "app": {
-    "name": "GitMob"
+    "name": "RepoYeti"
   },
   "common": {
     "cancel": "Cancel",
@@ -344,16 +344,16 @@
     "copy": "Copy link",
     "copyFailed": "Could not copy",
     "copied": "Link copied",
-    "description": "Reach GitMob from your phone — toggle remote on, scan the code, and sign in with Connections.",
-    "localBody": "GitMob is only reachable on this computer. Turn on remote access to open it from your phone — you'll sign in with Connections.",
-    "localBypassActive": "Using GitMob locally without signing in",
+    "description": "Reach RepoYeti from your phone — toggle remote on, scan the code, and sign in with Connections.",
+    "localBody": "RepoYeti is only reachable on this computer. Turn on remote access to open it from your phone — you'll sign in with Connections.",
+    "localBypassActive": "Using RepoYeti locally without signing in",
     "modeFailed": "Couldn't change access mode",
     "modeLabel": "Remote access",
     "modeOffHint": "On this device only.",
     "modeOnHint": "Reachable from your phone (login required).",
-    "needsOwner": "Sign in with Connections to claim this GitMob, then enable remote access.",
+    "needsOwner": "Sign in with Connections to claim this RepoYeti, then enable remote access.",
     "open": "Open in browser",
-    "scanHint": "Scan with your phone's camera to open GitMob there.",
+    "scanHint": "Scan with your phone's camera to open RepoYeti there.",
     "signedInAs": "Signed in as {name}",
     "starting": "Starting the tunnel…",
     "title": "Remote access",
@@ -371,7 +371,7 @@
     "syncedManyBody": "Auto-pulled {count} repo | Auto-pulled {count} repos"
   },
   "settings": {
-    "aiDescription": "Groq works out of the box with a free built-in key — no setup. Or bring your own key for any provider: GitMob uses it on this machine only, the key never leaves the daemon, and generating a message sends the repo's diff to the selected provider.",
+    "aiDescription": "Groq works out of the box with a free built-in key — no setup. Or bring your own key for any provider: RepoYeti uses it on this machine only, the key never leaves the daemon, and generating a message sends the repo's diff to the selected provider.",
     "aiYolo": "Smart-commit YOLO mode",
     "aiYoloHint": "Skip the review screen — generate the plan and commit it immediately. Never auto-pushes.",
     "aiYoloFailed": "Could not change YOLO mode",
@@ -394,7 +394,7 @@
     "signOutAllDone": "Signed out on all devices",
     "signOutAllFailed": "Couldn't sign out everywhere",
     "cardRoots": "Scan folders",
-    "rootsHint": "Folders GitMob scans for git repositories. Adding one scans it right away; removing one drops the repos found under it.",
+    "rootsHint": "Folders RepoYeti scans for git repositories. Adding one scans it right away; removing one drops the repos found under it.",
     "rootsEmpty": "No scan folders yet.",
     "rootsPlaceholder": "/Users/you/code",
     "rootsAdd": "Add folder",
@@ -430,7 +430,7 @@
     "diffPatchAlwaysHint": "Never switch large files to the compact patch — always load the full side-by-side diff (very large files may be truncated).",
     "diffPatchAlwaysFailed": "Could not change the diff view",
     "cardSync": "Background sync",
-    "syncDescription": "Quietly check your remotes so GitMob can warn you the moment a repo falls behind.",
+    "syncDescription": "Quietly check your remotes so RepoYeti can warn you the moment a repo falls behind.",
     "syncCheck": "Check remotes in the background",
     "syncCheckHint": "Periodically fetch each repo so the dashboard knows when new commits land on the remote.",
     "syncCheckFailed": "Could not change the sync check",
@@ -467,7 +467,7 @@
     "addScanFolder": "Add a scan folder",
     "allHidden": "All repositories are hidden. Turn on \"Show hidden\" in filters to see them.",
     "noMatch": "No repositories match these filters.",
-    "noReposBody": "Add one by path, or point GitMob at a folder to scan for repositories.",
+    "noReposBody": "Add one by path, or point RepoYeti at a folder to scan for repositories.",
     "noReposTitle": "No repositories yet",
     "sectionPinned": "Pinned",
     "sectionStarred": "Starred",
@@ -476,7 +476,7 @@
   "signIn": {
     "buttonLabel": "Sign in with Connections",
     "continueLocal": "Continue local for now",
-    "continueLocalHint": "Use GitMob on this computer without signing in.",
+    "continueLocalHint": "Use RepoYeti on this computer without signing in.",
     "ownerOnly": "Only the owner of this daemon can sign in.",
     "tagline": "Your repositories, from anywhere — signed in with Connections."
   },

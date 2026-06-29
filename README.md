@@ -1,4 +1,4 @@
-# GitMob
+# RepoYeti
 
 A self-contained, **system-wide remote git manager**. A background daemon discovers all your
 git repos, tracks their state (branch / dirty / ahead / behind) event-driven, manages multiple
@@ -19,7 +19,7 @@ fetch/pull/push from your phone.
 | 6 — Tauri tray | thin sidecar around the unchanged daemon binary | ⏳ deferred (the CLI binary + phone browser is the whole product) |
 
 ¹ Auth gating, the login redirect (built from live connections.icu discovery), and the sign-in UI are
-verified; the redirect shim is **deployed** (`gitmob-auth.lunawerx.workers.dev`). The only remaining
+verified; the redirect shim is **deployed** (`repoyeti-auth.lunawerx.workers.dev`). The only remaining
 step for a live login round-trip is registering a "Sign in with Connections" app (client id) — see
 [shim/README.md](shim/README.md) and MARCHING_ORDERS §13.
 ² PAT/HTTPS-token auth + OS-keychain (keytar) remain intentionally deferred (SSH-key injection covers
@@ -86,7 +86,7 @@ curl -XPOST :7171/api/repos/<id>/discard  -d '{"path":"src/a.ts"}'      # revert
 ## Remote access (over the internet)
 
 ```sh
-gitmob start --tunnel    # requires "oauth" configured in ~/.gitmob/config.json (Sign in with Connections)
+repoyeti start --tunnel    # requires "oauth" configured in ~/.repoyeti/config.json (Sign in with Connections)
 ```
 
 Prints a `*.trycloudflare.com` URL + a QR to scan. The daemon refuses to open a tunnel unless auth is
@@ -94,13 +94,13 @@ configured, so the public URL is useless to anyone but the signed-in owner.
 
 ### Finishing "Sign in with Connections" (one-time)
 
-The redirect **shim is already deployed**: `https://gitmob-auth.lunawerx.workers.dev` (Cloudflare Worker;
+The redirect **shim is already deployed**: `https://repoyeti-auth.lunawerx.workers.dev` (Cloudflare Worker;
 source in [shim/](shim/)). To light up login you only need to:
 
 1. Register a **"Sign in with Connections"** app at `studio.connections.icu` (developer apps) with
-   **redirect URI** `https://gitmob-auth.lunawerx.workers.dev/cb` and scopes `openid profile email`.
+   **redirect URI** `https://repoyeti-auth.lunawerx.workers.dev/cb` and scopes `openid profile email`.
    This yields a `client_id` (and, if confidential, a `client_secret`).
-2. Add the `oauth` block to `~/.gitmob/config.json`:
+2. Add the `oauth` block to `~/.repoyeti/config.json`:
 
    ```jsonc
    {
@@ -108,13 +108,13 @@ source in [shim/](shim/)). To light up login you only need to:
      "oauth": {
        "issuer": "https://accounts.connections.icu",
        "clientId": "<your client id>",
-       "redirectUri": "https://gitmob-auth.lunawerx.workers.dev/cb",
+       "redirectUri": "https://repoyeti-auth.lunawerx.workers.dev/cb",
        "ownerSub": "<your Connections sub>"   // or "ownerEmail": "you@example.com"
      }
    }
    ```
 
-Then `gitmob start --tunnel` → scan the QR → Sign in with Connections → dashboard, from anywhere.
+Then `repoyeti start --tunnel` → scan the QR → Sign in with Connections → dashboard, from anywhere.
 
 ## Testing
 
@@ -138,7 +138,7 @@ Safety guards return first-class error codes: `DIRTY_WORKING_TREE`, `NON_FAST_FO
 half-merged. Identity is injected **per operation** (`-c core.sshCommand` + `-c user.*`); global/repo git
 config is never mutated.
 
-Local state lives under `~/.gitmob/` (`config.json`, `gitmob.db`). Nothing is written into your repos.
+Local state lives under `~/.repoyeti/` (`config.json`, `repoyeti.db`). Nothing is written into your repos.
 
 ## Notes for hackers
 

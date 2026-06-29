@@ -63,7 +63,7 @@ const envConcurrency = (name: string, def: number): number => {
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : def;
 };
 
-/** Local git reads (status / changed-files / diff). Override: GITMOB_GIT_READ_CONCURRENCY. */
-export const readGate = createSemaphore(envConcurrency("GITMOB_GIT_READ_CONCURRENCY", 8));
-/** Remote git network ops (fetch / pull / push). Override: GITMOB_GIT_NET_CONCURRENCY. */
-export const netGate = createSemaphore(envConcurrency("GITMOB_GIT_NET_CONCURRENCY", 4));
+/** Local git reads (status / changed-files / diff). Override: REPOYETI_GIT_READ_CONCURRENCY. */
+export const readGate = createSemaphore(envConcurrency("REPOYETI_GIT_READ_CONCURRENCY", 8));
+/** Remote git network ops (fetch / pull / push). Override: REPOYETI_GIT_NET_CONCURRENCY. */
+export const netGate = createSemaphore(envConcurrency("REPOYETI_GIT_NET_CONCURRENCY", 4));

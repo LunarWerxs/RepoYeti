@@ -1,4 +1,4 @@
-# Verified GitMob Action List
+# Verified RepoYeti Action List
 
 Consolidates `dry_gpt.md`, `slow_gpt.md`, `despoke_gpt.md`, `delete_gpt.md`, and `deviant_gpt.md`.
 
@@ -69,7 +69,7 @@ Criteria used: keep only items that still match the current codebase, have clear
 > audit inputs; **this file is the live tracker** — update here, not there.
 
 - [x] **P1 - Bound global git subprocess concurrency + coalesce refreshes + progressive boot.**
-  - Done: new `src/gitgate.ts` — `readGate` (8, env `GITMOB_GIT_READ_CONCURRENCY`) wraps `readStatus`/`readChanges`; `netGate` (4, env `GITMOB_GIT_NET_CONCURRENCY`) wraps fetch/pull/push in `git-actions.ts`. Each gate is held around a single git call only, and a remote op's preflight read releases `readGate` before taking `netGate`, so the two pools never nest → deadlock-free. `service.ts` `coalescedRefresh` collapses watcher/poll bursts to ≤1 in-flight + 1 trailing pass (user paths `runAction`/`forceRefresh` still await `refreshRepo` exactly). `src/index.ts` now watches → serves → hydrates in the BACKGROUND (`hydrateInitialStatuses`) so a slow/hung repo can't block boot. Tests in `tests/gitgate.test.ts`; smoke-booted a real daemon (served repos immediately, hydrated statuses progressively).
+  - Done: new `src/gitgate.ts` — `readGate` (8, env `REPOYETI_GIT_READ_CONCURRENCY`) wraps `readStatus`/`readChanges`; `netGate` (4, env `REPOYETI_GIT_NET_CONCURRENCY`) wraps fetch/pull/push in `git-actions.ts`. Each gate is held around a single git call only, and a remote op's preflight read releases `readGate` before taking `netGate`, so the two pools never nest → deadlock-free. `service.ts` `coalescedRefresh` collapses watcher/poll bursts to ≤1 in-flight + 1 trailing pass (user paths `runAction`/`forceRefresh` still await `refreshRepo` exactly). `src/index.ts` now watches → serves → hydrates in the BACKGROUND (`hydrateInitialStatuses`) so a slow/hung repo can't block boot. Tests in `tests/gitgate.test.ts`; smoke-booted a real daemon (served repos immediately, hydrated statuses progressively).
 
 - [x] **P2 - Add watcher health and fallback polling.**
   - Done: `src/watcher.ts` `WatchHandle.watching` reports whether the `.git` watch actually installed; `src/service.ts` `startPollFallback` + `watcherHealth()` — a repo whose `fs.watch` fails falls back to ~30s jittered polling and logs a warning. Tests in `tests/watcher.test.ts` + `tests/service.test.ts`.

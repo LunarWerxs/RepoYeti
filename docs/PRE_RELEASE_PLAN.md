@@ -1,6 +1,6 @@
-# GitMob — Pre-Public-Release Readiness Plan
+# RepoYeti — Pre-Public-Release Readiness Plan
 
-> **Purpose.** A grounded, prioritized plan to take GitMob from "grew fast and unplanned" to
+> **Purpose.** A grounded, prioritized plan to take RepoYeti from "grew fast and unplanned" to
 > "clean enough to open-source with pride." Produced from a **5-track codebase audit** (tooling/CI ·
 > duplication/drift · architecture/boundaries · test coverage · release-readiness/security), each
 > verified against the actual files — not generic advice.
@@ -71,9 +71,9 @@ These must be true before the repo goes public.
 |---|---|---|---|---|
 | A1 | **Rotate the Groq key** | The `.env` key was never committed, but rotate it at console.groq.com/keys as standard hygiene before going public; drop the new value in `.env`. No code change (placeholder in `config.ts` is already inert). | S | 🧑 |
 | A2 | **`package.json` metadata** | Add `"license": "MIT"`, `"repository": {type,url}`, `"author"`, `"keywords"`, `"engines": {"bun": ">=1.1.0"}`. GitHub/npm read these; their absence reads as abandonware. | S | 🤖 |
-| A3 | **`bin` points at `.ts` source** | `"bin": {"gitmob": "./src/index.ts"}` breaks any `bun install -g`. Either document "Bun-only, install via the compiled binary" or repoint to `dist/`. At minimum add the `engines` field (A2). | S | 🤖 |
+| A3 | **`bin` points at `.ts` source** | `"bin": {"repoyeti": "./src/index.ts"}` breaks any `bun install -g`. Either document "Bun-only, install via the compiled binary" or repoint to `dist/`. At minimum add the `engines` field (A2). | S | 🤖 |
 | A4 | **Cut a real version** | Bump `0.0.1 → 0.1.0`, move `CHANGELOG.md`'s `[Unreleased]` into a dated `[0.1.0]` section, tag `v0.1.0`. | S | 🤖+🧑 |
-| A5 | **README: personal infra leaks** | README hardcodes your personal OAuth shim URL (`gitmob-auth.lunawerx.workers.dev`) and assumes `connections.icu` access. A forker would hit *your* shim. Replace with a placeholder + "deploy your own shim" note, and state plainly whether connections.icu is public or LunarWerx-internal. | S | 🧑 (decision) |
+| A5 | **README: personal infra leaks** | README hardcodes your personal OAuth shim URL (`repoyeti-auth.lunawerx.workers.dev`) and assumes `connections.icu` access. A forker would hit *your* shim. Replace with a placeholder + "deploy your own shim" note, and state plainly whether connections.icu is public or LunarWerx-internal. | S | 🧑 (decision) |
 
 ---
 
@@ -88,7 +88,7 @@ This is the heart of your concern: *automated* enforcement so drift can't creep 
 | B2 | **Architectural boundary checks** | None. | Enforce the layering as code so it can't drift: **`eslint no-restricted-imports`** (or **dependency-cruiser**) with rules — `daemon.ts` must not import `git-actions/status/inspect`; `vcs/*` must not import `service.ts`; `vcs/types.ts` must not import `git-actions.ts`; no circular deps. (Exact rules in the architecture audit.) | M |
 | B3 | **Coverage gate** | Coverage **already ~90%** but CI runs `bun test` **without `--coverage`** and there's **no threshold**. | Run `bun test --coverage` in CI; set a threshold in `bunfig.toml` (~**80% lines**, comfortably under today's 90% so it can't silently regress). | S |
 | B4 | **CI completeness** | typecheck + test + i18n + web build, Ubuntu-only, no caching, Bun unpinned. | Add: the **lint step** (B1); **dependency caching** (`actions/cache` keyed on `bun.lock`); a **cross-platform matrix** (`ubuntu/macos/windows` — the compiled binary is OS-specific); **pin the Bun version** (`bun-version`); a **`bun audit`**/Dependabot check; (later) the frontend test job (E6). | M |
-| B4b | **Release workflow (binary is the product)** | **No `release.yml`** — the compiled `gitmob` binary is built only locally; no GitHub Release, no published artifact. **A genuine P0 for a binary-distributed tool.** | Add `.github/workflows/release.yml`: on `v*` tag, matrix over OSes, `bun run scripts/build.ts`, upload binaries + create the GitHub Release. | M |
+| B4b | **Release workflow (binary is the product)** | **No `release.yml`** — the compiled `repoyeti` binary is built only locally; no GitHub Release, no published artifact. **A genuine P0 for a binary-distributed tool.** | Add `.github/workflows/release.yml`: on `v*` tag, matrix over OSes, `bun run scripts/build.ts`, upload binaries + create the GitHub Release. | M |
 | B5 | **Shared git hooks** | Hook is **committed** (`.githooks/pre-commit`) but **opt-in** (`git config core.hooksPath .githooks`) and only runs i18n-check. | Auto-enable via a `prepare`/postinstall script, and broaden the hook to **lint + typecheck** (not just i18n). **lefthook** is the low-maintenance option. | S |
 | B7 | **Misc tooling hygiene** | `@types/bun: "latest"` (unpinned → non-reproducible); no `.editorconfig`; Monaco chunk emits Vite size warnings. | Pin `@types/bun`; add a root `.editorconfig` (2-space, LF, utf-8); set `build.chunkSizeWarningLimit` for the Monaco chunk. | S |
 | B6 | **Type-drift guard** | `ApiErrorCode` is hand-mirrored backend↔frontend (47 strings). | A tiny CI script that imports both unions and fails on mismatch (until/unless you generate the frontend type from the backend). Cheap insurance. | S |
@@ -155,7 +155,7 @@ This is the *ongoing* process, not a one-time fix.
 
 - **Two-sessions-on-one-tree (active right now).** You're running parallel agent sessions committing to the same working tree (smart-commit + Lore/remotes-tags). It's stayed green, but it's fragile — commits bundle each other's work (as ours did). **Recommendation:** for release prep, run **one workstream at a time**, or give each session its **own branch/worktree**. Before any push, `git log --oneline` to see what's bundled.
 - **Branch protection (at public launch).** Protect `main`: require PRs + green CI; no direct pushes. Feature branches per workstream above.
-- **Releases.** Tag `vX.Y.Z`, cut the CHANGELOG section, and have CI **build + attach the compiled binary** (`dist/gitmob*` per-platform) to the GitHub Release — that compiled binary *is* the product, so it should be a first-class, CI-produced artifact, not a local build.
+- **Releases.** Tag `vX.Y.Z`, cut the CHANGELOG section, and have CI **build + attach the compiled binary** (`dist/repoyeti*` per-platform) to the GitHub Release — that compiled binary *is* the product, so it should be a first-class, CI-produced artifact, not a local build.
 - **Dependency upkeep.** Dependabot (F3) + the CI `bun audit` (B4) keep deps honest with near-zero effort.
 
 ---

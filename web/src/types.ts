@@ -292,7 +292,7 @@ export interface AiModel {
 export interface AiProviderState {
   configured: true;
   model: string | null;
-  /** True when served by GitMob's free built-in key (owner has set no key of their own). */
+  /** True when served by RepoYeti's free built-in key (owner has set no key of their own). */
   builtin?: boolean;
 }
 

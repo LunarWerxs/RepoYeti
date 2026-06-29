@@ -1,4 +1,4 @@
-<!-- Thanks for contributing to GitMob! Keep this short and honest. -->
+<!-- Thanks for contributing to RepoYeti! Keep this short and honest. -->
 
 ## What & why
 

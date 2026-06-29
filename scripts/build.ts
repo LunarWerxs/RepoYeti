@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * Build a distributable GitMob bundle into `dist/`:
- *   dist/gitmob[.exe]   — the compiled daemon (bun --compile)
+ * Build a distributable RepoYeti bundle into `dist/`:
+ *   dist/repoyeti[.exe]   — the compiled daemon (bun --compile)
  *   dist/web/dist/...   — the built PWA, served by the daemon at runtime
  *
  * cloudflared is expected on PATH (or bundle a pinned binary into dist/ for shipping).
@@ -14,7 +14,7 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dir, "..");
 const DIST = join(ROOT, "dist");
 const isWin = process.platform === "win32";
-const outBin = join(DIST, isWin ? "gitmob.exe" : "gitmob");
+const outBin = join(DIST, isWin ? "repoyeti.exe" : "repoyeti");
 
 console.log("→ clean dist/");
 rmSync(DIST, { recursive: true, force: true });
@@ -37,4 +37,4 @@ if (existsSync(vendor)) {
 }
 
 console.log(`\n✓ Built ${outBin}`);
-console.log("  Run it:  " + (isWin ? "dist\\gitmob.exe start" : "./dist/gitmob start"));
+console.log("  Run it:  " + (isWin ? "dist\\repoyeti.exe start" : "./dist/repoyeti start"));

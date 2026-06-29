@@ -1,7 +1,7 @@
 /**
  * Background remote-sync check — the "you're behind" early-warning loop.
  *
- * GitMob's `behind` count is read straight from `git status`, which only reflects the LAST
+ * RepoYeti's `behind` count is read straight from `git status`, which only reflects the LAST
  * fetch — a watch event never touches the network (see src/status.ts). So without a periodic
  * fetch the dashboard silently goes stale: a teammate pushes and you'd never know until you
  * fetched by hand. This module runs ONE daemon-wide timer that periodically calls

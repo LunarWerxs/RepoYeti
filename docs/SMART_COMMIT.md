@@ -1,4 +1,4 @@
-# GitMob — Smart Commit (AI multi-commit splitter)
+# RepoYeti — Smart Commit (AI multi-commit splitter)
 
 > **Goal.** One tap turns a pile of uncommitted changes — the kind several AI agents
 > produce when they edit a repo in parallel — into a set of small, logically-scoped,
@@ -18,7 +18,7 @@ split across two commits.**
 
 Why not line/hunk level (the "even smarter" option)?
 
-- GitMob's **central, non-negotiable invariant** (MARCHING_ORDERS.md §7, gap-analysis
+- RepoYeti's **central, non-negotiable invariant** (MARCHING_ORDERS.md §7, gap-analysis
   header): *"the daemon never leaves a repo in an unsafe / half-merged state."* Hunk-level
   staging means programmatically applying a **subset of a file's hunks** to the index
   (`git apply --cached` of a partial patch). That can fail/conflict and leave a file
@@ -59,7 +59,7 @@ broken commit to chase purity.
 
 ## 3. Architecture: **Plan → Review → Execute**
 
-Three clean stages, mapping onto GitMob's existing layering (read-only inspection vs.
+Three clean stages, mapping onto RepoYeti's existing layering (read-only inspection vs.
 op-queue mutation vs. routes vs. store/UI).
 
 ```
@@ -282,7 +282,7 @@ for (const c of commits) {
 | Identity / config mutation | Per-commit `-c user.*` injection; global/repo config untouched. |
 | Push divergence | `sync` reuses the existing pull-ff + non-force push guards (409/403). Splitting changes none of that. |
 | Provider returns garbage | Strict zod validation + one retry + deterministic fallback. Never executes an unvalidated plan. |
-| Reversibility from the phone | Commits are **local** until you choose `sync` — no worse than today's commit button. (Auto-branching for extra safety is a possible future, deliberately not in v1; it's off-pattern for GitMob.) |
+| Reversibility from the phone | Commits are **local** until you choose `sync` — no worse than today's commit button. (Auto-branching for extra safety is a possible future, deliberately not in v1; it's off-pattern for RepoYeti.) |
 
 ## 11. Edge cases
 

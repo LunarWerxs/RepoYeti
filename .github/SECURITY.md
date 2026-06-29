@@ -5,7 +5,7 @@
 **Please do not open a public issue for security vulnerabilities.**
 
 Report them privately to **2claude@lunarwerx.com** (or use GitHub's
-[private vulnerability reporting](https://github.com/LunarWerxs/gitmob/security/advisories/new)
+[private vulnerability reporting](https://github.com/LunarWerxs/repoyeti/security/advisories/new)
 on this repository). Include:
 
 - a description of the issue and its impact,
@@ -18,7 +18,7 @@ any public disclosure.
 
 ## Scope & deployment model (important context)
 
-GitMob is a self-hosted daemon that can expose a git dashboard over a Cloudflare tunnel. A few
+RepoYeti is a self-hosted daemon that can expose a git dashboard over a Cloudflare tunnel. A few
 properties are intentional and worth understanding before reporting:
 
 - **The built-in Groq AI key is intentionally public/throwaway** — abusing it only burns its own
@@ -26,7 +26,7 @@ properties are intentional and worth understanding before reporting:
   their own provider key, which never leaves the host.
 - **The OAuth client is a public PKCE client** — there is no confidential secret in the codebase.
 - **Local vs. remote is decided from reverse-proxy headers** (`cf-connecting-ip` /
-  `x-forwarded-*`). GitMob assumes a Cloudflare tunnel; if you deploy behind a different proxy that
+  `x-forwarded-*`). RepoYeti assumes a Cloudflare tunnel; if you deploy behind a different proxy that
   does **not** set these headers, remote requests may be treated as local. Configure your proxy to
   forward them. Reports about *this documented assumption* are not considered vulnerabilities; novel
   bypasses of the auth gate are.

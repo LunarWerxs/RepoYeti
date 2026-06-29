@@ -1,6 +1,6 @@
 // App-wide internationalisation (vue-i18n, Composition API) — English only.
 //
-// GitMob ships a single locale (English). The i18n layer is kept (rather than inlining raw
+// RepoYeti ships a single locale (English). The i18n layer is kept (rather than inlining raw
 // strings) so all user-facing copy stays centralised in one `locales/en.json` and the build's
 // `i18n:check` can flag any hardcoded/missing string. To reintroduce other languages later:
 // add `locales/<code>.json` (key-parity with en.json) and a small locale switcher back.

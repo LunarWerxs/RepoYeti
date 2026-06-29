@@ -24,7 +24,7 @@ import {
   resolveApiKey,
   resolveModel,
   effectiveDefaultProvider,
-  type GitmobConfig,
+  type RepoYetiConfig,
   type AiProviderId,
 } from "./config.ts";
 import { listModels, generateCommitMessage, generateCommitPlan, heuristicPlan, AiError } from "./ai.ts";
@@ -140,7 +140,7 @@ import {
   SmartCommitSchema,
 } from "./schemas.ts";
 
-export function createApp(cfg: GitmobConfig): Hono {
+export function createApp(cfg: RepoYetiConfig): Hono {
   const app = new Hono();
   const MAX_SSE_QUEUE = 500;
 
@@ -163,7 +163,7 @@ export function createApp(cfg: GitmobConfig): Hono {
 
   // ── auth surface ───────────────────────────────────────────────────────────
   app.get("/api/health", (c) =>
-    c.json({ ok: true, service: "gitmob", version: VERSION, ts: Date.now() }),
+    c.json({ ok: true, service: "repoyeti", version: VERSION, ts: Date.now() }),
   );
   // Runtime status for the UI — access mode + the public tunnel URL (null until a
   // cloudflared tunnel yields one) so the web app can show the remote-access link/QR.
@@ -290,7 +290,7 @@ export function createApp(cfg: GitmobConfig): Hono {
         return jsonError(
           c,
           "NEEDS_OWNER",
-          "Sign in with Connections once to claim this GitMob before enabling remote access.",
+          "Sign in with Connections once to claim this RepoYeti before enabling remote access.",
         );
       }
       cfg.mode = "remote";
@@ -775,7 +775,7 @@ export function createApp(cfg: GitmobConfig): Hono {
     const p = c.req.param("provider") ?? "";
     return (AI_PROVIDERS as readonly string[]).includes(p) ? (p as AiProviderId) : null;
   };
-  const ensureAi = (): NonNullable<GitmobConfig["ai"]> => (cfg.ai ??= { providers: {} });
+  const ensureAi = (): NonNullable<RepoYetiConfig["ai"]> => (cfg.ai ??= { providers: {} });
   const aiErr = (c: Context, e: unknown) =>
     e instanceof AiError
       ? jsonError(c, e.code as ApiErrorCode, e.message)

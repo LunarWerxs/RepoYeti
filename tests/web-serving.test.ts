@@ -2,14 +2,14 @@ import { test, expect } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 
 // These guard the static-file serving in src/daemon.ts (mountWeb). The bug they prevent:
 // a request for a hashed JS chunk that no longer exists on disk (an old tab after a rebuild)
 // used to fall back to index.html, handing the browser text/html for a module script
 // ("Failed to load module script … MIME type text/html"). Missing assets must 404; only
 // navigation routes get the SPA fallback. Requires a built web/dist (bun run --cwd web build).
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
 const ASSETS = join(import.meta.dir, "..", "web", "dist", "assets");
 const realAsset = (): string => {

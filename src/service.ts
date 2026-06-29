@@ -84,7 +84,7 @@ function startPollFallback(repoId: string, absPath: string): void {
   if (pollHandles.has(repoId)) return;
   unhealthyWatch.add(repoId);
   console.warn(
-    `gitmob: filesystem watch unavailable for ${absPath} — using ~${Math.round(POLL_BASE_MS / 1000)}s polling. ` +
+    `repoyeti: filesystem watch unavailable for ${absPath} — using ~${Math.round(POLL_BASE_MS / 1000)}s polling. ` +
       `Live updates may lag; check OS watch limits (e.g. fs.inotify.max_user_watches on Linux).`,
   );
   const tick = (): void => {
@@ -684,7 +684,7 @@ export async function writeFileContent(
   // Atomic replace: write a sibling temp file, then rename over the target. rename() never
   // follows a symlink at the destination (closing the lstat→write TOCTOU window), and a crash
   // mid-write can't leave a half-written source file.
-  const tmp = `${r.abs}.gitmob-${crypto.randomUUID()}.tmp`;
+  const tmp = `${r.abs}.repoyeti-${crypto.randomUUID()}.tmp`;
   try {
     await Bun.write(tmp, content);
     renameSync(tmp, r.abs);

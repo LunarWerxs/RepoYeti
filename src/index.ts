@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
- * gitmob CLI + daemon orchestration.
+ * repoyeti CLI + daemon orchestration.
  *
- *   gitmob start [--root <path>] [--port <n>]   boot the daemon
- *   gitmob add-root <path>                       register a scan root
- *   gitmob status                                print config + repo count
+ *   repoyeti start [--root <path>] [--port <n>]   boot the daemon
+ *   repoyeti add-root <path>                       register a scan root
+ *   repoyeti status                                print config + repo count
  *
  * Phase 1 wiring: discover → watch (.git/HEAD,.git/index,logs) → status read
  * (serialized per repo) → SQLite → SSE. No auth, no tunnel yet.
@@ -19,7 +19,7 @@ import {
   accessMode,
   tunnelStartProblem,
   hydrateSecrets,
-  type GitmobConfig,
+  type RepoYetiConfig,
 } from "./config.ts";
 import { initDb, upsertRepo, getRepo, getRepos, getWatchableRepos } from "./db.ts";
 import { discoverStream } from "./discovery.ts";
@@ -57,18 +57,18 @@ switch (cmd) {
 // ── commands ──────────────────────────────────────────────────────────────────
 
 function printHelp(): void {
-  console.log(`gitmob ${VERSION}
+  console.log(`repoyeti ${VERSION}
 
 Usage:
-  gitmob start [--root <path>] [--port <n>]   Boot the daemon
-  gitmob add-root <path>                       Register a directory to scan
-  gitmob status                                Show config + discovered repos
+  repoyeti start [--root <path>] [--port <n>]   Boot the daemon
+  repoyeti add-root <path>                       Register a directory to scan
+  repoyeti status                                Show config + discovered repos
 `);
 }
 
 function addRootCmd(path: string | undefined): void {
   if (!path) {
-    console.error("usage: gitmob add-root <path>");
+    console.error("usage: repoyeti add-root <path>");
     process.exit(1);
   }
   const cfg = addRoot(path);
@@ -80,8 +80,8 @@ function statusCmd(): void {
   const cfg = loadConfig();
   initDb();
   const repos = getRepos();
-  console.log(`gitmob ${VERSION}`);
-  console.log(`Roots: ${cfg.roots.join(", ") || "(none — add one with: gitmob add-root <path>)"}`);
+  console.log(`repoyeti ${VERSION}`);
+  console.log(`Roots: ${cfg.roots.join(", ") || "(none — add one with: repoyeti add-root <path>)"}`);
   console.log(`Repos indexed: ${repos.length}`);
   for (const r of repos.slice(0, 50)) {
     const s = r.status;
@@ -110,15 +110,15 @@ async function start(rest: string[]): Promise<void> {
     }
   }
 
-  // Single instance: if a GitMob daemon is already serving, don't start a second
+  // Single instance: if a RepoYeti daemon is already serving, don't start a second
   // one — it would just hop to another port (see `listen()`) and the launcher,
   // tunnel, and MCP would disagree about which instance is "the" one. The dev
-  // watcher sets GITMOB_DEV=1 (scripts/dev.ts) and must be free to rebind its port
+  // watcher sets REPOYETI_DEV=1 (scripts/dev.ts) and must be free to rebind its port
   // on every reload, so that flow is exempt from this guard.
-  if (process.env.GITMOB_DEV !== "1") {
+  if (process.env.REPOYETI_DEV !== "1") {
     const live = await findLiveInstance();
     if (live) {
-      console.log(`\nGitMob is already running → ${live.url}\nNot starting a second instance.\n`);
+      console.log(`\nRepoYeti is already running → ${live.url}\nNot starting a second instance.\n`);
       process.exit(0);
     }
   }
@@ -134,7 +134,7 @@ async function start(rest: string[]): Promise<void> {
   if (tunnelProblem === "auth") {
     console.error(
       "Refusing to open a tunnel without auth.\n" +
-        "Configure \"oauth\" in ~/.gitmob/config.json first (see MARCHING_ORDERS §13),\n" +
+        "Configure \"oauth\" in ~/.repoyeti/config.json first (see MARCHING_ORDERS §13),\n" +
         "so only you — signed in with Connections — can reach the daemon over the network.",
     );
     process.exit(1);
@@ -142,7 +142,7 @@ async function start(rest: string[]): Promise<void> {
   if (tunnelProblem === "owner") {
     console.error(
       "Refusing to open a tunnel before an owner is configured.\n" +
-        "Set oauth.ownerSub or oauth.ownerEmail in ~/.gitmob/config.json first, or complete\n" +
+        "Set oauth.ownerSub or oauth.ownerEmail in ~/.repoyeti/config.json first, or complete\n" +
         "a local-only pairing flow before exposing this daemon over the network.",
     );
     process.exit(1);
@@ -150,7 +150,7 @@ async function start(rest: string[]): Promise<void> {
 
   if (liveCfg.roots.length === 0) {
     console.error(
-      "No scan roots configured. Add one and restart:\n  gitmob add-root <path>\n  (or)  gitmob start --root <path>",
+      "No scan roots configured. Add one and restart:\n  repoyeti add-root <path>\n  (or)  repoyeti start --root <path>",
     );
     process.exit(1);
   }
@@ -172,7 +172,7 @@ async function start(rest: string[]): Promise<void> {
   // Advertise where we actually landed (the port may have hopped) so the launcher
   // opens the right URL and a second launch can detect us. Cleared on clean exit.
   writeInstanceInfo(server.port ?? port);
-  console.log(`\ngitmob ${VERSION} daemon up`);
+  console.log(`\nrepoyeti ${VERSION} daemon up`);
   console.log(`  local:  ${url}`);
   console.log(`  repos:  ${url}/api/repos`);
   console.log(`  events: ${url}/api/events  (SSE)`);
@@ -246,7 +246,7 @@ async function hydrateInitialStatuses(
  * (`knownIds`) is announced over SSE as `repo_added` so the dashboard appends it live.
  * Fire-and-forget — errors are swallowed so a bad root can't crash the running daemon.
  */
-async function runDiscovery(cfg: GitmobConfig, knownIds: Set<string>): Promise<void> {
+async function runDiscovery(cfg: RepoYetiConfig, knownIds: Set<string>): Promise<void> {
   let added = 0;
   try {
     const total = await discoverStream(cfg.roots, cfg.maxDepth, cfg.maxRepos, (f) => {

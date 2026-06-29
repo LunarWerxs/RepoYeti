@@ -87,7 +87,7 @@ function init(): void {
   });
 
   // Themes that blend the editor surface into the app's card colour (see web/src/style.css).
-  monaco.editor.defineTheme("gitmob-dark", {
+  monaco.editor.defineTheme("repoyeti-dark", {
     base: "vs-dark",
     inherit: true,
     // Diff-view token colours (see the "diff" language above) — mirror the app's git-status palette.
@@ -99,7 +99,7 @@ function init(): void {
     ],
     colors: { "editor.background": "#141419" },
   });
-  monaco.editor.defineTheme("gitmob-light", {
+  monaco.editor.defineTheme("repoyeti-light", {
     base: "vs",
     inherit: true,
     rules: [
@@ -119,5 +119,5 @@ export async function getMonaco(): Promise<typeof monaco> {
 }
 
 export function monacoThemeFor(mode: EditorTheme): string {
-  return mode === "dark" ? "gitmob-dark" : "gitmob-light";
+  return mode === "dark" ? "repoyeti-dark" : "repoyeti-light";
 }

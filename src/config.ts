@@ -1,7 +1,7 @@
 /**
  * Daemon configuration + paths.
  *
- * All local state lives under ~/.gitmob (never inside any tracked repo). The
+ * All local state lives under ~/.repoyeti (never inside any tracked repo). The
  * config file holds only non-secret operational settings (roots, port, limits);
  * secrets (AI keys, OAuth client_secret) live in the OS keychain via secrets.ts —
  * `hydrateSecrets()` loads them into memory at boot and `saveConfig()` strips them
@@ -20,9 +20,9 @@ import {
 
 export const VERSION = "0.0.1";
 
-/** Local state dir. Override with GITMOB_HOME (used by tests; also handy for relocating state). */
-export const CONFIG_DIR = process.env.GITMOB_HOME ?? join(homedir(), ".gitmob");
-export const DB_PATH = join(CONFIG_DIR, "gitmob.db");
+/** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
+export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
+export const DB_PATH = join(CONFIG_DIR, "repoyeti.db");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 /**
@@ -47,7 +47,7 @@ export interface OAuthConfig {
 }
 
 /**
- * Bring-your-own-key AI config. The owner pastes a provider API key; GitMob uses it
+ * Bring-your-own-key AI config. The owner pastes a provider API key; RepoYeti uses it
  * SERVER-SIDE only (list models + draft commit messages) and never returns it to any
  * client. The key bytes live in the OS keychain (see secrets.ts) — config.json on disk
  * carries only the selected model; `apiKey` is hydrated into this in-memory shape at boot
@@ -79,7 +79,7 @@ export interface AiCatalogEntry {
 }
 
 /**
- * Single source of truth for every AI provider GitMob supports.
+ * Single source of truth for every AI provider RepoYeti supports.
  * Derive AI_PROVIDERS from this so they can never diverge.
  * Order = display order in the Settings UI (free providers first).
  */
@@ -130,7 +130,7 @@ export interface AiConfig {
 export type AccessMode = "local" | "remote";
 
 /**
- * A registered Lore server (centralized server-of-record). GitMob stores only the URL + a
+ * A registered Lore server (centralized server-of-record). RepoYeti stores only the URL + a
  * display name — never credentials: Lore auth is delegated to the CLI's own session
  * (`lore login <url>`). Prefer an IP literal over `localhost` in the URL (a localhost→IPv6
  * QUIC handshake stalls ~30s before falling back to IPv4).
@@ -141,7 +141,7 @@ export interface LoreServer {
   url: string;
 }
 
-export interface GitmobConfig {
+export interface RepoYetiConfig {
   /** Absolute root paths to recursively scan for git repos. */
   roots: string[];
   /** Registered Lore servers the owner can clone repos from (see LoreServer). */
@@ -219,26 +219,26 @@ export interface RedactedAiConfig {
  * key/provider ALWAYS wins over this (see resolveApiKey / isBuiltinProvider).
  * Abuse only burns this key's rate limit — rotate by swapping the constant below.
  *
- * The key is read at call time from GITMOB_BUILTIN_GROQ_KEY (handy for dev / tests /
+ * The key is read at call time from REPOYETI_BUILTIN_GROQ_KEY (handy for dev / tests /
  * rotation) and otherwise falls back to the hardcoded constant. It counts as ACTIVE
  * only when it looks like a real Groq key (`gsk_…`), so the placeholder leaves the
- * feature DORMANT until a real key is dropped in, and `GITMOB_BUILTIN_GROQ_KEY=""`
+ * feature DORMANT until a real key is dropped in, and `REPOYETI_BUILTIN_GROQ_KEY=""`
  * force-disables it (used by the tests to assert the unconfigured baseline).
  */
 const BUILTIN_GROQ_KEY = "gsk_REPLACE_WITH_YOUR_THROWAWAY_GROQ_KEY";
 export const BUILTIN_AI = {
   provider: "groq" as AiProviderId,
-  model: process.env.GITMOB_BUILTIN_GROQ_MODEL ?? "llama-3.1-8b-instant",
+  model: process.env.REPOYETI_BUILTIN_GROQ_MODEL ?? "llama-3.1-8b-instant",
 };
 
 /** The active built-in key, or null when unset / placeholder / force-disabled. Read at call time. */
 export function builtinApiKey(): string | null {
-  const k = (process.env.GITMOB_BUILTIN_GROQ_KEY ?? BUILTIN_GROQ_KEY).trim();
+  const k = (process.env.REPOYETI_BUILTIN_GROQ_KEY ?? BUILTIN_GROQ_KEY).trim();
   return k.startsWith("gsk_") && !k.includes("REPLACE") ? k : null;
 }
 
 /** True when `provider` is served by the built-in key (the owner has set no key of their own). */
-export function isBuiltinProvider(cfg: GitmobConfig, provider: AiProviderId): boolean {
+export function isBuiltinProvider(cfg: RepoYetiConfig, provider: AiProviderId): boolean {
   return (
     provider === BUILTIN_AI.provider &&
     !cfg.ai?.providers?.[provider]?.apiKey &&
@@ -247,7 +247,7 @@ export function isBuiltinProvider(cfg: GitmobConfig, provider: AiProviderId): bo
 }
 
 /** Effective API key for a provider: the owner's key wins, else the built-in key (Groq only). */
-export function resolveApiKey(cfg: GitmobConfig, provider: AiProviderId): string | null {
+export function resolveApiKey(cfg: RepoYetiConfig, provider: AiProviderId): string | null {
   const own = cfg.ai?.providers?.[provider]?.apiKey;
   if (own) return own;
   if (provider === BUILTIN_AI.provider) return builtinApiKey();
@@ -255,7 +255,7 @@ export function resolveApiKey(cfg: GitmobConfig, provider: AiProviderId): string
 }
 
 /** Effective model for a provider: the owner's selection wins, else the built-in default model. */
-export function resolveModel(cfg: GitmobConfig, provider: AiProviderId): string | null {
+export function resolveModel(cfg: RepoYetiConfig, provider: AiProviderId): string | null {
   const own = cfg.ai?.providers?.[provider]?.model;
   if (own) return own;
   if (isBuiltinProvider(cfg, provider)) return BUILTIN_AI.model;
@@ -263,7 +263,7 @@ export function resolveModel(cfg: GitmobConfig, provider: AiProviderId): string 
 }
 
 /** Which provider "Generate" uses: the owner's choice if usable, else the first usable provider. */
-export function effectiveDefaultProvider(cfg: GitmobConfig): AiProviderId | null {
+export function effectiveDefaultProvider(cfg: RepoYetiConfig): AiProviderId | null {
   const pref = cfg.ai?.defaultProvider;
   if (pref && resolveApiKey(cfg, pref) && resolveModel(cfg, pref)) return pref;
   for (const id of AI_PROVIDERS) {
@@ -273,7 +273,7 @@ export function effectiveDefaultProvider(cfg: GitmobConfig): AiProviderId | null
 }
 
 /** Map the AI config to a key-free shape for the API. NEVER include `apiKey`. */
-export function redactAi(cfg: GitmobConfig): RedactedAiConfig {
+export function redactAi(cfg: RepoYetiConfig): RedactedAiConfig {
   const out: RedactedAiConfig = {
     providers: {},
     defaultProvider: null,
@@ -296,7 +296,7 @@ export function redactAi(cfg: GitmobConfig): RedactedAiConfig {
 }
 
 /**
- * The public "Sign in with Connections" OAuth client for GitMob, baked in so login works
+ * The public "Sign in with Connections" OAuth client for RepoYeti, baked in so login works
  * with zero owner setup. These are PUBLIC by nature (a PKCE client — no secret): the
  * client id and the fixed redirect "shim" are registered in the Connections IdP. The shim
  * is a tiny Cloudflare Worker that bounces the login back to whatever origin this daemon is
@@ -305,11 +305,11 @@ export function redactAi(cfg: GitmobConfig): RedactedAiConfig {
 const CONNECTIONS_OAUTH: OAuthConfig = {
   issuer: "https://accounts.connections.icu",
   clientId: "a790090c23b353c15ed973fd5fe20563",
-  redirectUri: "https://gitmob-auth.lunawerx.workers.dev/cb",
+  redirectUri: "https://repoyeti-auth.lunawerx.workers.dev/cb",
   scopes: "openid profile email",
 };
 
-const DEFAULTS: GitmobConfig = {
+const DEFAULTS: RepoYetiConfig = {
   roots: [],
   port: 7171,
   maxDepth: 6,
@@ -319,36 +319,66 @@ const DEFAULTS: GitmobConfig = {
 };
 
 /** Effective access mode (defaults to local). */
-export function accessMode(cfg: GitmobConfig): AccessMode {
+export function accessMode(cfg: RepoYetiConfig): AccessMode {
   return cfg.mode === "remote" ? "remote" : "local";
 }
 
 /** True when a sign-in flow is possible at all (an OIDC client is configured). With the
  *  baked-in Connections client this is true for every real install; only bare test configs
  *  (no `oauth`) are unauthenticated/local-open. The middleware layers `mode` on top. */
-export function authEnforced(cfg: GitmobConfig): boolean {
+export function authEnforced(cfg: RepoYetiConfig): boolean {
   return !!(cfg.oauth && cfg.oauth.issuer && cfg.oauth.clientId && cfg.oauth.redirectUri);
 }
 
-export function ownerConfigured(cfg: GitmobConfig): boolean {
+export function ownerConfigured(cfg: RepoYetiConfig): boolean {
   return !!(cfg.oauth?.ownerSub || cfg.oauth?.ownerEmail);
 }
 
-export function tunnelStartProblem(cfg: GitmobConfig): string | null {
+export function tunnelStartProblem(cfg: RepoYetiConfig): string | null {
   if (!authEnforced(cfg)) return "auth";
   if (!ownerConfigured(cfg)) return "owner";
   return null;
 }
 
+/**
+ * One-time migration of pre-rename state (back when RepoYeti was "GitMob"): move
+ * ~/.gitmob → ~/.repoyeti and rename the gitmob.db files inside. Only runs for the
+ * DEFAULT home — an explicit REPOYETI_HOME (tests / relocation) opts out. Best-effort:
+ * any failure just leaves a fresh ~/.repoyeti to be created normally.
+ */
+let legacyMigrated = false;
+function migrateLegacyState(): void {
+  if (legacyMigrated || process.env.REPOYETI_HOME) return;
+  legacyMigrated = true;
+  try {
+    const legacyDir = join(homedir(), ".gitmob");
+    if (!existsSync(CONFIG_DIR) && existsSync(legacyDir)) {
+      renameSync(legacyDir, CONFIG_DIR);
+    }
+    const legacyDb = join(CONFIG_DIR, "gitmob.db");
+    if (existsSync(legacyDb) && !existsSync(DB_PATH)) {
+      renameSync(legacyDb, DB_PATH);
+      for (const suf of ["-wal", "-shm"]) {
+        if (existsSync(legacyDb + suf) && !existsSync(DB_PATH + suf)) {
+          renameSync(legacyDb + suf, DB_PATH + suf);
+        }
+      }
+    }
+  } catch {
+    /* best-effort: a fresh ~/.repoyeti will be created on demand */
+  }
+}
+
 export function ensureConfigDir(): void {
+  migrateLegacyState();
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
 }
 
-export function loadConfig(): GitmobConfig {
+export function loadConfig(): RepoYetiConfig {
   ensureConfigDir();
   if (!existsSync(CONFIG_PATH)) return { ...DEFAULTS };
   try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Partial<GitmobConfig>;
+    const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Partial<RepoYetiConfig>;
     return {
       ...DEFAULTS,
       ...raw,
@@ -366,9 +396,9 @@ export function loadConfig(): GitmobConfig {
  * keep the legacy behavior — leave the secrets in config.json (0600) — so a key isn't
  * silently lost; `secrets.ts` has already warned once in that case.
  */
-function stripSecretsForDisk(cfg: GitmobConfig): GitmobConfig {
+function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
   if (!keychainAvailable()) return cfg; // degraded host → keep plaintext (no regression)
-  const clone = JSON.parse(JSON.stringify(cfg)) as GitmobConfig;
+  const clone = JSON.parse(JSON.stringify(cfg)) as RepoYetiConfig;
   if (clone.ai?.providers) {
     for (const p of Object.values(clone.ai.providers)) {
       if (p) delete p.apiKey;
@@ -378,7 +408,7 @@ function stripSecretsForDisk(cfg: GitmobConfig): GitmobConfig {
   return clone;
 }
 
-export function saveConfig(cfg: GitmobConfig): void {
+export function saveConfig(cfg: RepoYetiConfig): void {
   ensureConfigDir();
   // 0600 belt-and-suspenders; with the keychain available the file holds no secret at all.
   const onDisk = stripSecretsForDisk(cfg);
@@ -403,7 +433,7 @@ export function saveConfig(cfg: GitmobConfig): void {
  * redactAi, …) sees the hydrated key without becoming async. Idempotent + best-effort: on a
  * keychain-less host it leaves the plaintext config untouched.
  */
-export async function hydrateSecrets(cfg: GitmobConfig): Promise<void> {
+export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
   let migrated = false;
 
   if (cfg.ai?.providers) {
@@ -434,7 +464,7 @@ export async function hydrateSecrets(cfg: GitmobConfig): Promise<void> {
 }
 
 /** Add an absolute root to the config (idempotent). Returns the updated config. */
-export function addRoot(path: string): GitmobConfig {
+export function addRoot(path: string): RepoYetiConfig {
   const abs = resolve(path);
   const cfg = loadConfig();
   if (!cfg.roots.includes(abs)) cfg.roots.push(abs);

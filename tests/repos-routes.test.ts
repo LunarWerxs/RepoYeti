@@ -3,12 +3,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 import { MIN_CONTENT_SEARCH } from "../src/service.ts";
 import { upsertRepo, getRepo, setRepoHidden, setRepoPinned, setRepoStarred } from "../src/db.ts";
 
 // Local mode (no OIDC) → /api/* is not gated, so we can exercise the routes directly.
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
 test("GET /api/status reports the version and a null tunnel URL until one is set", async () => {
   const res = await createApp(localCfg()).request("/api/status");

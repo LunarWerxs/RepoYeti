@@ -1,5 +1,5 @@
 /**
- * SQLite state (bun:sqlite). One file at ~/.gitmob/gitmob.db.
+ * SQLite state (bun:sqlite). One file at ~/.repoyeti/repoyeti.db.
  *
  * WAL mode + NORMAL sync is what lets the watcher, the API, and git operations
  * write concurrently without corrupting a flat file. The full schema is created

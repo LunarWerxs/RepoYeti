@@ -1,4 +1,4 @@
-# GitMob performance and scalability todo
+# RepoYeti performance and scalability todo
 
 Ordered by severity/importance. P1 is the highest priority.
 

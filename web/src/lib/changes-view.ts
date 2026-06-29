@@ -21,10 +21,10 @@ export const MIN_CHANGES_PX = 96;
 export const MAX_CHANGES_PX = 1400;
 
 /** Global default, shared by every card that has no manual override. */
-export const changesViewSize = useLocalStorage<ChangesViewSize>("gitmob:changesViewSize", "medium");
+export const changesViewSize = useLocalStorage<ChangesViewSize>("repoyeti:changesViewSize", "medium");
 
 /** repoId → manually-dragged fixed height (px). Absent = use the global preset. */
-const overrides = useLocalStorage<Record<string, number>>("gitmob:changesViewHeights", {});
+const overrides = useLocalStorage<Record<string, number>>("repoyeti:changesViewHeights", {});
 
 export function hasChangesOverride(repoId: string): boolean {
   return typeof overrides.value[repoId] === "number";

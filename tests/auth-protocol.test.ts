@@ -33,25 +33,25 @@ import {
   handleComplete,
   authMiddleware,
 } from "../src/auth.ts";
-import type { OAuthConfig, GitmobConfig } from "../src/config.ts";
+import type { OAuthConfig, RepoYetiConfig } from "../src/config.ts";
 
-// ── Temp GITMOB_HOME so tests never pollute ~/.gitmob ─────────────────────────
-const TEST_HOME = join(tmpdir(), `gitmob-auth-protocol-test-${process.pid}`);
-const ORIG_HOME = process.env.GITMOB_HOME;
+// ── Temp REPOYETI_HOME so tests never pollute ~/.repoyeti ─────────────────────────
+const TEST_HOME = join(tmpdir(), `repoyeti-auth-protocol-test-${process.pid}`);
+const ORIG_HOME = process.env.REPOYETI_HOME;
 
 beforeAll(() => {
   mkdirSync(TEST_HOME, { recursive: true });
-  process.env.GITMOB_HOME = TEST_HOME;
+  process.env.REPOYETI_HOME = TEST_HOME;
   // Force the signing key module to re-read from the temp dir on next call.
-  // (The module caches KEY in a closure; setting GITMOB_HOME only matters if the
+  // (The module caches KEY in a closure; setting REPOYETI_HOME only matters if the
   //  first key() call in this process reads from it. In the test runner each test
   //  file is its own module instance so the cache starts cold — this is belt-and-
   //  suspenders to make intent explicit.)
 });
 
 afterAll(() => {
-  if (ORIG_HOME === undefined) delete process.env.GITMOB_HOME;
-  else process.env.GITMOB_HOME = ORIG_HOME;
+  if (ORIG_HOME === undefined) delete process.env.REPOYETI_HOME;
+  else process.env.REPOYETI_HOME = ORIG_HOME;
   rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
@@ -131,7 +131,7 @@ test("[2a] a valid signed state whose nonce is NOT in txs yields 400 (expired li
   const statePayload = JSON.stringify({ n: nonce, o: "https://example.com" });
   const state = sign(statePayload);
 
-  const cfg: GitmobConfig = {
+  const cfg: RepoYetiConfig = {
     roots: [],
     port: 7171,
     maxDepth: 6,
@@ -159,7 +159,7 @@ test("[2b] a valid signed state whose nonce IS in txs passes the nonce check (re
   const statePayload = JSON.stringify({ n: nonce, o: "https://example.com" });
   const state = sign(statePayload);
 
-  const cfg: GitmobConfig = {
+  const cfg: RepoYetiConfig = {
     roots: [],
     port: 7171,
     maxDepth: 6,
@@ -186,7 +186,7 @@ test("[2b] a valid signed state whose nonce IS in txs passes the nonce check (re
 });
 
 test("[2c] handleComplete with missing code AND state returns 400 (missing authorization code)", async () => {
-  const cfg: GitmobConfig = {
+  const cfg: RepoYetiConfig = {
     roots: [],
     port: 7171,
     maxDepth: 6,
@@ -429,7 +429,7 @@ test("authMiddleware: a valid session cookie grants access in remote mode over t
   };
   const cookieValue = makeSessionCookie(validSession);
 
-  const cfg: GitmobConfig = {
+  const cfg: RepoYetiConfig = {
     roots: [],
     port: 7171,
     maxDepth: 6,
@@ -460,7 +460,7 @@ test("authMiddleware: a tampered session cookie is rejected in remote mode over 
   const [body, mac] = legitimate.split(".");
   const tampered = `${body!.slice(0, -1) + (body!.slice(-1) === "A" ? "B" : "A")}.${mac}`;
 
-  const cfg: GitmobConfig = {
+  const cfg: RepoYetiConfig = {
     roots: [],
     port: 7171,
     maxDepth: 6,

@@ -1,6 +1,6 @@
-# Contributing to GitMob
+# Contributing to RepoYeti
 
-Thanks for hacking on GitMob. This is a Bun daemon + a Vue 3 PWA; the daemon is the primary
+Thanks for hacking on RepoYeti. This is a Bun daemon + a Vue 3 PWA; the daemon is the primary
 artifact and the web app is served from `web/dist`.
 
 ## Local setup

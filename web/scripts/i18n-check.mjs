@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * i18n compliance check for the GitMob web UI.
+ * i18n compliance check for the RepoYeti web UI.
  *
  * Fails (exit 1) on any of:
  *   1. MISSING KEY     — a t()/$t('x') reference in source with no entry in en.json.
@@ -27,7 +27,7 @@ const PROSE_ATTRS = new Set(["placeholder", "title", "aria-label", "alt", "aria-
 // Elements whose text content is never UI prose.
 const SKIP_TEXT_TAGS = new Set(["code", "pre", "style", "script"]);
 // Literal text that is allowed to stay hardcoded (brand/символы/technical, non-translatable).
-const TEXT_ALLOWLIST = new Set(["GitMob", "·", "—", "/"]);
+const TEXT_ALLOWLIST = new Set(["RepoYeti", "·", "—", "/"]);
 
 const errors = [];
 const warnings = [];

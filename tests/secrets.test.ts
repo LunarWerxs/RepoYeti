@@ -5,17 +5,17 @@ import { CONFIG_DIR, loadConfig, saveConfig, hydrateSecrets } from "../src/confi
 import { getSecret, setSecret, deleteSecret, aiKeyName } from "../src/secrets.ts";
 
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
-// An isolated keychain namespace so these tests never touch the user's real `gitmob` entries.
-const SVC = `gitmob-test-${process.pid}`;
+// An isolated keychain namespace so these tests never touch the user's real `repoyeti` entries.
+const SVC = `repoyeti-test-${process.pid}`;
 
 async function withService<T>(fn: () => Promise<T> | T): Promise<T> {
-  const prev = process.env.GITMOB_KEYCHAIN_SERVICE;
-  process.env.GITMOB_KEYCHAIN_SERVICE = SVC;
+  const prev = process.env.REPOYETI_KEYCHAIN_SERVICE;
+  process.env.REPOYETI_KEYCHAIN_SERVICE = SVC;
   try {
     return await fn(); // MUST await — else the env is restored before the async keychain ops run
   } finally {
-    if (prev === undefined) delete process.env.GITMOB_KEYCHAIN_SERVICE;
-    else process.env.GITMOB_KEYCHAIN_SERVICE = prev;
+    if (prev === undefined) delete process.env.REPOYETI_KEYCHAIN_SERVICE;
+    else process.env.REPOYETI_KEYCHAIN_SERVICE = prev;
   }
 }
 
@@ -81,8 +81,8 @@ test.skipIf(!HAVE_KEYCHAIN)(
 );
 
 test("with the keychain disabled, saveConfig keeps the key in config.json (no silent key loss)", () => {
-  const prevDisabled = process.env.GITMOB_NO_KEYCHAIN;
-  process.env.GITMOB_NO_KEYCHAIN = "1";
+  const prevDisabled = process.env.REPOYETI_NO_KEYCHAIN;
+  process.env.REPOYETI_NO_KEYCHAIN = "1";
   const saved = snapshotConfig();
   try {
     const cfg = loadConfig();
@@ -91,8 +91,8 @@ test("with the keychain disabled, saveConfig keeps the key in config.json (no si
     const onDisk = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
     expect(onDisk.ai.providers.openai.apiKey).toBe("sk-fallback");
   } finally {
-    if (prevDisabled === undefined) delete process.env.GITMOB_NO_KEYCHAIN;
-    else process.env.GITMOB_NO_KEYCHAIN = prevDisabled;
+    if (prevDisabled === undefined) delete process.env.REPOYETI_NO_KEYCHAIN;
+    else process.env.REPOYETI_NO_KEYCHAIN = prevDisabled;
     restoreConfig(saved);
   }
 });

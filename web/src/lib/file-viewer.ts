@@ -81,15 +81,15 @@ export function isViewing(repoId: string, path: string): boolean {
 /** Content (whole file) vs Diff (HEAD ↔ working tree). Persisted, so the tab sticks.
  *  Defaults to Diff — in a source-control panel the change is the interesting view. */
 export type ViewerMode = "content" | "diff";
-export const viewerMode = useLocalStorage<ViewerMode>("gitmob:fileViewerMode", "diff");
+export const viewerMode = useLocalStorage<ViewerMode>("repoyeti:fileViewerMode", "diff");
 
 /** Diff highlighting granularity: true = word/character-level (Monaco's default inner-change
  *  highlight), false = whole-line only. Persisted; toggled from the diff header. */
-export const wordLevelDiff = useLocalStorage<boolean>("gitmob:fileViewerWordDiff", true);
+export const wordLevelDiff = useLocalStorage<boolean>("repoyeti:fileViewerWordDiff", true);
 
 /** Diff layout: true = split (side-by-side), false = unified (inline). Persisted; toggled
  *  from the diff header. Split still auto-folds to inline when the panel is too narrow. */
-export const diffSplitView = useLocalStorage<boolean>("gitmob:fileViewerSplitView", true);
+export const diffSplitView = useLocalStorage<boolean>("repoyeti:fileViewerSplitView", true);
 
 // ── desktop push-panel geometry ───────────────────────────────────────────────
 /** Desktop = right push-drawer; narrower = mobile bottom sheet. Matches the Settings sheet. */
@@ -103,7 +103,7 @@ const clampWidth = (px: number): number =>
   Math.min(MAX_VIEWER_PX, Math.max(MIN_VIEWER_PX, Math.round(px)));
 
 /** Persisted seed for the panel width (committed on drag release). */
-const storedWidth = useLocalStorage<number>("gitmob:fileViewerWidth", 680);
+const storedWidth = useLocalStorage<number>("repoyeti:fileViewerWidth", 680);
 /** Live width — drives both the panel and the page shift; updated continuously while dragging. */
 export const viewerWidth = ref(clampWidth(storedWidth.value));
 

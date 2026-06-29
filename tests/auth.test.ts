@@ -6,23 +6,23 @@ import {
   accessMode,
   ownerConfigured,
   tunnelStartProblem,
-  type GitmobConfig,
+  type RepoYetiConfig,
 } from "../src/config.ts";
 
-const base: GitmobConfig = { roots: [], port: 7171, maxDepth: 6, maxRepos: 200 };
-const withOAuth: GitmobConfig = {
+const base: RepoYetiConfig = { roots: [], port: 7171, maxDepth: 6, maxRepos: 200 };
+const withOAuth: RepoYetiConfig = {
   ...base,
   oauth: {
     issuer: "https://accounts.connections.icu",
     clientId: "cid",
-    redirectUri: "https://gitmob-auth.example.workers.dev/cb",
+    redirectUri: "https://repoyeti-auth.example.workers.dev/cb",
     ownerSub: "owner-1",
   },
 };
-const remoteMode: GitmobConfig = { ...withOAuth, mode: "remote" };
-const localMode: GitmobConfig = { ...withOAuth, mode: "local" };
+const remoteMode: RepoYetiConfig = { ...withOAuth, mode: "remote" };
+const localMode: RepoYetiConfig = { ...withOAuth, mode: "local" };
 
-function appWith(cfg: GitmobConfig): Hono {
+function appWith(cfg: RepoYetiConfig): Hono {
   const app = new Hono();
   app.use("/api/*", authMiddleware(cfg));
   app.get("/api/repos", (c) => c.json({ ok: true }));

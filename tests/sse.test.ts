@@ -1,12 +1,12 @@
 import { test, expect } from "bun:test";
 import { createApp } from "../src/daemon.ts";
 import { addListener, removeListener, broadcast } from "../src/bus.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 
 // Closes the audit's P0 gap: the SSE bus + the GET /api/events live heartbeat (the dashboard's
 // real-time channel) had no test. A regression here would silently kill live updates.
 
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
 // ── bus (pub/sub) ────────────────────────────────────────────────────────────────
 

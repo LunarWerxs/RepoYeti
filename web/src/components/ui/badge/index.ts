@@ -3,7 +3,7 @@ import { cva } from "class-variance-authority"
 
 export { default as Badge } from "./Badge.vue"
 
-// Unified badge set (shared by GitMob + DevWebUI): tinted status chips
+// Unified badge set (shared by RepoYeti + DevWebUI): tinted status chips
 // (primary/success/warning/info) for state, a solid `destructive` for counts,
 // plus neutral default/secondary/outline. See web/UI_UNIFICATION.md §5.
 export const badgeVariants = cva(

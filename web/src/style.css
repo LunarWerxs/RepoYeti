@@ -5,7 +5,7 @@
    :where form is needed because reka-ui portals can land `.dark` on the element). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* GitMob keeps its green git-graph accent; light + dark are both supported (the
+/* RepoYeti keeps its green git-graph accent; light + dark are both supported (the
    accent is tuned per mode for contrast). Dark is the default — see index.html.
    Token names + the dark-mode mechanism are shared with DevWebUI; see
    web/UI_UNIFICATION.md. */

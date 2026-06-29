@@ -3,7 +3,7 @@
  *
  * service.ts / discovery / the watcher resolve a backend here instead of importing git
  * functions directly. While Lore is a pre-1.x spike it's OFF by default: detectVcs only ever
- * returns "git" (or null) unless the owner opts in with GITMOB_LORE=1, so the running daemon's
+ * returns "git" (or null) unless the owner opts in with REPOYETI_LORE=1, so the running daemon's
  * behavior is byte-for-byte unchanged until Lore is deliberately enabled.
  */
 import { existsSync } from "node:fs";
@@ -12,9 +12,9 @@ import { gitBackend } from "./git.ts";
 import { loreBackend } from "./lore.ts";
 import type { VcsBackend, VcsKind } from "./types.ts";
 
-/** Opt-in flag for the experimental Lore backend: GITMOB_LORE=1|true|yes|on. */
+/** Opt-in flag for the experimental Lore backend: REPOYETI_LORE=1|true|yes|on. */
 export function isLoreEnabled(): boolean {
-  const v = (process.env.GITMOB_LORE ?? "").trim().toLowerCase();
+  const v = (process.env.REPOYETI_LORE ?? "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 

@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea or improvement for GitMob.
+description: Suggest an idea or improvement for RepoYeti.
 labels: ["enhancement"]
 body:
   - type: textarea
@@ -13,7 +13,7 @@ body:
     id: proposal
     attributes:
       label: Proposed solution
-      description: What would you like GitMob to do?
+      description: What would you like RepoYeti to do?
     validations:
       required: false
   - type: textarea
@@ -21,7 +21,7 @@ body:
     attributes:
       label: Safety considerations
       description: |
-        GitMob's core invariant is that the daemon never leaves a repo in an unsafe / half-merged
+        RepoYeti's core invariant is that the daemon never leaves a repo in an unsafe / half-merged
         state, and never performs irreversible actions from the phone without confirmation. Does
         your idea fit that? (See docs/FEATURE_GAP_ANALYSIS.md for what's intentionally out of scope.)
     validations:

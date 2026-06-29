@@ -1,7 +1,7 @@
 /**
  * The VCS-agnostic backend abstraction (src/vcs/*). Proves the git backend satisfies the
  * contract, that the registry resolves both kinds, and — critically — that the Lore backend
- * is gated behind GITMOB_LORE so the default git path is unchanged.
+ * is gated behind REPOYETI_LORE so the default git path is unchanged.
  */
 import { describe, it, expect, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -13,11 +13,11 @@ import { detectVcs, backendFor, isLoreEnabled } from "../src/vcs/index.ts";
 
 describe("vcs backend abstraction", () => {
   const created: string[] = [];
-  const origLore = process.env.GITMOB_LORE;
+  const origLore = process.env.REPOYETI_LORE;
 
   afterEach(() => {
-    if (origLore === undefined) delete process.env.GITMOB_LORE;
-    else process.env.GITMOB_LORE = origLore;
+    if (origLore === undefined) delete process.env.REPOYETI_LORE;
+    else process.env.REPOYETI_LORE = origLore;
     for (const d of created.splice(0)) {
       try {
         rmSync(d, { recursive: true, force: true });
@@ -41,7 +41,7 @@ describe("vcs backend abstraction", () => {
     expect(loreBackend.capabilities).toEqual({ stash: false, fetch: false, multipleRemotes: false });
   });
 
-  it("detects git always, but Lore only when GITMOB_LORE is set", () => {
+  it("detects git always, but Lore only when REPOYETI_LORE is set", () => {
     const gitRepo = mkdtempSync(join(tmpdir(), "ry-git-"));
     created.push(gitRepo);
     mkdirSync(join(gitRepo, ".git"));
@@ -49,12 +49,12 @@ describe("vcs backend abstraction", () => {
     created.push(loreRepo);
     mkdirSync(join(loreRepo, ".lore"));
 
-    delete process.env.GITMOB_LORE;
+    delete process.env.REPOYETI_LORE;
     expect(isLoreEnabled()).toBe(false);
     expect(detectVcs(gitRepo)).toBe("git");
     expect(detectVcs(loreRepo)).toBe(null); // .lore ignored while Lore is disabled
 
-    process.env.GITMOB_LORE = "1";
+    process.env.REPOYETI_LORE = "1";
     expect(isLoreEnabled()).toBe(true);
     expect(detectVcs(loreRepo)).toBe("lore");
     expect(detectVcs(gitRepo)).toBe("git"); // git still wins / still works

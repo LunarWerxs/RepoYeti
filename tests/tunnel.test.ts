@@ -15,10 +15,10 @@ test("cloudflared resolver prefers bundled dist/vendor executable", () => {
   writeFileSync(bundled, "");
   chmodSync(bundled, 0o755);
 
-  expect(resolveCloudflaredExecutable(join(dist, "gitmob"), "linux")).toBe(bundled);
+  expect(resolveCloudflaredExecutable(join(dist, "repoyeti"), "linux")).toBe(bundled);
 });
 
 test("cloudflared resolver falls back to PATH executable name", () => {
   const root = tmp();
-  expect(resolveCloudflaredExecutable(join(root, "gitmob"), "win32")).toBe("cloudflared.exe");
+  expect(resolveCloudflaredExecutable(join(root, "repoyeti"), "win32")).toBe("cloudflared.exe");
 });

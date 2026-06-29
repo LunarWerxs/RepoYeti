@@ -2,7 +2,7 @@
 
 ## Intended purpose
 
-GitMob is intended to be a local-first, system-wide remote Git manager: a Bun daemon discovers local repositories, tracks branch/dirty/ahead/behind state, serializes safe git actions, manages per-repo identities, and exposes a mobile PWA over a Cloudflare tunnel only when app-layer owner auth is configured. The design emphasizes no half-merged repos, no global/repo git config mutation, loopback-only local serving, owner-only remote access, and secret handling that does not leak raw credentials.
+RepoYeti is intended to be a local-first, system-wide remote Git manager: a Bun daemon discovers local repositories, tracks branch/dirty/ahead/behind state, serializes safe git actions, manages per-repo identities, and exposes a mobile PWA over a Cloudflare tunnel only when app-layer owner auth is configured. The design emphasizes no half-merged repos, no global/repo git config mutation, loopback-only local serving, owner-only remote access, and secret handling that does not leak raw credentials.
 
 ## Todo
 
@@ -16,13 +16,13 @@ GitMob is intended to be a local-first, system-wide remote Git manager: a Bun da
 
 - Evidence: `src/config.ts:103-116` embeds a Groq bearer key in source; `src/config.ts:118-157` treats that built-in key as configured and makes it the effective default. `web/src/store.ts:40-42` enables AI when the default provider has a model, and `web/src/components/RepoCard.vue:129-133` sends the repo diff to that provider when Generate is clicked. Tests intentionally lock this in at `tests/ai.test.ts:42-70` and `tests/ai-routes.test.ts:14-22`.
 - Risk/impact: The repo publishes a live credential and makes third-party diff upload available by default, contradicting the BYOK posture in `src/ai.ts:1-8` and the Settings copy at `web/src/components/Settings.vue:173-175`. It also creates shared-key abuse/rate-limit risk and a privacy surprise for local code changes.
-- Suggested fix: Remove `BUILTIN_AI` from committed code. Require an owner-configured key or an explicit local opt-in such as `GITMOB_DEMO_GROQ_KEY`. Update UI copy and tests so "Generate" is disabled until the owner connects a provider.
+- Suggested fix: Remove `BUILTIN_AI` from committed code. Require an owner-configured key or an explicit local opt-in such as `REPOYETI_DEMO_GROQ_KEY`. Update UI copy and tests so "Generate" is disabled until the owner connects a provider.
 
 ### P2 - Do not allow public tunnel startup while ownership is unclaimed
 
 - Evidence: `src/index.ts:105-113` allows `--tunnel` whenever OAuth issuer/client/redirect are present; `src/index.ts:147-149` only logs that ownership is unclaimed; `src/auth.ts:229-235` persists the first verified Connections sign-in as owner. The design promise says an attacker with only the tunnel URL must sign in as the trusted owner (`MARCHING_ORDERS.md:329-336`).
 - Risk/impact: If the quick-tunnel URL leaks before the owner signs in, any Connections account that reaches it first can claim the daemon. That is not the same guarantee as "trusted owner only" and is especially risky for a daemon that can run git operations against local repos.
-- Suggested fix: Refuse `gitmob start --tunnel` unless `ownerSub` or `ownerEmail` is already configured, or constrain first-use ownership to a local-only pairing flow that requires a terminal-displayed secret.
+- Suggested fix: Refuse `repoyeti start --tunnel` unless `ownerSub` or `ownerEmail` is already configured, or constrain first-use ownership to a local-only pairing flow that requires a terminal-displayed secret.
 
 ### P2 - Harden `core.sshCommand` construction from identity `sshKeyPath`
 
@@ -32,7 +32,7 @@ GitMob is intended to be a local-first, system-wide remote Git manager: a Bun da
 
 ### P3 - Move owner AI keys and OAuth client secrets out of plaintext config
 
-- Evidence: `src/daemon.ts:265-273` validates and stores provider API keys directly in `cfg`; `src/config.ts:191-195` writes the whole config JSON to `~/.gitmob/config.json`. `src/config.ts:40-44` acknowledges AI keys are stored there, while `MARCHING_ORDERS.md:338-346` says confidential OAuth/client tokens belong in the daemon keychain.
+- Evidence: `src/daemon.ts:265-273` validates and stores provider API keys directly in `cfg`; `src/config.ts:191-195` writes the whole config JSON to `~/.repoyeti/config.json`. `src/config.ts:40-44` acknowledges AI keys are stored there, while `MARCHING_ORDERS.md:338-346` says confidential OAuth/client tokens belong in the daemon keychain.
 - Risk/impact: A config file read leaks user provider keys and any confidential OAuth `clientSecret`. Mode `0600` helps on Unix-like systems but is not equivalent to OS keychain storage, and the code comments still imply a stronger secret model than implemented.
 - Suggested fix: Store only keychain handles in config. Use `keytar` where available and an encrypted local fallback where not. Add migration code that lifts existing `ai.providers.*.apiKey` and `oauth.clientSecret` out of JSON.
 

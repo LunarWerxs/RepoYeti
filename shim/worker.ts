@@ -1,5 +1,5 @@
 /**
- * GitMob OAuth redirect shim — a Cloudflare Worker (~free, stable `*.workers.dev`).
+ * RepoYeti OAuth redirect shim — a Cloudflare Worker (~free, stable `*.workers.dev`).
  *
  * Why this exists: the daemon lives on a free, *rotating* quick-tunnel URL, but an
  * OAuth redirect URI must be a single *stable* registered URL. So we register THIS
@@ -12,7 +12,7 @@
  * any host outside the allowed suffix list (no open redirect).
  *
  * Deploy: see shim/README.md (`wrangler deploy`). Register `https://<name>.workers.dev/cb`
- * as the GitMob app's redirect URI, and set ALLOWED_SUFFIXES if you use a custom tunnel.
+ * as the RepoYeti app's redirect URI, and set ALLOWED_SUFFIXES if you use a custom tunnel.
  */
 export interface Env {
   /** Comma-separated host suffixes the shim may bounce to. Default: trycloudflare. */
@@ -22,7 +22,7 @@ export interface Env {
 function page(message: string, status: number): Response {
   return new Response(
     `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">` +
-      `<title>GitMob sign-in</title><body style="margin:0;background:#0e0e12;color:#e6e6ea;` +
+      `<title>RepoYeti sign-in</title><body style="margin:0;background:#0e0e12;color:#e6e6ea;` +
       `font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh">` +
       `<div style="max-width:320px;text-align:center;padding:24px"><div style="font-size:38px">🔒</div>` +
       `<p style="color:#9a9aa6;line-height:1.5">${message}</p></div>`,
@@ -60,7 +60,7 @@ function originAllowed(origin: string, env: Env): boolean {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname !== "/cb") return new Response("gitmob auth shim", { status: 200 });
+    if (url.pathname !== "/cb") return new Response("repoyeti auth shim", { status: 200 });
 
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");

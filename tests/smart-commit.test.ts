@@ -16,15 +16,15 @@ import { gitCommitGroups, collectCommitPlanInput, collectPathsDiff, isNoisyPath 
 import { smartCommitRepo, planCommitInput, collectRepoPathsDiff } from "../src/service.ts";
 import { createApp } from "../src/daemon.ts";
 import { upsertRepo } from "../src/db.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 import type { Identity } from "../src/db.ts";
 
 // Force the built-in Groq key OFF so "no provider configured" is deterministic regardless of
-// any GITMOB_BUILTIN_GROQ_KEY in a dev .env (mirrors tests/ai.test.ts).
-process.env.GITMOB_BUILTIN_GROQ_KEY = "";
+// any REPOYETI_BUILTIN_GROQ_KEY in a dev .env (mirrors tests/ai.test.ts).
+process.env.REPOYETI_BUILTIN_GROQ_KEY = "";
 
 const ID: Identity = { id: "x", displayName: "T", gitUsername: "Tester", gitEmail: "t@test.io", sshKeyPath: null };
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 const J = (body: unknown) => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 /** A git repo with one seed commit, local author configured (so null-identity commits work). */

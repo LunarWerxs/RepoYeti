@@ -26,7 +26,7 @@ export interface TreeCollapseApi {
 const KEY: InjectionKey<TreeCollapseApi> = Symbol("gm-tree-collapse");
 
 /** repoId → collapsed folder paths. Absent / empty = fully expanded. */
-const persisted = useLocalStorage<Record<string, string[]>>("gitmob:changesCollapsed", {});
+const persisted = useLocalStorage<Record<string, string[]>>("repoyeti:changesCollapsed", {});
 
 function makeApi(repoId?: string): TreeCollapseApi {
   const collapsed = reactive(new Set<string>(repoId ? (persisted.value[repoId] ?? []) : []));

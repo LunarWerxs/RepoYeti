@@ -6,7 +6,7 @@
  * Linux libsecret). That means: no native addon to compile or ship, no `bun --compile`
  * caveat, and no bespoke crypto to maintain — exactly the "simple, low-maintenance"
  * posture we want. Secrets the daemon must persist (AI provider API keys, an optional
- * confidential OAuth `client_secret`) live HERE, never in `~/.gitmob/config.json`.
+ * confidential OAuth `client_secret`) live HERE, never in `~/.repoyeti/config.json`.
  *
  * Graceful degradation: if the OS secret service isn't available (e.g. a headless Linux
  * box with no libsecret), every call becomes a no-op + a one-time warning and the daemon
@@ -16,11 +16,11 @@
  */
 import { secrets } from "bun";
 
-/** Keychain "service" namespace. Overridable so tests don't touch the real `gitmob` store.
+/** Keychain "service" namespace. Overridable so tests don't touch the real `repoyeti` store.
  *  Read per call (not at import) so a test can set it before exercising the boundary. */
-const service = (): string => process.env.GITMOB_KEYCHAIN_SERVICE ?? "gitmob";
+const service = (): string => process.env.REPOYETI_KEYCHAIN_SERVICE ?? "repoyeti";
 /** Escape hatch (tests / odd environments): force the plaintext-config fallback path. */
-const disabled = (): boolean => process.env.GITMOB_NO_KEYCHAIN === "1";
+const disabled = (): boolean => process.env.REPOYETI_NO_KEYCHAIN === "1";
 
 let warned = false;
 // null = untested yet, true/false = last observed availability.
@@ -31,8 +31,8 @@ function warnOnce(op: string, e: unknown): void {
   if (warned) return;
   warned = true;
   console.warn(
-    `gitmob: OS keychain unavailable (${op}: ${e instanceof Error ? e.message : String(e)}). ` +
-      `Storing secrets in plaintext ~/.gitmob/config.json instead — install your platform's ` +
+    `repoyeti: OS keychain unavailable (${op}: ${e instanceof Error ? e.message : String(e)}). ` +
+      `Storing secrets in plaintext ~/.repoyeti/config.json instead — install your platform's ` +
       `secret service (libsecret on Linux) for at-rest protection.`,
   );
 }
@@ -42,13 +42,32 @@ export function keychainAvailable(): boolean {
   return !disabled() && available !== false;
 }
 
+/** Pre-rename keychain namespace (back when RepoYeti was "GitMob"). On a default install
+ *  we transparently read secrets still stored there and re-home them under the new
+ *  service on first access, so a saved AI key survives the rename without re-entry. */
+const LEGACY_SERVICE = "gitmob";
+
 /** Read a secret by name. Returns null when absent or the keychain is unavailable. */
 export async function getSecret(name: string): Promise<string | null> {
   if (disabled()) return null;
   try {
     const v = await secrets.get({ service: service(), name });
     available = true;
-    return v ?? null;
+    if (v != null) return v;
+    // Legacy fallback: a secret left under the old "gitmob" service (default install only).
+    if (!process.env.REPOYETI_KEYCHAIN_SERVICE) {
+      const legacy = await secrets.get({ service: LEGACY_SERVICE, name });
+      if (legacy != null) {
+        try {
+          await secrets.set({ service: service(), name, value: legacy });
+          await secrets.delete({ service: LEGACY_SERVICE, name });
+        } catch {
+          /* best-effort re-home; returning the value is what matters */
+        }
+        return legacy;
+      }
+    }
+    return null;
   } catch (e) {
     warnOnce("get", e);
     return null;
@@ -82,3 +101,6 @@ export async function deleteSecret(name: string): Promise<void> {
 // ── secret-name scheme (one flat namespace under the SERVICE) ──────────────────
 export const aiKeyName = (provider: string): string => `ai/${provider}`;
 export const OAUTH_CLIENT_SECRET = "oauth/clientSecret";
+/** Named-tunnel connector token — a credential that lets cloudflared run the owner's tunnel,
+ *  so it's keychain-stored and stripped from config.json (see config.ts TunnelConfig). */
+export const TUNNEL_TOKEN = "tunnel/token";

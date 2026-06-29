@@ -1,14 +1,14 @@
 /**
  * Lore servers registry routes (/api/servers). Covers the read + validation paths that do NOT
- * persist config (so the test never writes ~/.gitmob); the happy-path add/clone is exercised at
+ * persist config (so the test never writes ~/.repoyeti); the happy-path add/clone is exercised at
  * the service layer (cloneLoreRepo) against a live binary, not here.
  */
 import { test, expect } from "bun:test";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 
 // Local mode (no OIDC) → /api/* is ungated, so routes are exercised directly.
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 const J = (body: unknown) => ({
   method: "POST",
   headers: { "content-type": "application/json" },

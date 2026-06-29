@@ -43,7 +43,7 @@ interface SyncedRepo {
 
 // Desktop-notification opt-in is per-browser (it rides the browser's Notification permission),
 // so it lives in localStorage, not the daemon config.
-const DESKTOP_NOTIFY_KEY = "gitmob.desktopNotify";
+const DESKTOP_NOTIFY_KEY = "repoyeti.desktopNotify";
 function loadDesktopNotifyPref(): boolean {
   try {
     return localStorage.getItem(DESKTOP_NOTIFY_KEY) === "1";
@@ -59,7 +59,7 @@ function saveDesktopNotifyPref(on: boolean): void {
   }
 }
 
-export const useStore = defineStore("gitmob", () => {
+export const useStore = defineStore("repoyeti", () => {
   const repos = ref<Repo[]>([]);
   const identities = ref<Identity[]>([]);
   const loading = ref(true);
@@ -100,7 +100,7 @@ export const useStore = defineStore("gitmob", () => {
 
   // BYOK AI settings (redacted — never holds a key). `aiEnabled` gates the Generate button.
   // Style is hardcoded to Conventional Commits (no UI picker); owners can still override
-  // it in ~/.gitmob/config.json. The daemon mirrors this default.
+  // it in ~/.repoyeti/config.json. The daemon mirrors this default.
   const aiSettings = ref<AiSettings>({ providers: {}, defaultProvider: null, style: "conventional", yolo: false });
   const aiReady = ref(false);
   /** Provider catalog from GET /api/ai/catalog — safe display metadata, no secrets. */
@@ -115,7 +115,7 @@ export const useStore = defineStore("gitmob", () => {
   );
 
   // Public cloudflared tunnel URL (null until one exists) + whether a tunnel is up.
-  // Surfaced in the connection panel so the owner can open GitMob on their phone.
+  // Surfaced in the connection panel so the owner can open RepoYeti on their phone.
   const tunnelUrl = ref<string | null>(null);
   const tunnelActive = ref(false);
 
@@ -424,7 +424,7 @@ export const useStore = defineStore("gitmob", () => {
     ) {
       try {
         // A fixed tag coalesces rapid-fire warnings into one OS toast instead of a stack.
-        new Notification(title, { body, tag: "gitmob-behind" });
+        new Notification(title, { body, tag: "repoyeti-behind" });
       } catch {
         /* notification construction can throw on some platforms — never break the SSE loop */
       }

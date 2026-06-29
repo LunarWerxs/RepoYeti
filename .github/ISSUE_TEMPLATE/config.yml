@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/LunarWerxs/gitmob/security/advisories/new
+    url: https://github.com/LunarWerxs/repoyeti/security/advisories/new
     about: Please report security issues privately, not as a public issue (see SECURITY.md).
   - name: Question / discussion
-    url: https://github.com/LunarWerxs/gitmob/discussions
+    url: https://github.com/LunarWerxs/repoyeti/discussions
     about: Ask questions and discuss ideas here rather than opening an issue.

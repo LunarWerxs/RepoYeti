@@ -1,7 +1,7 @@
 /**
  * "Sign in with Connections" — public OIDC relying party (MARCHING_ORDERS §7).
  *
- * Stand-alone: GitMob only ever calls the IdP's PUBLIC OAuth URLs (discovered from
+ * Stand-alone: RepoYeti only ever calls the IdP's PUBLIC OAuth URLs (discovered from
  * `<issuer>/.well-known/openid-configuration`) and verifies the returned id_token
  * with the IdP's PUBLIC JWKS (via `jose`). No shared secret, no IdP-repo coupling.
  *
@@ -27,7 +27,7 @@ import {
   authEnforced,
   accessMode,
   saveConfig,
-  type GitmobConfig,
+  type RepoYetiConfig,
   type OAuthConfig,
 } from "./config.ts";
 
@@ -210,7 +210,7 @@ export function handleContinueLocal(c: Context): Response {
 // ── HTML for the auth-complete error page ──────────────────────────────────────
 function errPage(message: string): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GitMob — sign in</title>
+<title>RepoYeti — sign in</title>
 <body style="margin:0;background:#0e0e12;color:#e6e6ea;font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh">
 <div style="max-width:340px;text-align:center;padding:24px">
 <div style="font-size:40px">🔒</div>
@@ -221,7 +221,7 @@ function errPage(message: string): string {
 }
 
 // ── handlers ────────────────────────────────────────────────────────────────────
-export async function handleLogin(c: Context, cfg: GitmobConfig): Promise<Response> {
+export async function handleLogin(c: Context, cfg: RepoYetiConfig): Promise<Response> {
   const o = cfg.oauth!;
   const doc = await discover(o.issuer);
   const { verifier, challenge } = pkce();
@@ -255,7 +255,7 @@ export interface HandleCompleteOptions {
 /** Shared by /oauth/finish (shim bounce) and /oauth/callback (loopback). */
 export async function handleComplete(
   c: Context,
-  cfg: GitmobConfig,
+  cfg: RepoYetiConfig,
   opts?: HandleCompleteOptions,
 ): Promise<Response> {
   const o = cfg.oauth!;
@@ -311,11 +311,11 @@ export async function handleComplete(
     if (!o.ownerSub && !o.ownerEmail && sub) {
       o.ownerSub = sub;
       saveConfig(cfg);
-      console.log(`[gitmob] ownership claimed by ${email || sub}`);
+      console.log(`[repoyeti] ownership claimed by ${email || sub}`);
     }
 
     if (!ownerMatches(o, sub, email)) {
-      return c.html(errPage("This Connections account isn't the owner of this GitMob."), 403);
+      return c.html(errPage("This Connections account isn't the owner of this RepoYeti."), 403);
     }
     setSession(c, { sub, email, exp: Date.now() + SESSION_TTL_MS });
     return c.redirect("/");
@@ -359,7 +359,7 @@ export function handleLogoutAll(c: Context): Response {
  *  - A local (loopback) request: open in "local" mode; in "remote" mode it needs either an
  *    owner session or the local bypass ("Continue local for now").
  *  Public endpoints (health + the status probes the gate itself relies on) always pass. */
-export function authMiddleware(cfg: GitmobConfig) {
+export function authMiddleware(cfg: RepoYetiConfig) {
   return async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
     if (!authEnforced(cfg)) return next();
     const path = new URL(c.req.url).pathname;

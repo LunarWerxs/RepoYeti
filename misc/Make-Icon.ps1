@@ -1,4 +1,4 @@
-# Generates misc\GitMob.ico — a rounded git-orange tile with a big "G".
+# Generates misc\RepoYeti.ico — a rounded git-orange tile with a big "G".
 # Emits a proper MULTI-SIZE icon: 16/24/32/48 (true 32bpp DIB) + 256 (PNG). The Windows
 # system tray needs small frames; a 256-only icon renders BLANK or fuzzy in the tray.
 # Re-run after changing the letter/color, then re-run Create-Shortcut.ps1
@@ -95,6 +95,6 @@ function Save-MultiIcon([string]$Path,[System.Drawing.Bitmap]$art){
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 # Output filename, letter, color (hex). #F05133 is Git's brand orange-red.
 $art = New-AppArt "G" "#F05133"
-Save-MultiIcon (Join-Path $dir "GitMob.ico") $art
+Save-MultiIcon (Join-Path $dir "RepoYeti.ico") $art
 $art.Dispose()
-Write-Host "Wrote $dir\GitMob.ico (16/24/32/48 + 256)"
+Write-Host "Wrote $dir\RepoYeti.ico (16/24/32/48 + 256)"

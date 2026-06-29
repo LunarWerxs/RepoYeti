@@ -1,5 +1,5 @@
 #!/bin/sh
-# GitMob pre-commit gate: enforce web i18n compliance (fast — no full build).
+# RepoYeti pre-commit gate: enforce web i18n compliance (fast — no full build).
 # Enable once with:  git config core.hooksPath .githooks
 # Bypass a single commit with:  git commit --no-verify
 if [ -f web/scripts/i18n-check.mjs ] && [ -d web/node_modules ]; then

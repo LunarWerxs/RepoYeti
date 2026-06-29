@@ -23,11 +23,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: gitmob-linux-x64
+            asset: repoyeti-linux-x64
           - os: macos-latest
-            asset: gitmob-macos-arm64
+            asset: repoyeti-macos-arm64
           - os: windows-latest
-            asset: gitmob-windows-x64.exe
+            asset: repoyeti-windows-x64.exe
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          bin=$(ls dist/gitmob.exe dist/gitmob 2>/dev/null | head -n1)
+          bin=$(ls dist/repoyeti.exe dist/repoyeti 2>/dev/null | head -n1)
           if [ -z "$bin" ]; then echo "::error::no compiled binary found in dist/"; ls -la dist || true; exit 1; fi
           cp "$bin" "out/${{ matrix.asset }}"
       - uses: actions/upload-artifact@v4

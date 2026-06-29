@@ -2,7 +2,7 @@
  * Git backend — a thin adapter over the existing, verified git plumbing.
  *
  * This file introduces NO new behavior: every method delegates straight to the functions
- * that have always driven gitmob (status.ts, git-actions.ts, inspect.ts). Its only job is to
+ * that have always driven repoyeti (status.ts, git-actions.ts, inspect.ts). Its only job is to
  * prove the VcsBackend contract is satisfiable by the real git code (a compile-time check)
  * and to give service.ts a single object to call once it stops importing git functions
  * directly. Because the signatures were designed to mirror these functions, the mapping is

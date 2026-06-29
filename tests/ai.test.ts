@@ -8,7 +8,7 @@ import {
   resolveApiKey,
   isBuiltinProvider,
   BUILTIN_AI,
-  type GitmobConfig,
+  type RepoYetiConfig,
 } from "../src/config.ts";
 import {
   parseModels,
@@ -21,16 +21,16 @@ import {
 } from "../src/ai.ts";
 import { collectCommitDiff } from "../src/git-actions.ts";
 
-const BASE: GitmobConfig = { roots: [], port: 7171, maxDepth: 6, maxRepos: 200 };
+const BASE: RepoYetiConfig = { roots: [], port: 7171, maxDepth: 6, maxRepos: 200 };
 
 // Force the free built-in Groq key OFF for the baseline assertions below, so they
 // hold regardless of whether a real key has been dropped into the constant. The
 // built-in path is covered explicitly by its own test (which switches it back on).
-process.env.GITMOB_BUILTIN_GROQ_KEY = "";
+process.env.REPOYETI_BUILTIN_GROQ_KEY = "";
 
 // ── redaction: the key must NEVER leave the daemon ──────────────────────────────
 test("redactAi never emits an apiKey and reports configured providers", () => {
-  const cfg: GitmobConfig = {
+  const cfg: RepoYetiConfig = {
     ...BASE,
     ai: {
       providers: {
@@ -59,7 +59,7 @@ test("AI is unconfigured until the owner supplies a key", () => {
   expect(resolveApiKey(BASE, "openai")).toBeNull();
 
   // The owner's own Groq key enables the provider without exposing the key.
-  const own: GitmobConfig = {
+  const own: RepoYetiConfig = {
     ...BASE,
     ai: { providers: { groq: { apiKey: "gsk-OWN-KEY", model: "llama-3.1-8b-instant" } } },
   };
@@ -72,8 +72,8 @@ test("AI is unconfigured until the owner supplies a key", () => {
 });
 
 test("the free built-in Groq key serves Groq with zero owner setup; the owner's key still wins", () => {
-  const prev = process.env.GITMOB_BUILTIN_GROQ_KEY;
-  process.env.GITMOB_BUILTIN_GROQ_KEY = "gsk_test_builtin_key"; // looks like a real Groq key → active
+  const prev = process.env.REPOYETI_BUILTIN_GROQ_KEY;
+  process.env.REPOYETI_BUILTIN_GROQ_KEY = "gsk_test_builtin_key"; // looks like a real Groq key → active
   try {
     // Zero config → Groq is usable via the built-in key and is the effective default.
     const r = redactAi(BASE);
@@ -85,15 +85,15 @@ test("the free built-in Groq key serves Groq with zero owner setup; the owner's 
     expect(JSON.stringify(r)).not.toContain("gsk_test_builtin_key"); // key never leaves the daemon
 
     // The owner's own Groq key overrides the built-in: no `builtin` flag, owner's model wins.
-    const own: GitmobConfig = {
+    const own: RepoYetiConfig = {
       ...BASE,
       ai: { providers: { groq: { apiKey: "gsk-OWN", model: "llama-own" } } },
     };
     expect(isBuiltinProvider(own, "groq")).toBe(false);
     expect(redactAi(own).providers.groq).toEqual({ configured: true, model: "llama-own" });
   } finally {
-    if (prev === undefined) delete process.env.GITMOB_BUILTIN_GROQ_KEY;
-    else process.env.GITMOB_BUILTIN_GROQ_KEY = prev;
+    if (prev === undefined) delete process.env.REPOYETI_BUILTIN_GROQ_KEY;
+    else process.env.REPOYETI_BUILTIN_GROQ_KEY = prev;
   }
 });
 

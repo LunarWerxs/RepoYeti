@@ -1,4 +1,4 @@
-name = "gitmob-auth"
+name = "repoyeti-auth"
 main = "worker.ts"
 compatibility_date = "2025-01-01"
 

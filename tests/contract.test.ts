@@ -1,10 +1,10 @@
 import { test, expect } from "bun:test";
 import { createApp } from "../src/daemon.ts";
 import { statusForCode } from "../src/contract.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 
 // Local mode (no OIDC) → /api/* is not gated, so routes are exercised directly.
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
 test("statusForCode maps every code family to the right HTTP status", () => {
   expect(statusForCode("OK")).toBe(200);

@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 import { upsertRepo, getRepo, setRepoStatus, type RepoStatus } from "../src/db.ts";
 import { fetchAllRepos, discoverRoot, forgetReposUnder } from "../src/service.ts";
 import { sign, unsign, rotateKey } from "../src/auth.ts";
 
-const localCfg = (roots: string[] = []): GitmobConfig => ({ roots, port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (roots: string[] = []): RepoYetiConfig => ({ roots, port: 7171, maxDepth: 6, maxRepos: 200 });
 
 const statusWithRemote = (remote: string | null): RepoStatus => ({
   branch: "main",

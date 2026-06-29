@@ -25,7 +25,7 @@ async function continueLocal(): Promise<void> {
   >
     <div class="w-full max-w-sm text-center">
       <img src="/icon.svg" alt="" width="60" height="60" class="mx-auto rounded-2xl shadow-lg shadow-black/40" />
-      <h1 class="mt-4 mb-1.5 text-2xl font-bold tracking-tight">GitMob</h1>
+      <h1 class="mt-4 mb-1.5 text-2xl font-bold tracking-tight">RepoYeti</h1>
       <p class="mx-auto mb-7 max-w-xs text-sm leading-relaxed text-muted-foreground">
         {{ $t("signIn.tagline") }}
       </p>

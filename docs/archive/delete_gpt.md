@@ -1,16 +1,16 @@
-# GitMob deletion and consolidation audit
+# RepoYeti deletion and consolidation audit
 
 ## P1 - Delete the source-resident built-in AI key path
 
 - Evidence: `src/config.ts:103-116` defines `BUILTIN_AI` and embeds a Groq-looking `gsk_...` key; `src/config.ts:118-130` makes `resolveApiKey`, `resolveModel`, and `isBuiltinProvider` fall back to it; `src/config.ts:143-157` exposes the built-in provider as configured; `web/src/components/Settings.vue:252-257` renders "Free built-in key"; `tests/ai.test.ts:42-69` and `tests/ai-routes.test.ts:14-21` assert this behavior.
 - Risk/impact: Shipping a third-party API key in source/binaries invites abuse, rate-limit burn, accidental credential rotation work, and a hidden network-capable feature before the owner explicitly configures AI. It also keeps tests coupled to a credential-like constant.
-- Suggested deletion path: Remove `BUILTIN_AI` and `isBuiltinProvider`; make AI unavailable until the owner supplies a key (or use an optional local env var such as `GITMOB_DEMO_GROQ_KEY` that is never committed). Update the redacted settings shape/UI to drop the `builtin` branch, and replace the built-in-key tests with "starts unconfigured" and BYOK override tests. Verify with `rg -n "BUILTIN_AI|gsk_|built-in free key|builtin" src tests web`.
+- Suggested deletion path: Remove `BUILTIN_AI` and `isBuiltinProvider`; make AI unavailable until the owner supplies a key (or use an optional local env var such as `REPOYETI_DEMO_GROQ_KEY` that is never committed). Update the redacted settings shape/UI to drop the `builtin` branch, and replace the built-in-key tests with "starts unconfigured" and BYOK override tests. Verify with `rg -n "BUILTIN_AI|gsk_|built-in free key|builtin" src tests web`.
 
 ## P2 - Remove the tray's dev-only rebuild branch before any shipped launcher
 
-- Evidence: `misc/GitMob-Tray.ps1:107-114` explicitly says the "Rebuild & Restart" menu is dev-only and should be removed before public distribution; the rebuild handler lives at `misc/GitMob-Tray.ps1:118-124`, the menu entry is added at `misc/GitMob-Tray.ps1:128`, and `misc/Rebuild.bat:2-4` already documents the standalone replacement.
+- Evidence: `misc/RepoYeti-Tray.ps1:107-114` explicitly says the "Rebuild & Restart" menu is dev-only and should be removed before public distribution; the rebuild handler lives at `misc/RepoYeti-Tray.ps1:118-124`, the menu entry is added at `misc/RepoYeti-Tray.ps1:128`, and `misc/Rebuild.bat:2-4` already documents the standalone replacement.
 - Risk/impact: A shipped tray that rebuilds from source assumes Bun, source files, and writable project directories on an end-user machine. It is an unnecessary runtime branch and can leave the served `web/dist` out of sync with the binary.
-- Suggested deletion path: Delete `Rebuild-Ui`, `$rebuildItem`, its click handler, and the menu insertion from `misc/GitMob-Tray.ps1`; keep only Open, Restart, and Quit. Keep `misc/Rebuild.bat` as a developer-only helper, or move all tray dev helpers under a clearly non-shipped path if the tray remains deferred.
+- Suggested deletion path: Delete `Rebuild-Ui`, `$rebuildItem`, its click handler, and the menu insertion from `misc/RepoYeti-Tray.ps1`; keep only Open, Restart, and Quit. Keep `misc/Rebuild.bat` as a developer-only helper, or move all tray dev helpers under a clearly non-shipped path if the tray remains deferred.
 
 ## P3 - Finalize removal of legacy web files already deleted in the worktree
 
@@ -18,11 +18,11 @@
 - Risk/impact: Reintroducing these tracked legacy files would pull the repo back toward a removed UI stack or create two utility locations for the same helper.
 - Suggested deletion path: Keep both deletions in the final cleanup commit. Remove stale Naive/lucide-vue-next references from active docs at `README.md:17` and `MARCHING_ORDERS.md:78`, or archive those docs if they are no longer meant to drive implementation.
 
-## P3 - Prune the copied UI component kit to components GitMob actually uses
+## P3 - Prune the copied UI component kit to components RepoYeti actually uses
 
 - Evidence: Active imports only use `button`, `tooltip`, `input`, `dropdown-menu`, `sheet`, `collapsible`, `dialog`, and `select` (`web/src/App.vue:5`, `web/src/AppShell.vue:5`, `web/src/components/AppHeader.vue:3-4`, `web/src/components/AddRepo.vue:8-16`, `web/src/components/IdentityManager.vue:8-10`, `web/src/components/RepoCard.vue:29-40`, `web/src/components/RepoFilters.vue:6-16`, `web/src/components/Settings.vue:9-18`). Entire unused component families are exported from `web/src/components/ui/alert/index.ts:4-8`, `web/src/components/ui/badge/index.ts:4-9`, `web/src/components/ui/card/index.ts:1-7`, `web/src/components/ui/label/index.ts:1`, `web/src/components/ui/separator/index.ts:1`, `web/src/components/ui/switch/index.ts:1`, and `web/src/components/ui/textarea/index.ts:1`.
 - Risk/impact: The repo is carrying a generated/golden component tree rather than just the app surface. Even if Vite tree-shakes runtime code, every extra component is maintenance, typecheck, and future-drift surface.
-- Suggested deletion path: Delete unused families if GitMob is not intended to host a shared design-system catalogue. Also prune unused subcomponent exports/files such as dropdown radio/sub/shortcut/group entries at `web/src/components/ui/dropdown-menu/index.ts:5,8-14`, `DialogTrigger`/`DialogScrollContent`/local `DialogClose` at `web/src/components/ui/dialog/index.ts:2,8,10`, `SheetClose`/`SheetFooter`/`SheetTrigger` at `web/src/components/ui/sheet/index.ts:4,7,10`, and `SelectGroup`/`SelectLabel`/`SelectSeparator` at `web/src/components/ui/select/index.ts:3,6,9`. Keep internally used pieces like `DialogOverlay`, `SheetOverlay`, `SelectItemText`, and select scroll buttons.
+- Suggested deletion path: Delete unused families if RepoYeti is not intended to host a shared design-system catalogue. Also prune unused subcomponent exports/files such as dropdown radio/sub/shortcut/group entries at `web/src/components/ui/dropdown-menu/index.ts:5,8-14`, `DialogTrigger`/`DialogScrollContent`/local `DialogClose` at `web/src/components/ui/dialog/index.ts:2,8,10`, `SheetClose`/`SheetFooter`/`SheetTrigger` at `web/src/components/ui/sheet/index.ts:4,7,10`, and `SelectGroup`/`SelectLabel`/`SelectSeparator` at `web/src/components/ui/select/index.ts:3,6,9`. Keep internally used pieces like `DialogOverlay`, `SheetOverlay`, `SelectItemText`, and select scroll buttons.
 
 ## P3 - Collapse duplicated AI provider metadata into one non-secret source
 
@@ -38,13 +38,13 @@
 
 ## P4 - Archive or delete superseded root planning/handoff documents
 
-- Evidence: `README.md:8` says `MARCHING_ORDERS.md` is the single source of truth. `MARCHING_ORDERS.md:3-8` says `git-orchestrator-brief-v2.md`, `gpt.md`, and `gem.md` were distilled into one decisive spec and over-scoped parts were cut. `AEGIS_OAUTH_REPAIR.md:3-9` says it is a convenience copy for the Connections repo, and `AEGIS_OAUTH_REPAIR.md:149-152` explicitly marks the GitMob daemon out of scope.
+- Evidence: `README.md:8` says `MARCHING_ORDERS.md` is the single source of truth. `MARCHING_ORDERS.md:3-8` says `git-orchestrator-brief-v2.md`, `gpt.md`, and `gem.md` were distilled into one decisive spec and over-scoped parts were cut. `AEGIS_OAUTH_REPAIR.md:3-9` says it is a convenience copy for the Connections repo, and `AEGIS_OAUTH_REPAIR.md:149-152` explicitly marks the RepoYeti daemon out of scope.
 - Risk/impact: Keeping old prompts/briefs and an off-repo AEGIS handoff at repo root makes search results noisy and can send future agents toward stale stack/scope decisions.
 - Suggested deletion path: Delete the superseded root briefs if `MARCHING_ORDERS.md` has fully absorbed them, or move them under an archive path with a clear "historical only" label. Move/delete the AEGIS repair note after confirming the canonical Connections-repo copy exists.
 
 ## P5 - Keep ignored generated artifacts out of handoffs and release inputs
 
-- Evidence: `.gitignore:2-4` ignores `node_modules/`, `dist/`, and `*.tsbuildinfo`; `.gitignore:22` ignores `GitMob.lnk`. `scripts/build.ts:19-31` recreates `dist/` and `dist/web/dist` from source. Current ignored local outputs include `dist/`, `web/dist/`, `node_modules/`, `web/node_modules/`, `web/tsconfig.tsbuildinfo`, and a local `GitMob.lnk`; `dist/gitmob.exe` is about 98 MB.
+- Evidence: `.gitignore:2-4` ignores `node_modules/`, `dist/`, and `*.tsbuildinfo`; `.gitignore:22` ignores `RepoYeti.lnk`. `scripts/build.ts:19-31` recreates `dist/` and `dist/web/dist` from source. Current ignored local outputs include `dist/`, `web/dist/`, `node_modules/`, `web/node_modules/`, `web/tsconfig.tsbuildinfo`, and a local `RepoYeti.lnk`; `dist/repoyeti.exe` is about 98 MB.
 - Risk/impact: These are not tracked today, but they can pollute zip handoffs, local audits, and manual release packaging. Stale binaries/assets are especially easy to run by accident.
 - Suggested deletion path: Keep the ignore rules, add an explicit `clean` script for generated outputs, and make release scripts build from a clean tree. Before handoffs, remove local `dist/`, `web/dist/`, tsbuildinfo, and machine-local shortcuts rather than copying them with the source tree.
 

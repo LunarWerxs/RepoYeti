@@ -15,10 +15,10 @@ import {
   SYNC_INTERVAL_MAX_S,
   SYNC_INTERVAL_DEFAULT_S,
 } from "../src/remote-sync.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 import type { RepoStatus } from "../src/db.ts";
 
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 const repo = (id: string, behind: number, branch = "main") => ({
   id,
   name: id,

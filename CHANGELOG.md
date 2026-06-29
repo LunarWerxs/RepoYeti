@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to GitMob are documented here. The format is based on
+All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -16,14 +16,14 @@ All notable changes to GitMob are documented here. The format is based on
   /api/repos/:id/remote` (URL-scheme validated), `GET /api/repos/:id/tags`, and
   `POST /api/repos/:id/tag` (git-only, ref-name validated).
 - **Clone from URL.** The Add-repository dialog has a **Clone** mode: paste a git URL, pick a
-  destination folder (must be inside a scan folder) and an optional identity, and GitMob clones
+  destination folder (must be inside a scan folder) and an optional identity, and RepoYeti clones
   it onto the machine — the new repo appears live. The URL scheme, target name, and destination
   are validated server-side before any git runs, and the chosen identity's SSH key is injected
   per-operation (same seam as fetch/pull/push).
 - **Recent commit messages.** The commit box shows your last few commit subjects as one-tap
   chips — handy when typing on a phone.
 - **Scan folders from the dashboard.** Add or remove discovery roots in **Settings → Scan
-  folders** (no more CLI-only `gitmob add-root`). Adding one scans it immediately and the repos
+  folders** (no more CLI-only `repoyeti add-root`). Adding one scans it immediately and the repos
   stream in live; removing one drops the auto-discovered repos found under it (repos you added
   explicitly by path are kept). The empty state now offers "Add a scan folder" too.
 - **Fetch all.** A header button fetches every repo that has a remote in one tap (bounded by the
@@ -71,8 +71,8 @@ All notable changes to GitMob are documented here. The format is based on
   DeepSeek). Keys live on the daemon only and never leave the machine.
 - **Sponsor credit** footer.
 - **Launcher guard tests** (`tests/launcher.test.ts`) — fail the build unless the one-click
-  launcher is intact: the shortcut machinery (`Create-Shortcut.ps1`, `GitMob.vbs`,
-  `GitMob-Tray.ps1`, `GitMob.ico`) exists, is **committed**, and is wired
+  launcher is intact: the shortcut machinery (`Create-Shortcut.ps1`, `RepoYeti.vbs`,
+  `RepoYeti-Tray.ps1`, `RepoYeti.ico`) exists, is **committed**, and is wired
   shortcut → wscript → vbs → tray → daemon + icon. On Windows it also runs the tray's new
   headless `-SelfTest` (bun on PATH + daemon entry + the icon actually loading into a
   `NotifyIcon`) and regenerates + resolves the root shortcut. Committing `misc/` (which was
@@ -81,7 +81,7 @@ All notable changes to GitMob are documented here. The format is based on
 ### Changed
 
 - **Single instance + the launcher follows the real port.** The daemon already hopped past
-  a busy port; now it records the port it ACTUALLY bound in `~/.gitmob/runtime.json`, so the
+  a busy port; now it records the port it ACTUALLY bound in `~/.repoyeti/runtime.json`, so the
   tray opens the right URL (validated with an auth-exempt `/api/health` probe) instead of
   blindly assuming the preferred port. A second launch detects the running daemon and exits
   rather than starting a rival on another port — across the tray, `bun run start`, and
@@ -98,7 +98,7 @@ All notable changes to GitMob are documented here. The format is based on
 - **Bounded git subprocess concurrency.** A daemon-wide read pool (status / changed-files)
   and a separate network pool (fetch / pull / push) cap how many `git` children run at once,
   so boot or a multi-client burst can't spawn hundreds and bog down the machine. Tune with
-  `GITMOB_GIT_READ_CONCURRENCY` / `GITMOB_GIT_NET_CONCURRENCY`.
+  `REPOYETI_GIT_READ_CONCURRENCY` / `REPOYETI_GIT_NET_CONCURRENCY`.
 - **Progressive startup.** The daemon serves the dashboard immediately and hydrates repo
   statuses in the background (streaming each over SSE as it lands), so a slow or hung repo no
   longer delays the daemon from coming up.
@@ -120,5 +120,5 @@ All notable changes to GitMob are documented here. The format is based on
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
-[Unreleased]: https://github.com/L0garithmic/GitMob/compare/v0.0.1...HEAD
-[0.0.1]: https://github.com/L0garithmic/GitMob/releases/tag/v0.0.1
+[Unreleased]: https://github.com/L0garithmic/RepoYeti/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/L0garithmic/RepoYeti/releases/tag/v0.0.1

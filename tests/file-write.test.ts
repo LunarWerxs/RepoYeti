@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 import { upsertRepo } from "../src/db.ts";
 import { writeFileContent } from "../src/service.ts";
 
 // Edit-mode save path: writeFileContent (src/service.ts) + PUT /api/repos/:id/file
 // (src/daemon.ts). Guards the confinement + binary/size limits that keep an untrusted edit
 // from escaping the repo or writing a corrupt blob.
-const localCfg = (): GitmobConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
 const plainRepo = (): string => mkdtempSync(join(tmpdir(), "gm-write-"));
 async function gitRepo(): Promise<string> {

@@ -7,7 +7,7 @@
  * to drift, it's noted. Longer term the read paths should move to the `@lore-vcs/sdk` JS SDK's
  * structured events instead of scraping text; this CLI path is the no-dependency baseline.
  *
- * This backend is DORMANT until opted in (GITMOB_LORE=1, see ./index.ts) and is not yet wired
+ * This backend is DORMANT until opted in (REPOYETI_LORE=1, see ./index.ts) and is not yet wired
  * into service.ts or discovery — so the running daemon's git behavior is unchanged.
  *
  * git → lore mapping (verified):

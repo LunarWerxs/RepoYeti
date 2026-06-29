@@ -11,10 +11,10 @@
 import { useLocalStorage } from "@vueuse/core";
 
 /** Master switch for all app keyboard shortcuts (persisted; on by default). */
-export const hotkeysEnabled = useLocalStorage("gitmob:hotkeysEnabled", true);
+export const hotkeysEnabled = useLocalStorage("repoyeti:hotkeysEnabled", true);
 
 /** Power-user shortcuts — e.g. Ctrl/⌘+Enter to commit (persisted; off by default). */
-export const powerShortcuts = useLocalStorage("gitmob:powerShortcuts", false);
+export const powerShortcuts = useLocalStorage("repoyeti:powerShortcuts", false);
 
 /** A documented accelerator, surfaced in Settings → Keyboard shortcuts. */
 export interface Shortcut {

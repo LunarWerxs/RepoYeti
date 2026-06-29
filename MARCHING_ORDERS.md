@@ -1,4 +1,4 @@
-# GitMob — Marching Orders (Minimal-but-Functional v1)
+# RepoYeti — Marching Orders (Minimal-but-Functional v1)
 
 > **What this file is.** The three briefs in this folder (`git-orchestrator-brief-v2.md`,
 > `gpt.md`, `gem.md`) describe the *same* product from three angles — a hard-constraints
@@ -19,13 +19,13 @@
 > case), and **Phase 6 (Tauri tray)** is deferred — the CLI binary + phone browser is the whole product.
 > The only thing between "built" and a live remote login is the owner-gated §13 setup (register the
 > OAuth app + set the owner sub). **The redirect shim is already deployed** at
-> `https://gitmob-auth.lunawerx.workers.dev` and git is initialized with tests (`bun test`, 19 passing).
+> `https://repoyeti-auth.lunawerx.workers.dev` and git is initialized with tests (`bun test`, 19 passing).
 
 ---
 
 ## 0. The one thesis
 
-**GitMob is a single Bun-compiled daemon binary.** It discovers your git repos, watches them
+**RepoYeti is a single Bun-compiled daemon binary.** It discovers your git repos, watches them
 cheaply, serves a mobile PWA, drives git operations with per-operation identity injection, and
 exposes itself over a zero-config Cloudflare tunnel — gated by app-layer auth so the tunnel URL
 alone is worthless. **The CLI binary + a phone browser is the entire product.** The Tauri tray,
@@ -55,7 +55,7 @@ never push with the wrong identity.
 ### The one success loop (this is "fully functional")
 
 ```
-gitmob start  →  phone (on LTE) opens the URL  →  "Sign in with Connections" once  →
+repoyeti start  →  phone (on LTE) opens the URL  →  "Sign in with Connections" once  →
 see all repos live  →  assign an identity to a repo  →  pull/push with that identity  →
 state updates on the phone within seconds
 ```
@@ -71,13 +71,13 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | **Runtime** | **Bun (LTS)** | `bun --compile` → single self-contained binary; built-in `bun:sqlite` kills the `better-sqlite3` native-addon build churn on Windows; built-in HTTP server + file watchers; TS-first, no `tsc` step. |
 | **Git engine** | **`simple-git`** over the system `git` binary | Reuses the user's installed, optimized git. Its per-call `env` option maps *directly* onto `GIT_SSH_COMMAND` / `GIT_AUTHOR_*` injection. No JS git reimplementation to trust. |
 | **HTTP framework** | **Hono** | Tiny, TS-native. Its middleware model makes auth **structural** — a single `app.use()` gates the whole router, so you *cannot* add an unauthenticated route by accident. |
-| **Storage** | **`bun:sqlite`**, WAL mode, `synchronous=NORMAL` | Only store that survives concurrent writers (watcher + API + git ops). One file: `gitmob.db`. Retry on `SQLITE_BUSY`; fall back to `journal_mode=DELETE` if WAL won't open (Windows AV). |
+| **Storage** | **`bun:sqlite`**, WAL mode, `synchronous=NORMAL` | Only store that survives concurrent writers (watcher + API + git ops). One file: `repoyeti.db`. Retry on `SQLITE_BUSY`; fall back to `journal_mode=DELETE` if WAL won't open (Windows AV). |
 | **Tunnel** | **`cloudflared` quick tunnel** (free, rotating) **+ a fixed redirect shim** | Daemon stays zero-config on a free auto tunnel; a tiny **stable shim** (Cloudflare Worker `*.workers.dev` — recommended — or Pages / GitHub Pages) is the registered OAuth redirect and bounces login back to the daemon's current URL (§7). No domain, no ngrok. Tunnel client bundled as a pinned binary. A stable *dashboard* URL comes later, once you own a domain. |
 | **Auth** | **"Sign in with Connections"** — public OIDC (AEGIS) at `accounts.connections.icu`; daemon verifies the login token and trusts one owner `sub` | Stand-alone relying party using connections.icu's **public** OAuth — like "Log in with Google." No shared secret, no Connections-repo coupling, no homegrown password/PIN. See §7. |
 | **Transport / sync** | **SSE** daemon→phone, **REST** phone→daemon | v2 decided this. SSE auto-reconnects through cloudflared with no WebSocket upgrade; maps cleanly onto the event-driven watcher. Commands are request/response → REST. |
 | **Frontend** | **Vue 3 + Vite**, PWA, **embedded in the binary**; **import pre-built libraries, minimal hand-written UI** | Static files bundled at `bun --compile` time; daemon serves them — no second server. **Owner directive: lean on smart pre-built libs, write minimal UI to maintain.** Stack: **reka-ui** (shadcn-vue–style component kit, `src/components/ui/`) · **Tailwind v4** (`@tailwindcss/vite`) · **@vueuse/core** (composables — `useEventSource` handles SSE+reconnect, `useColorMode`, `useLocalStorage`) · **@formkit/auto-animate** (zero-config list/card transitions — solves "no layout shift on SSE updates" for free) · **@lucide/vue** icons · **vue-sonner** toasts · **Pinia** state · **vite-plugin-pwa** (auto manifest + service worker). |
 | **Secrets** | **OS keychain via `keytar`** | SSH key *paths* in SQLite (the daemon never reads key bytes — only passes the path to `ssh -i`). Git PATs, the owner's Connections OAuth tokens, and any confidential `client_secret` in keychain by handle, resolved at call time. |
-| **Packaging** | `bun --compile` per platform, shipped via **npm** | `npm install -g gitmob && gitmob start`. ~25–35 MB incl. embedded frontend + bundled cloudflared. Tauri tray deferred to Phase 6. |
+| **Packaging** | `bun --compile` per platform, shipped via **npm** | `npm install -g repoyeti && repoyeti start`. ~25–35 MB incl. embedded frontend + bundled cloudflared. Tauri tray deferred to Phase 6. |
 
 ---
 
@@ -108,7 +108,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 - **PWA:** flat repo list sorted by name; per-repo card = branch badge + dirty count + ahead/behind
   (with fetch timestamp) + identity selector + fetch/pull/push buttons; dark terminal theme;
   Add-to-Home-Screen manifest.
-- **CLI:** `gitmob start | stop | status | add-root <path> | set-owner <sub|email>` (`set-owner` sets the trusted Connections identity; OAuth `client_id`/redirect come from config — see §13).
+- **CLI:** `repoyeti start | stop | status | add-root <path> | set-owner <sub|email>` (`set-owner` sets the trusted Connections identity; OAuth `client_id`/redirect come from config — see §13).
 - **Robustness:** port-conflict auto-increment; 30s op timeout; structured error codes.
 
 ### OUT (explicitly deferred — do not build in v1)
@@ -134,7 +134,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 ## 4. Architecture
 
 ```
-┌──────────────────────── gitmob daemon (single Bun binary) ────────────────────────┐
+┌──────────────────────── repoyeti daemon (single Bun binary) ────────────────────────┐
 │                                                                                    │
 │  Discovery (BFS, depth≤6)──┐                                                        │
 │                            ▼                                                        │
@@ -197,12 +197,12 @@ CREATE TABLE identities (
   git_username    TEXT NOT NULL,
   git_email       TEXT NOT NULL,
   ssh_key_path    TEXT,                     -- path ONLY; file never read by daemon
-  pat_handle      TEXT,                     -- keychain handle, e.g. 'gitmob/identity/<id>/pat' — NEVER the PAT
+  pat_handle      TEXT,                     -- keychain handle, e.g. 'repoyeti/identity/<id>/pat' — NEVER the PAT
   signing_handle  TEXT                      -- reserved, unused in v1
 );
 
 -- Auth is "Sign in with Connections" (public OIDC, §7):
---   • the trusted owner identity (sub/email) lives in config + OS keychain ('gitmob/owner-sub');
+--   • the trusted owner identity (sub/email) lives in config + OS keychain ('repoyeti/owner-sub');
 --   • the owner's Connections OAuth tokens live in the OS keychain, never in SQLite;
 --   • a single 'sessions' row (or signed __Host- cookie) tracks the active daemon session;
 --   • no password, PIN, or shared secret is ever stored.
@@ -216,7 +216,7 @@ CREATE TABLE sessions (                     -- the daemon's own RP session(s)
 ```
 
 **Invariant:** no raw secret bytes ever land in SQLite — only key *paths* (SSH) and keychain
-*handles*. The auth credential itself is issued and revoked by connections.icu, not by GitMob.
+*handles*. The auth credential itself is issued and revoked by connections.icu, not by RepoYeti.
 
 ---
 
@@ -252,12 +252,12 @@ right state.
 
 ## 7. Security model — "Sign in with Connections" (public OIDC), non-negotiable
 
-> **Decision (owner directive):** GitMob is a **stand-alone codebase**. It uses connections.icu for
+> **Decision (owner directive):** RepoYeti is a **stand-alone codebase**. It uses connections.icu for
 > **authentication only**, through the **public API** — never any internal/first-party mechanism. The
 > earlier Studio-`introspection_secret` design is **dropped** (that's the internal first-party path).
-> GitMob authenticates the owner via **"Sign in with Connections"**, connections.icu's public,
+> RepoYeti authenticates the owner via **"Sign in with Connections"**, connections.icu's public,
 > standards-compliant **OpenID Connect** provider (AEGIS), exactly like any "Log in with Google" app.
-> GitMob's only contact with connections.icu is calling its **public OAuth URLs**; it imports nothing
+> RepoYeti's only contact with connections.icu is calling its **public OAuth URLs**; it imports nothing
 > from the Connections repo and shares no secret with it.
 
 ### The public provider (verbatim, public surface)
@@ -271,7 +271,7 @@ right state.
   `docs/architecture/auth/ACCAP_SIGN_IN_WITH_CONNECTIONS.md`; button:
   `docs/how-to/SIGN_IN_WITH_CONNECTIONS_BUTTON.md`.
 
-GitMob is registered once as a **third-party OAuth app** (relying party) → it gets a public
+RepoYeti is registered once as a **third-party OAuth app** (relying party) → it gets a public
 `client_id` and registers its redirect URI(s). See §13.
 
 ### How auth works
@@ -307,7 +307,7 @@ Flow (daemon-side PKCE — the phone never handles tokens):
    **public JWKS**, checks the owner `sub`, and sets a `__Host-` session. Done.
 
 **The only thing that must be stable + registered is the shim** — pick a free one you already have:
-- **Cloudflare Worker** (`https://gitmob-auth.<account>.workers.dev`) — *recommended*: server-side 302,
+- **Cloudflare Worker** (`https://repoyeti-auth.<account>.workers.dev`) — *recommended*: server-side 302,
   validates the target host, no client JS, free, stable, **no custom domain**. ~30 lines; I can deploy it.
 - **Cloudflare Pages** (`https://<proj>.pages.dev`) or **GitHub Pages** (`https://<user>.github.io/…`) —
   same idea as a tiny static page that reads `state` and redirects in-browser.
@@ -323,7 +323,7 @@ directly, and the shim disappears (the *dashboard* URL stops rotating too).
 **Desktop fallback (Path B):** register `http://127.0.0.1:<port>/oauth/callback` and log in once at the
 machine — no shim, no tunnel — after which the phone is trusted.
 
-GitMob stays **stand-alone** throughout — it only ever calls the public `accounts.connections.icu/oauth/*`
+RepoYeti stays **stand-alone** throughout — it only ever calls the public `accounts.connections.icu/oauth/*`
 URLs; the shim is a dumb bounce on a free host, not a coupling to Connections.
 
 ### What an attacker with only the tunnel URL can do
@@ -338,7 +338,7 @@ the application layer.
 ### Secrets
 
 - **OAuth `client_id`** is public; the daemon stores its OAuth config (issuer, client_id, redirect_uri)
-  and the **trusted owner `sub`/`email`** in config + OS keychain (`gitmob/owner-sub`); none of it is
+  and the **trusted owner `sub`/`email`** in config + OS keychain (`repoyeti/owner-sub`); none of it is
   sensitive enough to leak access on its own. A confidential `client_secret`, **if** the app is
   registered as confidential, lives in the daemon keychain only (never shipped to the phone); a public
   PKCE client needs none.
@@ -351,7 +351,7 @@ the application layer.
   subprocess call, never assigned to a module-level variable, logged, or serialized.
 - **`keytar` fallback:** if keytar fails to load (common on Windows without build tools), encrypt the
   daemon-side secrets to an **AES-256-GCM** file in the config dir, key =
-  `HKDF-SHA256(machineUUID ‖ username ‖ 'gitmob-v1')`, perms `0600`, with a **loud, specific terminal
+  `HKDF-SHA256(machineUUID ‖ username ‖ 'repoyeti-v1')`, perms `0600`, with a **loud, specific terminal
   warning**. Still external to SQLite, still not plaintext.
 
 ### Identity injection (never break the user's desk)
@@ -412,7 +412,7 @@ These were not in the original briefs; they will bite if ignored.
 - **Phase 1 — Core daemon skeleton + op queue (localhost only, no auth, no tunnel).**
   Discovery → watchers (`.git/HEAD`,`.git/index`) → status engine → `bun:sqlite` → `GET /api/repos`.
   Build the per-repo operation queue here. **Run the `keytar` + `bun --compile` spike on all 3 platforms.**
-  *Done when:* `gitmob start` locally; `GET /api/repos` returns accurate branch/dirty/ahead-behind
+  *Done when:* `repoyeti start` locally; `GET /api/repos` returns accurate branch/dirty/ahead-behind
   within 1s of a local commit.
 
 - **Phase 2 — "Sign in with Connections" (public OIDC).**
@@ -434,12 +434,12 @@ These were not in the original briefs; they will bite if ignored.
 - **Phase 4 — cloudflared tunnel + mobile PWA.**
   Spawn cloudflared child; capture + print URL; emit `daemon_status` SSE. Embed Vue 3 PWA; wire SSE to
   watcher; flat repo cards + identity selector + action buttons; PWA manifest.
-  *Done when:* `gitmob start` → terminal prints the HTTPS URL (QR) → phone on LTE pastes its Connections
+  *Done when:* `repoyeti start` → terminal prints the HTTPS URL (QR) → phone on LTE pastes its Connections
   key → full dashboard works. **← This is the v1 finish line (the success loop from §1).**
 
 - **Phase 5 — Hardening + distribution.**
   Zod input validation; inotify-limit guard + 30s targeted-poll fallback; named-CF-tunnel upgrade path
-  (`gitmob.connections.icu` via Cloudflare, see §13); `bun --compile` for Win/Mac/Linux; `npm publish`;
+  (`repoyeti.connections.icu` via Cloudflare, see §13); `bun --compile` for Win/Mac/Linux; `npm publish`;
   stage+commit-from-phone patch; workspace UI; multi-root; "sign out everywhere"; optional Path-A named tunnel.
 
 - **Phase 6 — Tauri tray (explicitly deferred).**
@@ -450,7 +450,7 @@ These were not in the original briefs; they will bite if ignored.
 
 ## 10. Definition of Done (v1 acceptance criteria)
 
-1. `gitmob start` on a laptop with 3+ repos prints the tunnel URL, local URL, and a QR of the tunnel URL within 10s.
+1. `repoyeti start` on a laptop with 3+ repos prints the tunnel URL, local URL, and a QR of the tunnel URL within 10s.
 2. A phone **on LTE** (not the laptop's WiFi) opens the dashboard URL, taps **"Sign in with Connections"**,
    logs in as the owner, and reaches the dashboard — **no port forwarding, no router config**. (Path B: the
    owner completes the Connections login once at the laptop; the phone is then trusted.)
@@ -467,7 +467,7 @@ These were not in the original briefs; they will bite if ignored.
    before any session is issued; the owner's Connections tokens never appear in a client-facing payload.
 10. `~/.gitconfig` and every repo's `.git/config` are **byte-identical** before and after a full
     fetch/pull/push cycle with identity injection (verify by checksum).
-11. `npm install -g gitmob && gitmob start` works on Mac (arm64+x64), Linux x64, and Windows x64 with no
+11. `npm install -g repoyeti && repoyeti start` works on Mac (arm64+x64), Linux x64, and Windows x64 with no
     extra runtime or dependency install.
 
 ---
@@ -475,8 +475,8 @@ These were not in the original briefs; they will bite if ignored.
 ## 11. Repo structure (minimal monorepo)
 
 ```
-gitmob/
-├─ package.json              # bun workspaces; bin: gitmob
+repoyeti/
+├─ package.json              # bun workspaces; bin: repoyeti
 ├─ src/
 │  ├─ index.ts               # CLI entry: start|stop|status|key|add-root
 │  ├─ daemon.ts              # boots Hono server + watchers + tunnel
@@ -512,7 +512,7 @@ The daemon is the **primary artifact**; `web/` builds into it; `vendor/cloudflar
 - **SQLite, not JSON** — concurrent writers. (All three briefs agree.)
 - **SSE, not WebSockets** — server-push, event-driven, auto-reconnect through cloudflared.
 - **Auth = "Sign in with Connections" (public OIDC), not a homegrown credential and not the internal
-  Studio path** — GitMob is a stand-alone relying party that only calls the public
+  Studio path** — RepoYeti is a stand-alone relying party that only calls the public
   `accounts.connections.icu/oauth/*` URLs and verifies tokens via the public JWKS; it shares no secret
   with and imports nothing from the Connections repo. (Owner directive: public API, auth only, stand-alone.)
 - **DECIDED: free quick tunnel + a fixed redirect shim** (§7). The daemon stays zero-config on the free
@@ -528,19 +528,19 @@ The daemon is the **primary artifact**; `web/` builds into it; `vendor/cloudflar
 
 ## 13. connections.icu integration — what the owner provisions
 
-GitMob is a **stand-alone relying party** that uses connections.icu **only** for "Sign in with
+RepoYeti is a **stand-alone relying party** that uses connections.icu **only** for "Sign in with
 Connections" (public OIDC). It imports nothing from the Connections repo. To light up auth end-to-end
 (everything else builds without it), the owner provides — all via the **public developer console**
 (`studio.connections.icu` → developer apps), not by editing the Connections monorepo:
 
-1. **A registered GitMob OAuth app.** Create a "Sign in with Connections" app → yields a public
+1. **A registered RepoYeti OAuth app.** Create a "Sign in with Connections" app → yields a public
    **`client_id`** (and, if registered confidential, a `client_secret` that stays only on the daemon).
    Scopes: `openid profile email`.
-2. **The redirect URI** = the fixed **shim** URL (§7), e.g. `https://gitmob-auth.<account>.workers.dev/cb`
+2. **The redirect URI** = the fixed **shim** URL (§7), e.g. `https://repoyeti-auth.<account>.workers.dev/cb`
    (Cloudflare Worker, recommended) or a `*.pages.dev` / `*.github.io` page. **This is the only stable URL
    that gets registered;** the daemon itself stays on the free rotating tunnel. (Optionally also register
    `http://127.0.0.1:<port>/oauth/callback` for the Path-B desktop fallback.)
-3. **The trusted owner identity** — the `sub` (or email) GitMob should accept. Get it from
+3. **The trusted owner identity** — the `sub` (or email) RepoYeti should accept. Get it from
    `/oauth/userinfo` after a test login, or from the owner's account record. → daemon config/keychain.
 4. **The redirect shim (free; I can build + deploy it).** A ~30-line **Cloudflare Worker** (or static
    Pages/GitHub page) that reads `state`, validates the daemon URL against an allowed pattern, and 302s
@@ -560,4 +560,4 @@ moment the owner registers the app and supplies the `client_id` + trusted `sub`.
 
 *Marching orders end. Phase 1 starts with the watcher→SQLite→HTTP loop and the keytar spike — prove
 those two and the rest is wiring. Auth (Phase 2) is a standard "Sign in with Connections" OIDC relying
-party (§7/§13) and lights up the moment the owner registers the GitMob OAuth app.*
+party (§7/§13) and lights up the moment the owner registers the RepoYeti OAuth app.*

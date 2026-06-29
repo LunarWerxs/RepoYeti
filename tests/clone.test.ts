@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/daemon.ts";
-import type { GitmobConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 import { cloneRepo } from "../src/service.ts";
 import { getRepos } from "../src/db.ts";
 
-const localCfg = (roots: string[] = []): GitmobConfig => ({ roots, port: 7171, maxDepth: 6, maxRepos: 200 });
+const localCfg = (roots: string[] = []): RepoYetiConfig => ({ roots, port: 7171, maxDepth: 6, maxRepos: 200 });
 const J = (body: unknown) => ({
   method: "POST",
   headers: { "content-type": "application/json" },

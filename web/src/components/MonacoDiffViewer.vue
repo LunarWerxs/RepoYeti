@@ -62,7 +62,7 @@ function revealOnFirstDiff(): void {
  *  original gets a distinct scheme so the two never collide. */
 function makeModels(m: MonacoApi): { original: TextModel; modified: TextModel } {
   const modUri = m.Uri.file(props.filename || "untitled.txt");
-  const origUri = modUri.with({ scheme: "gitmob-head" });
+  const origUri = modUri.with({ scheme: "repoyeti-head" });
   m.editor.getModel(modUri)?.dispose();
   m.editor.getModel(origUri)?.dispose();
   return {

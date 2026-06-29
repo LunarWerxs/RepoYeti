@@ -1,18 +1,18 @@
-# GitMob — Feature & Functionality Rundown + Gap Analysis
+# RepoYeti — Feature & Functionality Rundown + Gap Analysis
 
-> **What this is.** A rundown of what GitMob does today, and a prioritized analysis of features
-> that comparable git tools have but GitMob is missing — focused on what's *obviously needed*,
+> **What this is.** A rundown of what RepoYeti does today, and a prioritized analysis of features
+> that comparable git tools have but RepoYeti is missing — focused on what's *obviously needed*,
 > *frequently asked for*, or *commonly used*. Produced by a 5-lens adversarial review (desktop
 > GUI clients · mobile/remote git apps · missing core git primitives · PWA/UX quality · a scope
 > guardian that defends the design and promotes ready-but-deferred items).
 >
-> **The guard rail.** Every recommendation respects GitMob's central invariant: **the daemon never
+> **The guard rail.** Every recommendation respects RepoYeti's central invariant: **the daemon never
 > leaves a repo in an unsafe / half-merged state — it surfaces "resolve at your desk" and stops.**
 > Anything that can strand the repo mid-operation on a phone is rejected by design (see Tier 3).
 
 ---
 
-## 1. What GitMob does today (current feature inventory)
+## 1. What RepoYeti does today (current feature inventory)
 
 **Product.** A self-contained, system-wide **remote git manager**: a background Bun daemon discovers
 your local git repos, tracks their state event-driven, and serves a mobile PWA (Vue 3) over a
@@ -39,7 +39,7 @@ into a genuinely useful phone-driven git client, not just a read-only dashboard.
 ### Tier 1 — Obviously needed & safe (implement)
 
 These came back as **implement-now** across multiple lenses, are high-demand in every comparable tool,
-and fit the safety invariant with straightforward guards. They turn GitMob from "sync + triage" into a
+and fit the safety invariant with straightforward guards. They turn RepoYeti from "sync + triage" into a
 real phone git client.
 
 | # | Feature | Why it matters | Demand | Effort | Guard |
@@ -76,7 +76,7 @@ Solid value, but either lower demand for the solo-owner target or needing more U
 | **Workspace / grouping UI** | The `workspaces` table exists but is unused; valuable past ~20 repos. | occasional | M | Pure CRUD + filter; needs UX design first. |
 | **Per-repo settings (e.g. AI provider override)** | Work vs personal accounts per repo. | niche | M | Small DB column + inline sheet. |
 | **Cross-repo global search** | Find a string across all repos, not just one repo's changed files. | occasional | L | Hard-cap/paginate results; scope to changed files first. |
-| **Cross-repo activity feed** | "What changed on my machine today?" across all repos — unique to GitMob. | occasional | M | Aggregate `git log` over starred/pinned first (cost on 200 repos). |
+| **Cross-repo activity feed** | "What changed on my machine today?" across all repos — unique to RepoYeti. | occasional | M | Aggregate `git log` over starred/pinned first (cost on 200 repos). |
 | **Web push notifications** | A phone-first tool that only updates when open misses its premise; push when a repo falls behind / a push fails. | occasional | L | VAPID + subscription store + SW push handler; opt-in per event; remote-mode only. |
 | **Commit signing (SSH/GPG)** | Teams with required signing can't commit. `signing_handle` column already reserved. | niche | M | Inject `-c gpg.format=ssh -c user.signingKey -c commit.gpgsign=true`; guard the passphrase hang. |
 | **PAT / HTTPS auth** | SSH-key auth is irrelevant for HTTPS remotes. `pat_handle` column reserved. | common | M | Keychain + per-op `GIT_ASKPASS`; never fall through to the system store. |

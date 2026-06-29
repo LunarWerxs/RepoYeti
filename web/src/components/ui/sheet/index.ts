@@ -9,7 +9,7 @@ export { default as SheetHeader } from "./SheetHeader.vue"
 export { default as SheetTitle } from "./SheetTitle.vue"
 export { default as SheetTrigger } from "./SheetTrigger.vue"
 
-// Unified sheet sides (shared by GitMob + DevWebUI). `bottom` is the mobile
+// Unified sheet sides (shared by RepoYeti + DevWebUI). `bottom` is the mobile
 // bottom-sheet variant; `right` is the desktop side panel. See UI_UNIFICATION.md §4.
 export const sheetVariants = cva(
   "fixed z-50 flex flex-col gap-0 overflow-hidden bg-card shadow-2xl shadow-black/50 transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:duration-300 data-[state=closed]:duration-300",

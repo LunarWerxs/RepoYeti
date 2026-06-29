@@ -1,13 +1,13 @@
-# GitMob system-tray host (Windows). Runs the daemon with NO console window and
+# RepoYeti system-tray host (Windows). Runs the daemon with NO console window and
 # shows a tray icon with Open / Rebuild & Restart / Restart / Quit. Launched via
-# GitMob.vbs (which sets the port). The shortcut launches FAST with the existing
+# RepoYeti.vbs (which sets the port). The shortcut launches FAST with the existing
 # web\dist build; use the tray's "Rebuild & Restart" to rebuild the UI from source
 # and restart. This script lives in misc/, so the project root is one level up.
 #
-# GitMob specifics worth knowing:
+# RepoYeti specifics worth knowing:
 #  * Port comes from the --port CLI FLAG, not an env var — so we pass it in
 #    Start-App. It's the PREFERRED port: if it's busy the daemon hops to the next
-#    free one and records where it landed in ~/.gitmob/runtime.json, which we read
+#    free one and records where it landed in ~/.repoyeti/runtime.json, which we read
 #    (validated with an /api/health probe) so we open the URL it ACTUALLY bound.
 #  * bun on Windows is an npm shim (bun.cmd), which CreateProcess can't run
 #    directly, so we launch through `cmd.exe /c bun …` (taskkill /T later kills
@@ -31,9 +31,9 @@ if ($SelfTest) {
   $fail = @()
   if (-not (Get-Command bun -ErrorAction SilentlyContinue)) { $fail += "bun not on PATH" }
   if (-not (Test-Path (Join-Path $root "src\index.ts")))     { $fail += "daemon entry src\index.ts missing" }
-  $icoPath = Join-Path $scriptDir "GitMob.ico"
+  $icoPath = Join-Path $scriptDir "RepoYeti.ico"
   if (-not (Test-Path $icoPath)) {
-    $fail += "tray icon GitMob.ico missing"
+    $fail += "tray icon RepoYeti.ico missing"
   } else {
     try {
       # Load the TRAY-sized frame (not the 256 jumbo) and force a decode — this catches a
@@ -50,38 +50,38 @@ if ($SelfTest) {
       if (-not $hasSmallFrame) { $fail += "tray icon has no small (<=48px) frame; a 256-only icon renders blank" }
     } catch { $fail += "tray icon failed to load: $($_.Exception.Message)" }
   }
-  if ($fail.Count) { Write-Output ("GITMOB_TRAY_SELFTEST_FAIL: " + ($fail -join "; ")); exit 1 }
-  Write-Output "GITMOB_TRAY_SELFTEST_OK"; exit 0
+  if ($fail.Count) { Write-Output ("REPOYETI_TRAY_SELFTEST_FAIL: " + ($fail -join "; ")); exit 1 }
+  Write-Output "REPOYETI_TRAY_SELFTEST_OK"; exit 0
 }
 $port = $Port
-# Runtime pointer the daemon writes (honours GITMOB_HOME, like the daemon does).
-$gmHome = if ($env:GITMOB_HOME) { $env:GITMOB_HOME } else { Join-Path $env:USERPROFILE ".gitmob" }
+# Runtime pointer the daemon writes (honours REPOYETI_HOME, like the daemon does).
+$gmHome = if ($env:REPOYETI_HOME) { $env:REPOYETI_HOME } else { Join-Path $env:USERPROFILE ".repoyeti" }
 $infoFile = Join-Path $gmHome "runtime.json"
 # Current live URL — refreshed whenever we (re)start the daemon, so the tray menu
 # always opens wherever the daemon actually is now.
 $script:url = "http://127.0.0.1:$port"
 
-# Is a GitMob daemon answering at this URL? (/api/health is auth-exempt, and reports
-# service:"gitmob" — so this won't mistake some other app on the port for us.)
-function Test-GitMob($u) {
+# Is a RepoYeti daemon answering at this URL? (/api/health is auth-exempt, and reports
+# service:"repoyeti" — so this won't mistake some other app on the port for us.)
+function Test-RepoYeti($u) {
   if (-not $u) { return $false }
   try {
     $r = Invoke-RestMethod -Uri "$u/api/health" -TimeoutSec 1 -ErrorAction Stop
-    return ($r.ok -eq $true -and $r.service -eq "gitmob")
+    return ($r.ok -eq $true -and $r.service -eq "repoyeti")
   } catch { return $false }
 }
 
-# The URL of a live GitMob instance (from the runtime pointer, else the preferred
+# The URL of a live RepoYeti instance (from the runtime pointer, else the preferred
 # port), or $null if none is actually answering.
 function Get-RunningUrl {
   if (Test-Path $infoFile) {
     try {
       $info = Get-Content $infoFile -Raw | ConvertFrom-Json
-      if ($info.url -and (Test-GitMob $info.url)) { return $info.url }
+      if ($info.url -and (Test-RepoYeti $info.url)) { return $info.url }
     } catch { }
   }
   $u = "http://127.0.0.1:$port"
-  if (Test-GitMob $u) { return $u }
+  if (Test-RepoYeti $u) { return $u }
   return $null
 }
 
@@ -91,7 +91,7 @@ if ($existing) { Start-Process $existing; return }
 
 # Bun must be on PATH.
 if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
-  [System.Windows.Forms.MessageBox]::Show("Bun was not found on PATH.`nInstall it from https://bun.sh then click GitMob again.", "GitMob") | Out-Null
+  [System.Windows.Forms.MessageBox]::Show("Bun was not found on PATH.`nInstall it from https://bun.sh then click RepoYeti again.", "RepoYeti") | Out-Null
   return
 }
 
@@ -151,18 +151,18 @@ Start-App
 $script:url = Wait-ForUrl
 if (-not $script:url) {
   Stop-App
-  $msg = "GitMob started but isn't serving.`n`n" +
+  $msg = "RepoYeti started but isn't serving.`n`n" +
          "The most likely cause is that no scan root is configured. " +
          "Open a terminal in this folder and run:`n`n" +
          "    bun run src\index.ts add-root <path-to-your-git-projects>`n`n" +
-         "then click GitMob again. (Other causes: a failed web build, or no free port.)"
-  [System.Windows.Forms.MessageBox]::Show($msg, "GitMob") | Out-Null
+         "then click RepoYeti again. (Other causes: a failed web build, or no free port.)"
+  [System.Windows.Forms.MessageBox]::Show($msg, "RepoYeti") | Out-Null
   return
 }
 
 $tray = New-Object System.Windows.Forms.NotifyIcon
-$tray.Text = "GitMob"
-$iconPath = Join-Path $scriptDir "GitMob.ico"
+$tray.Text = "RepoYeti"
+$iconPath = Join-Path $scriptDir "RepoYeti.ico"
 # Pull the TRAY-sized frame from the multi-size .ico so it renders crisply (not blank).
 # Fall back to the default frame, then a system icon, if anything goes wrong.
 $tray.Icon = if (Test-Path $iconPath) {
@@ -172,7 +172,7 @@ $tray.Icon = if (Test-Path $iconPath) {
 $tray.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
-$openItem    = New-Object System.Windows.Forms.ToolStripMenuItem("Open GitMob")
+$openItem    = New-Object System.Windows.Forms.ToolStripMenuItem("Open RepoYeti")
 # --- DEV-ONLY: remove before public distribution ----------------------------------
 # "Rebuild & Restart" rebuilds the PWA from SOURCE — a developer convenience so UI
 # edits show up without a manual build. Public/end users get a prebuilt web\dist and
@@ -185,11 +185,11 @@ $restartItem = New-Object System.Windows.Forms.ToolStripMenuItem("Restart")
 $quitItem    = New-Object System.Windows.Forms.ToolStripMenuItem("Quit")
 $openItem.Add_Click({ Start-Process $script:url })
 $rebuildItem.Add_Click({
-  $tray.ShowBalloonTip(1500, "GitMob", "Rebuilding the web UI and restarting...", [System.Windows.Forms.ToolTipIcon]::Info)
+  $tray.ShowBalloonTip(1500, "RepoYeti", "Rebuilding the web UI and restarting...", [System.Windows.Forms.ToolTipIcon]::Info)
   Rebuild-Ui
   Stop-App; Start-Sleep -Milliseconds 400; Start-App
   $u = Wait-ForUrl; if ($u) { $script:url = $u }
-  $tray.ShowBalloonTip(2500, "GitMob", "UI rebuilt - daemon restarted. Refresh your browser (Ctrl+R).", [System.Windows.Forms.ToolTipIcon]::Info)
+  $tray.ShowBalloonTip(2500, "RepoYeti", "UI rebuilt - daemon restarted. Refresh your browser (Ctrl+R).", [System.Windows.Forms.ToolTipIcon]::Info)
   Start-Process $script:url
 })
 $restartItem.Add_Click({ Stop-App; Start-Sleep -Milliseconds 600; Start-App; $u = Wait-ForUrl; if ($u) { $script:url = $u } })
@@ -202,6 +202,6 @@ $menu.Items.Add($quitItem) | Out-Null
 $tray.ContextMenuStrip = $menu
 $tray.Add_MouseDoubleClick({ Start-Process $script:url })
 
-$tray.ShowBalloonTip(2500, "GitMob", "Running in the tray - right-click for options.", [System.Windows.Forms.ToolTipIcon]::Info)
+$tray.ShowBalloonTip(2500, "RepoYeti", "Running in the tray - right-click for options.", [System.Windows.Forms.ToolTipIcon]::Info)
 Start-Process $script:url
 [System.Windows.Forms.Application]::Run()       # keeps the tray alive until Quit

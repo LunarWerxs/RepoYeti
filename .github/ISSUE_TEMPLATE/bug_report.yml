@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in GitMob isn't working as expected.
+description: Something in RepoYeti isn't working as expected.
 labels: ["bug"]
 body:
   - type: markdown
@@ -18,14 +18,14 @@ body:
     id: logs
     attributes:
       label: Daemon output / errors
-      description: Relevant lines from the `gitmob` daemon console or any error codes the UI showed.
+      description: Relevant lines from the `repoyeti` daemon console or any error codes the UI showed.
       render: shell
     validations:
       required: false
   - type: input
     id: version
     attributes:
-      label: GitMob version / commit
+      label: RepoYeti version / commit
       placeholder: "v0.1.0 or a commit SHA"
     validations:
       required: true
