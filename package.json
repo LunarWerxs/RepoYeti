@@ -40,7 +40,9 @@
     "check:coverage": "bun run scripts/check-coverage.ts",
     "check:codes": "bun run scripts/check-error-codes.ts",
     "check:boundaries": "bun run scripts/check-boundaries.ts",
-    "check": "bun run check:codes && bun run check:boundaries",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "bun run check:codes && bun run check:boundaries && bun run lint",
     "build": "bun run scripts/build.ts"
   },
   "dependencies": {
@@ -51,6 +53,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.1",
     "@types/bun": "latest",
     "typescript": "^5.7.2"
   }
