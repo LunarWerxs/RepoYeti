@@ -12,7 +12,7 @@ import {
   type CommitPlanInput,
   type FetchFn,
 } from "../src/ai.ts";
-import { gitCommitGroups, collectCommitPlanInput, collectPathsDiff } from "../src/git-actions.ts";
+import { gitCommitGroups, collectCommitPlanInput, collectPathsDiff, isNoisyPath } from "../src/git-actions.ts";
 import { smartCommitRepo, planCommitInput, collectRepoPathsDiff } from "../src/service.ts";
 import { createApp } from "../src/daemon.ts";
 import { upsertRepo } from "../src/db.ts";
@@ -257,6 +257,37 @@ test("collectCommitPlanInput lists changed files with stats + a diff", async () 
   const paths = input.files.map((f) => f.path).sort();
   expect(paths).toEqual(["a.txt", "new.txt"]);
   expect(input.diff).toContain("a.txt");
+});
+
+test("isNoisyPath folds lockfiles / generated / minified, not real source", () => {
+  expect(isNoisyPath("package-lock.json")).toBe(true);
+  expect(isNoisyPath("web/pnpm-lock.yaml")).toBe(true);
+  expect(isNoisyPath("Cargo.lock")).toBe(true);
+  expect(isNoisyPath("dist/app.min.js")).toBe(true);
+  expect(isNoisyPath("src/app.js.map")).toBe(true);
+  expect(isNoisyPath("__snapshots__/x.snap")).toBe(true);
+  expect(isNoisyPath("src/app.ts")).toBe(false);
+  expect(isNoisyPath("README.md")).toBe(false);
+});
+
+test("collectCommitPlanInput folds a lockfile's body out of the diff but keeps it in the file list", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gm-fold-"));
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+  await $`git -C ${dir} config user.name Seed`.quiet();
+  await $`git -C ${dir} config user.email s@s.io`.quiet();
+  writeFileSync(join(dir, "app.ts"), "const x = 1;\n");
+  writeFileSync(join(dir, "package-lock.json"), '{ "name": "demo", "version": "1.0.0" }\n');
+  await $`git -C ${dir} add -A`.quiet();
+  await $`git -C ${dir} commit -q -m init`.quiet();
+  // Change both: a real source file (should be diffed) and the lockfile (body should fold out).
+  writeFileSync(join(dir, "app.ts"), "const x = 2; // UNIQUE_APP_MARKER\n");
+  writeFileSync(join(dir, "package-lock.json"), '{ "name": "demo", "version": "2.0.0-UNIQUE_LOCK_MARKER" }\n');
+
+  const input = await collectCommitPlanInput(dir);
+  const paths = input.files.map((f) => f.path).sort();
+  expect(paths).toEqual(["app.ts", "package-lock.json"]); // file list is complete
+  expect(input.diff).toContain("UNIQUE_APP_MARKER"); // real source is diffed
+  expect(input.diff).not.toContain("UNIQUE_LOCK_MARKER"); // lockfile body folded out
 });
 
 // ── smartCommitRepo (service) ────────────────────────────────────────────────────

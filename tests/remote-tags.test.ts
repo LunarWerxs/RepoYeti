@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/daemon.ts";
 import type { GitmobConfig } from "../src/config.ts";
-import { gitRemoteSet, gitRemoteRemove } from "../src/git-actions.ts";
+import { gitRemoteSet, gitRemoteRemove, gitTagCreate } from "../src/git-actions.ts";
 import { readTags } from "../src/inspect.ts";
 import { upsertRepo } from "../src/db.ts";
 
@@ -90,4 +90,29 @@ test("GET /api/repos/:id/tags returns tags; unknown repo 404s", async () => {
   expect((await res.json()).tags.map((t: { name: string }) => t.name)).toContain("v2.0.0");
 
   expect((await app.request("/api/repos/nope/tags")).status).toBe(404);
+});
+
+// ── tag creation ──────────────────────────────────────────────────────────────────
+
+test("gitTagCreate makes lightweight + annotated tags, rejects duplicates and bad names", async () => {
+  const dir = await repo();
+  expect((await gitTagCreate(dir, null, "v1.0.0")).ok).toBe(true); // lightweight
+  expect((await gitTagCreate(dir, null, "v1.1.0", "release 1.1")).ok).toBe(true); // annotated
+  expect((await gitTagCreate(dir, null, "v1.0.0")).code).toBe("EXISTS"); // duplicate
+  expect((await gitTagCreate(dir, null, "bad tag")).code).toBe("INVALID_REF_NAME");
+  expect((await readTags(dir)).tags.map((t) => t.name).sort()).toEqual(["v1.0.0", "v1.1.0"]);
+});
+
+test("POST /api/repos/:id/tag creates a tag (201) and validates the name", async () => {
+  const dir = await repo();
+  const id = upsertRepo(dir, "tag-route", "auto", false);
+  const app = createApp(localCfg());
+
+  const ok = await app.request(`/api/repos/${id}/tag`, J("POST", { name: "v3.0.0", message: "three" }));
+  expect(ok.status).toBe(201);
+  expect((await ok.json()).ok).toBe(true);
+  expect((await readTags(dir)).tags.map((t) => t.name)).toContain("v3.0.0");
+
+  const bad = await app.request(`/api/repos/${id}/tag`, J("POST", { name: "no good" }));
+  expect(bad.status).toBe(400);
 });

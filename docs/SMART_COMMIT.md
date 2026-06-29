@@ -324,6 +324,23 @@ that stay on even in YOLO:
   execution as the reviewed path.
 The button shows a small **YOLO** tag when the mode is on.
 
+## 12c. Token efficiency (shipped)
+
+The planner's diff is **token-trimmed** so more change-sets fit a provider's rate limit (the free
+Groq tier is 6000 tokens/min) and every call is cheaper — without any external dependency or model:
+- **Zero-context diffs** (`git diff -U0`) — just the changed lines, no surrounding context (grouping
+  doesn't need it; *message* generation still uses full context).
+- **Noise folding** (`isNoisyPath`) — the diff *bodies* of lockfiles, `*.min.js/.css`, `*.map`,
+  `*.snap`, `*.lock` are dropped; the file **list** still carries them (with stat) so grouping a
+  lockfile *with its manifest* still works. The model only needs to *know* they changed, not read
+  thousands of generated lines.
+
+Measured ~99.9% diff reduction on a lockfile-heavy change (136 KB → 151 chars), with the AI plan
+still `degraded:false`. (Concept borrowed from claw-compactor's "diff folding"; implemented as ~40
+lines in `collectCommitPlanInput`, kept in that one function so a future TS compressor can drop in.
+A generic compressor like LLMLingua was rejected — it can corrupt code semantics and needs a bundled
+model; the only diff-specific tool, claw-compactor, is Python and can't live in the Bun binary.)
+
 ## 13. Future (deferred, additive)
 
 - **Hunk-level "deep split"** opt-in (would require an explicit decision to relax the

@@ -70,6 +70,7 @@ import {
   getTags,
   setRemoteRepo,
   removeRemoteRepo,
+  createTagRepo,
   discardFile,
   planCommitInput,
   smartCommitRepo,
@@ -117,6 +118,7 @@ import {
   DiscardSchema,
   RemoteSetSchema,
   RemoteDeleteSchema,
+  TagCreateSchema,
   ConnectSchema,
   AiSettingsSchema,
   ProviderUpdateSchema,
@@ -552,6 +554,17 @@ export function createApp(cfg: GitmobConfig): Hono {
     const id = c.req.param("id");
     if (!getRepo(id)) return jsonError(c, "NOT_FOUND", "repo not found");
     return c.json(await getTags(id));
+  });
+  // Create a tag (annotated when a message is given), optionally pushing it to origin.
+  app.post("/api/repos/:id/tag", async (c) => {
+    const id = c.req.param("id");
+    const repo = getRepo(id);
+    if (!repo) return jsonError(c, "NOT_FOUND", "repo not found");
+    if (repo.vcs !== "git") return jsonError(c, "BAD_REQUEST", "tags are only available for git repos");
+    const p = await parseBody(c, TagCreateSchema);
+    if (!p.ok) return p.res;
+    const r = await createTagRepo(id, p.data.name.trim(), p.data.message, p.data.push === true);
+    return c.json(r, r.ok ? 201 : statusForCode(r.code));
   });
 
   // ── remote (set-url / add-or-update origin, remove) — local config, no network ──

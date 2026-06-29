@@ -10,9 +10,11 @@ All notable changes to GitMob are documented here. The format is based on
 
 - **Remote & tags management.** A per-repo "Remote & tags" dialog (repo card ⋮ menu) sets or
   updates the `origin` URL — a local config change, no network — so a repo you created with
-  `git init` from the phone can finally be given a remote and pushed. It also lists the repo's
-  tags (read-only, newest first). Backed by `POST`/`DELETE /api/repos/:id/remote` (URL-scheme
-  validated) and `GET /api/repos/:id/tags`.
+  `git init` from the phone can finally be given a remote and pushed. The same dialog lists the
+  repo's tags (newest first) and **creates a tag** (annotated when you add a message), optionally
+  **pushing it to origin** — "tag a release from your phone." Backed by `POST`/`DELETE
+  /api/repos/:id/remote` (URL-scheme validated), `GET /api/repos/:id/tags`, and
+  `POST /api/repos/:id/tag` (git-only, ref-name validated).
 - **Clone from URL.** The Add-repository dialog has a **Clone** mode: paste a git URL, pick a
   destination folder (must be inside a scan folder) and an optional identity, and GitMob clones
   it onto the machine — the new repo appears live. The URL scheme, target name, and destination

@@ -137,8 +137,9 @@ the existing `DIRTY_WORKING_TREE` / `DETACHED_HEAD`.
 
 - **Remote management** — `POST`/`DELETE /api/repos/:id/remote` (add-or-update / remove `origin`, local
   config only, URL-scheme validated) so a `git init`-from-the-phone repo can be given a remote and pushed.
-- **Tag list** — read-only `GET /api/repos/:id/tags`. Both live in a self-contained `RepoManage.vue`
-  dialog opened from the repo card's ⋮ menu.
+- **Tags** — read-only list (`GET /api/repos/:id/tags`) plus **create** (`POST /api/repos/:id/tag`,
+  git-only, annotated when a message is given, optional push to origin). Both live in a self-contained
+  `RepoManage.vue` dialog opened from the repo card's ⋮ menu.
 
 **Next up (remaining Tier 2):** commit-detail diff from the log (multi-file `git show` → viewer) ·
 PAT/HTTPS auth (for private-HTTPS remotes) · file-level staging · stable named-tunnel URL surface · workspace UI.

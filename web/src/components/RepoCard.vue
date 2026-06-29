@@ -78,6 +78,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { VCS_CAPABILITIES } from "../types";
 import type { Repo, TreeNode } from "../types";
 
 const props = withDefaults(defineProps<{ repo: Repo; draggable?: boolean }>(), {
@@ -88,6 +89,17 @@ const { t } = useI18n();
 
 const st = computed(() => props.repo.status);
 const hasRemote = computed(() => !!st.value?.remote);
+// Per-VCS capabilities (mirrors the daemon) drive which controls this card shows.
+const caps = computed(() => VCS_CAPABILITIES[props.repo.vcs] ?? VCS_CAPABILITIES.git);
+const isLore = computed(() => props.repo.vcs === "lore");
+// Lore is centralized — it always has a server to push/sync to — so its remote ops don't
+// hinge on a configured git remote the way git's do.
+const hasUpstream = computed(() => isLore.value || hasRemote.value);
+// "Pull" for git; "Sync" for a centralized backend (Lore), where pull maps to `lore sync`.
+const pullLabel = computed(() => (caps.value.fetch ? t("repo.actions.pull") : t("repo.actions.sync")));
+// AI commit message + smart-commit read a git diff, so they're git-only until ported — hide
+// them on Lore repos rather than show dead buttons.
+const aiHere = computed(() => store.aiEnabled && !isLore.value);
 const busyAction = computed(() => store.busy[props.repo.id]);
 const anyBusy = computed(() => !!busyAction.value);
 const isClean = computed(
@@ -264,7 +276,7 @@ function toggle(): void {
       void loadRecentMsgs();
     }
     void store.loadBranches(props.repo.id);
-    void store.loadStashes(props.repo.id);
+    if (caps.value.stash) void store.loadStashes(props.repo.id);
   }
 }
 watch(
@@ -670,6 +682,12 @@ async function confirmDiscard(): Promise<void> {
           <GitBranch :size="11" />{{ st.detached ? "detached" : st.branch }}
         </span>
         <span
+          v-if="repo.vcs !== 'git'"
+          class="mono flex shrink-0 items-center rounded-md bg-info/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-info uppercase"
+        >
+          {{ repo.vcs }}
+        </span>
+        <span
           v-if="repo.pinned"
           class="flex shrink-0 items-center rounded-md bg-primary/15 px-1.5 py-0.5 text-primary"
           :title="$t('repo.badge.pinned')"
@@ -1062,11 +1080,11 @@ async function confirmDiscard(): Promise<void> {
               :placeholder="$t('repo.commit.placeholder')"
               :maxlength="300"
               rows="1"
-              :class="cn('max-h-40 min-h-9 resize-none py-1.5 leading-snug', store.aiEnabled && 'pr-10')"
+              :class="cn('max-h-40 min-h-9 resize-none py-1.5 leading-snug', aiHere && 'pr-10')"
               @keydown="onCommitKey"
             />
             <button
-              v-if="store.aiEnabled"
+              v-if="aiHere"
               type="button"
               :disabled="generating"
               :title="$t('repo.commit.generateTitle')"
@@ -1108,11 +1126,11 @@ async function confirmDiscard(): Promise<void> {
                   <Pencil :size="15" />
                   <span>{{ $t("repo.commit.amend") }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem :disabled="!hasRemote" @select="doCommit('push')">
+                <DropdownMenuItem :disabled="!hasUpstream" @select="doCommit('push')">
                   <ArrowUpFromLine :size="15" />
                   <span>{{ $t("repo.commit.commitPush") }}</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem :disabled="!hasRemote" @select="doCommit('sync')">
+                <DropdownMenuItem :disabled="!hasUpstream" @select="doCommit('sync')">
                   <RefreshCw :size="15" />
                   <span>{{ $t("repo.commit.commitSync") }}</span>
                 </DropdownMenuItem>
@@ -1124,7 +1142,7 @@ async function confirmDiscard(): Promise<void> {
         <!-- smart commit: AI splits the working tree into separate scoped commits (opt-in;
              shown only with >1 changed file, since one file can't be split) -->
         <button
-          v-if="store.aiEnabled && st && st.dirty > 1"
+          v-if="aiHere && st && st.dirty > 1"
           type="button"
           :disabled="smartBusy || committing"
           class="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-violet-300/40 bg-violet-300/5 px-3 py-1.5 text-[12.5px] text-violet-300 outline-none transition-colors hover:bg-violet-300/10 disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -1143,6 +1161,7 @@ async function confirmDiscard(): Promise<void> {
         <!-- git actions -->
         <div class="flex flex-wrap items-center gap-2">
           <Button
+            v-if="caps.fetch"
             variant="secondary"
             size="sm"
             :disabled="!hasRemote || anyBusy"
@@ -1155,17 +1174,17 @@ async function confirmDiscard(): Promise<void> {
           <Button
             :variant="st && st.behind > 0 ? 'default' : 'outline'"
             size="sm"
-            :disabled="!hasRemote || anyBusy"
+            :disabled="!hasUpstream || anyBusy"
             @click="run('pull')"
           >
             <Loader2 v-if="busyAction === 'pull'" class="animate-spin" />
             <ArrowDownToLine v-else />
-            {{ $t("repo.actions.pull") }}
+            {{ pullLabel }}
           </Button>
           <Button
             :variant="st && st.ahead > 0 ? 'default' : 'outline'"
             size="sm"
-            :disabled="!hasRemote || anyBusy"
+            :disabled="!hasUpstream || anyBusy"
             @click="run('push')"
           >
             <Loader2 v-if="busyAction === 'push'" class="animate-spin" />
@@ -1173,7 +1192,7 @@ async function confirmDiscard(): Promise<void> {
             {{ $t("repo.actions.push") }}
           </Button>
           <Button
-            v-if="st && st.dirty > 0"
+            v-if="caps.stash && st && st.dirty > 0"
             variant="outline"
             size="sm"
             :disabled="!!gitBusy"
@@ -1185,7 +1204,7 @@ async function confirmDiscard(): Promise<void> {
             {{ $t("repo.stash.stash") }}
           </Button>
           <!-- existing stashes: pop / drop -->
-          <DropdownMenu v-if="stashes.length">
+          <DropdownMenu v-if="caps.stash && stashes.length">
             <DropdownMenuTrigger
               class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-transparent px-2.5 text-[13px] font-medium text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40"
               :title="$t('repo.stash.menuLabel')"
@@ -1262,7 +1281,7 @@ async function confirmDiscard(): Promise<void> {
                 <span>{{ repo.hidden ? $t("repo.unhide") : $t("repo.hide") }}</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem @select="manageOpen = true">
+              <DropdownMenuItem v-if="caps.multipleRemotes" @select="manageOpen = true">
                 <Cloud :size="15" />
                 <span>{{ $t("repo.manage.open") }}</span>
               </DropdownMenuItem>

@@ -148,7 +148,8 @@
       "fetch": "Fetch",
       "pull": "Pull",
       "push": "Push",
-      "refresh": "Refresh"
+      "refresh": "Refresh",
+      "sync": "Sync"
     },
     "badge": {
       "ahead": "ahead",
@@ -323,6 +324,12 @@
       "removeFailed": "Couldn't remove the remote",
       "tagsTitle": "Tags",
       "tagsEmpty": "No tags",
+      "tagCreate": "Tag",
+      "tagNamePlaceholder": "v1.0.0",
+      "tagMessagePlaceholder": "Release notes (optional → annotated tag)",
+      "tagPush": "Push to origin",
+      "tagCreated": "Tag created",
+      "tagFailed": "Couldn't create the tag",
       "open": "Remote & tags"
     },
     "expand": "Expand",

@@ -26,16 +26,42 @@ const { t } = useI18n();
 
 const url = ref("");
 const busy = computed(() => store.gitOpBusy[props.repoId] === "remote");
+const tagBusy = computed(() => store.gitOpBusy[props.repoId] === "tag");
 const confirmRemove = ref(false);
 const tags = computed(() => store.tagsByRepo[props.repoId]?.tags ?? []);
+
+// new-tag form
+const tagName = ref("");
+const tagMessage = ref("");
+const tagPush = ref(false);
 
 watch(open, (isOpen) => {
   if (isOpen) {
     url.value = props.remote ?? "";
     confirmRemove.value = false;
+    tagName.value = "";
+    tagMessage.value = "";
+    tagPush.value = false;
     void store.loadTags(props.repoId);
   }
 });
+
+async function createTag(): Promise<void> {
+  const name = tagName.value.trim();
+  if (!name || tagBusy.value) return;
+  const r = await store.createTag(props.repoId, {
+    name,
+    message: tagMessage.value.trim() || undefined,
+    push: tagPush.value,
+  });
+  if (r.ok) {
+    toast.success(r.message || t("repo.manage.tagCreated"));
+    tagName.value = "";
+    tagMessage.value = "";
+  } else {
+    toast.error(r.message || t("repo.manage.tagFailed"));
+  }
+}
 
 async function save(): Promise<void> {
   const u = url.value.trim();
@@ -112,6 +138,22 @@ async function remove(): Promise<void> {
             <span class="shrink-0 text-[11px] text-muted-foreground/70">{{ fromNow(tg.date) }}</span>
           </div>
         </div>
+
+        <!-- create a tag (annotated when a message is given; optional push) -->
+        <form class="flex flex-col gap-2 pt-1" @submit.prevent="createTag">
+          <div class="flex items-center gap-2">
+            <Input v-model="tagName" class="mono" :placeholder="$t('repo.manage.tagNamePlaceholder')" />
+            <Button type="submit" size="sm" class="shrink-0" :disabled="!tagName.trim() || tagBusy">
+              <Loader2 v-if="tagBusy" class="animate-spin" />
+              {{ $t("repo.manage.tagCreate") }}
+            </Button>
+          </div>
+          <Input v-model="tagMessage" class="mono" :placeholder="$t('repo.manage.tagMessagePlaceholder')" />
+          <label v-if="remote" class="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground">
+            <input v-model="tagPush" type="checkbox" class="size-3.5 accent-primary" />
+            {{ $t("repo.manage.tagPush") }}
+          </label>
+        </form>
       </div>
 
       <DialogFooter>

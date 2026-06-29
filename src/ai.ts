@@ -477,7 +477,9 @@ export function planSystemPrompt(_style: CommitStyle): string {
     "OUTPUT: return ONLY a JSON object (no prose, no markdown fences) of this exact shape:\n" +
     `{"groups":[{"type":"feat","scope":"auth","subject":"add token refresh","body":"optional longer text","files":["src/auth.ts","tests/auth.test.ts"],"rationale":"short why"}],"leftovers":[]}\n` +
     "Put a file in `leftovers` ONLY if you truly cannot decide where it belongs. " +
-    "Every path from the input MUST appear once across all `groups[].files` and `leftovers`."
+    "Every path from the input MUST appear once across all `groups[].files` and `leftovers`. " +
+    "Files with status A or U are NEW and have NO diff shown — place them by their path and name; " +
+    "do not forget them."
   );
 }
 

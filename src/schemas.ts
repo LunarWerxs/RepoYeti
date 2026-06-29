@@ -90,6 +90,13 @@ export const DiscardSchema = z.object({ path: nonEmpty });
 export const RemoteSetSchema = z.object({ url: nonEmpty, name: z.string().trim().optional() });
 export const RemoteDeleteSchema = z.object({ name: z.string().trim().optional() });
 
+// ── tag creation (annotated when a message is given; optional push to origin) ─────────
+export const TagCreateSchema = z.object({
+  name: nonEmpty,
+  message: z.string().optional(),
+  push: z.boolean().optional(),
+});
+
 // ── AI ──────────────────────────────────────────────────────────────────────────
 export const ConnectSchema = z.object({ apiKey: z.string().optional() }); // NO_KEY stays in handler
 

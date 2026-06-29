@@ -24,6 +24,7 @@ import {
   gitClone,
   gitRemoteSet,
   gitRemoteRemove,
+  gitTagCreate,
   collectCommitDiff,
   collectPathsDiff,
   collectCommitPlanInput,
@@ -212,6 +213,15 @@ export const setRemoteRepo = (id: string, name: string, url: string): Promise<Ac
   runAction(id, (_b, p) => gitRemoteSet(p, name, url));
 export const removeRemoteRepo = (id: string, name: string): Promise<ActionOutcome> =>
   runAction(id, (_b, p) => gitRemoteRemove(p, name));
+
+// ── tag creation (git-only; the route guards on repo.vcs) ──────────────────────────
+export const createTagRepo = (
+  id: string,
+  name: string,
+  message?: string,
+  push = false,
+): Promise<ActionOutcome> =>
+  runAction(id, (_b, p, idn) => gitTagCreate(p, idn, name, message, push));
 
 // ── read-only inspection (branches / log / stashes) ───────────────────────────────
 // Deliberately NOT behind the per-repo op-queue (reads stay snappy during a fetch/pull).

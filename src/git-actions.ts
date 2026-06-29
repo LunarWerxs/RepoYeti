@@ -348,16 +348,57 @@ export async function collectPathsDiff(absPath: string, paths: string[]): Promis
  *  balloon the provider payload; the per-file list (always complete) carries the rest. */
 const PLAN_DIFF_CAP = 40_000;
 
+/** Lockfile basenames whose DIFF BODY is high-noise / low-signal for commit GROUPING. */
+const NOISE_BASENAMES = new Set([
+  "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb",
+  "cargo.lock", "composer.lock", "gemfile.lock", "poetry.lock", "pipfile.lock", "go.sum", "flake.lock",
+]);
+/** Generated / minified / derived extensions (matched on the lowercased basename). */
+const NOISE_EXT = /\.(min\.js|min\.css|map|snap|lock|lockb)$/i;
+
+/**
+ * True for a file whose diff body the planner doesn't need to READ — lockfiles, minified bundles,
+ * source maps, snapshots. It only needs to KNOW the file changed (its name + stat ride in the
+ * file list either way), so we fold the body out of the planner's diff to save a lot of tokens
+ * (a single lockfile diff can be thousands of lines). Borrowed concept: claw-compactor's "diff
+ * folding". Pure + unit-tested. NOTE: only the PLANNER's diff folds these; message generation
+ * (collectPathsDiff / collectCommitDiff) keeps full content.
+ */
+export function isNoisyPath(path: string): boolean {
+  const base = (path.replace(/\\/g, "/").split("/").pop() ?? "").toLowerCase();
+  return NOISE_BASENAMES.has(base) || NOISE_EXT.test(base);
+}
+
 /**
  * Build the read-only input for the AI commit planner: the complete changed-file list (with
- * per-file +/- stats and rename sources) plus a bounded unified `git diff HEAD -M`. Never
- * mutates the index. The file list is authoritative (it drives validation); the diff is best-
- * effort context for grouping and may be truncated on a large change-set.
+ * per-file +/- stats and rename sources) plus a bounded, TOKEN-TRIMMED diff. Never mutates the
+ * index. The file list is authoritative (it drives validation + grouping); the diff is best-
+ * effort context, sent at ZERO context (`-U0`, just the changed lines) and with noisy files'
+ * bodies folded out (see isNoisyPath) — so a big change-set stays small enough for a provider's
+ * rate limit. May still be truncated on a pathological change-set.
  */
 export async function collectCommitPlanInput(absPath: string): Promise<CommitPlanInput> {
   const changed = await readChanges(absPath, true); // withStats → per-file add/remove counts
-  let diff = (await boundedGit(absPath, ["diff", "HEAD", "-M", "--no-color"], PLAN_DIFF_CAP + 1)).trim();
-  if (!diff) diff = (await boundedGit(absPath, ["diff", "-M", "--no-color"], PLAN_DIFF_CAP + 1)).trim();
+
+  // Only diff the files worth reading; fold out lockfiles/generated/minified (their name + stat
+  // in the file list is enough for grouping). `-U0` trims to just the changed lines.
+  const diffPaths = changed.map((f) => f.path).filter((p) => !isNoisyPath(p));
+  let diff = "";
+  if (diffPaths.length > 0) {
+    for (const chunk of chunkByBytes(diffPaths)) {
+      if (diff.length >= PLAN_DIFF_CAP) break;
+      diff += await boundedGit(absPath, ["diff", "HEAD", "-U0", "--no-color", "-M", "--", ...chunk], PLAN_DIFF_CAP + 1);
+    }
+    diff = diff.trim();
+    if (!diff) {
+      // Unborn HEAD → `git diff HEAD` errors/empties; fall back to the worktree diff.
+      for (const chunk of chunkByBytes(diffPaths)) {
+        if (diff.length >= PLAN_DIFF_CAP) break;
+        diff += await boundedGit(absPath, ["diff", "-U0", "--no-color", "-M", "--", ...chunk], PLAN_DIFF_CAP + 1);
+      }
+      diff = diff.trim();
+    }
+  }
   const truncated = diff.length > PLAN_DIFF_CAP;
   if (truncated) diff = diff.slice(0, PLAN_DIFF_CAP) + "\n…[truncated]";
 
@@ -530,6 +571,45 @@ export async function gitRemoteRemove(absPath: string, name: string): Promise<Ac
     if (low.includes("no such remote")) return fail("NO_REMOTE", `no remote named ${name}`);
     return classify(err);
   }
+}
+
+// ── tags ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a tag — "tag a release from your phone". Annotated (`-a -m`, identity-attributed) when a
+ * message is given, else lightweight. Creating a tag is a local, safe ref write. When `push` is
+ * set the tag is then pushed to origin (network → identity SSH key + `netGate`); a push failure is
+ * reported but the LOCAL tag is kept (honest partial result, nothing lost). The caller validates
+ * that this is a git repo; the name is validated here with the shared ref-name check.
+ */
+export async function gitTagCreate(
+  absPath: string,
+  identity: Identity | null,
+  name: string,
+  message?: string,
+  push = false,
+): Promise<ActionResult> {
+  if (!isValidBranchName(name)) return fail("INVALID_REF_NAME", "invalid tag name");
+  try {
+    const git = gitFor(absPath);
+    const msg = (message ?? "").trim();
+    // `--` separates the tag name so one starting with a dash can't be read as a flag.
+    const args = [...identityConfigArgs(identity), "tag", ...(msg ? ["-a", "-m", msg] : []), "--", name];
+    await git.raw(args);
+  } catch (err) {
+    const low = err instanceof Error ? err.message.toLowerCase() : String(err);
+    if (low.includes("already exists")) return fail("EXISTS", `tag already exists: ${name}`);
+    return classify(err);
+  }
+  if (push) {
+    try {
+      await netGate.run(() => gitFor(absPath).raw([...identityConfigArgs(identity), "push", "origin", name]));
+    } catch (err) {
+      const c = classify(err);
+      return fail(c.code, `tag created locally, but push failed: ${c.message}`);
+    }
+  }
+  return ok(push ? "tag created and pushed" : "tag created");
 }
 
 // ── branches ──────────────────────────────────────────────────────────────────────

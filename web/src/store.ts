@@ -659,6 +659,21 @@ export const useStore = defineStore("gitmob", () => {
       tagsByRepo[repoId] = { ...asResult(e), tags: [] };
     }
   }
+  async function createTag(
+    repoId: string,
+    input: { name: string; message?: string; push?: boolean },
+  ): Promise<ActionResult> {
+    gitOpBusy[repoId] = "tag";
+    try {
+      const r = await api.createTag(repoId, input);
+      await loadTags(repoId);
+      return r;
+    } catch (e) {
+      return asResult(e);
+    } finally {
+      gitOpBusy[repoId] = undefined;
+    }
+  }
   async function setRemote(repoId: string, url: string, name?: string): Promise<ActionResult> {
     gitOpBusy[repoId] = "remote";
     try {
@@ -790,6 +805,7 @@ export const useStore = defineStore("gitmob", () => {
     loadStashes,
     tagsByRepo,
     loadTags,
+    createTag,
     setRemote,
     removeRemote,
     stashSave,

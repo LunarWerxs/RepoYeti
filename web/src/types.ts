@@ -24,11 +24,34 @@ export interface RepoStatus {
 
 export type RepoSource = "auto" | "pinned" | "created";
 
+/** Which VCS backs a repo. Mirrors src/vcs/types.ts VcsKind. */
+export type VcsKind = "git" | "lore";
+
+/**
+ * What a backend supports — mirrors src/vcs/types.ts VcsCapabilities so the UI can hide
+ * controls a VCS doesn't have. Looked up by kind via VCS_CAPABILITIES below.
+ */
+export interface VcsCapabilities {
+  /** Has a stash stack (git). Lore has none. */
+  stash: boolean;
+  /** Has a distinct fetch step separate from pull (git). Lore syncs in one step. */
+  fetch: boolean;
+  /** Has multiple named remotes + tag management (git). Lore is centralized (one server). */
+  multipleRemotes: boolean;
+}
+
+export const VCS_CAPABILITIES: Record<VcsKind, VcsCapabilities> = {
+  git: { stash: true, fetch: true, multipleRemotes: true },
+  lore: { stash: false, fetch: false, multipleRemotes: false },
+};
+
 export interface Repo {
   id: string;
   name: string;
   absPath: string;
   source: RepoSource;
+  /** Which VCS backs this repo — drives which controls the card shows. */
+  vcs: VcsKind;
   isSubmodule: boolean;
   identityId: string | null;
   /** Owner-hidden from the dashboard (e.g. a deprecated repo). Display-only. */

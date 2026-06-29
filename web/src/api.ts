@@ -187,6 +187,9 @@ export const api = {
     req<ActionResult>("POST", `/api/repos/${id}/stash/drop`, { index }),
   /** Read-only tag list (newest first). */
   tags: (id: string) => req<TagList>("GET", `/api/repos/${id}/tags`),
+  /** Create a tag (annotated when a message is given), optionally pushing it to origin. */
+  createTag: (id: string, input: { name: string; message?: string; push?: boolean }) =>
+    req<ActionResult>("POST", `/api/repos/${id}/tag`, input),
   /** Add or update a remote (default origin). Throws ApiError on a bad URL. */
   setRemote: (id: string, url: string, name?: string) =>
     req<ActionResult>("POST", `/api/repos/${id}/remote`, name ? { url, name } : { url }),
