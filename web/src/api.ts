@@ -15,6 +15,7 @@ import type {
   FileDiff,
   Identity,
   LogResult,
+  LoreServer,
   Repo,
   SmartCommitResult,
   StashList,
@@ -107,6 +108,14 @@ export const api = {
   addRoot: (path: string) => req<{ ok: boolean; roots: string[] }>("POST", "/api/roots", { path }),
   removeRoot: (path: string) =>
     req<{ ok: boolean; roots: string[]; removed: number }>("DELETE", "/api/roots", { path }),
+
+  // ── lore servers (registry + clone-from-server) ──────────────────────────────
+  servers: () => req<{ servers: LoreServer[] }>("GET", "/api/servers").then((r) => r.servers),
+  addServer: (url: string, name?: string) =>
+    req<{ ok: boolean; server: LoreServer; servers: LoreServer[] }>("POST", "/api/servers", { url, name }),
+  deleteServer: (id: string) => req<{ ok: boolean; servers: LoreServer[] }>("DELETE", `/api/servers/${id}`),
+  cloneFromServer: (input: { url: string; parentPath: string; name?: string }) =>
+    req<{ repo: Repo }>("POST", "/api/servers/clone", input).then((r) => r.repo),
   /** Fetch every repo that has a remote; returns a per-repo summary. */
   fetchAll: () => req<FetchAllResult>("POST", "/api/repos/fetch-all"),
 

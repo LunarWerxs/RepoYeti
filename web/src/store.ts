@@ -12,6 +12,7 @@ import type {
   AiProviderId,
   AiSettings,
   CommitStyle,
+  LoreServer,
   BranchList,
   ChangedFile,
   CommitPlanResponse,
@@ -96,6 +97,8 @@ export const useStore = defineStore("repoyeti", () => {
 
   // Scan roots (discovery directories) — lazily loaded when Settings opens.
   const roots = ref<string[]>([]);
+  // Registered Lore servers — lazily loaded when Settings / Add-repo opens.
+  const servers = ref<LoreServer[]>([]);
   // True while a bulk "fetch all" is running (drives the header button spinner).
   const fetchingAll = ref(false);
 
@@ -882,6 +885,28 @@ export const useStore = defineStore("repoyeti", () => {
     roots.value = r.roots;
     return r.removed;
   }
+  // ── lore servers ─────────────────────────────────────────────────────────────
+  async function loadServers(): Promise<void> {
+    servers.value = await api.servers();
+  }
+  async function addServer(url: string, name?: string): Promise<LoreServer> {
+    const r = await api.addServer(url, name);
+    servers.value = r.servers;
+    return r.server;
+  }
+  async function removeServer(id: string): Promise<void> {
+    const r = await api.deleteServer(id);
+    servers.value = r.servers;
+  }
+  /** Clone a repo from a registered Lore server into a folder under a scan root. */
+  async function cloneFromServer(input: { url: string; parentPath: string; name?: string }): Promise<Repo> {
+    const repo = await api.cloneFromServer(input);
+    const idx = repos.value.findIndex((r) => r.id === repo.id);
+    if (idx >= 0) repos.value[idx] = repo;
+    else repos.value.push(repo);
+    return repo;
+  }
+
   /** Fetch every repo with a remote. Returns a summary the caller toasts. */
   async function fetchAll(): Promise<FetchAllResult> {
     fetchingAll.value = true;
@@ -985,10 +1010,15 @@ export const useStore = defineStore("repoyeti", () => {
     stashDrop,
     discardFile,
     roots,
+    servers,
     fetchingAll,
     loadRoots,
     addScanRoot,
     removeScanRoot,
+    loadServers,
+    addServer,
+    removeServer,
+    cloneFromServer,
     fetchAll,
     logoutAll,
     aiSettings,

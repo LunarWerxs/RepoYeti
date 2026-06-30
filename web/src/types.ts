@@ -283,6 +283,13 @@ export interface AiCatalogEntry {
 }
 export type CommitStyle = "conventional" | "concise" | "detailed";
 
+/** A registered Lore server RepoYeti can clone repos from (mirrors src/config.ts LoreServer). */
+export interface LoreServer {
+  id: string;
+  name: string;
+  url: string;
+}
+
 export interface AiModel {
   id: string;
   label: string;

@@ -15,6 +15,7 @@ import {
   Keyboard,
   Settings as SettingsIcon,
   FolderSearch,
+  Server,
   Plus,
   LogOut,
   Loader2,
@@ -103,7 +104,10 @@ const addingRoot = ref(false);
 const confirmRemoveRoot = ref<string | null>(null);
 // Load the current roots whenever the sheet opens.
 watch(open, (isOpen) => {
-  if (isOpen) void store.loadRoots();
+  if (isOpen) {
+    void store.loadRoots();
+    void store.loadServers();
+  }
 });
 async function addRoot(): Promise<void> {
   const path = newRoot.value.trim();
@@ -130,6 +134,40 @@ async function removeRoot(path: string): Promise<void> {
     toast.success(t("settings.rootsRemoved", { count: removed }, removed));
   } catch {
     toast.error(t("settings.rootsRemoveFailed"));
+  }
+}
+
+// ── lore servers (registry RepoYeti can clone from) ─────────────────────────────
+const newServerName = ref("");
+const newServerUrl = ref("");
+const addingServer = ref(false);
+const confirmRemoveServer = ref<string | null>(null);
+async function addServer(): Promise<void> {
+  const url = newServerUrl.value.trim();
+  if (!url || addingServer.value) return;
+  addingServer.value = true;
+  try {
+    await store.addServer(url, newServerName.value.trim() || undefined);
+    toast.success(t("settings.serversAdded"));
+    newServerName.value = "";
+    newServerUrl.value = "";
+  } catch {
+    toast.error(t("settings.serversAddFailed"));
+  } finally {
+    addingServer.value = false;
+  }
+}
+async function removeServer(id: string): Promise<void> {
+  if (confirmRemoveServer.value !== id) {
+    confirmRemoveServer.value = id; // first click arms the confirm
+    return;
+  }
+  confirmRemoveServer.value = null;
+  try {
+    await store.removeServer(id);
+    toast.success(t("settings.serversRemoved"));
+  } catch {
+    toast.error(t("settings.serversRemoveFailed"));
   }
 }
 
@@ -451,6 +489,64 @@ async function remove(id: AiProviderId): Promise<void> {
                 <Plus v-else />
                 {{ $t("settings.rootsAdd") }}
               </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <!-- Lore servers (clone-from-server registry) ─────────────────────────── -->
+        <Card class="gap-3 border-border bg-secondary/20 py-4 shadow-none">
+          <CardHeader class="gap-1 px-4">
+            <CardTitle class="flex items-center gap-2 text-[13px]">
+              <Server :size="15" class="text-muted-foreground" /> {{ $t("settings.cardServers") }}
+            </CardTitle>
+            <CardDescription class="text-[12px]">{{ $t("settings.serversHint") }}</CardDescription>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-2.5 px-4">
+            <p v-if="!store.servers.length" class="text-[12.5px] text-muted-foreground">
+              {{ $t("settings.serversEmpty") }}
+            </p>
+            <div
+              v-for="s in store.servers"
+              :key="s.id"
+              class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5"
+            >
+              <span class="flex min-w-0 flex-1 flex-col">
+                <span class="truncate text-[12.5px] font-medium text-foreground">{{ s.name }}</span>
+                <code class="mono truncate text-[11.5px] text-muted-foreground" :title="s.url">{{ s.url }}</code>
+              </span>
+              <Button
+                :variant="confirmRemoveServer === s.id ? 'destructive' : 'ghost'"
+                size="sm"
+                class="shrink-0"
+                :aria-label="$t('settings.serversRemove')"
+                @click="removeServer(s.id)"
+                @blur="confirmRemoveServer = null"
+              >
+                <Trash2 />
+                <span v-if="confirmRemoveServer === s.id">{{ $t("settings.serversRemove") }}</span>
+              </Button>
+            </div>
+            <form class="flex flex-col gap-2 pt-0.5" @submit.prevent="addServer">
+              <Input
+                v-model="newServerName"
+                class="text-[12.5px]"
+                :placeholder="$t('settings.serversPlaceholderName')"
+                :aria-label="$t('settings.serversLabelName')"
+              />
+              <div class="flex items-center gap-2">
+                <Input
+                  v-model="newServerUrl"
+                  class="mono min-w-0 flex-1 text-[12.5px]"
+                  :placeholder="$t('settings.serversPlaceholderUrl')"
+                  :aria-label="$t('settings.serversLabelUrl')"
+                />
+                <Button type="submit" size="sm" class="shrink-0" :disabled="!newServerUrl.trim() || addingServer">
+                  <Loader2 v-if="addingServer" class="animate-spin" />
+                  <Plus v-else />
+                  {{ $t("settings.serversAdd") }}
+                </Button>
+              </div>
+              <p class="text-[11.5px] text-muted-foreground">{{ $t("settings.serversIpHint") }}</p>
             </form>
           </CardContent>
         </Card>
