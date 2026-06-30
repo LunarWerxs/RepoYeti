@@ -10,11 +10,21 @@
 > also gate the release). 🤖 = an agent can do it. Each item keeps its original code (`A4`, `C1`, `D1`…)
 > so older cross-references still resolve. Status verified against the tree on **2026-06-29**.
 
+> **▶ RESUME HERE (fresh chat).** The frontend pass is mid-flight. Next agent-doable items, in order:
+> **tunnel-URL UI** (needs a `PUT /api/tunnel` route) → **per-file staging** (needs a
+> `POST /api/repos/:id/commit-selected` route) → **`D1`** RepoCard split (~1380 lines, biggest) →
+> **`E6`** frontend test infra (Vitest + Playwright). **Constraints:** work **only on `main`** (never
+> branch); **never suggest pushing/tagging/branch-protecting `0.1.0`** (owner-only, don't raise it).
+> The gitignored `.env` already holds `CONNECTIONS_API_KEY` + the Groq key — don't re-ask. A dev env
+> may still be live (daemon `:7171`, Vite `:4319`, `loreserver`); **restart the daemon after backend
+> edits** so new routes are served. The pattern to copy: each feature = backend route + `VcsBackend`
+> method (git real, Lore graceful stub) + a test, then the web UI, then browser-verify via preview tools.
+
 ---
 
 ## ✅ Landed in the `0.1.0` burndown (2026-06-29 → 06-30, all on `main`)
 
-All verified green at each step (276 daemon tests + web build, `tsc`, `check:codes`/`check:boundaries`, lint).
+All verified green at each step (277 daemon tests + web build, `tsc`, `check:codes`/`check:boundaries`, lint).
 
 **🟡 Lore feature-parity port — DONE & verified end-to-end** against a live `loreserver` 0.8.4 (the
 `lore` CLI is now installed at `~/bin`). AI commit-diff, smart-commit (plan input + group staging via
