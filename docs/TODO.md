@@ -12,6 +12,28 @@
 
 ---
 
+## ✅ Landed in the `0.1.0` burndown (2026-06-29, branch `wrap-up/todo-burndown`)
+
+This pass cleared the release-prep + quick-win wave (all verified: 268 tests, `tsc`, `check:codes`/
+`check:boundaries`, lint green). **Done:** `C1` (registerRepo → `detectVcs`), `C5` (gate-nesting
+comment), `D5` (drop `workspace_id`), `D3` (CommitStyle drift guard), `D4` (centralize
+`ok`/`fail`/`PATCH_CAP`), `A4` (version cut `0.1.0` — **tag not pushed**, owner pulls that trigger),
+`A5` (baked-in OAuth documented as intentional + override path), `A6` (shim retired — docs corrected;
+no deploy needed, see below), `F2` (CF-header auth comment + README proxy note), `B5` (pre-commit
+lint+typecheck), `B7` (pin `@types/bun`, Monaco chunk limit).
+
+**Connections / A6 owner-step finding:** the `cnx_live_…` key is valid with `apps:write`, but the
+RepoYeti app (`a790090c…`) is an **AEGIS-direct registration** with no Studio filing-queue row, so the
+`studio.connections.icu` API can't see/PATCH it. Per `docs/REMOTE_ACCESS.md` the redirect URIs were
+already set in AEGIS via the vault. No write was made; the only unproven step is a **live sign-in**
+with the daemon running (owner step).
+
+**Still open** (the big items): `C2`, `E4`, `D1`, `E5`, `E6`, `F6`, PAT, per-file staging, Lore
+parity port, Lore servers UI, `D2`, `B4`, the feature UIs, and the 🧑 owner decisions (`F5`,
+branch-protect, MIT confirm, process `G`, push the `v0.1.0` tag).
+
+---
+
 ## 🔴 Vital — do now (blocks a public release / real bugs / active breakage)
 
 Agent-doable blockers first; `A6` needs you for two steps. The release **also** needs the owner-gated
