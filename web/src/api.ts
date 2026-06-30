@@ -7,6 +7,7 @@ import type {
   AiProviderId,
   AiSettings,
   BranchList,
+  CommitStyle,
   ChangedFile,
   CommitPlanResponse,
   FetchAllResult,
@@ -260,6 +261,8 @@ export const api = {
     settings: () => req<AiSettings>("GET", "/api/ai/settings"),
     /** Toggle smart-commit YOLO mode (commit the AI plan without the review editor). */
     setYolo: (yolo: boolean) => req<AiSettings>("PUT", "/api/ai/settings", { yolo }),
+    /** Set the AI commit-message style (conventional / concise / detailed). */
+    setStyle: (style: CommitStyle) => req<AiSettings>("PUT", "/api/ai/settings", { style }),
     connect: (provider: AiProviderId, apiKey: string) =>
       req<{ ok: boolean; models: AiModel[]; settings: AiSettings }>(
         "POST",

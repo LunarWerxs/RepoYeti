@@ -40,7 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import IdentityManager from "./IdentityManager.vue";
-import type { AiCatalogEntry, AiModel, AiProviderId } from "../types";
+import type { AiCatalogEntry, AiModel, AiProviderId, CommitStyle } from "../types";
 
 const open = defineModel<boolean>("open", { required: true });
 const store = useStore();
@@ -148,6 +148,15 @@ async function onYolo(enabled: boolean): Promise<void> {
     await store.setYolo(enabled);
   } catch {
     toast.error(t("settings.aiYoloFailed"));
+  }
+}
+
+// Set the AI commit-message style (conventional / concise / detailed).
+async function onStyle(style: string): Promise<void> {
+  try {
+    await store.setStyle(style as CommitStyle);
+  } catch {
+    toast.error(t("settings.aiStyleFailed"));
   }
 }
 
@@ -867,6 +876,24 @@ async function remove(id: AiProviderId): Promise<void> {
                 :aria-label="$t('settings.aiYolo')"
                 @update:model-value="(v: boolean) => onYolo(v)"
               />
+            </label>
+
+            <!-- AI commit-message style -->
+            <label class="flex cursor-pointer items-center justify-between gap-3">
+              <span class="flex flex-col gap-0.5">
+                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.aiStyle") }}</span>
+                <span class="text-[12px] text-muted-foreground">{{ $t("settings.aiStyleHint") }}</span>
+              </span>
+              <select
+                :value="settings.style"
+                :aria-label="$t('settings.aiStyle')"
+                class="rounded-md border border-input bg-background px-2 py-1.5 text-[12.5px] text-foreground"
+                @change="(e) => onStyle((e.target as HTMLSelectElement).value)"
+              >
+                <option value="conventional">{{ $t("settings.aiStyleConventional") }}</option>
+                <option value="concise">{{ $t("settings.aiStyleConcise") }}</option>
+                <option value="detailed">{{ $t("settings.aiStyleDetailed") }}</option>
+              </select>
             </label>
           </CardContent>
         </Card>

@@ -11,6 +11,7 @@ import type {
   AiModel,
   AiProviderId,
   AiSettings,
+  CommitStyle,
   BranchList,
   ChangedFile,
   CommitPlanResponse,
@@ -482,6 +483,16 @@ export const useStore = defineStore("repoyeti", () => {
       aiSettings.value = await api.ai.setYolo(yolo);
     } catch (e) {
       aiSettings.value = { ...aiSettings.value, yolo: prev }; // roll back
+      throw e;
+    }
+  }
+  async function setStyle(style: CommitStyle): Promise<void> {
+    const prev = aiSettings.value.style;
+    aiSettings.value = { ...aiSettings.value, style };
+    try {
+      aiSettings.value = await api.ai.setStyle(style);
+    } catch (e) {
+      aiSettings.value = { ...aiSettings.value, style: prev }; // roll back
       throw e;
     }
   }
@@ -991,6 +1002,7 @@ export const useStore = defineStore("repoyeti", () => {
     selectModel,
     setDefaultProvider,
     setYolo,
+    setStyle,
     removeProvider,
     genCommitMessage,
     genCommitPlan,
