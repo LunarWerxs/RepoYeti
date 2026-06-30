@@ -47,10 +47,14 @@ halves of per-file staging & commit-detail diff.
 **Still open:**
 - **`E6`** frontend test infra (Vitest + Playwright) — adds dev-deps to the shared `bun.lock`.
 - **PAT/HTTPS:** the network path can't be unit-verified without a real private repo + token (owner).
-- **SDK migration — ⚠️ reconsider.** `@lore-vcs/sdk` is a **koffi native-FFI binding** (not pure JS), so it
-  adds a native dependency that breaks the zero-native-dep `bun --compile` single binary (and its postinstall
-  is blocked by Bun's security). Recommendation: keep the verified CLI path; adopt the SDK later only as an
-  *optional* fast-path with CLI fallback (so the single binary still ships), or when a pure-JS/WASM binding exists.
+- **SDK migration — DECISION: YES, do it (deferred, triggered).** Verified the `lore` CLI has **no
+  structured/JSON/porcelain output** of any kind — only human text — so regex-scraping is the *only* CLI
+  option and it WILL break silently as Lore (pre-1.0, fast-moving) changes wording. `@lore-vcs/sdk` (a koffi
+  native-FFI binding) is the only drift-proof path to structured Lore reads. **Trigger:** do it when Lore
+  graduates from the experimental `REPOYETI_LORE=1` flag to a default-eligible backend, OR the first time a
+  Lore release breaks a parser in `tests/lore-parse.test.ts` — whichever first. **Cost to plan for:** it's a
+  native dep, so the per-OS `release.yml` build must bundle the native libs (the single-binary gets a small
+  sidecar) — accepted as the price of first-class Lore. NOT "optional / maybe drop."
 - **🧑 owner:** branch-protect `main`, confirm MIT, push the `v0.1.0` tag, the live sign-in.
 
 ---
