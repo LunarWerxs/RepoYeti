@@ -39,10 +39,12 @@ RepoYeti app (`a790090c…`) is an **AEGIS-direct registration** with no Studio 
 already set in AEGIS via the vault. No write was made; the only unproven step is a **live sign-in**
 with the daemon running (owner step). (Key is now stored in gitignored `.env` as `CONNECTIONS_API_KEY`.)
 
-**Frontend pass — in progress** (dev env stood up: daemon on `:7171` + Vite + `loreserver`, verified via
-browser preview tools). **DONE & browser-verified:** toast-undo (hide/pin/star → Undo restores) ·
-AI-style picker (Settings → AI; change → daemon persists `style`). Remaining: tunnel-URL UI, Lore servers
-UI, `F6` a11y, then `D1` RepoCard split (biggest), + the UI halves of per-file staging & commit-detail diff.
+**Frontend pass — in progress** (dev env: daemon `:7171` + Vite + `loreserver`, verified via browser
+preview tools). **DONE & browser-verified:** toast-undo (hide/pin/star → Undo restores) · AI-style picker
+(Settings → AI; change → daemon persists `style`) · **Lore servers UI** (Settings → "Lore servers" panel
+add/remove → daemon persists; Add-repo → "From Lore" tab cloned `clonetest` from a live server end-to-end).
+Remaining: `F6` a11y (next — quick), tunnel-URL UI (needs a PUT /api/tunnel route), commit-detail diff +
+per-file staging (each needs a backend route), then `D1` RepoCard split (biggest), and `E6` test infra.
 
 **Still open:**
 - **`E6`** frontend test infra (Vitest + Playwright) — adds dev-deps to the shared `bun.lock`.
