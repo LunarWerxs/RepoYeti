@@ -1,16 +1,19 @@
-# RepoYeti OAuth redirect shim
+# RepoYeti OAuth redirect shim — ⚠️ RETIRED (dead reference code)
 
-A ~50-line Cloudflare Worker that is the **stable OAuth redirect URL** for "Sign in
-with Connections", so the daemon can stay on a free, rotating quick-tunnel URL.
+> **This shim is no longer used and is not deployed.** Once RepoYeti moved to a stable domain
+> (`app.repoyeti.com` via a named Cloudflare tunnel), the rotating-URL problem this Worker solved
+> went away. Login now uses the daemon's **own** `<origin>/oauth/callback` directly — see
+> [`src/auth.ts`](../src/auth.ts) and [`docs/REMOTE_ACCESS.md`](../docs/REMOTE_ACCESS.md). The old
+> `gitmob-auth`/`repoyeti-auth` Workers were deleted from Cloudflare. This directory is kept only as
+> historical reference for the rotating-tunnel pattern below; nothing in the running product calls it.
 
-It receives `GET /cb?code&state`, reads the daemon's current origin out of the signed
-`state`, validates it against an allowed host list, and `302`s the login back to
+A ~50-line Cloudflare Worker that *was* the **stable OAuth redirect URL** for "Sign in
+with Connections", so the daemon could stay on a free, rotating quick-tunnel URL.
+
+It received `GET /cb?code&state`, read the daemon's current origin out of the signed
+`state`, validated it against an allowed host list, and `302`d the login back to
 `<daemon-origin>/oauth/finish`. The `code` is PKCE-bound and single-use, so the shim
-never sees a usable credential. See [`../MARCHING_ORDERS.md`](../MARCHING_ORDERS.md) §7.
-
-> **✅ Deployed:** `https://repoyeti-auth.lunawerx.workers.dev` — register
-> `https://repoyeti-auth.lunawerx.workers.dev/cb` as the redirect URI of your
-> "Sign in with Connections" app. Re-deploy after edits with `bunx wrangler deploy`.
+never saw a usable credential.
 
 ## Deploy (free)
 

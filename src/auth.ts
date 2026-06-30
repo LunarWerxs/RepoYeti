@@ -167,7 +167,18 @@ export function readSession(c: Context, o: OAuthConfig): Session | null {
 const LOCAL_COOKIE = "gm_local";
 const LOCAL_TTL_MS = 30 * 24 * 3600 * 1000;
 
-/** True when the request came in over the tunnel (Cloudflare adds these; localhost has none). */
+/**
+ * True when the request came in over the tunnel (Cloudflare adds these; localhost has none).
+ *
+ * ⚠️ SECURITY ASSUMPTION (F2): "local vs remote" is inferred PURELY from these proxy headers.
+ * This is correct behind Cloudflare (the named tunnel always injects `cf-connecting-ip`, and a
+ * remote caller can't strip them). But if you deploy RepoYeti behind a DIFFERENT reverse proxy
+ * that does NOT set any of these, a genuinely remote request would be misclassified as LOCAL —
+ * letting it use the "continue local" bypass and skip owner auth. Only expose the daemon through
+ * a proxy that sets `cf-connecting-ip` / `x-forwarded-*` (see README "Deploying behind a proxy"),
+ * or bind it to loopback only. Do not loosen this without re-deriving remoteness from a trusted
+ * signal (e.g. the bound socket address), not a spoofable header.
+ */
 export function isRemoteRequest(c: Context): boolean {
   return !!(
     c.req.header("cf-connecting-ip") ||

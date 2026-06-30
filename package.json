@@ -1,6 +1,6 @@
 {
   "name": "repoyeti",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "System-wide remote git manager — a background daemon with a mobile dashboard.",
   "type": "module",
   "license": "MIT",
@@ -54,7 +54,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
-    "@types/bun": "latest",
+    "@types/bun": "1.3.14",
     "typescript": "^5.7.2"
   }
 }

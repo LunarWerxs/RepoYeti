@@ -15,16 +15,17 @@ AI multi-commit **Smart Commit** splitter. A pluggable VCS backend also supports
 | Phase | What | State |
 |---|---|---|
 | **1 — daemon core** | discovery · `.git` watchers · SQLite · status engine · op-queue · REST + SSE | ✅ built & verified |
-| **2 — auth** | "Sign in with Connections" (public OIDC, config-gated) + redirect shim | ✅ built & verified¹ |
+| **2 — auth** | "Sign in with Connections" (public OIDC, config-gated) — daemon's own `/oauth/callback` | ✅ built & verified¹ |
 | **3 — identity + safe git ops** | identity CRUD · per-op `-c core.sshCommand`/`user.*` · fetch/pull(FF-only)/push(no-force)/commit guards | ✅ built & verified |
 | **4 — tunnel + PWA** | cloudflared (+QR) · Vue 3 dashboard (reka-ui / Tailwind v4 / VueUse / vue-sonner / auto-animate) | ✅ built & verified |
 | **5 — hardening + dist** | `bun --compile` single binary · register/create repo · stage-all+commit · port/timeout guards | ✅ built & verified² |
 | 6 — Tauri tray | thin sidecar around the unchanged daemon binary | ⏳ deferred (the CLI binary + phone browser is the whole product) |
 
 ¹ Auth gating, the login redirect (built from live connections.icu discovery), and the sign-in UI are
-verified; the redirect shim is **deployed** (`repoyeti-auth.lunawerx.workers.dev`). The only remaining
-step for a live login round-trip is registering a "Sign in with Connections" app (client id) — see
-[shim/README.md](shim/README.md) and MARCHING_ORDERS §13.
+verified. Login uses the daemon's **own** `<origin>/oauth/callback` — the old rotating-URL redirect
+"shim" Worker is **retired** (`shim/` is now dead reference code). A public PKCE client ships baked in
+so login works with zero setup over `app.repoyeti.com`; the only unproven step is a live end-to-end
+sign-in with the daemon running. See [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
 ² PAT/HTTPS-token auth + OS-keychain (keytar) remain intentionally deferred (SSH-key injection covers
 the common case); the named-tunnel stable-URL upgrade is documented.
 
@@ -109,15 +110,20 @@ repoyeti start --tunnel    # opens a tunnel; an owner must have signed in once (
 Prints a `*.trycloudflare.com` URL + a QR to scan. The daemon refuses to open a tunnel unless auth is
 configured, so the public URL is useless to anyone but the signed-in owner.
 
-### Finishing "Sign in with Connections" (one-time)
+### "Sign in with Connections" — baked in (override optional)
 
-The redirect **shim is already deployed**: `https://repoyeti-auth.lunawerx.workers.dev` (Cloudflare Worker;
-source in [shim/](shim/)). To light up login you only need to:
+RepoYeti ships a **public PKCE client** (a `client_id`, no secret — public by nature) baked into
+`src/config.ts`, so login works with **zero setup**: the daemon registers and uses its **own**
+`<origin>/oauth/callback` (there is no redirect shim). The hosted instance's IdP allow-lists
+`https://app.repoyeti.com/oauth/callback` plus the loopback, so `repoyeti start --tunnel` → scan
+the QR → Sign in with Connections → dashboard works out of the box.
+
+If you fork RepoYeti and want your **own** OAuth client instead of the baked-in one:
 
 1. Register a **"Sign in with Connections"** app at `studio.connections.icu` (developer apps) with
-   **redirect URI** `https://repoyeti-auth.lunawerx.workers.dev/cb` and scopes `openid profile email`.
-   This yields a `client_id` (and, if confidential, a `client_secret`).
-2. Add the `oauth` block to `~/.repoyeti/config.json`:
+   **redirect URI** `<your daemon origin>/oauth/callback` — e.g. `http://127.0.0.1:7171/oauth/callback`
+   for loopback, plus your own tunnel hostname — and scopes `openid profile email`. This yields a `client_id`.
+2. Override the `oauth` block in `~/.repoyeti/config.json`:
 
    ```jsonc
    {
@@ -125,13 +131,16 @@ source in [shim/](shim/)). To light up login you only need to:
      "oauth": {
        "issuer": "https://accounts.connections.icu",
        "clientId": "<your client id>",
-       "redirectUri": "https://repoyeti-auth.lunawerx.workers.dev/cb",
+       "redirectUri": "<your daemon origin>/oauth/callback",
        "ownerSub": "<your Connections sub>"   // or "ownerEmail": "you@example.com"
      }
    }
    ```
 
-Then `repoyeti start --tunnel` → scan the QR → Sign in with Connections → dashboard, from anywhere.
+> **Deploying behind a proxy (security).** RepoYeti decides "local vs remote" from Cloudflare /
+> `x-forwarded-*` headers (see `isRemoteRequest` in `src/auth.ts`). Only expose the daemon through a
+> proxy that sets those headers (the named Cloudflare tunnel does). Behind a proxy that strips them, a
+> remote request could be treated as local and skip owner auth — bind to loopback instead.
 
 ## Testing
 

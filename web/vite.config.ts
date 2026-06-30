@@ -69,7 +69,10 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
-  build: { outDir: "dist", emptyOutDir: true },
+  // The Monaco code-viewer chunk is legitimately multi-MB (language services); raise the
+  // "chunk too large" warning ceiling so a normal build isn't noisy, while still flagging a
+  // real regression. Monaco stays lazy-loaded + out of the PWA precache (see workbox above).
+  build: { outDir: "dist", emptyOutDir: true, chunkSizeWarningLimit: 4000 },
   server: {
     port: 4319,
     proxy: {

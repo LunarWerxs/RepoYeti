@@ -6,6 +6,8 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-06-29
+
 ### Added
 
 - **Smart Commit (AI multi-commit splitter).** Turn a pile of unrelated working-tree changes into
@@ -136,5 +138,6 @@ All notable changes to RepoYeti are documented here. The format is based on
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
-[Unreleased]: https://github.com/L0garithmic/RepoYeti/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/L0garithmic/RepoYeti/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/L0garithmic/RepoYeti/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/L0garithmic/RepoYeti/releases/tag/v0.0.1
