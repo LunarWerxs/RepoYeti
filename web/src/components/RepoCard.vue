@@ -666,8 +666,14 @@ async function confirmDiscard(): Promise<void> {
   >
     <!-- ── collapsed header row — the whole row toggles + highlights on hover ── -->
     <div
-      class="flex cursor-pointer items-center gap-1.5 p-2 transition-colors hover:bg-accent/30 sm:gap-2 sm:p-2.5"
+      role="button"
+      tabindex="0"
+      :aria-expanded="expanded"
+      :aria-label="expanded ? $t('repo.collapse') : $t('repo.expand')"
+      class="flex cursor-pointer items-center gap-1.5 rounded-md p-2 outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring/40 sm:gap-2 sm:p-2.5"
       @click="toggle"
+      @keydown.enter.prevent="toggle"
+      @keydown.space.prevent="toggle"
     >
       <!-- drag handle (hidden in filtered view, where reordering is disabled) -->
       <button
@@ -705,6 +711,7 @@ async function confirmDiscard(): Promise<void> {
           v-if="repo.pinned"
           class="flex shrink-0 items-center rounded-md bg-primary/15 px-1.5 py-0.5 text-primary"
           :title="$t('repo.badge.pinned')"
+          :aria-label="$t('repo.badge.pinned')"
         >
           <Pin :size="11" />
         </span>
@@ -712,6 +719,7 @@ async function confirmDiscard(): Promise<void> {
           v-if="repo.starred"
           class="flex shrink-0 items-center rounded-md bg-amber-400/15 px-1.5 py-0.5 text-amber-400"
           :title="$t('repo.badge.starred')"
+          :aria-label="$t('repo.badge.starred')"
         >
           <Star :size="11" class="fill-current" />
         </span>
@@ -719,6 +727,7 @@ async function confirmDiscard(): Promise<void> {
           v-if="repo.hidden"
           class="flex shrink-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground"
           :title="$t('repo.badge.hidden')"
+          :aria-label="$t('repo.badge.hidden')"
         >
           <EyeOff :size="11" />
         </span>
@@ -742,7 +751,7 @@ async function confirmDiscard(): Promise<void> {
         </Tooltip>
         <Tooltip v-if="st && st.behind > 0">
           <TooltipTrigger as-child>
-            <span :class="statusChip('warning')">
+            <span :class="statusChip('warning')" :aria-label="$t('repo.badge.behindLabel', { count: st.behind })">
               <ArrowDown :size="12" /><span class="ml-0.5">{{ st.behind }}</span>
             </span>
           </TooltipTrigger>
@@ -754,6 +763,7 @@ async function confirmDiscard(): Promise<void> {
           v-if="st && st.ahead > 0"
           :class="statusChip('success')"
           :title="$t('repo.badge.aheadLabel', { count: st.ahead })"
+          :aria-label="$t('repo.badge.aheadLabel', { count: st.ahead })"
         >
           <ArrowUp :size="12" /><span class="ml-0.5">{{ st.ahead }}</span
           ><span :class="statusWord">&nbsp;{{ $t("repo.badge.ahead") }}</span>
@@ -762,11 +772,12 @@ async function confirmDiscard(): Promise<void> {
           v-if="st && st.dirty > 0"
           :class="statusChip('warning')"
           :title="$t('repo.badge.changedLabel', { count: st.dirty })"
+          :aria-label="$t('repo.badge.changedLabel', { count: st.dirty })"
         >
           <Pencil :size="12" /><span class="ml-0.5">{{ st.dirty }}</span
           ><span :class="statusWord">&nbsp;{{ $t("repo.badge.changed") }}</span>
         </span>
-        <span v-if="isClean" :class="statusChip('muted')" :title="$t('repo.badge.clean')">
+        <span v-if="isClean" :class="statusChip('muted')" :title="$t('repo.badge.clean')" :aria-label="$t('repo.badge.clean')">
           <Check :size="12" /><span :class="statusWord">&nbsp;{{ $t("repo.badge.clean") }}</span>
         </span>
         <AlertTriangle v-if="st?.error" :size="14" class="text-destructive" />

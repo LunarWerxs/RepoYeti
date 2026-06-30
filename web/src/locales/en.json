@@ -162,6 +162,7 @@
     "badge": {
       "ahead": "ahead",
       "aheadLabel": "{count} ahead",
+      "behindLabel": "Behind by {count}",
       "behindTooltip": "Behind by {count} as of last fetch",
       "changed": "changed",
       "changedLabel": "{count} changed",
