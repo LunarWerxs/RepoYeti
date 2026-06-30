@@ -16,11 +16,8 @@ import type { CommitPlanInput, PlanInputFile } from "./ai.ts";
 // The result envelope + code now live in contract.ts (the contract layer) so the VCS
 // abstraction can depend on them without importing this git module. Re-exported here for
 // back-compat — service.ts and the vcs backends still import them from git-actions.ts.
-import type { ActionResult, ActionCode } from "./contract.ts";
+import { ok, fail, PATCH_CAP, type ActionResult, type ActionCode } from "./contract.ts";
 export type { ActionResult, ActionCode };
-
-const ok = (message: string): ActionResult => ({ ok: true, code: "OK", message });
-const fail = (code: ActionCode, message: string): ActionResult => ({ ok: false, code, message });
 
 /** Map a thrown git error (simple-git surfaces stderr in the message) to a code. */
 function classify(err: unknown): ActionResult {
@@ -409,10 +406,6 @@ export async function collectCommitPlanInput(absPath: string): Promise<CommitPla
   }));
   return { files, diff, truncated };
 }
-
-/** ~1 MB of unified diff is plenty for the viewer; bound the pathological "huge change in a
- *  huge file" case so we never buffer an unbounded patch. */
-const PATCH_CAP = 1_000_000;
 
 /**
  * A single tracked file's unified `git diff HEAD`, bounded via boundedGit so a pathological

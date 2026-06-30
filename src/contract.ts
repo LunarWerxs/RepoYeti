@@ -79,6 +79,16 @@ export interface ActionResult {
   message: string;
 }
 
+/** Success/failure envelope builders — every git/VCS action returns one of these. Centralized
+ *  here (not in git-actions.ts) so the VCS backends can build results WITHOUT importing the git
+ *  implementation, and the two backends share one definition instead of copy-pasting it. */
+export const ok = (message: string): ActionResult => ({ ok: true, code: "OK", message });
+export const fail = (code: ActionCode, message: string): ActionResult => ({ ok: false, code, message });
+
+/** ~1 MB of unified diff is plenty for the file viewer; bound the pathological "huge change in a
+ *  huge file" case so neither backend ever buffers an unbounded patch. Shared by git + Lore. */
+export const PATCH_CAP = 1_000_000;
+
 /** Canonical HTTP status for a code. Routes can still override per call site. */
 export function statusForCode(code: ApiCode): ContentfulStatusCode {
   switch (code) {

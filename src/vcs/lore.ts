@@ -29,7 +29,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Identity, RepoStatus } from "../db.ts";
 import type { ChangedFile } from "../status.ts";
-import type { ActionResult } from "../git-actions.ts";
+import { ok, PATCH_CAP, type ActionResult } from "../contract.ts";
 import type { BranchList, LogResult, StashList } from "../inspect.ts";
 import type { VcsBackend } from "./types.ts";
 
@@ -99,8 +99,6 @@ async function runLore(absPath: string, args: string[]): Promise<LoreRun> {
 function loreIdentityArgs(identity: Identity | null): string[] {
   return identity?.gitUsername ? ["--identity", identity.gitUsername] : [];
 }
-
-const ok = (message: string): ActionResult => ({ ok: true, code: "OK", message });
 
 /** Map a failed `lore` run to one of our stable action codes (error strings from 0.8.4). */
 function classifyLore(run: LoreRun): ActionResult {
@@ -397,9 +395,6 @@ async function loreStashDrop(_absPath: string, _index?: number): Promise<ActionR
 // ── file diff / discard (power the file viewer + discard on Lore repos; called from
 //    service.ts for non-git repos, alongside the VcsBackend methods) ───────────────────
 
-/** ~1 MB of unified diff is plenty for the viewer; bound a pathological huge-file diff. */
-const LORE_PATCH_CAP = 1_000_000;
-
 /**
  * A single file's unified diff — working tree vs the current revision — via `lore diff <path>`.
  * Maps to the file viewer's "patch" mode for Lore repos (we don't reconstruct both sides).
@@ -411,8 +406,8 @@ export async function loreFilePatch(
   const run = await runLore(absPath, ["diff", relPath]);
   if (run.spawnError) return { ok: false, patch: "", truncated: false, message: "lore CLI not available" };
   if (run.code !== 0) return { ok: false, patch: "", truncated: false, message: classifyLore(run).message };
-  const truncated = run.stdout.length > LORE_PATCH_CAP;
-  return { ok: true, patch: truncated ? run.stdout.slice(0, LORE_PATCH_CAP) : run.stdout, truncated };
+  const truncated = run.stdout.length > PATCH_CAP;
+  return { ok: true, patch: truncated ? run.stdout.slice(0, PATCH_CAP) : run.stdout, truncated };
 }
 
 /**
