@@ -249,6 +249,7 @@
     "toastStarred": "Repository starred",
     "toastUnstarred": "Repository unstarred",
     "toastFavFailed": "Could not update repository",
+    "undo": "Undo",
     "unhide": "Show repository",
     "err": {
       "detachedHead": "Detached HEAD — resolve at your desk.",

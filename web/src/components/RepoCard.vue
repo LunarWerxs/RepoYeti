@@ -502,12 +502,25 @@ function gripKey(action: () => void): void {
   if (shortcutsActive()) action();
 }
 
+// A success toast carrying an "Undo" action that calls `revert` (re-applies the previous value).
+// Used by the hide/pin/star toggles so a mis-tap is one tap to reverse.
+function undoableToast(message: string, revert: () => Promise<unknown>): void {
+  toast.success(message, {
+    action: {
+      label: t("repo.undo"),
+      onClick: () => {
+        void revert();
+      },
+    },
+  });
+}
+
 // ── hide / unhide from the dashboard ──────────────────────────────────────────
 async function toggleHidden(): Promise<void> {
   const next = !props.repo.hidden;
   try {
     await store.setHidden(props.repo.id, next);
-    toast.success(next ? t("repo.toastHidden") : t("repo.toastShown"));
+    undoableToast(next ? t("repo.toastHidden") : t("repo.toastShown"), () => store.setHidden(props.repo.id, !next));
   } catch {
     toast.error(t("repo.toastHideFailed"));
   }
@@ -518,7 +531,7 @@ async function togglePinned(): Promise<void> {
   const next = !props.repo.pinned;
   try {
     await store.setPinned(props.repo.id, next);
-    toast.success(next ? t("repo.toastPinned") : t("repo.toastUnpinned"));
+    undoableToast(next ? t("repo.toastPinned") : t("repo.toastUnpinned"), () => store.setPinned(props.repo.id, !next));
   } catch {
     toast.error(t("repo.toastFavFailed"));
   }
@@ -527,7 +540,7 @@ async function toggleStarred(): Promise<void> {
   const next = !props.repo.starred;
   try {
     await store.setStarred(props.repo.id, next);
-    toast.success(next ? t("repo.toastStarred") : t("repo.toastUnstarred"));
+    undoableToast(next ? t("repo.toastStarred") : t("repo.toastUnstarred"), () => store.setStarred(props.repo.id, !next));
   } catch {
     toast.error(t("repo.toastFavFailed"));
   }
