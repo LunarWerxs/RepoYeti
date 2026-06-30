@@ -81,6 +81,19 @@ for (const f of readdirSync(join(ROOT, "src/vcs")).filter((n) => n.endsWith(".ts
   }
 }
 
+// MCP core/contract layer (src/mcp/{core,tools,backend}.ts) must stay transport-agnostic + pure —
+// the backend is INJECTED, so these three files must not import the service/git/db layers. The two
+// adapters (adapter-service.ts, adapter-http.ts) ARE the bridges and are deliberately exempt.
+const MCP_FORBID = /from\s+"[^"]*\/(service|read|git-actions|vcs|db)(\/|\.ts|")/g;
+const MCP_WHY = "mcp core/tools/backend must be transport-agnostic — use an injected backend, not the service/git/db layers";
+const MCP_PURE = new Set(["core.ts", "tools.ts", "backend.ts"]);
+for (const name of readdirSync(join(ROOT, "src/mcp")).filter((n) => n.endsWith(".ts"))) {
+  if (!MCP_PURE.has(name)) continue; // adapter-service.ts + adapter-http.ts are the bridges → exempt
+  for (const m of read(`src/mcp/${name}`).matchAll(MCP_FORBID)) {
+    violations.push(`src/mcp/${name}: forbidden import \`${m[0]}\` — ${MCP_WHY}`);
+  }
+}
+
 if (violations.length) {
   console.error("✗ Architectural boundary violations:");
   for (const v of violations) console.error(`  ${v}`);

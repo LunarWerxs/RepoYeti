@@ -192,6 +192,9 @@ export const META: Record<string, RouteMeta> = {
 
   // ── events (SSE) — documented for completeness; not a JSON endpoint ───────────────
   "GET /api/events": { summary: "Server-Sent Events stream of live repo/settings updates.", tags: ["system"] },
+
+  // ── MCP (Model Context Protocol) — AI agent tool access ────────────────────────────
+  "POST /api/mcp": { summary: "MCP JSON-RPC endpoint (Streamable HTTP) — AI tool access.", tags: ["mcp"] },
 };
 
 /** Hono path params (`:id`) → OpenAPI template params (`{id}`). */

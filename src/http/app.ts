@@ -36,6 +36,7 @@ import * as files from "./routes/files.ts";
 import * as ai from "./routes/ai.ts";
 import * as events from "./routes/events.ts";
 import * as openapi from "./routes/openapi.ts";
+import * as mcp from "./routes/mcp.ts";
 
 export function createApp(cfg: RepoYetiConfig): Hono {
   // Startup side-effects: prime the runtime flags from this daemon's config before serving.
@@ -80,6 +81,7 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   ai.register(app, deps);
   events.register(app, deps);
   openapi.register(app, deps);
+  mcp.register(app, deps);
 
   // Static PWA — LAST, so the /* catch-all only catches non-API routes.
   mountWeb(app);
