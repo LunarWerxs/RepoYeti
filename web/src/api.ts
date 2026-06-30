@@ -211,6 +211,10 @@ export const api = {
   push: (id: string) => req<ActionResult>("POST", `/api/repos/${id}/push`),
   commit: (id: string, message: string, amend = false) =>
     req<ActionResult>("POST", `/api/repos/${id}/commit`, { message, amend }),
+  /** Commit ONLY the selected paths in one ordinary commit (per-file staging); the rest stay
+   *  pending. A stale path (no longer changed) comes back as PLAN_STALE. */
+  commitSelected: (id: string, message: string, paths: string[]) =>
+    req<ActionResult>("POST", `/api/repos/${id}/commit-selected`, { message, paths }),
   /** Execute an (owner-edited) multi-commit plan. Each entry = a final message + its paths.
    *  `sync` runs pull --ff-only then push after all commits land. */
   smartCommit: (id: string, commits: Array<{ message: string; paths: string[] }>, sync = false) =>

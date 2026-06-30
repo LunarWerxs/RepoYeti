@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ChevronRight, Undo2 } from "@lucide/vue";
+import { Check, ChevronRight, Undo2 } from "@lucide/vue";
 import type { DiffStat as DiffStatT, TreeNode } from "../types";
 import { fileVisual } from "@/lib/file-icons";
 import { fmtCount } from "@/lib/diffstat";
 import { openFile, isViewing } from "@/lib/file-viewer";
 import { useTreeCollapse } from "@/lib/changes-tree";
+import { useTreeSelection } from "@/lib/changes-selection";
 import DiffStat from "./DiffStat.vue";
 
 const { t } = useI18n();
@@ -28,6 +29,9 @@ const emit = defineEmits<{ discard: [path: string] }>();
 
 // Shared collapsed-folder state (provided once by RepoCard; see @/lib/changes-tree).
 const collapse = useTreeCollapse();
+// Shared per-file selection (provided once by RepoCard; drives "Commit selected" — see
+// @/lib/changes-selection). Each file row owns a checkbox; folders are not selectable directly.
+const selection = useTreeSelection();
 
 // While a search is active the tree is force-expanded so matches inside otherwise-collapsed
 // folders stay visible; otherwise we honour the per-folder collapse state.
@@ -196,6 +200,31 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
             <span class="text-[11px] font-bold" :style="{ color: statusColor(n.status) }">{{
               n.status
             }}</span>
+          </span>
+        </button>
+        <!-- per-file selection checkbox: sits over the (empty) chevron column on the left so it
+             never shifts the row. Toggling it adds/removes this file from the shared selection that
+             drives RepoCard's "Commit selected (N)". A sibling (not nested) since the row is a
+             <button>; tabindex -1 to stay out of the tree's roving tabindex (matches discard). -->
+        <button
+          type="button"
+          role="checkbox"
+          tabindex="-1"
+          :aria-checked="selection.isSelected(n.path)"
+          :aria-label="$t('repo.changes.select', { name: n.name })"
+          class="absolute top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40"
+          :style="{ left: (depth ?? 0) * 14 + 5 + 'px' }"
+          @click.stop="selection.toggle(n.path)"
+        >
+          <span
+            class="flex size-3.5 items-center justify-center rounded-[4px] border transition-colors"
+            :class="
+              selection.isSelected(n.path)
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border/70 bg-card/70 opacity-70 group-hover/file:opacity-100'
+            "
+          >
+            <Check v-if="selection.isSelected(n.path)" :size="11" />
           </span>
         </button>
         <!-- discard this file's working-tree changes (RepoCard confirms first) -->

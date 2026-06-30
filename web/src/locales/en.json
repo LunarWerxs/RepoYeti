@@ -184,6 +184,7 @@
       "searchContent": "Search content",
       "searchNoMatch": "No matching files",
       "searchPlaceholder": "Search files…",
+      "select": "Select {name} for commit",
       "truncated": "Showing {shown} of {total} changed files"
     },
     "collapse": "Collapse",
@@ -194,8 +195,10 @@
     "commit": {
       "amend": "Commit (amend)",
       "amended": "Amended",
+      "clearSelection": "Clear selection",
       "commit": "Commit",
       "commitPush": "Commit & Push",
+      "commitSelected": "Commit selected ({n})",
       "commitSync": "Commit & Sync",
       "failed": "commit failed",
       "generateFailed": "Could not generate a message",
@@ -204,6 +207,7 @@
       "placeholder": "Commit message",
       "pushed": "Committed & pushed",
       "recent": "Recent:",
+      "selectedSuccess": "Committed {n} selected file(s)",
       "success": "Committed",
       "synced": "Committed & synced",
       "useRecentTitle": "Use this message"

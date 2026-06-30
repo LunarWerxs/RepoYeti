@@ -675,6 +675,22 @@ export const useStore = defineStore("repoyeti", () => {
     }
   }
 
+  // Per-file staging: commit ONLY `paths` (the rest stay pending), so the changes tree must be
+  // reloaded afterward to drop the committed files (unlike a full commit, which empties the tree
+  // and hides the section). The SSE status push refreshes the dirty count; this refreshes the list.
+  async function commitSelected(repoId: string, message: string, paths: string[]): Promise<ActionResult> {
+    busy[repoId] = "commit";
+    try {
+      const r = await api.commitSelected(repoId, message, paths);
+      if (r.ok) await loadChanges(repoId);
+      return r;
+    } catch (e) {
+      return asResult(e);
+    } finally {
+      busy[repoId] = undefined;
+    }
+  }
+
   async function assignIdentity(repoId: string, identityId: string | null): Promise<void> {
     patchRepo(repoId, { identityId }); // optimistic
     await api.assignIdentity(repoId, identityId);
@@ -1113,6 +1129,7 @@ export const useStore = defineStore("repoyeti", () => {
     connect,
     doAction,
     commit,
+    commitSelected,
     assignIdentity,
     addRepo,
     persistRepoOrder,

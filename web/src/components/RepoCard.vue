@@ -43,6 +43,7 @@ import { useStore } from "../store";
 import { api, ApiError } from "../api";
 import { fromNow, buildChangeTree } from "@/lib/util";
 import { provideTreeCollapse } from "@/lib/changes-tree";
+import { provideTreeSelection } from "@/lib/changes-selection";
 import { cn } from "@/lib/utils";
 import {
   changesTreeStyle,
@@ -163,6 +164,20 @@ const changeTree = computed(() => buildChangeTree(store.changesByRepo[props.repo
 // Per-folder collapse state, shared with the recursive ChangesTree via provide/inject
 // (persisted per repo — see @/lib/changes-tree).
 const treeCollapse = provideTreeCollapse(props.repo.id);
+
+// Per-file selection (the checkboxes in ChangesTree) → drives the "Commit selected (N)" bar.
+// Shared with the recursive tree via provide/inject, persisted per repo (see @/lib/changes-selection).
+const treeSelection = provideTreeSelection(props.repo.id);
+const selectedCount = treeSelection.count; // a ComputedRef → auto-unwraps in template
+// Keep the selection honest: once the changed-file list loads/updates, drop any selected path that's
+// no longer pending (just committed, discarded, or vanished) so a stale path can't reach the backend
+// (which would reject it as PLAN_STALE). Skip while the list is still unloaded (undefined).
+watch(
+  () => store.changesByRepo[props.repo.id],
+  (files) => {
+    if (files) treeSelection.prune(files.map((f) => f.path));
+  },
+);
 function collectDirPaths(nodes: TreeNode[], acc: string[] = []): string[] {
   for (const n of nodes) {
     if (n.type === "dir") {
@@ -483,6 +498,29 @@ async function doCommit(mode: CommitMode = "commit"): Promise<void> {
         sync: t("repo.commit.synced"),
       }[mode],
     );
+  } finally {
+    committing.value = false;
+  }
+}
+
+// Per-file staging: commit ONLY the checked files (the rest stay pending). Shares the same message
+// box as the normal commit; the store reloads the changed-file list afterward, and the prune watch
+// above drops the just-committed paths from the selection. A stale path comes back as PLAN_STALE.
+async function doCommitSelected(): Promise<void> {
+  const msg = commitMsg.value.trim();
+  const paths = [...treeSelection.selected];
+  if (!msg || !paths.length || committing.value) return;
+  committing.value = true;
+  try {
+    const r = await store.commitSelected(props.repo.id, msg, paths);
+    if (!r.ok) {
+      toast.error(friendly(r.code) || r.message || t("repo.commit.failed"));
+      return;
+    }
+    commitMsg.value = "";
+    treeSelection.clear();
+    void loadRecentMsgs();
+    toast.success(t("repo.commit.selectedSuccess", { n: paths.length }));
   } finally {
     committing.value = false;
   }
@@ -1191,6 +1229,27 @@ async function confirmDiscard(): Promise<void> {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+
+        <!-- per-file staging: appears only when ≥1 file is checked in the tree above. Commits ONLY
+             the selected files (reusing the message box), leaving everything else pending. -->
+        <div
+          v-if="st && st.dirty > 0 && selectedCount > 0"
+          class="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/[0.06] px-2 py-1.5"
+        >
+          <Button size="sm" :disabled="!commitMsg.trim() || committing" @click="doCommitSelected()">
+            <Loader2 v-if="committing" class="animate-spin" />
+            <GitCommitHorizontal v-else />
+            <span>{{ $t("repo.commit.commitSelected", { n: selectedCount }) }}</span>
+          </Button>
+          <button
+            type="button"
+            class="ml-auto shrink-0 rounded px-2 py-1 text-[11.5px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            :title="$t('repo.commit.clearSelection')"
+            @click="treeSelection.clear()"
+          >
+            {{ $t("repo.commit.clearSelection") }}
+          </button>
         </div>
 
         <!-- smart commit: AI splits the working tree into separate scoped commits (opt-in;
