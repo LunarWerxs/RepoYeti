@@ -47,15 +47,17 @@ UI, `F6` a11y, then `D1` RepoCard split (biggest), + the UI halves of per-file s
 **Still open:**
 - **`E6`** frontend test infra (Vitest + Playwright) — adds dev-deps to the shared `bun.lock`.
 - **PAT/HTTPS:** the network path can't be unit-verified without a real private repo + token (owner).
-- **SDK migration — DECISION: YES, do it (deferred, triggered).** Verified the `lore` CLI has **no
-  structured/JSON/porcelain output** of any kind — only human text — so regex-scraping is the *only* CLI
-  option and it WILL break silently as Lore (pre-1.0, fast-moving) changes wording. `@lore-vcs/sdk` (a koffi
-  native-FFI binding) is the only drift-proof path to structured Lore reads. **Trigger:** do it when Lore
-  graduates from the experimental `REPOYETI_LORE=1` flag to a default-eligible backend, OR the first time a
-  Lore release breaks a parser in `tests/lore-parse.test.ts` — whichever first. **Cost to plan for:** it's a
-  native dep, so the per-OS `release.yml` build must bundle the native libs (the single-binary gets a small
-  sidecar) — accepted as the price of first-class Lore. NOT "optional / maybe drop."
 - **🧑 owner:** branch-protect `main`, confirm MIT, push the `v0.1.0` tag, the live sign-in.
+
+**SDK migration — DONE (owner decided: do it now).** ALL text-scraped Lore reads — status, changed
+files, branches, log — now go through `@lore-vcs/sdk` (a koffi native-FFI binding) in `src/vcs/lore-sdk.ts`,
+returning structured/typed data (drift-proof; the `lore` CLI has **no** machine-readable output). Lazy-loaded
+(a git-only daemon never touches the native lib) with the CLI parsers retained as fallback. Single binary
+preserved: `build.ts` keeps the SDK + koffi EXTERNAL to `--compile` and bundles the native libs into
+`dist/node_modules` (CLI fallback if absent); compiled `repoyeti.exe` boots clean. koffi in
+`trustedDependencies`. Verified end-to-end vs a live `loreserver` 0.8.4 (`lore-parity.test.ts`). _Remaining
+SDK-adjacent: the `lore diff`-based reads (file patch / AI diff) still use the CLI — left as-is since `lore
+diff` is real unified-diff content, not drift-prone status labels._
 
 ---
 
