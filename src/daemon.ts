@@ -314,6 +314,11 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   // ── repos ────────────────────────────────────────────────────────────────
   app.get("/api/repos", (c) => c.json({ repos: getRepos() }));
 
+  // Parse the `:id` route param once, 400 if absent. Collapses the id-parse/guard pattern that
+  // was repeated at ~20 route heads. Usage:  const id = requireId(c); if (id instanceof Response) return id;
+  const requireId = (c: Context): string | Response =>
+    c.req.param("id") || jsonError(c, "BAD_REQUEST", "missing repo id");
+
   // "Point to Folder" (register existing) + "Create New" (git init).
   const repoFromPath = (handler: (path: string) => Promise<{ ok: boolean; code: string; message: string }>) =>
     async (c: Context) => {
@@ -528,8 +533,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
 
   // ── safe git actions ───────────────────────────────────────────────────────
   const action = (fn: (id: string) => Promise<ActionOutcome>) => async (c: Context) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const r = await fn(id);
     return c.json(r, r.ok ? 200 : statusForCode(r.code));
   };
@@ -537,8 +542,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   app.post("/api/repos/:id/pull", action(pullRepo));
   app.post("/api/repos/:id/push", action(pushRepo));
   app.post("/api/repos/:id/commit", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, CommitSchema);
     if (!p.ok) return p.res;
     const message = (p.data.message ?? "").trim();
@@ -551,8 +556,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   // commit it in order, optionally syncing after. The body is validated against the live tree
   // in the service layer (PLAN_STALE / PLAN_PATHS_INVALID). See docs/SMART_COMMIT.md.
   app.post("/api/repos/:id/smart-commit", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, SmartCommitSchema);
     if (!p.ok) return p.res;
     const r = await smartCommitRepo(id, p.data.commits, p.data.sync === true);
@@ -560,8 +565,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   });
 
   app.post("/api/repos/:id/refresh", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const repo = await forceRefresh(id);
     return repo ? c.json({ repo }) : jsonError(c, "NOT_FOUND", "repo not found");
   });
@@ -573,24 +578,24 @@ export function createApp(cfg: RepoYetiConfig): Hono {
     return c.json(await getBranches(id));
   });
   app.post("/api/repos/:id/checkout", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, CheckoutSchema);
     if (!p.ok) return p.res;
     const r = await checkoutRepo(id, p.data.branch.trim());
     return c.json(r, r.ok ? 200 : statusForCode(r.code));
   });
   app.post("/api/repos/:id/branch", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, CreateBranchSchema);
     if (!p.ok) return p.res;
     const r = await createBranchRepo(id, p.data.name.trim(), p.data.switch !== false);
     return c.json(r, r.ok ? 201 : statusForCode(r.code));
   });
   app.delete("/api/repos/:id/branch", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, DeleteBranchSchema);
     if (!p.ok) return p.res;
     const r = await deleteBranchRepo(id, p.data.name.trim());
@@ -619,24 +624,24 @@ export function createApp(cfg: RepoYetiConfig): Hono {
     return c.json(await getStashes(id));
   });
   app.post("/api/repos/:id/stash", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, StashSaveSchema);
     if (!p.ok) return p.res;
     const r = await stashSaveRepo(id, p.data.message);
     return c.json(r, r.ok ? 200 : statusForCode(r.code));
   });
   app.post("/api/repos/:id/stash/pop", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, StashRefSchema);
     if (!p.ok) return p.res;
     const r = await stashPopRepo(id, p.data.index ?? 0);
     return c.json(r, r.ok ? 200 : statusForCode(r.code));
   });
   app.post("/api/repos/:id/stash/drop", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, StashRefSchema);
     if (!p.ok) return p.res;
     const r = await stashDropRepo(id, p.data.index ?? 0);
@@ -663,8 +668,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
 
   // ── remote (set-url / add-or-update origin, remove) — local config, no network ──
   app.post("/api/repos/:id/remote", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, RemoteSetSchema);
     if (!p.ok) return p.res;
     const url = p.data.url.trim();
@@ -673,8 +678,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
     return c.json(r, r.ok ? 200 : statusForCode(r.code));
   });
   app.delete("/api/repos/:id/remote", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, RemoteDeleteSchema);
     if (!p.ok) return p.res;
     const r = await removeRemoteRepo(id, (p.data.name || "origin").trim());
@@ -682,8 +687,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   });
 
   app.get("/api/repos/:id/changes", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const result = await getChanges(id);
     if (result.ok)
       return c.json({ files: result.files ?? [], total: result.total, truncated: result.truncated });
@@ -693,8 +698,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   // Read one changed file's contents for the read-only viewer drawer. Path is a query
   // param (?path=…); it's normalised + confined to the repo in readFileContent.
   app.get("/api/repos/:id/file", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const path = c.req.query("path") ?? "";
     const ref = c.req.query("ref") === "head" ? "head" : "work";
     const result = await readFileContent(id, path, ref);
@@ -706,8 +711,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   // Content search across the repo's CHANGED files (the changes tree only shows those).
   // Drives the "Search content" toggle; returns the matching repo-relative paths.
   app.get("/api/repos/:id/search", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const result = await searchChangedContent(id, c.req.query("q") ?? "");
     if (result.ok) return c.json({ paths: result.paths ?? [] });
     return jsonError(c, result.code as ApiErrorCode, result.message ?? "search failed");
@@ -715,8 +720,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
 
   // Both sides (HEAD + working tree) of a changed file, for the viewer's Diff tab.
   app.get("/api/repos/:id/diff", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const path = c.req.query("path") ?? "";
     const result = await readFileDiff(id, path);
     if (result.ok) return c.json(result);
@@ -752,8 +757,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   // Discard one changed file's working-tree changes (the changes-tree "Discard" action).
   // Destructive → gated behind the same remote-editing toggle as file writes (loopback always allowed).
   app.post("/api/repos/:id/discard", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     if (isRemoteRequest(c) && cfg.remoteEditing === false) {
       return c.json(
         { ok: false, code: "EDIT_REMOTE_DISABLED", message: "editing over remote access is turned off" },
@@ -878,8 +883,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
 
   // Draft a commit message from the repo's diff using the default (or a chosen) provider.
   app.post("/api/repos/:id/commit-message", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, CommitMessageSchema);
     if (!p.ok) return p.res;
     const requested = p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
@@ -919,8 +924,8 @@ export function createApp(cfg: RepoYetiConfig): Hono {
   // On an AI failure other than a bad key we fall back to a deterministic grouping so Smart
   // Commit always yields an editable plan; a rejected key surfaces so the owner can fix it.
   app.post("/api/repos/:id/commit-plan", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
+    const id = requireId(c);
+    if (id instanceof Response) return id;
     const p = await parseBody(c, CommitPlanSchema);
     if (!p.ok) return p.res;
     const requested = p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
