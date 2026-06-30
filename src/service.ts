@@ -18,7 +18,7 @@ import { discoverStream } from "./discovery.ts";
 import { resolveRepoIdentity } from "./identity.ts";
 import { gitFor } from "./git.ts";
 import { backendFor, detectVcs } from "./vcs/index.ts";
-import { loreFilePatch, loreDiscardFile, loreClone } from "./vcs/lore.ts";
+import { loreClone } from "./vcs/lore.ts";
 import type { VcsBackend } from "./vcs/types.ts";
 import {
   gitPullFfOnly,
@@ -31,7 +31,6 @@ import {
   collectPathsDiff,
   collectCommitPlanInput,
   gitCommitGroups,
-  fileDiffPatch,
   grepChangedContent,
   type ActionResult,
   type ActionCode,
@@ -778,13 +777,14 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
 
-  // Non-git (Lore): `lore diff <path>` yields a unified working-vs-current-revision patch —
-  // the viewer's "patch" mode. Reconstructing both whole sides isn't needed for a read-only view.
-  if (repo.vcs !== "git") {
-    const lr = await loreFilePatch(repo.absPath, r.clean);
-    return lr.ok
-      ? { ok: true, code: "OK", path: r.clean, mode: "patch", patch: lr.patch, truncated: lr.truncated }
-      : { ok: false, code: "ERROR", message: lr.message ?? "lore diff failed" };
+  const backend = backendFor(repo.vcs);
+  // Backends without whole-side reconstruction (Lore) only offer a unified patch — the viewer's
+  // "patch" mode (`lore diff <path>` is working-vs-current-revision; no models view is possible).
+  if (!backend.capabilities.fileModels) {
+    const fp = await backend.filePatch(repo.absPath, r.clean);
+    return fp.ok
+      ? { ok: true, code: "OK", path: r.clean, mode: "patch", patch: fp.patch, truncated: fp.truncated }
+      : { ok: false, code: "ERROR", message: fp.message ?? "diff failed" };
   }
 
   try {
@@ -813,8 +813,9 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
       Math.max(workSize, headSize) > getDiffPatchBytes() &&
       !(await workLooksBinary(r.abs))
     ) {
-      const { patch, truncated } = await fileDiffPatch(repo.absPath, r.clean);
-      if (patch.trim()) return { ok: true, code: "OK", path: r.clean, mode: "patch", patch, truncated };
+      const fp = await backend.filePatch(repo.absPath, r.clean);
+      if (fp.ok && fp.patch.trim())
+        return { ok: true, code: "OK", path: r.clean, mode: "patch", patch: fp.patch, truncated: fp.truncated };
       // empty patch (e.g. a mode-only change) → fall through to the model view
     }
 
@@ -863,55 +864,18 @@ export async function discardFile(repoId: string, relPath: string): Promise<Disc
   if (repo.isSubmodule) return { ok: false, code: "SUBMODULE_NOT_ACTIONABLE", message: "submodule worktree is not actionable" };
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
-  // Non-git (Lore): `lore reset --purge <path>` reverts the tracked file + deletes it if untracked.
-  if (repo.vcs !== "git") {
-    if (r.clean.split("/").includes(".lore")) {
-      return { ok: false, code: "ERROR", message: "refusing to touch a .lore directory" };
-    }
-    const out = await enqueue(repoId, async (): Promise<DiscardResult> => {
-      const lr = await loreDiscardFile(repo.absPath, r.clean);
-      return lr.ok
-        ? { ok: true, code: "OK" as const, path: r.clean }
-        : { ok: false, code: "DISCARD_FAILED" as const, message: lr.message ?? "lore reset failed" };
-    });
-    if (out.ok) await refreshRepo(repo.id, repo.absPath);
-    return out;
+  const backend = backendFor(repo.vcs);
+  // Never reach into the VCS marker dir (.git / .lore) — restoring its internals is nonsense/unsafe.
+  if (r.clean.split("/").includes(backend.marker)) {
+    return { ok: false, code: "ERROR", message: `refusing to touch a ${backend.marker} directory` };
   }
-  // Never reach into a .git dir (restoring .git/* would be nonsense / unsafe).
-  if (r.clean.split("/").includes(".git")) {
-    return { ok: false, code: "ERROR", message: "refusing to touch a .git directory" };
-  }
-
-  const result = await enqueue(repoId, async (): Promise<DiscardResult> => {
-    try {
-      const git = gitFor(repo.absPath);
-      let inHead = false;
-      try {
-        await git.raw(["cat-file", "-e", `HEAD:${r.clean}`]);
-        inHead = true;
-      } catch {
-        /* not in HEAD → newly added or untracked */
-      }
-      if (inHead) {
-        // Restores both the index and the working tree to the committed content.
-        await git.raw(["checkout", "HEAD", "--", r.clean]);
-      } else {
-        if (existsSync(r.abs) && lstatSync(r.abs).isFile()) unlinkSync(r.abs);
-        // Drop any staged "add" for this path. No-op (and harmless throw) on an unborn HEAD.
-        try {
-          await git.raw(["reset", "-q", "--", r.clean]);
-        } catch {
-          /* unborn HEAD or nothing staged */
-        }
-      }
-      return { ok: true, code: "OK" as const, path: r.clean };
-    } catch (e) {
-      return { ok: false, code: "DISCARD_FAILED" as const, message: e instanceof Error ? e.message : String(e) };
-    }
-  });
+  const result = await enqueue(repoId, () => backend.discardFile(repo.absPath, r.clean));
   // Refresh AFTER the queue slot releases (refreshRepo enqueues again → would deadlock if nested).
-  if (result.ok) await refreshRepo(repo.id, repo.absPath);
-  return result;
+  if (result.ok) {
+    await refreshRepo(repo.id, repo.absPath);
+    return { ok: true, code: "OK", path: r.clean };
+  }
+  return { ok: false, code: result.code === "ERROR" ? "ERROR" : "DISCARD_FAILED", message: result.message };
 }
 
 export interface DiffResult {

@@ -8,6 +8,8 @@
  * Auth + author identity are injected per operation (`-c core.sshCommand` + `-c user.*`)
  * via git.ts — global/repo config is never mutated.
  */
+import { existsSync, lstatSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { gitFor, identityConfigArgs, safeGitEnv } from "./git.ts";
 import { readStatus, readChanges } from "./status.ts";
 import { netGate } from "./gitgate.ts";
@@ -422,6 +424,43 @@ export async function fileDiffPatch(
   const raw = await boundedGit(absPath, ["diff", "HEAD", "--", relPath], PATCH_CAP + 1);
   const truncated = raw.length > PATCH_CAP;
   return { patch: truncated ? raw.slice(0, PATCH_CAP) : raw, truncated };
+}
+
+/**
+ * VcsBackend.discardFile for git — restore ONE file to its committed/absent state. Backs the
+ * changes-tree "Discard" action (DESTRUCTIVE; the UI confirms first). Two cases:
+ *  - tracked in HEAD (modified/deleted) → `git checkout HEAD -- <path>` restores index+worktree.
+ *  - added/untracked (not in HEAD)      → delete the working file + unstage any add.
+ * HEAD is never touched and no merge state is possible. The caller (service.discardFile)
+ * guarantees the path is repo-relative, resolved, and not inside the `.git` marker dir.
+ */
+export async function gitDiscardFile(absPath: string, relPath: string): Promise<ActionResult> {
+  try {
+    const git = gitFor(absPath);
+    let inHead = false;
+    try {
+      await git.raw(["cat-file", "-e", `HEAD:${relPath}`]);
+      inHead = true;
+    } catch {
+      /* not in HEAD → newly added or untracked */
+    }
+    if (inHead) {
+      // Restores both the index and the working tree to the committed content.
+      await git.raw(["checkout", "HEAD", "--", relPath]);
+    } else {
+      const abs = join(absPath, relPath);
+      if (existsSync(abs) && lstatSync(abs).isFile()) unlinkSync(abs);
+      // Drop any staged "add" for this path. No-op (harmless throw) on an unborn HEAD.
+      try {
+        await git.raw(["reset", "-q", "--", relPath]);
+      } catch {
+        /* unborn HEAD or nothing staged */
+      }
+    }
+    return ok("discarded");
+  } catch (e) {
+    return fail("DISCARD_FAILED", e instanceof Error ? e.message : String(e));
+  }
 }
 
 /** Cap the `-l` name list we read back from `git grep`. A few thousand paths fit easily;

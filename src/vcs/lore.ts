@@ -29,7 +29,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Identity, RepoStatus } from "../db.ts";
 import type { ChangedFile } from "../status.ts";
-import { ok, PATCH_CAP, type ActionResult } from "../contract.ts";
+import { ok, fail, PATCH_CAP, type ActionResult } from "../contract.ts";
 import type { BranchList, LogResult, StashList } from "../inspect.ts";
 import type { VcsBackend } from "./types.ts";
 
@@ -444,7 +444,7 @@ export async function loreClone(
 export const loreBackend: VcsBackend = {
   kind: "lore",
   marker: ".lore",
-  capabilities: { stash: false, fetch: false, multipleRemotes: false },
+  capabilities: { stash: false, fetch: false, multipleRemotes: false, fileModels: false },
 
   detect: (absPath) => existsSync(join(absPath, ".lore")),
 
@@ -467,4 +467,12 @@ export const loreBackend: VcsBackend = {
   stashSave: loreStashSave,
   stashPop: loreStashPop,
   stashDrop: loreStashDrop,
+
+  // `lore diff <path>` yields a unified working-vs-current-revision patch (no models mode →
+  // capabilities.fileModels is false). `lore reset --purge <path>` is the discard.
+  filePatch: loreFilePatch,
+  discardFile: async (absPath, relPath): Promise<ActionResult> => {
+    const lr = await loreDiscardFile(absPath, relPath);
+    return lr.ok ? ok("discarded") : fail("DISCARD_FAILED", lr.message ?? "lore reset failed");
+  },
 };

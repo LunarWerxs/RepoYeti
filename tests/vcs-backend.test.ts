@@ -30,7 +30,7 @@ describe("vcs backend abstraction", () => {
   it("git backend maps the contract to the real git plumbing", () => {
     expect(gitBackend.kind).toBe("git");
     expect(gitBackend.marker).toBe(".git");
-    expect(gitBackend.capabilities).toEqual({ stash: true, fetch: true, multipleRemotes: true });
+    expect(gitBackend.capabilities).toEqual({ stash: true, fetch: true, multipleRemotes: true, fileModels: true });
     expect(backendFor("git")).toBe(gitBackend);
     expect(backendFor("lore")).toBe(loreBackend);
   });
@@ -38,7 +38,7 @@ describe("vcs backend abstraction", () => {
   it("lore backend declares its centralized capabilities", () => {
     expect(loreBackend.kind).toBe("lore");
     expect(loreBackend.marker).toBe(".lore");
-    expect(loreBackend.capabilities).toEqual({ stash: false, fetch: false, multipleRemotes: false });
+    expect(loreBackend.capabilities).toEqual({ stash: false, fetch: false, multipleRemotes: false, fileModels: false });
   });
 
   it("detects git always, but Lore only when REPOYETI_LORE is set", () => {

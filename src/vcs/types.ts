@@ -33,6 +33,18 @@ export interface VcsCapabilities {
   fetch: boolean;
   /** Supports multiple named remotes (git: true). Lore is centralized (one server) → false. */
   multipleRemotes: boolean;
+  /** Can reconstruct BOTH whole sides of a file for a rich side-by-side "models" diff (git:
+   *  true). When false (Lore), the file viewer falls back to unified-patch mode only. */
+  fileModels: boolean;
+}
+
+/** A single file's unified patch (working tree vs the current revision/HEAD) — the file
+ *  viewer's "patch" mode. `ok` is false when the backend couldn't produce it. */
+export interface FilePatchResult {
+  ok: boolean;
+  patch: string;
+  truncated: boolean;
+  message?: string;
 }
 
 /**
@@ -78,4 +90,11 @@ export interface VcsBackend {
   stashSave(absPath: string, identity: Identity | null, message?: string): Promise<ActionResult>;
   stashPop(absPath: string, index?: number): Promise<ActionResult>;
   stashDrop(absPath: string, index?: number): Promise<ActionResult>;
+
+  // ── file diff / discard (file viewer "patch" mode + the changes-tree "Discard") ──
+  /** Unified working-tree-vs-current-revision patch for ONE file. */
+  filePatch(absPath: string, relPath: string): Promise<FilePatchResult>;
+  /** Discard ONE file's working-tree changes — restore it to its committed/absent state.
+   *  DESTRUCTIVE (the UI gates it behind an explicit confirm); never touches HEAD. */
+  discardFile(absPath: string, relPath: string): Promise<ActionResult>;
 }

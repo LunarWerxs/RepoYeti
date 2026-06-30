@@ -22,14 +22,16 @@ import {
   gitStashSave,
   gitStashPop,
   gitStashDrop,
+  fileDiffPatch,
+  gitDiscardFile,
 } from "../git-actions.ts";
 import { readBranches, readLog, readStashes } from "../inspect.ts";
-import type { VcsBackend } from "./types.ts";
+import type { VcsBackend, FilePatchResult } from "./types.ts";
 
 export const gitBackend: VcsBackend = {
   kind: "git",
   marker: ".git",
-  capabilities: { stash: true, fetch: true, multipleRemotes: true },
+  capabilities: { stash: true, fetch: true, multipleRemotes: true, fileModels: true },
 
   detect: (absPath) => existsSync(join(absPath, ".git")),
 
@@ -52,4 +54,14 @@ export const gitBackend: VcsBackend = {
   stashSave: gitStashSave,
   stashPop: gitStashPop,
   stashDrop: gitStashDrop,
+
+  async filePatch(absPath, relPath): Promise<FilePatchResult> {
+    try {
+      const { patch, truncated } = await fileDiffPatch(absPath, relPath);
+      return { ok: true, patch, truncated };
+    } catch (e) {
+      return { ok: false, patch: "", truncated: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  },
+  discardFile: gitDiscardFile,
 };
