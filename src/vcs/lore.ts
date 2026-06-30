@@ -210,7 +210,8 @@ export function parseHistory(stdout: string, cap: number): LogResult["commits"] 
   let open = false;
   const flush = (): void => {
     if (open && hash) {
-      out.push({ hash, shortHash: hash.slice(0, 12), subject, authorName: author, authorEmail: "", date, refs: "" });
+      // Lore history is linear (no merge commits), so parents is always empty / isMerge false.
+      out.push({ hash, shortHash: hash.slice(0, 12), subject, authorName: author, authorEmail: "", date, refs: "", parents: [], isMerge: false });
     }
     hash = "";
     subject = "";
@@ -368,6 +369,8 @@ async function loreReadLog(absPath: string, limit = 50, _skip = 0): Promise<LogR
       authorEmail: "",
       date: c.date,
       refs: "",
+      parents: [], // Lore history is linear — no merge commits
+      isMerge: false,
     }));
     return { ok: true, code: "OK", commits, hasMore: commits.length >= cap };
   }
@@ -596,6 +599,8 @@ export const loreBackend: VcsBackend = {
     authorName: "",
     authorEmail: "",
     date: 0,
+    parents: [],
+    isMerge: false,
     files: [],
     diff: "",
     truncated: false,

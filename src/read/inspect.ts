@@ -109,6 +109,9 @@ export async function readBranches(absPath: string): Promise<BranchList> {
   }
 }
 
+/** Optional log filter: only merge commits, or exclude them entirely. */
+export type MergeFilter = "only" | "exclude";
+
 export interface LogEntry {
   /** Full 40-char commit hash. */
   hash: string;
@@ -122,6 +125,11 @@ export interface LogEntry {
   date: number;
   /** Ref decorations (e.g. "HEAD -> main, origin/main, tag: v1"), or "". */
   refs: string;
+  /** Parent commit hashes (full). A root commit has none; a merge has 2+. */
+  parents: string[];
+  /** True when this commit has 2+ parents (a merge). Lets callers detect/flag merges
+   *  without re-deriving from `parents`. */
+  isMerge: boolean;
 }
 
 export interface LogResult {
@@ -138,17 +146,26 @@ export interface LogResult {
  * Read-only. On an unborn HEAD (brand-new repo with no commits) `git log` exits non-zero;
  * that surfaces as an empty list, not an error.
  */
-export async function readLog(absPath: string, limit = LOG_PAGE_DEFAULT, skip = 0): Promise<LogResult> {
+export async function readLog(
+  absPath: string,
+  limit = LOG_PAGE_DEFAULT,
+  skip = 0,
+  merges?: MergeFilter,
+): Promise<LogResult> {
   const cap = Math.min(Math.max(1, Math.floor(limit)), LOG_PAGE_MAX);
   const off = Math.max(0, Math.floor(skip));
   try {
     return await readGate.run(async () => {
-      const fmt = ["%H", "%h", "%an", "%ae", "%at", "%D", "%s"].join(US);
+      // %P = space-separated parent hashes (→ merge detection). Subject (%s) stays LAST so any
+      // odd character in it can't shift earlier fields when we split on the unit separator.
+      const fmt = ["%H", "%h", "%an", "%ae", "%at", "%P", "%D", "%s"].join(US);
+      const mergeFlag = merges === "only" ? ["--merges"] : merges === "exclude" ? ["--no-merges"] : [];
       let raw = "";
       try {
         raw = await gitFor(absPath).raw([
           "log",
           "--no-color",
+          ...mergeFlag,
           `--max-count=${cap}`,
           `--skip=${off}`,
           `--pretty=format:${fmt}`,
@@ -158,8 +175,9 @@ export async function readLog(absPath: string, limit = LOG_PAGE_DEFAULT, skip = 
       }
       const lines = raw.split("\n").filter((l) => l.trim() !== "");
       const commits: LogEntry[] = lines.map((line) => {
-        const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", refs = "", subject = ""] =
+        const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", subject = ""] =
           line.split(US);
+        const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
         return {
           hash,
           shortHash,
@@ -168,6 +186,8 @@ export async function readLog(absPath: string, limit = LOG_PAGE_DEFAULT, skip = 
           authorEmail,
           date: Number(at) * 1000,
           refs: refs.trim(),
+          parents,
+          isMerge: parents.length > 1,
         };
       });
       return { ok: true, code: "OK" as const, commits, hasMore: commits.length === cap };
@@ -197,6 +217,10 @@ export interface CommitDetail {
   authorName: string;
   authorEmail: string;
   date: number;
+  /** Parent commit hashes (full); 2+ ⇒ this is a merge. */
+  parents: string[];
+  /** True when this commit has 2+ parents (a merge). */
+  isMerge: boolean;
   files: CommitFile[];
   diff: string;
   truncated: boolean;
@@ -215,6 +239,8 @@ const emptyCommitDetail = (hash: string, code: "OK" | "ERROR", message?: string)
   authorName: "",
   authorEmail: "",
   date: 0,
+  parents: [],
+  isMerge: false,
   files: [],
   diff: "",
   truncated: false,
@@ -230,12 +256,13 @@ export async function readCommit(absPath: string, hash: string): Promise<CommitD
   try {
     return await readGate.run(async () => {
       const git = gitFor(absPath);
-      const fmt = ["%H", "%h", "%an", "%ae", "%at", "%s"].join(US);
+      const fmt = ["%H", "%h", "%an", "%ae", "%at", "%P", "%s"].join(US);
       // Header (first line) + name-status lines (the rest).
       const metaOut = await git.raw(["show", "--no-color", "--name-status", `--format=${fmt}`, hash]);
       const lines = metaOut.split("\n");
-      const [full = "", short = "", an = "", ae = "", at = "0", ...subjRest] = (lines[0] ?? "").split(US);
+      const [full = "", short = "", an = "", ae = "", at = "0", parentsRaw = "", ...subjRest] = (lines[0] ?? "").split(US);
       const subject = subjRest.join(US);
+      const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
       const files: CommitFile[] = [];
       for (const l of lines.slice(1)) {
         const t = l.trim();
@@ -258,6 +285,8 @@ export async function readCommit(absPath: string, hash: string): Promise<CommitD
         authorName: an,
         authorEmail: ae,
         date: Number(at) * 1000,
+        parents,
+        isMerge: parents.length > 1,
         files,
         diff: diff.trim(),
         truncated,

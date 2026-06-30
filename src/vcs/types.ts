@@ -15,7 +15,7 @@
 import type { Identity, RepoStatus } from "../db.ts";
 import type { ChangedFile } from "../read/status.ts";
 import type { ActionResult, CommitGroupSpec, CommitGroupsResult } from "../contract.ts";
-import type { BranchList, LogResult, StashList, CommitDetail } from "../read/inspect.ts";
+import type { BranchList, LogResult, StashList, CommitDetail, MergeFilter } from "../read/inspect.ts";
 
 export type VcsKind = "git" | "lore";
 
@@ -83,7 +83,7 @@ export interface VcsBackend {
   deleteBranch(absPath: string, name: string): Promise<ActionResult>;
 
   // ── history ──
-  readLog(absPath: string, limit?: number, skip?: number): Promise<LogResult>;
+  readLog(absPath: string, limit?: number, skip?: number, merges?: MergeFilter): Promise<LogResult>;
   /** Full detail for one commit: changed-file list + a bounded unified diff. */
   readCommit(absPath: string, hash: string): Promise<CommitDetail>;
 
