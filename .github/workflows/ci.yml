@@ -8,7 +8,12 @@ on:
 jobs:
   daemon:
     name: daemon (test + typecheck)
-    runs-on: ubuntu-latest
+    # The shipped artifact is a per-OS `bun --compile` binary, so run the suite on all three.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -23,6 +28,8 @@ jobs:
       - run: bun run typecheck
       - run: bun run check # ApiErrorCode drift guard + architectural boundary guard
       - run: bun run check:coverage # runs the suite with coverage + an overall-% floor
+      - run: bun audit # dependency CVE scan
+        continue-on-error: true # advisory only — surfaces advisories without failing on upstream CVEs
 
   web:
     name: web (i18n + build)
