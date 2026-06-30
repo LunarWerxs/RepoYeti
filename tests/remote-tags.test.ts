@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { gitRemoteSet, gitRemoteRemove, gitTagCreate } from "../src/git-actions.ts";
 import { readTags } from "../src/read/inspect.ts";

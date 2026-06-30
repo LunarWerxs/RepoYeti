@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import { registerRepo, refreshRepo, stopWatching } from "../src/service/index.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 

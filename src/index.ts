@@ -23,7 +23,7 @@ import {
 } from "./config.ts";
 import { initDb, upsertRepo, getRepo, getRepos, getWatchableRepos } from "./db.ts";
 import { discoverStream } from "./discovery.ts";
-import { createApp } from "./daemon.ts";
+import { createApp } from "./http/app.ts";
 import { refreshRepo, startWatching, watchOne, stopWatching } from "./service/index.ts";
 import { startRemoteSync, stopRemoteSync } from "./remote-sync.ts";
 import { broadcast } from "./bus.ts";

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { upsertRepo, getRepo, setRepoStatus, type RepoStatus } from "../src/db.ts";
 import { fetchAllRepos, discoverRoot, forgetReposUnder } from "../src/service/index.ts";

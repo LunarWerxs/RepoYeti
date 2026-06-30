@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 
 // These guard the static-file serving in src/daemon.ts (mountWeb). The bug they prevent:

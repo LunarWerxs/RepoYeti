@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import { addListener, removeListener, broadcast } from "../src/bus.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 

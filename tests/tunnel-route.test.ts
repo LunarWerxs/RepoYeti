@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import { redactTunnel, type RepoYetiConfig } from "../src/config.ts";
 import { getSecret, TUNNEL_TOKEN } from "../src/secrets.ts";
 

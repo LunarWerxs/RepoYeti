@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { parsePatchStats, computeDiffStats } from "../src/read/diffstat.ts";
 import { readStatus, readChanges } from "../src/read/status.ts";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 
 // ── pure patch parser ───────────────────────────────────────────────────────────

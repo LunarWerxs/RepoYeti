@@ -14,7 +14,7 @@ import {
 } from "../src/ai.ts";
 import { gitCommitGroups, collectCommitPlanInput, collectPathsDiff, isNoisyPath } from "../src/git-actions.ts";
 import { smartCommitRepo, planCommitInput, collectRepoPathsDiff } from "../src/service/index.ts";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import { upsertRepo } from "../src/db.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import type { Identity } from "../src/db.ts";

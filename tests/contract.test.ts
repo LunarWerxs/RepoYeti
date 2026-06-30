@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import { statusForCode } from "../src/contract.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 

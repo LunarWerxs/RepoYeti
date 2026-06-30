@@ -4,7 +4,7 @@
  * the service layer (cloneLoreRepo) against a live binary, not here.
  */
 import { test, expect } from "bun:test";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 
 // Local mode (no OIDC) → /api/* is ungated, so routes are exercised directly.

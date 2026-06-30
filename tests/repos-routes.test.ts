@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp } from "../src/daemon.ts";
+import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { MIN_CONTENT_SEARCH } from "../src/service/index.ts";
 import { upsertRepo, getRepo, setRepoHidden, setRepoPinned, setRepoStarred } from "../src/db.ts";
