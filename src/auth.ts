@@ -388,7 +388,8 @@ export function authMiddleware(cfg: RepoYetiConfig) {
       path === "/api/auth/me" ||
       path === "/api/health" ||
       path === "/api/status" ||
-      path === "/api/auth/continue-local"
+      path === "/api/auth/continue-local" ||
+      path === "/api/openapi.json"
     ) {
       return next();
     }
