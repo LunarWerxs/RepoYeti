@@ -273,11 +273,36 @@ async function boundedGit(absPath: string, args: string[], cap: number): Promise
   return out;
 }
 
+/**
+ * Accumulate a bounded `git diff` (up to `cap` bytes) with the unborn-HEAD fallback baked in: try
+ * `git diff HEAD <extraArgs> [-- <chunk>…]`, and if that comes back empty — a repo with no commits
+ * yet errors/empties on `diff HEAD` — retry the same WITHOUT `HEAD` against the worktree. Pass
+ * `paths=null` (or empty) for the whole tree (no pathspec); otherwise the pathspec is chunked so a
+ * big group can't overflow the OS arg limit. `extraArgs` carries per-caller flags (e.g. -U0 -M).
+ * Read-only. Extracted so the three diff collectors share ONE fallback path.
+ */
+async function boundedDiff(
+  absPath: string,
+  paths: string[] | null,
+  extraArgs: string[],
+  cap: number,
+): Promise<string> {
+  const chunks: (string[] | null)[] = paths?.length ? chunkByBytes(paths) : [null];
+  const run = async (base: string[]): Promise<string> => {
+    let out = "";
+    for (const chunk of chunks) {
+      if (out.length >= cap) break;
+      out += await boundedGit(absPath, chunk ? [...base, "--", ...chunk] : base, cap);
+    }
+    return out.trim();
+  };
+  const withHead = await run(["diff", "HEAD", ...extraArgs]);
+  return withHead || (await run(["diff", ...extraArgs]));
+}
+
 export async function collectCommitDiff(absPath: string): Promise<string> {
   const status = (await boundedGit(absPath, ["status", "--porcelain=v1"], STATUS_CAP)).trim();
-  // `git diff HEAD` is empty (non-zero exit) on an unborn HEAD → fall back to `git diff`.
-  let diff = (await boundedGit(absPath, ["diff", "HEAD"], DIFF_CAP)).trim();
-  if (!diff) diff = (await boundedGit(absPath, ["diff"], DIFF_CAP)).trim();
+  const diff = await boundedDiff(absPath, null, [], DIFF_CAP);
   let combined =
     `# git status --porcelain\n${status || "(clean)"}\n\n# git diff\n${diff || "(no textual diff — new/untracked files only)"}`;
   if (combined.length > DIFF_CAP) combined = combined.slice(0, DIFF_CAP) + "\n…[truncated]";
@@ -298,20 +323,7 @@ export async function collectPathsDiff(absPath: string, paths: string[]): Promis
     status += await boundedGit(absPath, ["status", "--porcelain=v1", "--", ...chunk], STATUS_CAP);
   }
   status = status.trim();
-  let diff = "";
-  for (const chunk of chunks) {
-    if (diff.length >= DIFF_CAP) break;
-    diff += await boundedGit(absPath, ["diff", "HEAD", "--", ...chunk], DIFF_CAP);
-  }
-  diff = diff.trim();
-  if (!diff) {
-    // Unborn HEAD → `git diff HEAD` errors/empties; fall back to the worktree diff.
-    for (const chunk of chunks) {
-      if (diff.length >= DIFF_CAP) break;
-      diff += await boundedGit(absPath, ["diff", "--", ...chunk], DIFF_CAP);
-    }
-    diff = diff.trim();
-  }
+  const diff = await boundedDiff(absPath, paths, [], DIFF_CAP);
   let combined =
     `# git status --porcelain\n${status || "(clean)"}\n\n# git diff\n${diff || "(no textual diff — new/untracked files only)"}`;
   if (combined.length > DIFF_CAP) combined = combined.slice(0, DIFF_CAP) + "\n…[truncated]";
@@ -358,22 +370,10 @@ export async function collectCommitPlanInput(absPath: string): Promise<CommitPla
   // Only diff the files worth reading; fold out lockfiles/generated/minified (their name + stat
   // in the file list is enough for grouping). `-U0` trims to just the changed lines.
   const diffPaths = changed.map((f) => f.path).filter((p) => !isNoisyPath(p));
-  let diff = "";
-  if (diffPaths.length > 0) {
-    for (const chunk of chunkByBytes(diffPaths)) {
-      if (diff.length >= PLAN_DIFF_CAP) break;
-      diff += await boundedGit(absPath, ["diff", "HEAD", "-U0", "--no-color", "-M", "--", ...chunk], PLAN_DIFF_CAP + 1);
-    }
-    diff = diff.trim();
-    if (!diff) {
-      // Unborn HEAD → `git diff HEAD` errors/empties; fall back to the worktree diff.
-      for (const chunk of chunkByBytes(diffPaths)) {
-        if (diff.length >= PLAN_DIFF_CAP) break;
-        diff += await boundedGit(absPath, ["diff", "-U0", "--no-color", "-M", "--", ...chunk], PLAN_DIFF_CAP + 1);
-      }
-      diff = diff.trim();
-    }
-  }
+  // +1 on the cap so the truncation check below can tell "exactly at cap" from "overflowed".
+  let diff = diffPaths.length > 0
+    ? await boundedDiff(absPath, diffPaths, ["-U0", "--no-color", "-M"], PLAN_DIFF_CAP + 1)
+    : "";
   const truncated = diff.length > PLAN_DIFF_CAP;
   if (truncated) diff = diff.slice(0, PLAN_DIFF_CAP) + "\n…[truncated]";
 

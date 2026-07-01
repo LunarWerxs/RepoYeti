@@ -7,6 +7,7 @@
 import { getRepo, getWatchableRepos } from "../db.ts";
 import { backendFor } from "../vcs/index.ts";
 import { watchRepo, type WatchHandle } from "../watcher.ts";
+import { forgetQueue } from "../opqueue.ts";
 import { refreshRepo, lastStatusSig } from "./core.ts";
 
 // ── watcher registry (lets repos registered/created at runtime get watched live) ──
@@ -90,6 +91,7 @@ export function unwatchOne(repoId: string): void {
   refreshBusy.delete(repoId);
   refreshAgain.delete(repoId);
   lastStatusSig.delete(repoId);
+  forgetQueue(repoId); // drop the op-queue chain too, so `chains` doesn't leak per removed repo
 }
 export function startWatching(repos: Array<{ id: string; absPath: string }>): void {
   for (const r of repos) watchOne(r.id, r.absPath);

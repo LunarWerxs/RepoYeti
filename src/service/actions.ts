@@ -149,6 +149,51 @@ export interface SmartCommitOutcome {
   syncMessage?: string;
 }
 
+// ── shared path validation for the two staging entry points (smart-commit + commit-selected) ──
+// Build a validation context from a fresh `readChanges`, then resolve each submitted path list
+// against it: normalize slashes, reject paths no longer pending (PLAN_STALE), auto-add each
+// rename's old path so the deletion lands with the addition, and enforce a duplicate policy. The
+// `seen` set is threaded across calls (smart-commit accumulates it across groups) so the same file
+// can't be assigned twice. Extracted so the two callers' rename/stale semantics can't drift apart.
+interface PathValidationCtx {
+  changedSet: Set<string>;
+  renameFrom: Map<string, string>;
+  seen: Set<string>;
+}
+function pathValidationCtx(fresh: Array<{ path: string; from?: string }>): PathValidationCtx {
+  const changedSet = new Set(fresh.map((f) => f.path));
+  const renameFrom = new Map<string, string>();
+  for (const f of fresh) if (f.from) renameFrom.set(f.path, f.from);
+  return { changedSet, renameFrom, seen: new Set<string>() };
+}
+type StagedPathsResult =
+  | { ok: true; paths: string[] }
+  | { ok: false; code: ActionCode; message: string };
+function resolveStagedPaths(
+  ctx: PathValidationCtx,
+  rawPaths: string[],
+  opts: { onDuplicate: "error" | "skip"; staleHint: string },
+): StagedPathsResult {
+  const paths: string[] = [];
+  for (const raw of rawPaths) {
+    const p = raw.replace(/\\/g, "/").trim();
+    if (!ctx.changedSet.has(p)) {
+      return { ok: false, code: "PLAN_STALE", message: `"${p}" is no longer a pending change — ${opts.staleHint}` };
+    }
+    if (ctx.seen.has(p)) {
+      if (opts.onDuplicate === "error") {
+        return { ok: false, code: "PLAN_PATHS_INVALID", message: `"${p}" is assigned to more than one commit` };
+      }
+      continue; // commit-selected: silently ignore an accidental duplicate selection
+    }
+    ctx.seen.add(p);
+    paths.push(p);
+    const from = ctx.renameFrom.get(p);
+    if (from) paths.push(from); // stage the rename's old path with the new one
+  }
+  return { ok: true, paths };
+}
+
 /**
  * Execute an owner-edited commit plan: validate the submitted groups against the LIVE working
  * tree, then run the whole stage+commit sequence inside ONE op-queue slot (so nothing can
@@ -173,30 +218,15 @@ export async function smartCommitRepo(
   const backend = backendFor(repo.vcs);
 
   const outcome = await enqueue(repoId, async (): Promise<Omit<SmartCommitOutcome, "repoId">> => {
-    // Validate against the CURRENT tree (the plan may have been built minutes ago).
+    // Validate against the CURRENT tree (the plan may have been built minutes ago). A path in two
+    // groups is an error here (each group is a distinct commit); see resolveStagedPaths.
     const fresh = await backend.readChanges(repo.absPath, false);
-    const changedSet = new Set(fresh.map((f) => f.path));
-    const renameFrom = new Map<string, string>();
-    for (const f of fresh) if (f.from) renameFrom.set(f.path, f.from);
-
-    const seen = new Set<string>();
+    const ctx = pathValidationCtx(fresh);
     const specs: CommitGroupSpec[] = [];
     for (const c of commits) {
-      const expanded: string[] = [];
-      for (const raw of c.paths) {
-        const p = raw.replace(/\\/g, "/").trim();
-        if (!changedSet.has(p)) {
-          return { ok: false, code: "PLAN_STALE", message: `"${p}" is no longer a pending change — re-plan` };
-        }
-        if (seen.has(p)) {
-          return { ok: false, code: "PLAN_PATHS_INVALID", message: `"${p}" is assigned to more than one commit` };
-        }
-        seen.add(p);
-        expanded.push(p);
-        const from = renameFrom.get(p);
-        if (from) expanded.push(from); // stage the rename's old path with the new one
-      }
-      specs.push({ message: c.message, paths: expanded });
+      const r = resolveStagedPaths(ctx, c.paths, { onDuplicate: "error", staleHint: "re-plan" });
+      if (!r.ok) return { ok: false, code: r.code, message: r.message };
+      specs.push({ message: c.message, paths: r.paths });
     }
 
     const res = await backend.commitGroups(repo.absPath, identity, specs);
@@ -209,8 +239,14 @@ export async function smartCommitRepo(
     };
     if (!res.ok || !sync) return base;
 
-    // Post-commit sync (mirrors the UI's "commit & sync"): pull --ff-only, then push.
+    // Post-commit sync (mirrors the UI's "commit & sync"): pull --ff-only, THEN push — but only if
+    // the pull actually succeeded. Pushing after a failed pull would publish the just-made local
+    // commits without first confirming the branch is fast-forwarded to upstream (exactly the
+    // NON_FAST_FORWARD race the pull-first order exists to avoid), and a dirty-tree failure — e.g.
+    // leftover unassigned files after a partial-group commit — would be silently overridden by a
+    // blind push. So a failed pull short-circuits: the commits are safe locally; sync is skipped.
     const pull = await backend.pull(repo.absPath, identity);
+    if (!pull.ok) return { ...base, synced: false, syncCode: pull.code, syncMessage: pull.message };
     const push = await backend.push(repo.absPath, identity);
     if (push.ok) return { ...base, synced: true };
     return { ...base, synced: false, syncCode: push.code, syncMessage: push.message || pull.message };
@@ -241,25 +277,13 @@ export async function commitSelectedRepo(
   const backend = backendFor(repo.vcs);
 
   const outcome = await enqueue(repoId, async (): Promise<ActionResult> => {
-    // Validate the selection against the CURRENT tree (it may have shifted since the UI read it).
+    // Validate the selection against the CURRENT tree (it may have shifted since the UI read it). A
+    // duplicate selection is silently skipped here (single commit, no completeness requirement).
     const fresh = await backend.readChanges(repo.absPath, false);
-    const changedSet = new Set(fresh.map((f) => f.path));
-    const renameFrom = new Map<string, string>();
-    for (const f of fresh) if (f.from) renameFrom.set(f.path, f.from);
-
-    const seen = new Set<string>();
-    const staged: string[] = [];
-    for (const raw of paths) {
-      const p = raw.replace(/\\/g, "/").trim();
-      if (!changedSet.has(p)) {
-        return { ok: false, code: "PLAN_STALE", message: `"${p}" is no longer a pending change — refresh and retry` };
-      }
-      if (seen.has(p)) continue; // ignore an accidental duplicate selection
-      seen.add(p);
-      staged.push(p);
-      const from = renameFrom.get(p);
-      if (from) staged.push(from); // stage the rename's old path with the new one
-    }
+    const ctx = pathValidationCtx(fresh);
+    const r = resolveStagedPaths(ctx, paths, { onDuplicate: "skip", staleHint: "refresh and retry" });
+    if (!r.ok) return { ok: false, code: r.code, message: r.message };
+    const staged = r.paths;
     if (staged.length === 0) {
       return { ok: false, code: "NOTHING_TO_COMMIT", message: "select at least one changed file to commit" };
     }

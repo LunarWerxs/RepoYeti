@@ -7,7 +7,9 @@
  */
 const MIN_LINE_COVERAGE = 80; // overall is ~92%; floor with margin to catch silent regression
 
-const proc = Bun.spawnSync(["bun", "test", "--coverage"], { stdout: "pipe", stderr: "pipe" });
+// Scope to `tests/` so bun's runner never picks up the web/ Vitest suite (web/test/*.test.ts use
+// vitest-only APIs like vi.stubGlobal + @vue/test-utils and are run separately via `bun run --cwd web test`).
+const proc = Bun.spawnSync(["bun", "test", "tests", "--coverage"], { stdout: "pipe", stderr: "pipe" });
 const out = new TextDecoder().decode(proc.stdout) + new TextDecoder().decode(proc.stderr);
 process.stdout.write(out);
 
