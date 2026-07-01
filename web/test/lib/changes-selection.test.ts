@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mount } from "@vue/test-utils";
-import { defineComponent, h } from "vue";
+import { mount, flushPromises } from "@vue/test-utils";
+import { defineComponent, h, nextTick } from "vue";
 import { provideTreeSelection, type TreeSelectionApi } from "@/lib/changes-selection";
 
 // The selection store uses provide/inject + reactive Set + persistence — all of which need a real
@@ -63,7 +63,27 @@ describe("changes-selection store", () => {
     expect(sel.count.value).toBe(2); // queries don't change the selection
   });
 
-  // NB: localStorage persistence (selection surviving the SSE-driven card re-render) is exercised
-  // in the browser verification, not here — @vueuse's useLocalStorage couples to module-load timing
-  // and async watcher flush, which is awkward and low-value to assert in-process.
+  // #21 — persistence (the selection surviving the SSE-driven card re-render) IS testable: flush the
+  // watcher chain (the store's watch → @vueuse's useLocalStorage) before asserting on localStorage.
+  it("mirrors the selection to localStorage per repo after the watcher flushes", async () => {
+    const sel = makeSelection("rp");
+    sel.toggle("keep.txt");
+    await flushPromises();
+    await nextTick();
+    const raw = localStorage.getItem("repoyeti:changesSelected");
+    expect(raw).toBeTruthy();
+    expect(JSON.parse(raw as string)).toMatchObject({ rp: ["keep.txt"] });
+  });
+
+  it("drops the repo's localStorage entry once its selection is cleared", async () => {
+    const sel = makeSelection("rp2");
+    sel.toggle("a.txt");
+    await flushPromises();
+    sel.clear();
+    await flushPromises();
+    await nextTick();
+    const raw = localStorage.getItem("repoyeti:changesSelected");
+    const parsed = raw ? JSON.parse(raw) : {};
+    expect(parsed.rp2).toBeUndefined(); // empty selection ⇒ key removed (tidy-up)
+  });
 });
