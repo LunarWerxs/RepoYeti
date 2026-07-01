@@ -4,8 +4,9 @@
 // Like collapse state (see @/lib/changes-tree), ChangesTree is *self-recursive*, so the set of
 // selected files can't live in a single instance — it's created once by the owner (RepoCard) via
 // provideTreeSelection() and read by every node in the recursion via useTreeSelection(). State is a
-// reactive Set of selected *file* paths (folders are never selected directly; selecting a folder
-// toggles its descendant files — RepoCard owns that fan-out since only it holds the full tree).
+// reactive Set of selected *file* paths — the current UI selects files individually (folder rows
+// have no checkbox). setMany() is a bulk add/remove primitive kept for a future folder / select-all
+// affordance (a folder toggle would fan out to its descendant file paths); nothing wires it today.
 //
 // Persisted to localStorage per repo (same pattern as collapse / changes-view height) so a partial
 // selection survives a reload — or the live-update re-render that re-creates the card on every SSE
@@ -20,7 +21,8 @@ export interface TreeSelectionApi {
   isSelected: (path: string) => boolean;
   /** Flip one file in ↔ out of the selection. */
   toggle: (path: string) => void;
-  /** Add (select = true) or remove (false) many files at once — drives the folder/select-all toggles. */
+  /** Bulk add (select = true) or remove (false) — the primitive a future folder/select-all toggle
+   *  would call to fan out over many file paths at once. Not wired into the UI yet (tested directly). */
   setMany: (paths: Iterable<string>, select: boolean) => void;
   /** Clear the whole selection (after a successful commit, or the "clear" affordance). */
   clear: () => void;

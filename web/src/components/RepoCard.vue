@@ -585,6 +585,9 @@ async function confirmDiscard(): Promise<void> {
   const path = discardTarget.value;
   discardTarget.value = null;
   if (!path) return;
+  // Serialize with the other per-repo git ops (matches BranchPanel/StashPanel): a rapid second
+  // discard while one is still in flight would otherwise fire two concurrent discardFile ops.
+  if (store.gitOpBusy[props.repo.id]) return;
   toastResult(await store.discardFile(props.repo.id, path), t("repo.discard.discarded"));
 }
 </script>

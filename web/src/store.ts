@@ -681,12 +681,14 @@ export const useStore = defineStore("repoyeti", () => {
   async function commitSelected(repoId: string, message: string, paths: string[]): Promise<ActionResult> {
     busy[repoId] = "commit";
     try {
-      const r = await api.commitSelected(repoId, message, paths);
-      if (r.ok) await loadChanges(repoId);
-      return r;
+      return await api.commitSelected(repoId, message, paths);
     } catch (e) {
       return asResult(e);
     } finally {
+      // ALWAYS refresh the changed-file list — not just on success. On a PLAN_STALE failure (a
+      // selected file vanished out-of-band) this re-syncs the tree so RepoCard's prune watch drops
+      // the now-stale path from the selection, instead of leaving it checked in a retry loop.
+      await loadChanges(repoId);
       busy[repoId] = undefined;
     }
   }
@@ -796,6 +798,10 @@ export const useStore = defineStore("repoyeti", () => {
         logByRepo[repoId] = res;
       }
     } catch (e) {
+      // A paginated "load more" (skip>0) failure must NOT wipe the commits already on screen — a
+      // flaky network request would otherwise blank the whole history. Keep what's shown; the user
+      // can retry. Only surface the error/empty state on a first-page load.
+      if (skip > 0 && logByRepo[repoId]?.commits.length) return;
       logByRepo[repoId] = { ...asResult(e), commits: [], hasMore: false };
     }
   }
