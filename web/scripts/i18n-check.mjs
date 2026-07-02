@@ -25,6 +25,8 @@ const EN = join(LOCALES, "en.json");
 // not app copy — their sr-only "Close" labels etc. are intentionally hardcoded and
 // synced from the kit, so they're exempt from the hardcoded-prose scan.
 const UI = join(SRC, "components", "ui");
+// The shared LunarWerx sidebar/shell (src/shell) is synced kit code too.
+const SHELL = join(SRC, "shell");
 
 // Static prose attributes that should be translated when set to a literal.
 const PROSE_ATTRS = new Set(["placeholder", "title", "aria-label", "alt", "aria-description"]);
@@ -54,7 +56,7 @@ const walkDir = (dir, files = []) => {
     const p = join(dir, name);
     const s = statSync(p);
     if (s.isDirectory()) {
-      if (name === "node_modules" || p === LOCALES || p === UI) continue;
+      if (name === "node_modules" || p === LOCALES || p === UI || p === SHELL) continue;
       walkDir(p, files);
     } else if ([".vue", ".ts"].includes(extname(p))) {
       files.push(p);
