@@ -56,7 +56,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
     <Search
       class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
     />
-    <Input v-model="store.filterQuery" :placeholder="$t('filters.searchPlaceholder')" class="pl-8 pr-10" />
+    <Input v-model="store.filterQuery" :placeholder="$t('filters.searchPlaceholder')" class="h-11 pl-8 pr-10 sm:h-9" />
 
     <Popover v-model:open="open">
       <PopoverTrigger as-child>

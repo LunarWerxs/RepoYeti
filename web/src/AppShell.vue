@@ -16,6 +16,7 @@ import FileViewer from "./components/FileViewer.vue";
 import { pageShiftPx } from "@/lib/file-viewer";
 import { usePushPanel } from "@/shell/usePushPanel";
 import AppContainer from "@/shell/AppContainer.vue";
+import AppFooter from "@/shell/AppFooter.vue";
 
 const store = useStore();
 const showAdd = ref(false);
@@ -119,17 +120,7 @@ onMounted(async () => {
       </AppContainer>
     </main>
 
-    <!-- subtle sponsor credit -->
-    <footer class="px-4 pb-6 text-center text-[11px] text-muted-foreground/55">
-      <a
-        href="https://lunarwerx.com/"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="transition-colors hover:text-muted-foreground"
-      >
-        {{ $t("sponsor.creditedTo", { name: "LunarWerx Studios" }) }}
-      </a>
-    </footer>
+    <AppFooter />
 
     <AddRepo v-model:open="showAdd" />
     <ScanProjects v-model:open="store.scanOpen" @open-settings="showSettings = true" />

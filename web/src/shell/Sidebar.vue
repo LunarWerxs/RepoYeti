@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CSSProperties, HTMLAttributes } from "vue";
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   DialogClose,
   DialogContent,
@@ -67,10 +67,21 @@ const contentStyle = computed<CSSProperties>(() => {
   };
 });
 
-// A desktop push panel must not dismiss on outside interaction (keeps the page
-// usable, and swallows the opening click so it can't self-close).
+// Swallow the opening click (from an external trigger) so the panel can't
+// self-close, but let outside clicks close it once it's settled (~1 frame later).
+const canDismiss = ref(false);
+let dismissTimer: ReturnType<typeof setTimeout> | undefined;
+watch(
+  () => props.open,
+  (o) => {
+    canDismiss.value = false;
+    clearTimeout(dismissTimer);
+    if (o) dismissTimer = setTimeout(() => (canDismiss.value = true), 300);
+  },
+  { immediate: true },
+);
 function guardOutside(e: Event) {
-  if (!overlayed.value) e.preventDefault();
+  if (!canDismiss.value) e.preventDefault();
 }
 </script>
 

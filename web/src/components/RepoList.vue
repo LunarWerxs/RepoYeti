@@ -46,7 +46,18 @@ function persist(): void {
 const pinnedParent = ref<HTMLElement>();
 const starredParent = ref<HTMLElement>();
 const otherParent = ref<HTMLElement>();
-const dragOpts = { dragHandle: ".drag-handle", draggingClass: "dragging", plugins: [animations()] };
+// `nativeDrag: false` routes every pointer (mouse + touch) through the synthetic
+// dragger — the native HTML5 drag drops the item on fast flicks, this doesn't.
+// `longPress` gives touch users a tap-and-hold to enter reorder mode (mouse still
+// drags immediately from the handle).
+const dragOpts = {
+  dragHandle: ".drag-handle",
+  draggingClass: "dragging",
+  nativeDrag: false,
+  longPress: true,
+  longPressDuration: 250,
+  plugins: [animations()],
+};
 dragAndDrop({ parent: pinnedParent, values: pinnedList, onDragend: persist, ...dragOpts });
 dragAndDrop({ parent: starredParent, values: starredList, onDragend: persist, ...dragOpts });
 dragAndDrop({ parent: otherParent, values: otherList, onDragend: persist, ...dragOpts });

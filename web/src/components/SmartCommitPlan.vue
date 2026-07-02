@@ -103,6 +103,9 @@ dragAndDrop({
   values: groups,
   dragHandle: ".sc-drag",
   draggingClass: "opacity-60",
+  nativeDrag: false,
+  longPress: true,
+  longPressDuration: 250,
   plugins: [animations()],
 });
 onBeforeUnmount(() => {
