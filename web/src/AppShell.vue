@@ -14,13 +14,14 @@ import SignIn from "./components/SignIn.vue";
 import RemoteAccess from "./components/RemoteAccess.vue";
 import FileViewer from "./components/FileViewer.vue";
 import { pageShiftPx } from "@/lib/file-viewer";
-import { useSettingsPanelShift } from "@/lib/settings-panel";
+import { usePushPanel } from "@/shell/usePushPanel";
+import AppContainer from "@/shell/AppContainer.vue";
 
 const store = useStore();
 const showAdd = ref(false);
 const showSettings = ref(false);
 const showRemote = ref(false);
-const { side: settingsSide, shiftPx: settingsShiftPx } = useSettingsPanelShift(showSettings);
+const { side: settingsSide, shiftPx: settingsShiftPx } = usePushPanel(showSettings);
 const appShiftPx = computed(() => pageShiftPx.value + settingsShiftPx.value);
 
 // The login gate shows only in remote mode, when there's no owner session and no local
@@ -62,7 +63,8 @@ onMounted(async () => {
       @remote="showRemote = true"
     />
 
-    <main class="mx-auto max-w-3xl px-3 pt-3 pb-10 sm:px-4">
+    <main class="pt-3 pb-10">
+      <AppContainer>
       <template v-if="store.loading">
         <div class="flex flex-col gap-2.5">
           <div
@@ -116,6 +118,7 @@ onMounted(async () => {
           {{ $t("shell.allHidden") }}
         </div>
       </template>
+      </AppContainer>
     </main>
 
     <!-- subtle sponsor credit -->

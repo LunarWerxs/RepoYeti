@@ -23,11 +23,11 @@ import {
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
 import { ApiError } from "../api";
-import type { SheetSide } from "@/lib/use-locked-sheet-side";
+import type { PushPanelSide } from "@/shell/usePushPanel";
 import { changesViewSize } from "@/lib/changes-view";
 import { hotkeysEnabled, powerShortcuts, SHORTCUTS } from "@/lib/hotkeys";
 import { useRepoYetiColorMode } from "@/lib/theme";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import SettingsPanel from "@/shell/SettingsPanel.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +45,7 @@ import SettingsSection from "./SettingsSection.vue";
 import type { AiCatalogEntry, AiModel, AiProviderId, CommitStyle } from "../types";
 
 const open = defineModel<boolean>("open", { required: true });
-const props = withDefaults(defineProps<{ side?: SheetSide; rightOffsetPx?: number }>(), {
+const props = withDefaults(defineProps<{ side?: PushPanelSide; rightOffsetPx?: number }>(), {
   side: "right",
   rightOffsetPx: 0,
 });
@@ -54,8 +54,6 @@ const { t } = useI18n();
 
 // Shared light/dark/system theme — writes to the same store App.vue reads. §3.
 const theme = useRepoYetiColorMode();
-
-const usesDesktopPanel = computed(() => props.side === "right");
 
 // Human descriptions for the Keyboard-shortcuts reference list, keyed by Shortcut.id.
 // Static t() literals (re-run on locale change) so the i18n parity check sees them used.
@@ -439,23 +437,18 @@ async function remove(id: AiProviderId): Promise<void> {
 </script>
 
 <template>
-  <Sheet v-model:open="open" :modal="!usesDesktopPanel">
-    <SheetContent
-      :side="props.side"
-      :show-overlay="!usesDesktopPanel"
-      :right-offset-px="props.rightOffsetPx"
-      class="gap-0 p-0 transition-[right,transform]"
-    >
-      <SheetHeader class="border-b border-border/60">
-        <SheetTitle class="flex items-center gap-2">
-          <SettingsIcon :size="17" class="text-muted-foreground" /> {{ $t("settings.title") }}
-        </SheetTitle>
-        <!-- Kept for dialog accessibility (screen-reader description) but visually hidden — the
-             blurb was redundant clutter above the sections. -->
-        <SheetDescription class="sr-only">{{ $t("settings.description") }}</SheetDescription>
-      </SheetHeader>
+  <SettingsPanel
+    v-model:open="open"
+    :side="props.side"
+    :right-offset-px="props.rightOffsetPx"
+    :title="$t('settings.title')"
+    :description="$t('settings.description')"
+  >
+    <template #title-icon>
+      <SettingsIcon :size="17" class="text-muted-foreground" />
+    </template>
 
-      <div class="scroll-slim flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+    <div class="flex flex-col gap-4">
         <!-- Signed-in account (the daemon owner). Its own row above the sections — it's the
              Connections account, NOT a git identity, so it no longer lives inside Identities.
              Shown only when actually signed in (store.owner). -->
@@ -1095,7 +1088,6 @@ async function remove(id: AiProviderId): Promise<void> {
               </select>
             </label>
         </SettingsSection>
-      </div>
-    </SheetContent>
-  </Sheet>
+    </div>
+  </SettingsPanel>
 </template>

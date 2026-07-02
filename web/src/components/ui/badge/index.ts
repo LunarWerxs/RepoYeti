@@ -3,24 +3,21 @@ import { cva } from "class-variance-authority"
 
 export { default as Badge } from "./Badge.vue"
 
-// Unified badge set (shared by RepoYeti + DevWebUI): tinted status chips
-// (primary/success/warning/info) for state, a solid `destructive` for counts,
-// plus neutral default/secondary/outline. See web/UI_UNIFICATION.md §5.
 export const badgeVariants = cva(
-  "inline-flex items-center justify-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive transition-[color,box-shadow] overflow-hidden",
+  'h-5 gap-1 rounded-full border border-transparent px-2 py-0.5 text-[0.625rem] font-medium transition-all has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&>svg]:size-2.5! group/badge inline-flex w-fit shrink-0 items-center justify-center overflow-hidden whitespace-nowrap focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none',
   {
     variants: {
       variant: {
-        default: "border-transparent bg-secondary text-secondary-foreground",
-        secondary: "border-transparent bg-secondary text-secondary-foreground",
-        primary: "border-primary/25 bg-primary/15 text-primary",
-        success: "border-success/25 bg-success/15 text-success",
-        warning: "border-warning/25 bg-warning/15 text-warning",
-        info: "border-info/25 bg-info/15 text-info",
-        destructive:
-          "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
-        outline:
-          "text-muted-foreground border-border [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        default: 'bg-primary text-primary-foreground [a]:hover:bg-primary/80',
+        secondary: 'bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80',
+        destructive: 'bg-destructive/10 [a]:hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 text-destructive dark:bg-destructive/20',
+        primary: 'bg-primary/10 text-primary dark:bg-primary/20',
+        success: 'bg-success/10 text-success dark:bg-success/20',
+        warning: 'bg-warning/10 text-warning dark:bg-warning/20',
+        info: 'bg-info/10 text-info dark:bg-info/20',
+        outline: 'border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground bg-input/20 dark:bg-input/30',
+        ghost: 'hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50',
+        link: 'text-primary underline-offset-4 hover:underline',
       },
     },
     defaultVariants: {

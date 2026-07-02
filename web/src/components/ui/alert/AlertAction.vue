@@ -9,8 +9,8 @@ const props = defineProps<{
 
 <template>
   <div
-    data-slot="dialog-header"
-    :class="cn('gap-1 flex flex-col', props.class)"
+    data-slot="alert-action"
+    :class="cn('absolute top-1.5 right-2', props.class)"
   >
     <slot />
   </div>

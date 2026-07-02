@@ -21,6 +21,10 @@ const WEB = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const SRC = join(WEB, "src");
 const LOCALES = join(SRC, "locales");
 const EN = join(LOCALES, "en.json");
+// Vendored shadcn / LunarWerx-kit primitives (src/components/ui) are library code,
+// not app copy — their sr-only "Close" labels etc. are intentionally hardcoded and
+// synced from the kit, so they're exempt from the hardcoded-prose scan.
+const UI = join(SRC, "components", "ui");
 
 // Static prose attributes that should be translated when set to a literal.
 const PROSE_ATTRS = new Set(["placeholder", "title", "aria-label", "alt", "aria-description"]);
@@ -50,7 +54,7 @@ const walkDir = (dir, files = []) => {
     const p = join(dir, name);
     const s = statSync(p);
     if (s.isDirectory()) {
-      if (name === "node_modules" || p === LOCALES) continue;
+      if (name === "node_modules" || p === LOCALES || p === UI) continue;
       walkDir(p, files);
     } else if ([".vue", ".ts"].includes(extname(p))) {
       files.push(p);
