@@ -21,7 +21,7 @@
 
 :root {
   --radius: 0.625rem;      /* Mira / neutral */
-  --container-max: 1180px; /* unified app content width (was RY 768 / Dev 1280) */
+  --container-max: 800px; /* unified app content width */
 
   /* --- Mira neutral palette · light --- */
   --background: oklch(1 0 0);
