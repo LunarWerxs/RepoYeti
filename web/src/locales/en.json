@@ -625,9 +625,6 @@
     "ownerOnly": "Only the owner of this daemon can sign in.",
     "tagline": "Your repositories, from anywhere — signed in with Connections."
   },
-  "sponsor": {
-    "creditedTo": "Sponsored by {name}"
-  },
   "time": {
     "daysAgo": "{n}d ago",
     "hoursAgo": "{n}h ago",
