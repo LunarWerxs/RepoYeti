@@ -106,7 +106,7 @@ function guardOutside(e: Event) {
         @pointer-down-outside="guardOutside"
         @interact-outside="guardOutside"
       >
-        <header class="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-3 pr-12">
+        <header class="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-2.5 pr-12">
           <slot name="header">
             <slot name="title-icon" />
             <DialogTitle class="text-sm font-semibold">{{ title }}</DialogTitle>
@@ -116,16 +116,16 @@ function guardOutside(e: Event) {
           <DialogDescription class="sr-only">{{ description || title }}</DialogDescription>
         </header>
 
-        <div :class="bodyClass || 'scroll-slim min-h-0 flex-1 overflow-y-auto p-4'">
+        <div :class="bodyClass || 'scroll-slim min-h-0 flex-1 overflow-y-auto p-3.5'">
           <slot />
         </div>
 
-        <footer v-if="$slots.footer" class="shrink-0 border-t border-border/60 px-4 py-3">
+        <footer v-if="$slots.footer" class="shrink-0 border-t border-border/60 px-4 py-2.5">
           <slot name="footer" />
         </footer>
 
         <DialogClose
-          class="ring-offset-background focus:ring-ring absolute top-3 right-3 rounded-sm p-1 opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:outline-hidden"
+          class="ring-offset-background focus:ring-ring absolute top-2.5 right-3 rounded-sm p-1 opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:outline-hidden"
           aria-label="Close"
         >
           <X class="size-4" />
