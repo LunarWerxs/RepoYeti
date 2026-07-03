@@ -385,9 +385,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <Button class="ml-1" size="sm" :aria-label="$t('header.addRepository')" @click="$emit('add')">
+        <Button
+          size="icon-sm"
+          class="ml-1 transition-transform hover:scale-105 sm:w-auto sm:gap-1.5 sm:px-2.5"
+          :aria-label="$t('header.addRepository')"
+          @click="$emit('add')"
+        >
           <Plus />
-          <span class="hidden sm:inline">{{ $t("header.add") }}</span>
+          <span class="hidden sm:inline">{{ $t("header.addRepository") }}</span>
         </Button>
       </div>
     </div>

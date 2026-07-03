@@ -22,6 +22,7 @@ import {
   GripVertical,
   GripHorizontal,
   User,
+  AtSign,
   Loader2,
   MoreVertical,
   EyeOff,
@@ -154,6 +155,11 @@ const identity = computed(() =>
 );
 function onIdentity(id: string | null): void {
   void store.assignIdentity(props.repo.id, id);
+}
+
+// ── sync account (which GitHub account this repo fetches/pulls/pushes as) ──────
+function onAccount(a: { host: string; login: string } | null): void {
+  void store.assignRepoAccount(props.repo.id, a?.host ?? null, a?.login ?? null);
 }
 
 // ── collapse + changed-files tree ─────────────────────────────────────────────
@@ -805,6 +811,44 @@ async function confirmDiscard(): Promise<void> {
             </TooltipTrigger>
             <TooltipContent>{{ hasRemote ? st?.remote : $t("repo.badge.noRemote") }}</TooltipContent>
           </Tooltip>
+        </div>
+
+        <!-- sync account: the GitHub account this repo fetches/pulls/pushes as (auto-switched on sync) -->
+        <div v-if="store.ghAccounts.length" class="flex items-center gap-2">
+          <AtSign :size="14" class="shrink-0 text-muted-foreground" />
+          <span class="shrink-0 text-[11.5px] text-muted-foreground">{{ $t("repo.syncAccount.label") }}</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              class="flex min-w-0 items-center gap-1 rounded-md border border-border/60 bg-secondary/40 px-2 py-1 text-[12px] outline-none transition hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50"
+              @click.stop
+            >
+              <span class="truncate">{{ repo.syncAccountLogin || $t("repo.syncAccount.machineDefault") }}</span>
+              <ChevronDown :size="13" class="shrink-0 text-muted-foreground" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" class="w-60">
+              <DropdownMenuLabel>{{ $t("repo.syncAccount.dropdownLabel") }}</DropdownMenuLabel>
+              <DropdownMenuItem class="text-muted-foreground" @select="onAccount(null)">
+                <span class="flex-1">{{ $t("repo.syncAccount.machineDefault") }}</span>
+                <Check v-if="!repo.syncAccountLogin" :size="15" class="text-primary" />
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                v-for="a in store.ghAccounts"
+                :key="`${a.host}/${a.login}`"
+                @select="onAccount(a)"
+              >
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-[13px]">{{ a.login }}</div>
+                  <div class="mono truncate text-[11px] text-muted-foreground">{{ a.host }}</div>
+                </div>
+                <Check
+                  v-if="repo.syncAccountLogin === a.login && (repo.syncAccountHost || 'github.com') === a.host"
+                  :size="15"
+                  class="ml-1 shrink-0 text-primary"
+                />
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <!-- branch switcher + inline create form — see BranchPanel.vue -->

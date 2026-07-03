@@ -16,7 +16,7 @@ withDefaults(
 <template>
   <div
     class="flex items-center gap-3 px-3.5 py-2.5"
-    :class="clickable ? 'cursor-pointer transition-colors hover:bg-accent/40' : ''"
+    :class="clickable ? 'cursor-pointer transition-colors hover:bg-accent/60' : ''"
   >
     <component :is="icon" v-if="icon" class="size-[18px] shrink-0 text-muted-foreground" />
     <slot v-else name="icon" />

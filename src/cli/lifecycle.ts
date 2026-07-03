@@ -110,11 +110,15 @@ export async function start(rest: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // No scan roots is a valid state now: the dashboard's "Scan for projects" can sweep the whole
+  // computer (or a specific folder) on demand, and the daemon still serves whatever repos the DB
+  // already knows. So DON'T exit — just note it and carry on. (A hard exit here is what bricked the
+  // tray's "Rebuild & Restart" whenever roots happened to be empty.)
   if (liveCfg.roots.length === 0) {
-    console.error(
-      "No scan roots configured. Add one and restart:\n  repoyeti add-root <path>\n  (or)  repoyeti start --root <path>",
+    console.log(
+      "No scan roots configured — starting anyway. Use Scan for projects (whole computer or a\n" +
+        "specific folder) in the app, or add a watched root: repoyeti add-root <path>",
     );
-    process.exit(1);
   }
 
   // 1) Serve immediately on whatever the DB already knows from a previous run — discovery

@@ -15,13 +15,13 @@ import {
   type CommitGroupResult,
 } from "../git-actions.ts";
 import type { ActionResult } from "../contract.ts";
-import { runAction, refreshRepo, type ActionOutcome } from "./core.ts";
+import { runAction, refreshRepo, ensureRepoAccount, type ActionOutcome } from "./core.ts";
 import { guardRepo } from "./guards.ts";
 import { resolveRepoPath } from "./files.ts";
 
-export const fetchRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.fetch(p, idn), true);
-export const pullRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.pull(p, idn), true);
-export const pushRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.push(p, idn));
+export const fetchRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.fetch(p, idn), true, true);
+export const pullRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.pull(p, idn), true, true);
+export const pushRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.push(p, idn), false, true);
 export const commitRepo = (
   id: string,
   message: string,
@@ -238,6 +238,10 @@ export async function smartCommitRepo(
       remaining: res.remaining,
     };
     if (!res.ok || !sync) return base;
+
+    // Match the machine's active GitHub account to this repo's pinned sync account before the
+    // network round-trip (no-op when unpinned).
+    await ensureRepoAccount(repo);
 
     // Post-commit sync (mirrors the UI's "commit & sync"): pull --ff-only, THEN push — but only if
     // the pull actually succeeded. Pushing after a failed pull would publish the just-made local

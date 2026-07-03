@@ -54,6 +54,10 @@ export interface Repo {
   vcs: VcsKind;
   isSubmodule: boolean;
   identityId: string | null;
+  /** Repo-level GitHub "sync account" (host + login) to authenticate as for fetch/pull/push.
+   *  Null → use the machine's currently-active account. */
+  syncAccountHost: string | null;
+  syncAccountLogin: string | null;
   /** Owner-hidden from the dashboard (e.g. a deprecated repo). Display-only. */
   hidden: boolean;
   /** Favorited into the "Pinned" section. Organisation flag — NOT `source: "pinned"`. */

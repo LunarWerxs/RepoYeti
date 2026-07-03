@@ -80,9 +80,15 @@ function onMobileOpenChange(open: boolean): void {
   </Teleport>
 
   <!-- mobile bottom sheet -->
+  <!-- `h-[85vh]` must be scoped to the `data-[side=bottom]:` variant to out-rank
+       SheetContent's own `data-[side=bottom]:h-auto` (same-specificity attribute selector —
+       an unscoped `h-[85vh]` loses that fight and the sheet collapses to its content height,
+       leaving the editor invisible). The built-in absolute close button is disabled in favor
+       of FileViewerInner's in-flow one (`show-close`), so it doesn't float on top of the
+       split/unified toggle at the end of the header row. -->
   <Sheet v-if="!isDesktopViewer" :open="fileViewer.open" @update:open="onMobileOpenChange">
-    <SheetContent side="bottom" class="h-[85vh] gap-0 p-0">
-      <FileViewerInner :target="fileViewer.target" :show-close="false" class="h-full" @close="closeFile" />
+    <SheetContent side="bottom" :show-close-button="false" class="data-[side=bottom]:h-[85vh] gap-0 p-0">
+      <FileViewerInner :target="fileViewer.target" :show-close="true" class="h-full" @close="closeFile" />
     </SheetContent>
   </Sheet>
 

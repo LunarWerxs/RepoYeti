@@ -35,6 +35,7 @@ onMounted(async () => {
   await store.loadAuth();
   if (needsSignIn.value) return; // show the sign-in gate instead of loading data
   void store.loadAll();
+  void store.loadAccounts();
   store.connect();
 });
 </script>

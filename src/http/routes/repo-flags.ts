@@ -6,6 +6,7 @@ import {
   getRepo,
   getIdentity,
   setRepoIdentity,
+  setRepoAccount,
   setRepoHidden,
   setRepoPinned,
   setRepoStarred,
@@ -23,6 +24,22 @@ export function register(app: Hono, _deps: Deps): void {
       if (identityId && !getIdentity(identityId)) return jsonError(c, "NOT_FOUND", "identity not found");
       setRepoIdentity(repoId, identityId);
       broadcast("repo_identity_changed", { id: repoId, identityId });
+      return c.json({ ok: true, repo: getRepo(repoId) });
+    }),
+  );
+
+  // ── pin a GitHub "sync account" to a repo (the account its fetch/pull/push auth as) ──
+  app.post("/api/repos/:id/account", (c) =>
+    withRepo(c, async (repoId) => {
+      const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+      const login = typeof b.login === "string" && b.login.trim() ? b.login.trim() : null;
+      const host = typeof b.host === "string" && b.host.trim() ? b.host.trim() : null;
+      setRepoAccount(repoId, host, login);
+      broadcast("repo_account_changed", {
+        id: repoId,
+        syncAccountHost: login ? host || "github.com" : null,
+        syncAccountLogin: login,
+      });
       return c.json({ ok: true, repo: getRepo(repoId) });
     }),
   );

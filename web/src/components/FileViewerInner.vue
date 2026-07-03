@@ -101,7 +101,7 @@ const binary = ref(false);
 const truncated = ref(false);
 const fromHead = ref(false);
 
-// ── edit mode (Content tab only) ────────────────────────────────────────────────
+// ── edit mode (Content tab, and Diff tab when it's showing the full working-tree text) ──
 const editing = ref(false);
 const draft = ref(""); // latest editor text while editing
 const dirty = ref(false);
@@ -118,16 +118,22 @@ watch(dirty, (v) => (editorDirty.value = v));
 // server-side — so disable Edit up front with a clear reason instead of letting it 403 on save.
 const remoteEditBlocked = computed(() => !store.canContinueLocal && !store.remoteEditing);
 
-const canEdit = computed(
-  () =>
-    viewerMode.value === "content" &&
-    !loading.value &&
-    !errorMsg.value &&
-    !binary.value &&
-    !truncated.value &&
-    !fromHead.value &&
-    !remoteEditBlocked.value,
-);
+// Diff tab is editable whenever it's rendering the rich side-by-side view (a real `modified`
+// working-tree string in hand) rather than a compact unified patch — patch mode ships only
+// the hunks, so there's no whole-file text here to seed an editor with.
+const diffEditable = computed(() => viewerMode.value === "diff" && !patchMode.value);
+const showEditControls = computed(() => viewerMode.value === "content" || diffEditable.value);
+
+const canEdit = computed(() => {
+  if (loading.value || !!errorMsg.value || binary.value || truncated.value || remoteEditBlocked.value) return false;
+  if (viewerMode.value === "content") return !fromHead.value;
+  // Diff tab: patch mode has no whole-file text (see diffEditable); a Deleted file has
+  // nothing left in the working tree to write over (mirrors content mode's fromHead guard).
+  return diffEditable.value && props.target?.status !== "D";
+});
+
+/** The loaded (unedited) source for whichever tab is currently editable. */
+const editableSource = computed(() => (viewerMode.value === "content" ? content.value : modified.value));
 
 // Identity of the request in flight — repo + path + mode. Re-fetches when any changes,
 // and lets a returning request bail if a newer open/toggle has superseded it.
@@ -183,18 +189,18 @@ async function requestMode(m: ViewerMode): Promise<void> {
 }
 function startEdit(): void {
   if (!canEdit.value) return;
-  draft.value = content.value;
+  draft.value = editableSource.value;
   dirty.value = false;
   editing.value = true;
 }
 function cancelEdit(): void {
-  // MonacoViewer resets its buffer to `content` when `editable` flips false.
+  // MonacoViewer resets its buffer to `editableSource` when `editable` flips false.
   editing.value = false;
   dirty.value = false;
 }
 function onEditorChange(value: string): void {
   draft.value = value;
-  dirty.value = value !== content.value;
+  dirty.value = value !== editableSource.value;
 }
 async function save(): Promise<void> {
   if (!props.target || !editing.value || !canEdit.value || !dirty.value || saving.value) return;
@@ -202,7 +208,11 @@ async function save(): Promise<void> {
   saving.value = true;
   try {
     await api.saveFile(repoId, path, draft.value);
-    content.value = draft.value; // editor value catches up; MonacoViewer skips the reset
+    // Editor value catches up so MonacoViewer skips the reset; update whichever tab's source
+    // was actually edited (the Diff tab's working-tree side also feeds MonacoDiffViewer once
+    // editing ends, so it reflects the save without needing a re-fetch).
+    if (viewerMode.value === "content") content.value = draft.value;
+    else modified.value = draft.value;
     dirty.value = false;
     toast.success(t("fileViewer.saved"));
   } catch (e) {
@@ -293,9 +303,9 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <!-- Edit / Save / Cancel (Content tab only) -->
+      <!-- Edit / Save / Cancel — Content tab, or the Diff tab's side-by-side view (not patch mode) -->
       <button
-        v-if="viewerMode === 'content' && !editing"
+        v-if="showEditControls && !editing"
         type="button"
         :disabled="!canEdit"
         :class="
@@ -311,7 +321,7 @@ onBeforeUnmount(() => {
         <Pencil :size="13" />
         {{ $t("fileViewer.edit") }}
       </button>
-      <template v-else-if="viewerMode === 'content' && editing">
+      <template v-else-if="showEditControls && editing">
         <button
           type="button"
           class="flex h-[26px] shrink-0 items-center rounded-md border border-border bg-secondary/40 px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -337,9 +347,9 @@ onBeforeUnmount(() => {
         </button>
       </template>
 
-      <!-- word-level vs line-level diff highlight (side-by-side diff mode only) -->
+      <!-- word-level vs line-level diff highlight (side-by-side diff mode only, not while editing) -->
       <button
-        v-if="viewerMode === 'diff' && !patchMode"
+        v-if="diffEditable && !editing"
         type="button"
         :class="
           cn(
@@ -358,7 +368,7 @@ onBeforeUnmount(() => {
 
       <!-- split (side-by-side) ↔ unified (inline) diff layout; icon shows current mode -->
       <button
-        v-if="viewerMode === 'diff' && !patchMode"
+        v-if="diffEditable && !editing"
         type="button"
         class="flex h-[26px] shrink-0 items-center rounded-md border border-border bg-secondary/40 px-1.5 text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
         :aria-label="$t('fileViewer.viewModeTooltip')"
@@ -415,9 +425,11 @@ onBeforeUnmount(() => {
         </div>
         <div class="min-h-0 flex-1">
           <!-- Large modified files arrive as a unified patch (compact diff) — rendered in a
-               read-only editor with `diff` highlighting; small files use the rich side-by-side. -->
+               read-only editor with `diff` highlighting; small files use the rich side-by-side.
+               Clicking Edit on the Diff tab drops the side-by-side view for the same single-pane
+               editable editor Content mode uses, seeded from the working-tree (`modified`) text. -->
           <MonacoDiffViewer
-            v-if="viewerMode === 'diff' && !patchMode"
+            v-if="diffEditable && !editing"
             :original="original"
             :modified="modified"
             :filename="target?.path ?? ''"
@@ -426,7 +438,7 @@ onBeforeUnmount(() => {
             :split="diffSplitView"
           />
           <MonacoViewer
-            v-else-if="viewerMode === 'diff'"
+            v-else-if="viewerMode === 'diff' && patchMode"
             :value="patch"
             :filename="target?.path ?? ''"
             language="diff"
@@ -434,7 +446,7 @@ onBeforeUnmount(() => {
           />
           <MonacoViewer
             v-else
-            :value="content"
+            :value="viewerMode === 'content' ? content : modified"
             :filename="target?.path ?? ''"
             :theme="editorTheme"
             :editable="editing"

@@ -68,3 +68,33 @@ test("POST /api/scan/cancel is a no-op (cancelled:false) when nothing is running
 test("cancelScan() returns false when idle", () => {
   expect(cancelScan()).toBe(false);
 });
+
+test("POST /api/repos/:id/account pins then clears a repo's GitHub sync account", async () => {
+  const root = mkdtempSync(join(tmpdir(), "gm-acct-"));
+  await gitRepoIn(root, "delta");
+  const app = createApp(localCfg([root]));
+  await rescanFolder(root); // await → fully indexed when it resolves
+  const repo = getRepos().find((r) => r.name === "delta");
+  expect(repo).toBeTruthy();
+  // Fresh repos have no pinned account.
+  expect(repo!.syncAccountLogin).toBe(null);
+
+  // Pin an account (host defaults to github.com when omitted).
+  const post = (body: unknown) =>
+    app.request(`/api/repos/${repo!.id}/account`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  let res = await post({ login: "octocat" });
+  expect(res.status).toBe(200);
+  let out = (await res.json()) as { repo: { syncAccountLogin: string | null; syncAccountHost: string | null } };
+  expect(out.repo.syncAccountLogin).toBe("octocat");
+  expect(out.repo.syncAccountHost).toBe("github.com");
+
+  // Clear it (null login wipes both columns).
+  res = await post({ login: null });
+  out = (await res.json()) as { repo: { syncAccountLogin: string | null; syncAccountHost: string | null } };
+  expect(out.repo.syncAccountLogin).toBe(null);
+  expect(out.repo.syncAccountHost).toBe(null);
+});

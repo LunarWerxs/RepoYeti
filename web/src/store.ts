@@ -667,6 +667,7 @@ export const useStore = defineStore("repoyeti", () => {
         "repo_added",
         "repo_removed",
         "repo_identity_changed",
+        "repo_account_changed",
         "repo_hidden_changed",
         "repo_pinned_changed",
         "repo_starred_changed",
@@ -700,6 +701,11 @@ export const useStore = defineStore("repoyeti", () => {
           if (payload.id) repos.value = repos.value.filter((r) => r.id !== payload.id);
         } else if (event.value === "repo_identity_changed")
           patchRepo(payload.id, { identityId: payload.identityId });
+        else if (event.value === "repo_account_changed")
+          patchRepo(payload.id, {
+            syncAccountHost: payload.syncAccountHost ?? null,
+            syncAccountLogin: payload.syncAccountLogin ?? null,
+          });
         else if (event.value === "repo_hidden_changed")
           patchRepo(payload.id, { hidden: !!payload.hidden });
         else if (event.value === "repo_pinned_changed")
@@ -818,6 +824,16 @@ export const useStore = defineStore("repoyeti", () => {
   async function assignIdentity(repoId: string, identityId: string | null): Promise<void> {
     patchRepo(repoId, { identityId }); // optimistic
     await api.assignIdentity(repoId, identityId);
+  }
+
+  /** Pin (or clear) the GitHub account a repo syncs as. Optimistic; the repo_account_changed SSE
+   *  echo keeps every device in step. */
+  async function assignRepoAccount(repoId: string, host: string | null, login: string | null): Promise<void> {
+    patchRepo(repoId, {
+      syncAccountHost: login ? host || "github.com" : null,
+      syncAccountLogin: login,
+    }); // optimistic
+    await api.assignRepoAccount(repoId, host, login);
   }
 
   /** Hide/unhide a repo from the dashboard (optimistic; rolls back on failure). */
@@ -1357,6 +1373,7 @@ export const useStore = defineStore("repoyeti", () => {
     commit,
     commitSelected,
     assignIdentity,
+    assignRepoAccount,
     addRepo,
     persistRepoOrder,
     createIdentity,

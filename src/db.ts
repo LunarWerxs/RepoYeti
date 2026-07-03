@@ -41,6 +41,8 @@ interface RepoRow {
   source: RepoSource;
   vcs: string;
   identity_id: string | null;
+  sync_account_host: string | null;
+  sync_account_login: string | null;
   is_submodule: number;
   hidden: number;
   /** User "favorite" flags — organisation only. Distinct from source='pinned'. */
@@ -61,6 +63,10 @@ export interface RepoView {
   isSubmodule: boolean;
   /** Repo-level identity override (null → inherit/none). */
   identityId: string | null;
+  /** Repo-level GitHub "sync account" (host + login) to authenticate as for fetch/pull/push.
+   *  Null → use the machine's currently-active account. */
+  syncAccountHost: string | null;
+  syncAccountLogin: string | null;
   /** Owner-hidden from the dashboard (e.g. a deprecated repo). Display-only. */
   hidden: boolean;
   /** Favorited into the "Pinned" section. Organisation flag — NOT source='pinned'. */
@@ -166,6 +172,17 @@ export function initDb(): Database {
   } catch {
     /* column already present */
   }
+  // Repo-level GitHub "sync account" (host + login) — the account fetch/pull/push authenticates as.
+  try {
+    handle.exec("ALTER TABLE repos ADD COLUMN sync_account_host TEXT;");
+  } catch {
+    /* column already present */
+  }
+  try {
+    handle.exec("ALTER TABLE repos ADD COLUMN sync_account_login TEXT;");
+  } catch {
+    /* column already present */
+  }
   db = handle;
   return db;
 }
@@ -219,6 +236,8 @@ function toView(r: RepoRow): RepoView {
     vcs: (r.vcs as VcsKind) || "git",
     isSubmodule: r.is_submodule === 1,
     identityId: r.identity_id,
+    syncAccountHost: r.sync_account_host,
+    syncAccountLogin: r.sync_account_login,
     hidden: r.hidden === 1,
     pinned: r.pinned === 1,
     starred: r.starred === 1,
@@ -360,6 +379,17 @@ export function setRepoIdentity(repoId: string, identityId: string | null): void
   getDb()
     .query(`UPDATE repos SET identity_id = ?, updated_at = ? WHERE id = ?`)
     .run(identityId, Date.now(), repoId);
+}
+
+/**
+ * Assign (or clear, with a null login) a repo's GitHub "sync account". When set, fetch/pull/push on
+ * this repo first switch the machine's active gh account to (host, login) — see service/core.ts.
+ */
+export function setRepoAccount(repoId: string, host: string | null, login: string | null): void {
+  const h = login ? host || "github.com" : null;
+  getDb()
+    .query(`UPDATE repos SET sync_account_host = ?, sync_account_login = ?, updated_at = ? WHERE id = ?`)
+    .run(h, login || null, Date.now(), repoId);
 }
 
 // ── GitHub account → commit-identity links ──────────────────────────────────────

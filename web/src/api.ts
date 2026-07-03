@@ -233,6 +233,10 @@ export const api = {
   assignIdentity: (repoId: string, identityId: string | null) =>
     req<{ repo: Repo }>("POST", `/api/repos/${repoId}/identity`, { identityId }).then((r) => r.repo),
 
+  /** Pin (or clear, with null login) the GitHub account a repo authenticates as for fetch/pull/push. */
+  assignRepoAccount: (repoId: string, host: string | null, login: string | null) =>
+    req<{ repo: Repo }>("POST", `/api/repos/${repoId}/account`, { host, login }).then((r) => r.repo),
+
   setHidden: (repoId: string, hidden: boolean) =>
     req<{ repo: Repo }>("POST", `/api/repos/${repoId}/hidden`, { hidden }).then((r) => r.repo),
 

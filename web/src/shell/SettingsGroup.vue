@@ -16,7 +16,7 @@ defineProps<{ label?: string }>();
     >
       {{ label }}
     </p>
-    <div class="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60 bg-card/40">
+    <div class="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
       <slot />
     </div>
   </section>

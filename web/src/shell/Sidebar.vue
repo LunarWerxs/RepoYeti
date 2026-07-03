@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CSSProperties, HTMLAttributes } from "vue";
-import { computed, ref, watch } from "vue";
+import { computed } from "vue";
 import {
   DialogClose,
   DialogContent,
@@ -67,21 +67,12 @@ const contentStyle = computed<CSSProperties>(() => {
   };
 });
 
-// Swallow the opening click (from an external trigger) so the panel can't
-// self-close, but let outside clicks close it once it's settled (~1 frame later).
-const canDismiss = ref(false);
-let dismissTimer: ReturnType<typeof setTimeout> | undefined;
-watch(
-  () => props.open,
-  (o) => {
-    canDismiss.value = false;
-    clearTimeout(dismissTimer);
-    if (o) dismissTimer = setTimeout(() => (canDismiss.value = true), 300);
-  },
-  { immediate: true },
-);
+// A push panel never dismisses on an outside click — only ✕ / Escape / the trigger
+// toggle. (This also swallows the opening click from an external trigger, so it can't
+// open-then-vanish.) Modal overlays — the mobile bottom sheet and wide overlay drawers —
+// keep the normal tap-outside-to-close affordance.
 function guardOutside(e: Event) {
-  if (!canDismiss.value) e.preventDefault();
+  if (!overlayed.value) e.preventDefault();
 }
 </script>
 
@@ -97,7 +88,7 @@ function guardOutside(e: Event) {
         :data-side="side"
         :style="contentStyle"
         :class="cn(
-          'bg-popover text-popover-foreground fixed z-50 flex flex-col shadow-xl outline-none ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:duration-300 data-[state=closed]:duration-300',
+          'bg-background text-foreground fixed z-50 flex flex-col shadow-xl outline-none ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:duration-300 data-[state=closed]:duration-300',
           isBottom
             ? 'inset-x-0 bottom-0 max-h-[92vh] rounded-t-2xl border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom'
             : 'inset-y-0 right-0 h-full border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right',
@@ -106,7 +97,7 @@ function guardOutside(e: Event) {
         @pointer-down-outside="guardOutside"
         @interact-outside="guardOutside"
       >
-        <header class="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-2.5 pr-12">
+        <header class="flex shrink-0 items-center gap-2 px-4 py-2.5 pr-12">
           <slot name="header">
             <slot name="title-icon" />
             <DialogTitle class="text-sm font-semibold">{{ title }}</DialogTitle>

@@ -119,7 +119,6 @@
     "statusCount": "{count} status | {count} statuses"
   },
   "header": {
-    "add": "Add",
     "addRepository": "Add repository",
     "connectedStatus": "Connected — live updates",
     "reconnecting": "Reconnecting",
@@ -425,6 +424,11 @@
       "dropdownLabel": "Git identity for this repo",
       "noIdentity": "No identity",
       "setTitle": "Set git identity"
+    },
+    "syncAccount": {
+      "label": "Syncs as",
+      "dropdownLabel": "GitHub account to sync this repo as",
+      "machineDefault": "Active account"
     }
   },
   "remote": {

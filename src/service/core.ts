@@ -10,6 +10,7 @@ import { broadcast } from "../bus.ts";
 import { getRepo, setRepoStatus, setRepoOrder } from "../db.ts";
 import { resolveRepoIdentity } from "../identity.ts";
 import { backendFor } from "../vcs/index.ts";
+import { switchGhAccount } from "../gh-cli.ts";
 import type { VcsBackend } from "../vcs/types.ts";
 import type { ActionResult } from "../git-actions.ts";
 import type { Identity, RepoView } from "../db.ts";
@@ -38,12 +39,32 @@ export interface ActionOutcome extends ActionResult {
 
 type VcsAction = (backend: VcsBackend, absPath: string, identity: Identity | null) => Promise<ActionResult>;
 
-export async function runAction(repoId: string, action: VcsAction, markFetched = false): Promise<ActionOutcome> {
+/**
+ * Before a repo's NETWORK op, make the machine's active GitHub account match the repo's pinned
+ * "sync account" (if it has one) so push/pull/fetch authenticate as the right account. Best-effort:
+ * a no-op when unpinned or already active, and a failed switch (gh missing, account gone) does NOT
+ * block the op — the git action just proceeds under whatever account is active and surfaces its own
+ * error. Switching is global (gh has one active account), so the last-synced repo's account stays
+ * active until the next repo op flips it — exactly what "each repo syncs as its own account,
+ * automatically" needs.
+ */
+export async function ensureRepoAccount(repo: RepoView): Promise<void> {
+  if (!repo.syncAccountLogin) return;
+  await switchGhAccount(repo.syncAccountHost || "github.com", repo.syncAccountLogin).catch(() => {});
+}
+
+export async function runAction(
+  repoId: string,
+  action: VcsAction,
+  markFetched = false,
+  syncAccount = false,
+): Promise<ActionOutcome> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found", repoId };
   if (repo.isSubmodule) {
     return { ok: false, code: "SUBMODULE_NOT_ACTIONABLE", message: "submodule worktree is not actionable", repoId };
   }
+  if (syncAccount) await ensureRepoAccount(repo);
   const identity = resolveRepoIdentity(repo);
   const backend = backendFor(repo.vcs);
   const result = await enqueue(repoId, () => action(backend, repo.absPath, identity));
