@@ -1,0 +1,136 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+import { toast } from "vue-sonner";
+import { useStore } from "../../store";
+import { changesViewSize } from "@/lib/changes-view";
+import { useRepoYetiColorMode } from "@/lib/theme";
+import SettingsGroup from "@/shell/SettingsGroup.vue";
+import SettingsRow from "@/shell/SettingsRow.vue";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const store = useStore();
+const { t } = useI18n();
+
+// Shared light/dark/system theme — writes to the same store App.vue reads. §3.
+const theme = useRepoYetiColorMode();
+
+// Toggle the per-file/per-repo diff statistics (server setting; rolls back + toasts on fail).
+async function onDiffStats(enabled: boolean): Promise<void> {
+  try {
+    await store.setDiffStats(enabled);
+  } catch {
+    toast.error(t("settings.diffStatsFailed"));
+  }
+}
+
+// Large-file Diff threshold (server setting). Preset sizes are powers of two so the labels
+// read as real KB/MB (512 KB = 524288 = the server default). <Select> is string-valued, so
+// map via String(bytes).
+const DIFF_PATCH_OPTIONS = [
+  { bytes: 256 * 1024, label: "256 KB" },
+  { bytes: 512 * 1024, label: "512 KB" },
+  { bytes: 1024 * 1024, label: "1 MB" },
+  { bytes: 2 * 1024 * 1024, label: "2 MB" },
+];
+const diffPatchChoice = computed<string>({
+  get: () => String(store.diffPatchBytes),
+  set: (v: string) => void onDiffPatchBytes(Number(v)),
+});
+async function onDiffPatchBytes(bytes: number): Promise<void> {
+  try {
+    await store.setDiffPatchBytes(bytes);
+  } catch {
+    toast.error(t("settings.diffPatchThresholdFailed"));
+  }
+}
+
+// "Always side-by-side" is the user-facing inverse of the server's compact-patch flag:
+// ON → never use the compact patch (diffPatchEnabled = false).
+async function onAlwaysSideBySide(always: boolean): Promise<void> {
+  try {
+    await store.setDiffPatchEnabled(!always);
+  } catch {
+    toast.error(t("settings.diffPatchAlwaysFailed"));
+  }
+}
+</script>
+
+<template>
+  <!-- Appearance ───────────────────────────────────────────────── -->
+  <SettingsGroup :label="$t('settings.cardAppearance')">
+    <SettingsRow :label="$t('settings.theme')">
+      <template #control>
+        <Select v-model="theme">
+          <SelectTrigger class="w-full max-w-36" :aria-label="$t('settings.theme')"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="light">{{ $t("settings.themeLight") }}</SelectItem>
+            <SelectItem value="dark">{{ $t("settings.themeDark") }}</SelectItem>
+            <SelectItem value="auto">{{ $t("settings.themeSystem") }}</SelectItem>
+          </SelectContent>
+        </Select>
+      </template>
+    </SettingsRow>
+    <div class="flex flex-col gap-1.5 px-3.5 py-3">
+      <span class="text-[12px] text-muted-foreground">{{ $t("settings.changesHeight") }}</span>
+      <Select v-model="changesViewSize">
+        <SelectTrigger class="w-full" :aria-label="$t('settings.changesHeight')"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="small">{{ $t("settings.heightSmall") }}</SelectItem>
+          <SelectItem value="medium">{{ $t("settings.heightMedium") }}</SelectItem>
+          <SelectItem value="tall">{{ $t("settings.heightTall") }}</SelectItem>
+        </SelectContent>
+      </Select>
+      <span class="text-[11px] text-muted-foreground/70">
+        {{ $t("settings.changesHeightHint") }}
+      </span>
+    </div>
+  </SettingsGroup>
+
+  <!-- Diffs ─────────────────────────────────────────────────────── -->
+  <SettingsGroup :label="$t('settings.cardDiffs')">
+    <SettingsRow :label="$t('settings.diffStats')" :description="$t('settings.diffStatsHint')">
+      <template #control>
+        <Switch
+          :model-value="store.diffStatsEnabled"
+          :aria-label="$t('settings.diffStats')"
+          @update:model-value="(v: boolean) => onDiffStats(v)"
+        />
+      </template>
+    </SettingsRow>
+    <SettingsRow :label="$t('settings.diffPatchAlways')" :description="$t('settings.diffPatchAlwaysHint')">
+      <template #control>
+        <Switch
+          :model-value="!store.diffPatchEnabled"
+          :aria-label="$t('settings.diffPatchAlways')"
+          @update:model-value="(v: boolean) => onAlwaysSideBySide(v)"
+        />
+      </template>
+    </SettingsRow>
+    <!-- Threshold is moot when always-side-by-side is on → dim + disable it. -->
+    <div
+      class="flex flex-col gap-1.5 px-3.5 py-3 transition-opacity"
+      :class="store.diffPatchEnabled ? '' : 'pointer-events-none opacity-50'"
+    >
+      <span class="text-[12px] text-muted-foreground">{{ $t("settings.diffPatchThreshold") }}</span>
+      <Select v-model="diffPatchChoice" :disabled="!store.diffPatchEnabled">
+        <SelectTrigger class="w-full" :aria-label="$t('settings.diffPatchThreshold')"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="o in DIFF_PATCH_OPTIONS" :key="o.bytes" :value="String(o.bytes)">
+            {{ o.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <span class="text-[11px] text-muted-foreground/70">
+        {{ $t("settings.diffPatchThresholdHint") }}
+      </span>
+    </div>
+  </SettingsGroup>
+</template>
