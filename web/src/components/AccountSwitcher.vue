@@ -9,7 +9,7 @@ import { useI18n } from "vue-i18n";
 import { useStore } from "../store";
 import { cn } from "@/lib/utils";
 import { identityInitials, identityTint } from "@/lib/identity-display";
-import SettingsSection from "./SettingsSection.vue";
+import SettingsGroup from "@/shell/SettingsGroup.vue";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { GhAccount } from "../types";
@@ -44,13 +44,9 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
 </script>
 
 <template>
-  <SettingsSection
-    section-id="accounts"
-    :icon="ArrowLeftRight"
-    :title="$t('accounts.title')"
-    :description="$t('accounts.description')"
-  >
-    <div class="flex flex-col gap-3">
+  <div class="flex flex-col gap-1.5">
+    <SettingsGroup :label="$t('accounts.title')">
+    <div class="flex flex-col gap-3 px-3.5 py-3">
       <div class="flex items-center justify-end">
         <Button
           variant="ghost"
@@ -156,5 +152,7 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
         <p class="mt-1 text-[11px] text-muted-foreground/70">{{ $t("accounts.commitIdentityNote") }}</p>
       </div>
     </div>
-  </SettingsSection>
+    </SettingsGroup>
+    <p class="px-1 text-[11px] text-muted-foreground/70">{{ $t("accounts.description") }}</p>
+  </div>
 </template>

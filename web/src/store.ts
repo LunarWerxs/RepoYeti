@@ -51,7 +51,7 @@ interface SyncedRepo {
 // Desktop-notification opt-in is per-browser (it rides the browser's Notification permission),
 // so it lives in localStorage, not the daemon config.
 const DESKTOP_NOTIFY_KEY = "repoyeti.desktopNotify";
-let appOpenedTracked = false;
+let appOpenedPulsed = false;
 function loadDesktopNotifyPref(): boolean {
   try {
     return localStorage.getItem(DESKTOP_NOTIFY_KEY) === "1";
@@ -331,9 +331,9 @@ export const useStore = defineStore("repoyeti", () => {
       identities.value = i;
     } finally {
       loading.value = false;
-      if (!appOpenedTracked) {
-        appOpenedTracked = true;
-        void trackEvent("app_opened");
+      if (!appOpenedPulsed) {
+        appOpenedPulsed = true;
+        void recordPulse("app_opened");
       }
       void checkForUpdate();
     }
@@ -363,11 +363,11 @@ export const useStore = defineStore("repoyeti", () => {
     }
   }
 
-  async function trackEvent(event: string, properties?: Record<string, unknown>): Promise<void> {
+  async function recordPulse(event: string, properties?: Record<string, unknown>): Promise<void> {
     try {
-      await api.trackEvent(event, properties);
+      await api.recordPulse(event, properties);
     } catch {
-      /* analytics is non-critical */
+      /* pulse is non-critical */
     }
   }
 
@@ -1049,16 +1049,17 @@ export const useStore = defineStore("repoyeti", () => {
     return r.removed;
   }
 
-  /** Start rescanning every configured scan root. Progress + results arrive over the scan_*
-   *  SSE events; we flip `scanning` on optimistically so the modal reacts before the first frame. */
-  async function startScan(): Promise<void> {
+  /** Start a scan — the whole machine by default, or a single folder via `{ path }`. Progress +
+   *  results arrive over the scan_* SSE events; we flip `scanning` on optimistically so the modal
+   *  reacts before the first frame. */
+  async function startScan(opts?: { path?: string }): Promise<void> {
     scanning.value = true;
     scanDone.value = false;
     lastScanCancelled.value = false;
     scanFound.value = 0;
     scanNew.value = 0;
     try {
-      await api.startScan();
+      await api.startScan(opts);
     } catch (e) {
       scanning.value = false; // the request itself failed — never entered the running state
       throw e;
@@ -1235,7 +1236,7 @@ export const useStore = defineStore("repoyeti", () => {
     updateApplying,
     checkForUpdate,
     applyUpdate,
-    trackEvent,
+    recordPulse,
     busy,
     changesByRepo,
     changesLoading,

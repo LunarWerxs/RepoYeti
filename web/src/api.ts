@@ -135,9 +135,11 @@ export const api = {
   addRoot: (path: string) => req<{ ok: boolean; roots: string[] }>("POST", "/api/roots", { path }),
   removeRoot: (path: string) =>
     req<{ ok: boolean; roots: string[]; removed: number }>("DELETE", "/api/roots", { path }),
-  /** Rescan every configured scan root for new repos. Fire-and-forget — progress + results
-   *  stream back over the scan_* / repo_added SSE events. No-op if a scan is already running. */
-  startScan: () => req<{ ok: boolean; running: boolean }>("POST", "/api/scan"),
+  /** Start a scan — the whole machine (every drive) by default, or a single folder via `{ path }`.
+   *  Fire-and-forget — progress + results stream back over the scan_* / repo_added SSE events.
+   *  No-op if a scan is already running. */
+  startScan: (body?: { path?: string }) =>
+    req<{ ok: boolean; running: boolean; scope?: string }>("POST", "/api/scan", body ?? {}),
   /** Stop the in-flight scan. `cancelled` is false when no scan was running. */
   cancelScan: () => req<{ ok: boolean; cancelled: boolean }>("POST", "/api/scan/cancel"),
 
@@ -159,9 +161,9 @@ export const api = {
   checkUpdate: () => req<UpdateStatus>("GET", "/api/updates"),
   /** Apply an available source update. The daemon should be restarted afterward. */
   applyUpdate: () => req<UpdateApplyResult>("POST", "/api/updates/apply"),
-  /** Transparent product analytics; no-op unless the daemon has a Connections endpoint configured. */
-  trackEvent: (event: string, properties?: Record<string, unknown>) =>
-    req<{ ok: boolean; enabled: boolean }>("POST", "/api/analytics/events", { event, properties }),
+  /** Fire-and-forget product pulse; a no-op unless a collector endpoint is configured. */
+  recordPulse: (event: string, properties?: Record<string, unknown>) =>
+    req<{ ok: boolean; enabled: boolean }>("POST", "/api/pulse", { event, properties }),
   /** Flip local ↔ remote. Throws ApiError "NEEDS_OWNER" if remote needs a sign-in first. */
   setMode: (mode: AccessMode) => req<ModeResult>("PUT", "/api/mode", { mode }),
   /** Configure the stable named tunnel (hostname + connector token). Token is write-only — pass

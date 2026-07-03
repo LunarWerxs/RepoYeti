@@ -168,12 +168,12 @@ export interface TunnelConfig {
   token?: string;
 }
 
-export interface AnalyticsConfig {
-  /** Explicit opt-out switch. Analytics only sends when a Connections endpoint is configured. */
+export interface PulseConfig {
+  /** Explicit opt-out switch. Pulse only sends when a Connections endpoint is configured. */
   enabled?: boolean;
-  /** Connections-compatible event collector URL. Env CONNECTIONS_ANALYTICS_URL wins when set. */
+  /** Connections-compatible event collector URL. Env CONNECTIONS_PULSE_URL wins when set. */
   endpoint?: string;
-  /** Anonymous per-install id. Generated only after analytics is configured and first used. */
+  /** Anonymous per-install id. Generated only after pulse is configured and first used. */
   installId?: string;
 }
 
@@ -236,8 +236,8 @@ export interface RepoYetiConfig {
   oauth?: OAuthConfig;
   /** Remote-access tunnel config (quick trycloudflare by default; named for a stable host). */
   tunnel?: TunnelConfig;
-  /** Transparent product analytics, forwarded to a Connections-compatible endpoint when configured. */
-  analytics?: AnalyticsConfig;
+  /** Transparent product pulse, forwarded to a Connections-compatible endpoint when configured. */
+  pulse?: PulseConfig;
   /** Bring-your-own-key AI config (optional). */
   ai?: AiConfig;
   /**

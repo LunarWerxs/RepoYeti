@@ -6,7 +6,7 @@ import { useI18n } from "vue-i18n";
 import { useStore } from "../store";
 import { cn } from "@/lib/utils";
 import { identityInitials, identityTint } from "@/lib/identity-display";
-import SettingsSection from "./SettingsSection.vue";
+import SettingsGroup from "@/shell/SettingsGroup.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { DetectedIdentity, DetectedIdentitySource, Identity } from "../types";
@@ -137,14 +137,9 @@ async function remove(id: string): Promise<void> {
 </script>
 
 <template>
-  <SettingsSection
-    section-id="identities"
-    :icon="Users"
-    :title="$t('identity.title')"
-    :description="$t('identity.description')"
-    :default-open="true"
-  >
-    <div class="flex flex-col gap-3">
+  <div class="flex flex-col gap-1.5">
+    <SettingsGroup :label="$t('identity.title')">
+    <div class="flex flex-col gap-3 px-3.5 py-3">
         <!-- local machine suggestions -->
         <div class="flex items-center justify-between gap-2">
           <div class="text-[12px] font-medium text-muted-foreground">{{ $t("identity.detected.title") }}</div>
@@ -291,5 +286,7 @@ async function remove(id: string): Promise<void> {
           {{ $t("identity.action.add") }}
         </Button>
     </div>
-  </SettingsSection>
+    </SettingsGroup>
+    <p class="px-1 text-[11px] text-muted-foreground/70">{{ $t("identity.description") }}</p>
+  </div>
 </template>

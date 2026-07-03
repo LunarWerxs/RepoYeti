@@ -2,20 +2,13 @@
 import { reactive, ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
-  Sparkles,
   Check,
   Link2,
   Trash2,
   RefreshCw,
   X,
   ChevronDown,
-  Palette,
-  GitCompare,
-  Cloud,
-  Keyboard,
   Settings as SettingsIcon,
-  FolderSearch,
-  Server,
   Plus,
   LogOut,
   Loader2,
@@ -28,6 +21,8 @@ import { changesViewSize } from "@/lib/changes-view";
 import { hotkeysEnabled, powerShortcuts, SHORTCUTS } from "@/lib/hotkeys";
 import { useRepoYetiColorMode } from "@/lib/theme";
 import SettingsPanel from "@/shell/SettingsPanel.vue";
+import SettingsGroup from "@/shell/SettingsGroup.vue";
+import SettingsRow from "@/shell/SettingsRow.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +37,6 @@ import {
 } from "@/components/ui/select";
 import IdentityManager from "./IdentityManager.vue";
 import AccountSwitcher from "./AccountSwitcher.vue";
-import SettingsSection from "./SettingsSection.vue";
 import type { AiCatalogEntry, AiModel, AiProviderId, CommitStyle } from "../types";
 
 const open = defineModel<boolean>("open", { required: true });
@@ -475,309 +469,286 @@ async function remove(id: AiProviderId): Promise<void> {
         <AccountSwitcher />
 
         <!-- Access (local ↔ remote) ───────────────────────────────────── -->
-        <SettingsSection section-id="access" :icon="Cloud" :title="$t('settings.cardAccess')">
-            <label class="flex cursor-pointer items-center justify-between gap-3">
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.accessMode") }}</span>
-                <span class="text-[12px] text-muted-foreground">
-                  {{ isRemote ? $t("remote.modeOnHint") : $t("remote.modeOffHint") }}
-                </span>
-              </span>
+        <SettingsGroup :label="$t('settings.cardAccess')">
+          <SettingsRow
+            :label="$t('settings.accessMode')"
+            :description="isRemote ? $t('remote.modeOnHint') : $t('remote.modeOffHint')"
+          >
+            <template #control>
               <Switch
                 :model-value="isRemote"
                 :disabled="switchingMode"
                 :aria-label="$t('settings.accessMode')"
                 @update:model-value="(v: boolean) => setAccessMode(v)"
               />
-            </label>
+            </template>
+          </SettingsRow>
 
-            <!-- stable address (named Cloudflare tunnel) — a permanent URL instead of a rotating one -->
-            <div class="flex flex-col gap-2.5 border-t border-border/60 pt-4">
-              <div class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.tunnelLabel") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.tunnelHint") }}</span>
-              </div>
-              <p
-                v-if="store.tunnelConfig.named"
-                class="flex items-center gap-1.5 text-[12px] text-success"
-              >
-                <Check :size="13" class="shrink-0" />
-                <span class="min-w-0 break-all">{{ $t("settings.tunnelActive", { host: store.tunnelConfig.hostname }) }}</span>
-              </p>
-              <Input
-                v-model="tunnelHost"
-                class="mono text-[12.5px]"
-                :placeholder="$t('settings.tunnelHostPlaceholder')"
-                :aria-label="$t('settings.tunnelHostLabel')"
-              />
-              <Input
-                v-if="!store.tunnelConfig.tokenFromEnv"
-                v-model="tunnelToken"
-                type="password"
-                class="text-[12.5px]"
-                :placeholder="store.tunnelConfig.hasToken ? $t('settings.tunnelTokenSaved') : $t('settings.tunnelTokenPlaceholder')"
-                :aria-label="$t('settings.tunnelTokenLabel')"
-              />
-              <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
-              <div class="flex items-center gap-2">
-                <Button size="sm" :disabled="savingTunnel" @click="saveTunnel">
-                  <Loader2 v-if="savingTunnel" class="animate-spin" />
-                  <Check v-else />
-                  {{ $t("settings.tunnelSave") }}
-                </Button>
-                <Button
-                  v-if="store.tunnelConfig.hostname || store.tunnelConfig.hasToken"
-                  :variant="confirmForgetTunnel ? 'destructive' : 'ghost'"
-                  size="sm"
-                  class="ml-auto"
-                  @click="forgetTunnel"
-                  @blur="confirmForgetTunnel = false"
-                >
-                  <Trash2 />
-                  {{ confirmForgetTunnel ? $t("settings.tunnelForgetConfirm") : $t("settings.tunnelForget") }}
-                </Button>
-              </div>
+          <!-- stable address (named Cloudflare tunnel) — a permanent URL instead of a rotating one -->
+          <div class="flex flex-col gap-2.5 px-3.5 py-3">
+            <div class="flex flex-col gap-0.5">
+              <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.tunnelLabel") }}</span>
+              <span class="text-[12px] text-muted-foreground">{{ $t("settings.tunnelHint") }}</span>
             </div>
-
-            <!-- sign out everywhere (rotates the signing key → invalidates all devices) -->
-            <div v-if="store.authEnforced" class="flex items-center justify-between gap-3">
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.signOutAll") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.signOutAllHint") }}</span>
-              </span>
+            <p
+              v-if="store.tunnelConfig.named"
+              class="flex items-center gap-1.5 text-[12px] text-success"
+            >
+              <Check :size="13" class="shrink-0" />
+              <span class="min-w-0 break-all">{{ $t("settings.tunnelActive", { host: store.tunnelConfig.hostname }) }}</span>
+            </p>
+            <Input
+              v-model="tunnelHost"
+              class="mono text-[12.5px]"
+              :placeholder="$t('settings.tunnelHostPlaceholder')"
+              :aria-label="$t('settings.tunnelHostLabel')"
+            />
+            <Input
+              v-if="!store.tunnelConfig.tokenFromEnv"
+              v-model="tunnelToken"
+              type="password"
+              class="text-[12.5px]"
+              :placeholder="store.tunnelConfig.hasToken ? $t('settings.tunnelTokenSaved') : $t('settings.tunnelTokenPlaceholder')"
+              :aria-label="$t('settings.tunnelTokenLabel')"
+            />
+            <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
+            <div class="flex items-center gap-2">
+              <Button size="sm" :disabled="savingTunnel" @click="saveTunnel">
+                <Loader2 v-if="savingTunnel" class="animate-spin" />
+                <Check v-else />
+                {{ $t("settings.tunnelSave") }}
+              </Button>
               <Button
-                :variant="confirmSignOutAll ? 'destructive' : 'outline'"
+                v-if="store.tunnelConfig.hostname || store.tunnelConfig.hasToken"
+                :variant="confirmForgetTunnel ? 'destructive' : 'ghost'"
                 size="sm"
-                class="shrink-0"
-                @click="signOutAll"
-                @blur="confirmSignOutAll = false"
+                class="ml-auto"
+                @click="forgetTunnel"
+                @blur="confirmForgetTunnel = false"
               >
-                <LogOut />
-                {{ confirmSignOutAll ? $t("settings.signOutAllConfirm") : $t("settings.signOutAll") }}
+                <Trash2 />
+                {{ confirmForgetTunnel ? $t("settings.tunnelForgetConfirm") : $t("settings.tunnelForget") }}
               </Button>
             </div>
-        </SettingsSection>
+          </div>
+
+          <!-- sign out everywhere (rotates the signing key → invalidates all devices) -->
+          <div v-if="store.authEnforced" class="flex items-center justify-between gap-3 px-3.5 py-3">
+            <span class="flex flex-col gap-0.5">
+              <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.signOutAll") }}</span>
+              <span class="text-[12px] text-muted-foreground">{{ $t("settings.signOutAllHint") }}</span>
+            </span>
+            <Button
+              :variant="confirmSignOutAll ? 'destructive' : 'outline'"
+              size="sm"
+              class="shrink-0"
+              @click="signOutAll"
+              @blur="confirmSignOutAll = false"
+            >
+              <LogOut />
+              {{ confirmSignOutAll ? $t("settings.signOutAllConfirm") : $t("settings.signOutAll") }}
+            </Button>
+          </div>
+        </SettingsGroup>
 
         <!-- Scan folders (discovery roots) ───────────────────────────────── -->
-        <SettingsSection
-          section-id="roots"
-          :icon="FolderSearch"
-          :title="$t('settings.cardRoots')"
-          :description="$t('settings.rootsHint')"
-          body-class="flex flex-col gap-2.5"
-        >
-            <p v-if="!store.roots.length" class="text-[12.5px] text-muted-foreground">
-              {{ $t("settings.rootsEmpty") }}
-            </p>
-            <div
-              v-for="r in store.roots"
-              :key="r"
-              class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5"
-            >
-              <code class="mono min-w-0 flex-1 truncate text-[12px]" :title="r">{{ r }}</code>
-              <Button
-                :variant="confirmRemoveRoot === r ? 'destructive' : 'ghost'"
-                size="sm"
-                class="shrink-0"
-                :aria-label="$t('settings.rootsRemove')"
-                @click="removeRoot(r)"
-                @blur="confirmRemoveRoot = null"
+        <div class="flex flex-col gap-1.5">
+          <SettingsGroup :label="$t('settings.cardRoots')">
+            <div class="flex flex-col gap-2.5 px-3.5 py-3">
+              <p v-if="!store.roots.length" class="text-[12.5px] text-muted-foreground">
+                {{ $t("settings.rootsEmpty") }}
+              </p>
+              <div
+                v-for="r in store.roots"
+                :key="r"
+                class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5"
               >
-                <Trash2 />
-                <span v-if="confirmRemoveRoot === r">{{ $t("settings.rootsRemove") }}</span>
-              </Button>
-            </div>
-            <form class="flex items-center gap-2 pt-0.5" @submit.prevent="addRoot">
-              <Input
-                v-model="newRoot"
-                class="mono min-w-0 flex-1 text-[12.5px]"
-                :placeholder="$t('settings.rootsPlaceholder')"
-                :aria-label="$t('settings.rootsAdd')"
-              />
-              <Button type="submit" size="sm" class="shrink-0" :disabled="!newRoot.trim() || addingRoot">
-                <Loader2 v-if="addingRoot" class="animate-spin" />
-                <Plus v-else />
-                {{ $t("settings.rootsAdd") }}
-              </Button>
-            </form>
-        </SettingsSection>
-
-        <!-- Lore servers (clone-from-server registry) ─────────────────────────── -->
-        <SettingsSection
-          section-id="servers"
-          :icon="Server"
-          :title="$t('settings.cardServers')"
-          :description="$t('settings.serversHint')"
-          body-class="flex flex-col gap-2.5"
-        >
-            <p v-if="!store.servers.length" class="text-[12.5px] text-muted-foreground">
-              {{ $t("settings.serversEmpty") }}
-            </p>
-            <div
-              v-for="s in store.servers"
-              :key="s.id"
-              class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5"
-            >
-              <span class="flex min-w-0 flex-1 flex-col">
-                <span class="truncate text-[12.5px] font-medium text-foreground">{{ s.name }}</span>
-                <code class="mono truncate text-[11.5px] text-muted-foreground" :title="s.url">{{ s.url }}</code>
-              </span>
-              <Button
-                :variant="confirmRemoveServer === s.id ? 'destructive' : 'ghost'"
-                size="sm"
-                class="shrink-0"
-                :aria-label="$t('settings.serversRemove')"
-                @click="removeServer(s.id)"
-                @blur="confirmRemoveServer = null"
-              >
-                <Trash2 />
-                <span v-if="confirmRemoveServer === s.id">{{ $t("settings.serversRemove") }}</span>
-              </Button>
-            </div>
-            <form class="flex flex-col gap-2 pt-0.5" @submit.prevent="addServer">
-              <Input
-                v-model="newServerName"
-                class="text-[12.5px]"
-                :placeholder="$t('settings.serversPlaceholderName')"
-                :aria-label="$t('settings.serversLabelName')"
-              />
-              <div class="flex items-center gap-2">
-                <Input
-                  v-model="newServerUrl"
-                  class="mono min-w-0 flex-1 text-[12.5px]"
-                  :placeholder="$t('settings.serversPlaceholderUrl')"
-                  :aria-label="$t('settings.serversLabelUrl')"
-                />
-                <Button type="submit" size="sm" class="shrink-0" :disabled="!newServerUrl.trim() || addingServer">
-                  <Loader2 v-if="addingServer" class="animate-spin" />
-                  <Plus v-else />
-                  {{ $t("settings.serversAdd") }}
+                <code class="mono min-w-0 flex-1 truncate text-[12px]" :title="r">{{ r }}</code>
+                <Button
+                  :variant="confirmRemoveRoot === r ? 'destructive' : 'ghost'"
+                  size="sm"
+                  class="shrink-0"
+                  :aria-label="$t('settings.rootsRemove')"
+                  @click="removeRoot(r)"
+                  @blur="confirmRemoveRoot = null"
+                >
+                  <Trash2 />
+                  <span v-if="confirmRemoveRoot === r">{{ $t("settings.rootsRemove") }}</span>
                 </Button>
               </div>
-              <p class="text-[11.5px] text-muted-foreground">{{ $t("settings.serversIpHint") }}</p>
-            </form>
-        </SettingsSection>
+              <form class="flex items-center gap-2 pt-0.5" @submit.prevent="addRoot">
+                <Input
+                  v-model="newRoot"
+                  class="mono min-w-0 flex-1 text-[12.5px]"
+                  :placeholder="$t('settings.rootsPlaceholder')"
+                  :aria-label="$t('settings.rootsAdd')"
+                />
+                <Button type="submit" size="sm" class="shrink-0" :disabled="!newRoot.trim() || addingRoot">
+                  <Loader2 v-if="addingRoot" class="animate-spin" />
+                  <Plus v-else />
+                  {{ $t("settings.rootsAdd") }}
+                </Button>
+              </form>
+            </div>
+          </SettingsGroup>
+          <p class="px-1 text-[11px] text-muted-foreground/70">{{ $t("settings.rootsHint") }}</p>
+        </div>
+
+        <!-- Lore servers (clone-from-server registry) ─────────────────────────── -->
+        <div class="flex flex-col gap-1.5">
+          <SettingsGroup :label="$t('settings.cardServers')">
+            <div class="flex flex-col gap-2.5 px-3.5 py-3">
+              <p v-if="!store.servers.length" class="text-[12.5px] text-muted-foreground">
+                {{ $t("settings.serversEmpty") }}
+              </p>
+              <div
+                v-for="s in store.servers"
+                :key="s.id"
+                class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5"
+              >
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-[12.5px] font-medium text-foreground">{{ s.name }}</span>
+                  <code class="mono truncate text-[11.5px] text-muted-foreground" :title="s.url">{{ s.url }}</code>
+                </span>
+                <Button
+                  :variant="confirmRemoveServer === s.id ? 'destructive' : 'ghost'"
+                  size="sm"
+                  class="shrink-0"
+                  :aria-label="$t('settings.serversRemove')"
+                  @click="removeServer(s.id)"
+                  @blur="confirmRemoveServer = null"
+                >
+                  <Trash2 />
+                  <span v-if="confirmRemoveServer === s.id">{{ $t("settings.serversRemove") }}</span>
+                </Button>
+              </div>
+              <form class="flex flex-col gap-2 pt-0.5" @submit.prevent="addServer">
+                <Input
+                  v-model="newServerName"
+                  class="text-[12.5px]"
+                  :placeholder="$t('settings.serversPlaceholderName')"
+                  :aria-label="$t('settings.serversLabelName')"
+                />
+                <div class="flex items-center gap-2">
+                  <Input
+                    v-model="newServerUrl"
+                    class="mono min-w-0 flex-1 text-[12.5px]"
+                    :placeholder="$t('settings.serversPlaceholderUrl')"
+                    :aria-label="$t('settings.serversLabelUrl')"
+                  />
+                  <Button type="submit" size="sm" class="shrink-0" :disabled="!newServerUrl.trim() || addingServer">
+                    <Loader2 v-if="addingServer" class="animate-spin" />
+                    <Plus v-else />
+                    {{ $t("settings.serversAdd") }}
+                  </Button>
+                </div>
+                <p class="text-[11.5px] text-muted-foreground">{{ $t("settings.serversIpHint") }}</p>
+              </form>
+            </div>
+          </SettingsGroup>
+          <p class="px-1 text-[11px] text-muted-foreground/70">{{ $t("settings.serversHint") }}</p>
+        </div>
 
         <!-- Appearance ───────────────────────────────────────────────── -->
-        <SettingsSection
-          section-id="appearance"
-          :icon="Palette"
-          :title="$t('settings.cardAppearance')"
-          :default-open="true"
-        >
-            <div class="flex flex-col gap-1.5">
-              <span class="text-[12px] text-muted-foreground">{{ $t("settings.theme") }}</span>
+        <SettingsGroup :label="$t('settings.cardAppearance')">
+          <SettingsRow :label="$t('settings.theme')">
+            <template #control>
               <Select v-model="theme">
-                <SelectTrigger class="w-full" :aria-label="$t('settings.theme')"><SelectValue /></SelectTrigger>
+                <SelectTrigger class="w-full max-w-36" :aria-label="$t('settings.theme')"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="light">{{ $t("settings.themeLight") }}</SelectItem>
                   <SelectItem value="dark">{{ $t("settings.themeDark") }}</SelectItem>
                   <SelectItem value="auto">{{ $t("settings.themeSystem") }}</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <span class="text-[12px] text-muted-foreground">{{ $t("settings.changesHeight") }}</span>
-              <Select v-model="changesViewSize">
-                <SelectTrigger class="w-full" :aria-label="$t('settings.changesHeight')"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="small">{{ $t("settings.heightSmall") }}</SelectItem>
-                  <SelectItem value="medium">{{ $t("settings.heightMedium") }}</SelectItem>
-                  <SelectItem value="tall">{{ $t("settings.heightTall") }}</SelectItem>
-                </SelectContent>
-              </Select>
-              <span class="text-[11px] text-muted-foreground/70">
-                {{ $t("settings.changesHeightHint") }}
-              </span>
-            </div>
-        </SettingsSection>
+            </template>
+          </SettingsRow>
+          <div class="flex flex-col gap-1.5 px-3.5 py-3">
+            <span class="text-[12px] text-muted-foreground">{{ $t("settings.changesHeight") }}</span>
+            <Select v-model="changesViewSize">
+              <SelectTrigger class="w-full" :aria-label="$t('settings.changesHeight')"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="small">{{ $t("settings.heightSmall") }}</SelectItem>
+                <SelectItem value="medium">{{ $t("settings.heightMedium") }}</SelectItem>
+                <SelectItem value="tall">{{ $t("settings.heightTall") }}</SelectItem>
+              </SelectContent>
+            </Select>
+            <span class="text-[11px] text-muted-foreground/70">
+              {{ $t("settings.changesHeightHint") }}
+            </span>
+          </div>
+        </SettingsGroup>
 
         <!-- Diffs ─────────────────────────────────────────────────────── -->
-        <SettingsSection
-          section-id="diffs"
-          :icon="GitCompare"
-          :title="$t('settings.cardDiffs')"
-          :default-open="true"
-        >
-            <label class="flex cursor-pointer items-center justify-between gap-3">
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.diffStats") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.diffStatsHint") }}</span>
-              </span>
+        <SettingsGroup :label="$t('settings.cardDiffs')">
+          <SettingsRow :label="$t('settings.diffStats')" :description="$t('settings.diffStatsHint')">
+            <template #control>
               <Switch
                 :model-value="store.diffStatsEnabled"
                 :aria-label="$t('settings.diffStats')"
                 @update:model-value="(v: boolean) => onDiffStats(v)"
               />
-            </label>
-            <label class="flex cursor-pointer items-center justify-between gap-3">
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.diffPatchAlways") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.diffPatchAlwaysHint") }}</span>
-              </span>
+            </template>
+          </SettingsRow>
+          <SettingsRow :label="$t('settings.diffPatchAlways')" :description="$t('settings.diffPatchAlwaysHint')">
+            <template #control>
               <Switch
                 :model-value="!store.diffPatchEnabled"
                 :aria-label="$t('settings.diffPatchAlways')"
                 @update:model-value="(v: boolean) => onAlwaysSideBySide(v)"
               />
-            </label>
-            <!-- Threshold is moot when always-side-by-side is on → dim + disable it. -->
-            <div
-              class="flex flex-col gap-1.5 transition-opacity"
-              :class="store.diffPatchEnabled ? '' : 'pointer-events-none opacity-50'"
-            >
-              <span class="text-[12px] text-muted-foreground">{{ $t("settings.diffPatchThreshold") }}</span>
-              <Select v-model="diffPatchChoice" :disabled="!store.diffPatchEnabled">
-                <SelectTrigger class="w-full" :aria-label="$t('settings.diffPatchThreshold')"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="o in DIFF_PATCH_OPTIONS" :key="o.bytes" :value="String(o.bytes)">
-                    {{ o.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <span class="text-[11px] text-muted-foreground/70">
-                {{ $t("settings.diffPatchThresholdHint") }}
-              </span>
-            </div>
-        </SettingsSection>
+            </template>
+          </SettingsRow>
+          <!-- Threshold is moot when always-side-by-side is on → dim + disable it. -->
+          <div
+            class="flex flex-col gap-1.5 px-3.5 py-3 transition-opacity"
+            :class="store.diffPatchEnabled ? '' : 'pointer-events-none opacity-50'"
+          >
+            <span class="text-[12px] text-muted-foreground">{{ $t("settings.diffPatchThreshold") }}</span>
+            <Select v-model="diffPatchChoice" :disabled="!store.diffPatchEnabled">
+              <SelectTrigger class="w-full" :aria-label="$t('settings.diffPatchThreshold')"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="o in DIFF_PATCH_OPTIONS" :key="o.bytes" :value="String(o.bytes)">
+                  {{ o.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <span class="text-[11px] text-muted-foreground/70">
+              {{ $t("settings.diffPatchThresholdHint") }}
+            </span>
+          </div>
+        </SettingsGroup>
 
         <!-- Background sync ─────────────────────────────────────────────── -->
-        <SettingsSection
-          section-id="sync"
-          :icon="RefreshCw"
-          :title="$t('settings.cardSync')"
-          :description="$t('settings.syncDescription')"
-        >
-            <label class="flex cursor-pointer items-center justify-between gap-3">
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.syncCheck") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.syncCheckHint") }}</span>
-              </span>
-              <Switch
-                :model-value="store.syncCheckEnabled"
-                :aria-label="$t('settings.syncCheck')"
-                @update:model-value="(v: boolean) => onSyncCheck(v)"
-              />
-            </label>
+        <div class="flex flex-col gap-1.5">
+          <SettingsGroup :label="$t('settings.cardSync')">
+            <SettingsRow :label="$t('settings.syncCheck')" :description="$t('settings.syncCheckHint')">
+              <template #control>
+                <Switch
+                  :model-value="store.syncCheckEnabled"
+                  :aria-label="$t('settings.syncCheck')"
+                  @update:model-value="(v: boolean) => onSyncCheck(v)"
+                />
+              </template>
+            </SettingsRow>
             <!-- keep in sync (auto fast-forward) — only acts as part of the check → gate on it -->
-            <label
-              class="flex items-center justify-between gap-3 transition-opacity"
-              :class="store.syncCheckEnabled ? 'cursor-pointer' : 'pointer-events-none opacity-50'"
+            <SettingsRow
+              :label="$t('settings.keepInSync')"
+              :description="$t('settings.keepInSyncHint')"
+              :class="['transition-opacity', store.syncCheckEnabled ? '' : 'pointer-events-none opacity-50']"
             >
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.keepInSync") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.keepInSyncHint") }}</span>
-              </span>
-              <Switch
-                :model-value="store.keepInSync"
-                :disabled="!store.syncCheckEnabled"
-                :aria-label="$t('settings.keepInSync')"
-                @update:model-value="(v: boolean) => onKeepInSync(v)"
-              />
-            </label>
+              <template #control>
+                <Switch
+                  :model-value="store.keepInSync"
+                  :disabled="!store.syncCheckEnabled"
+                  :aria-label="$t('settings.keepInSync')"
+                  @update:model-value="(v: boolean) => onKeepInSync(v)"
+                />
+              </template>
+            </SettingsRow>
             <!-- cadence — moot while the check is off → dim + disable it -->
             <div
-              class="flex flex-col gap-1.5 transition-opacity"
+              class="flex flex-col gap-1.5 px-3.5 py-3 transition-opacity"
               :class="store.syncCheckEnabled ? '' : 'pointer-events-none opacity-50'"
             >
               <span class="text-[12px] text-muted-foreground">{{ $t("settings.syncInterval") }}</span>
@@ -792,84 +763,76 @@ async function remove(id: AiProviderId): Promise<void> {
               <span class="text-[11px] text-muted-foreground/70">{{ $t("settings.syncIntervalHint") }}</span>
             </div>
             <!-- desktop notifications (per-browser; rides the OS Notification permission) -->
-            <label
-              class="flex items-center justify-between gap-3 transition-opacity"
-              :class="store.notifyPermission === 'unsupported' ? 'pointer-events-none opacity-50' : 'cursor-pointer'"
+            <SettingsRow
+              :label="$t('settings.desktopNotify')"
+              :description="$t('settings.desktopNotifyHint')"
+              :class="['transition-opacity', store.notifyPermission === 'unsupported' ? 'pointer-events-none opacity-50' : '']"
             >
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.desktopNotify") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.desktopNotifyHint") }}</span>
-              </span>
-              <Switch
-                :model-value="store.desktopNotify"
-                :disabled="store.notifyPermission === 'unsupported'"
-                :aria-label="$t('settings.desktopNotify')"
-                @update:model-value="(v: boolean) => onDesktopNotify(v)"
-              />
-            </label>
-            <p v-if="store.notifyPermission === 'denied'" class="text-[11px] text-warning">
+              <template #control>
+                <Switch
+                  :model-value="store.desktopNotify"
+                  :disabled="store.notifyPermission === 'unsupported'"
+                  :aria-label="$t('settings.desktopNotify')"
+                  @update:model-value="(v: boolean) => onDesktopNotify(v)"
+                />
+              </template>
+            </SettingsRow>
+            <p v-if="store.notifyPermission === 'denied'" class="px-3.5 pb-3 text-[11px] text-warning">
               {{ $t("settings.desktopNotifyBlocked") }}
             </p>
-        </SettingsSection>
+          </SettingsGroup>
+          <p class="px-1 text-[11px] text-muted-foreground/70">{{ $t("settings.syncDescription") }}</p>
+        </div>
 
         <!-- Keyboard shortcuts ───────────────────────────────────────── -->
-        <SettingsSection section-id="hotkeys" :icon="Keyboard" :title="$t('settings.cardHotkeys')">
-            <label class="flex cursor-pointer items-center justify-between gap-3">
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.hotkeysEnable") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.hotkeysEnableHint") }}</span>
-              </span>
+        <SettingsGroup :label="$t('settings.cardHotkeys')">
+          <SettingsRow :label="$t('settings.hotkeysEnable')" :description="$t('settings.hotkeysEnableHint')">
+            <template #control>
               <Switch v-model="hotkeysEnabled" :aria-label="$t('settings.hotkeysEnable')" />
-            </label>
+            </template>
+          </SettingsRow>
 
-            <label
-              class="flex items-center justify-between gap-3 transition-opacity"
-              :class="hotkeysEnabled ? 'cursor-pointer' : 'pointer-events-none opacity-50'"
-            >
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.hotkeysPower") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.hotkeysPowerHint") }}</span>
-              </span>
+          <SettingsRow
+            :label="$t('settings.hotkeysPower')"
+            :description="$t('settings.hotkeysPowerHint')"
+            :class="['transition-opacity', hotkeysEnabled ? '' : 'pointer-events-none opacity-50']"
+          >
+            <template #control>
               <Switch
                 v-model="powerShortcuts"
                 :disabled="!hotkeysEnabled"
                 :aria-label="$t('settings.hotkeysPower')"
               />
-            </label>
+            </template>
+          </SettingsRow>
 
-            <div class="flex flex-col gap-2">
-              <span class="text-[12px] text-muted-foreground">{{ $t("settings.hotkeysListLabel") }}</span>
-              <ul class="flex flex-col gap-1.5">
-                <li
-                  v-for="s in SHORTCUTS"
-                  :key="s.id"
-                  class="flex items-center justify-between gap-3 transition-opacity"
-                  :class="(s.power ? hotkeysEnabled && powerShortcuts : hotkeysEnabled) ? '' : 'opacity-40'"
-                >
-                  <span class="text-[12.5px] text-foreground">{{ shortcutDesc[s.id] }}</span>
-                  <span class="flex shrink-0 items-center gap-1">
-                    <kbd
-                      v-for="k in s.keys"
-                      :key="k"
-                      class="mono rounded border border-border bg-secondary px-1.5 py-0.5 text-[10.5px] leading-none text-muted-foreground"
-                    >{{ k }}</kbd>
-                  </span>
-                </li>
-              </ul>
-            </div>
-        </SettingsSection>
+          <div class="flex flex-col gap-2 px-3.5 py-3">
+            <span class="text-[12px] text-muted-foreground">{{ $t("settings.hotkeysListLabel") }}</span>
+            <ul class="flex flex-col gap-1.5">
+              <li
+                v-for="s in SHORTCUTS"
+                :key="s.id"
+                class="flex items-center justify-between gap-3 transition-opacity"
+                :class="(s.power ? hotkeysEnabled && powerShortcuts : hotkeysEnabled) ? '' : 'opacity-40'"
+              >
+                <span class="text-[12.5px] text-foreground">{{ shortcutDesc[s.id] }}</span>
+                <span class="flex shrink-0 items-center gap-1">
+                  <kbd
+                    v-for="k in s.keys"
+                    :key="k"
+                    class="mono rounded border border-border bg-secondary px-1.5 py-0.5 text-[10.5px] leading-none text-muted-foreground"
+                  >{{ k }}</kbd>
+                </span>
+              </li>
+            </ul>
+          </div>
+        </SettingsGroup>
 
         <!-- AI commit messages ──────────────────────────────────────── -->
-        <SettingsSection
-          section-id="ai"
-          :icon="Sparkles"
-          icon-class="text-violet-300"
-          :title="$t('settings.cardAi')"
-          :description="$t('settings.aiDescription')"
-          :default-open="true"
-        >
+        <div class="flex flex-col gap-1.5">
+          <SettingsGroup :label="$t('settings.cardAi')">
             <!-- Providers -->
-            <div class="flex flex-col gap-1.5">
+            <div class="flex flex-col gap-1.5 px-3.5 py-3">
               <span class="text-[12px] text-muted-foreground">{{ $t("settings.providers") }}</span>
               <div v-auto-animate class="flex flex-col gap-2">
                 <Collapsible
@@ -1063,36 +1026,34 @@ async function remove(id: AiProviderId): Promise<void> {
             </div>
 
             <!-- Smart-commit YOLO mode -->
-            <label class="flex cursor-pointer items-center justify-between gap-3">
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.aiYolo") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.aiYoloHint") }}</span>
-              </span>
-              <Switch
-                :model-value="settings.yolo"
-                :aria-label="$t('settings.aiYolo')"
-                @update:model-value="(v: boolean) => onYolo(v)"
-              />
-            </label>
+            <SettingsRow :label="$t('settings.aiYolo')" :description="$t('settings.aiYoloHint')">
+              <template #control>
+                <Switch
+                  :model-value="settings.yolo"
+                  :aria-label="$t('settings.aiYolo')"
+                  @update:model-value="(v: boolean) => onYolo(v)"
+                />
+              </template>
+            </SettingsRow>
 
             <!-- AI commit-message style -->
-            <label class="flex cursor-pointer items-center justify-between gap-3">
-              <span class="flex flex-col gap-0.5">
-                <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.aiStyle") }}</span>
-                <span class="text-[12px] text-muted-foreground">{{ $t("settings.aiStyleHint") }}</span>
-              </span>
-              <select
-                :value="settings.style"
-                :aria-label="$t('settings.aiStyle')"
-                class="rounded-md border border-input bg-background px-2 py-1.5 text-[12.5px] text-foreground"
-                @change="(e) => onStyle((e.target as HTMLSelectElement).value)"
-              >
-                <option value="conventional">{{ $t("settings.aiStyleConventional") }}</option>
-                <option value="concise">{{ $t("settings.aiStyleConcise") }}</option>
-                <option value="detailed">{{ $t("settings.aiStyleDetailed") }}</option>
-              </select>
-            </label>
-        </SettingsSection>
+            <SettingsRow :label="$t('settings.aiStyle')" :description="$t('settings.aiStyleHint')">
+              <template #control>
+                <select
+                  :value="settings.style"
+                  :aria-label="$t('settings.aiStyle')"
+                  class="rounded-md border border-input bg-background px-2 py-1.5 text-[12.5px] text-foreground"
+                  @change="(e) => onStyle((e.target as HTMLSelectElement).value)"
+                >
+                  <option value="conventional">{{ $t("settings.aiStyleConventional") }}</option>
+                  <option value="concise">{{ $t("settings.aiStyleConcise") }}</option>
+                  <option value="detailed">{{ $t("settings.aiStyleDetailed") }}</option>
+                </select>
+              </template>
+            </SettingsRow>
+          </SettingsGroup>
+          <p class="px-1 text-[11px] text-muted-foreground/70">{{ $t("settings.aiDescription") }}</p>
+        </div>
     </div>
   </SettingsPanel>
 </template>

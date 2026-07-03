@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { watch } from "vue";
-import { FolderSearch, FolderGit2, Loader2, X, Settings as SettingsIcon } from "@lucide/vue";
+import { ref } from "vue";
+import { FolderSearch, HardDrive, Folder, Loader2, X } from "@lucide/vue";
 import { useStore } from "../store";
 import {
   Dialog,
@@ -11,54 +11,78 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ openSettings: [] }>();
 const store = useStore();
 
-// Load the configured scan folders when the modal opens — but NEVER auto-scan (the whole point
-// of the Start button). The done-summary is left intact across opens so the "View" action on the
-// "new projects found" toast can reopen the modal and still show what the last scan found.
-watch(open, (isOpen) => {
-  if (isOpen && !store.roots.length) void store.loadRoots();
-});
+// Two scopes: the whole machine (default — every drive) or a single folder the owner types/pastes.
+type Mode = "machine" | "folder";
+const mode = ref<Mode>("machine");
+const folderPath = ref("");
 
-function openSettings(): void {
-  open.value = false;
-  emit("openSettings");
+function start(): void {
+  if (store.scanning) return;
+  if (mode.value === "folder") {
+    const path = folderPath.value.trim();
+    if (!path) return;
+    void store.startScan({ path });
+  } else {
+    void store.startScan();
+  }
 }
 </script>
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent>
+    <DialogContent class="sm:max-w-md">
       <DialogHeader>
         <DialogTitle>{{ $t("scan.title") }}</DialogTitle>
         <DialogDescription>{{ $t("scan.description") }}</DialogDescription>
       </DialogHeader>
 
-      <!-- configured folders (managed in Settings) -->
-      <div class="flex flex-col gap-1.5">
-        <div class="text-[12px] font-medium text-muted-foreground">{{ $t("scan.foldersHeading") }}</div>
-        <template v-if="store.roots.length">
-          <ul class="flex flex-col gap-1">
-            <li
-              v-for="r in store.roots"
-              :key="r"
-              class="mono flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-secondary/40 px-2.5 py-1.5 text-[12.5px]"
-            >
-              <FolderGit2 :size="14" class="shrink-0 text-muted-foreground" />
-              <span class="min-w-0 truncate" :title="r">{{ r }}</span>
-            </li>
-          </ul>
-          <p class="text-[11.5px] text-muted-foreground">{{ $t("scan.manageHint") }}</p>
-        </template>
-        <div v-else class="flex flex-col items-start gap-2 rounded-md border border-dashed border-border px-3 py-3">
-          <p class="text-[12.5px] text-muted-foreground">{{ $t("scan.noFolders") }}</p>
-          <Button variant="secondary" size="sm" @click="openSettings">
-            <SettingsIcon /> {{ $t("scan.openSettings") }}
-          </Button>
-        </div>
+      <!-- scope: the whole computer, or one folder -->
+      <div class="inline-flex w-full rounded-lg border border-border/60 bg-secondary/40 p-0.5 text-[12.5px]">
+        <button
+          type="button"
+          class="flex-1 rounded-md px-2.5 py-1.5 font-medium transition-colors"
+          :class="mode === 'machine' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+          @click="mode = 'machine'"
+        >
+          {{ $t("scan.modeMachine") }}
+        </button>
+        <button
+          type="button"
+          class="flex-1 rounded-md px-2.5 py-1.5 font-medium transition-colors"
+          :class="mode === 'folder' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+          @click="mode = 'folder'"
+        >
+          {{ $t("scan.modeFolder") }}
+        </button>
+      </div>
+
+      <!-- whole computer -->
+      <div
+        v-if="mode === 'machine'"
+        class="flex items-start gap-2.5 rounded-md border border-border/60 bg-secondary/40 px-3 py-2.5 text-[12.5px] text-muted-foreground"
+      >
+        <HardDrive :size="16" class="mt-px shrink-0" />
+        <span>{{ $t("scan.machineHint") }}</span>
+      </div>
+
+      <!-- specific folder -->
+      <div v-else class="flex flex-col gap-1.5">
+        <label class="text-[12px] font-medium text-muted-foreground">{{ $t("scan.folderLabel") }}</label>
+        <Input
+          v-model="folderPath"
+          :placeholder="$t('scan.folderPlaceholder')"
+          class="mono text-[12.5px]"
+          spellcheck="false"
+          @keydown.enter.prevent="start"
+        />
+        <p class="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          <Folder :size="12" class="shrink-0" /> {{ $t("scan.folderHint") }}
+        </p>
       </div>
 
       <!-- live status: scanning (with a Stop X) → or the last run's summary -->
@@ -96,7 +120,11 @@ function openSettings(): void {
 
       <DialogFooter>
         <Button variant="ghost" @click="open = false">{{ $t("scan.close") }}</Button>
-        <Button v-if="!store.scanning" :disabled="!store.roots.length" @click="store.startScan()">
+        <Button
+          v-if="!store.scanning"
+          :disabled="mode === 'folder' && !folderPath.trim()"
+          @click="start"
+        >
           <FolderSearch />
           {{ store.scanDone ? $t("scan.again") : $t("scan.start") }}
         </Button>

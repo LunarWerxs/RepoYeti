@@ -38,7 +38,6 @@ import * as remote from "./routes/remote.ts";
 import * as files from "./routes/files.ts";
 import * as ai from "./routes/ai.ts";
 import * as updates from "./routes/updates.ts";
-import * as analytics from "./routes/analytics.ts";
 import * as events from "./routes/events.ts";
 import * as openapi from "./routes/openapi.ts";
 import * as mcp from "./routes/mcp.ts";
@@ -92,7 +91,6 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   files.register(app, deps);
   ai.register(app, deps);
   updates.register(app, deps);
-  analytics.register(app, deps);
   events.register(app, deps);
   openapi.register(app, deps);
   mcp.register(app, deps);

@@ -123,7 +123,7 @@ onMounted(async () => {
     <AppFooter />
 
     <AddRepo v-model:open="showAdd" />
-    <ScanProjects v-model:open="store.scanOpen" @open-settings="showSettings = true" />
+    <ScanProjects v-model:open="store.scanOpen" />
     <Settings v-model:open="showSettings" :side="settingsSide" :right-offset-px="pageShiftPx" />
     <RemoteAccess v-model:open="showRemote" />
     <FileViewer />
