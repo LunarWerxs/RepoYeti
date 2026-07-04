@@ -32,36 +32,62 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     }
   }
 
+  // On Windows, package-manager launchers (npm/yarn/pnpm) are `.cmd` shims that CreateProcess
+  // can't execute directly, so a bare spawn throws ENOENT — while git/node/bun are real `.exe`
+  // and resolve fine. So spawn raw first (git/bun keep their exact behavior and no shell-escaping
+  // deprecation fires) and retry once through a shell only when the raw spawn ENOENTs on Windows,
+  // which is exactly the `.cmd`-shim case. Every arg here is a fixed literal or a git URL (no
+  // spaces or shell metacharacters), so the shell's arg concatenation is safe.
   function runCommand(args, timeoutMs) {
     return new Promise((resolve) => {
-      const child = spawn(args[0], args.slice(1), {
-        cwd: appRoot,
-        windowsHide: true,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      });
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill();
-      }, timeoutMs);
-      child.stdout?.setEncoding("utf8");
-      child.stderr?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk) => {
-        stdout += chunk;
-      });
-      child.stderr?.on("data", (chunk) => {
-        stderr += chunk;
-      });
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        resolve({ ok: false, code: null, stdout, stderr: stderr || err.message, timedOut });
-      });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        resolve({ ok: code === 0 && !timedOut, code, stdout, stderr, timedOut });
-      });
+      let settled = false;
+      const finish = (r) => {
+        if (!settled) {
+          settled = true;
+          resolve(r);
+        }
+      };
+      const attempt = (useShell) => {
+        const child = spawn(args[0], args.slice(1), {
+          cwd: appRoot,
+          windowsHide: true,
+          shell: useShell,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        });
+        let stdout = "";
+        let stderr = "";
+        let timedOut = false;
+        let superseded = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          child.kill();
+        }, timeoutMs);
+        child.stdout?.setEncoding("utf8");
+        child.stderr?.setEncoding("utf8");
+        child.stdout?.on("data", (chunk) => {
+          stdout += chunk;
+        });
+        child.stderr?.on("data", (chunk) => {
+          stderr += chunk;
+        });
+        child.on("error", (err) => {
+          clearTimeout(timer);
+          // `error` fires before this attempt's `close`; flag it so that trailing `close`
+          // is ignored while we retry the `.cmd` shim through a shell.
+          if (err.code === "ENOENT" && !useShell && process.platform === "win32") {
+            superseded = true;
+            attempt(true);
+            return;
+          }
+          finish({ ok: false, code: null, stdout, stderr: stderr || err.message, timedOut });
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          if (superseded) return;
+          finish({ ok: code === 0 && !timedOut, code, stdout, stderr, timedOut });
+        });
+      };
+      attempt(false);
     });
   }
 
