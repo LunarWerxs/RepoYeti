@@ -43,11 +43,9 @@ describe("IdentityManager.vue", () => {
 
   it("opens and focuses the new identity form from the empty state", async () => {
     const wrapper = mountManager();
-    expect(wrapper.text()).not.toContain("RepoYeti-managed git identities");
-    const infoButton = wrapper
-      .findAll("button")
-      .find((button) => button.attributes("aria-label")?.startsWith("RepoYeti-managed git identities"));
-    expect(infoButton).toBeTruthy();
+    // The blurb now renders as an always-visible footer paragraph (identity.description),
+    // replacing the old info-button tooltip the earlier version of this test looked for.
+    expect(wrapper.text()).toContain("RepoYeti-managed git identities");
 
     const addButton = wrapper.findAll("button").find((b) => b.text().includes("Add identity"));
     expect(addButton).toBeTruthy();
