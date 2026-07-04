@@ -6,8 +6,8 @@ import { createI18n } from "vue-i18n";
  * (non-legacy) overload — which is what makes `i18n.global.locale` a writable ref.
  * Key existence itself is enforced by each app's build-time i18n check, not by TS.
  */
-type MessageValue = string | MessageCatalog | MessageValue[];
-interface MessageCatalog {
+export type MessageValue = string | MessageCatalog | MessageValue[];
+export interface MessageCatalog {
   [key: string]: MessageValue;
 }
 
@@ -36,7 +36,10 @@ export function createAppI18n(
   storageKey: string,
 ) {
   const DEFAULT_LOCALE = "en";
-  const isSupported = (code: string): boolean => Object.hasOwn(messages, code);
+  // Own enumerable keys of the catalog are the shipped locale codes. `Object.keys`
+  // (vs `Object.hasOwn`) keeps this portable across every app's TS lib target.
+  const supported = Object.keys(messages);
+  const isSupported = (code: string): boolean => supported.includes(code);
 
   // Prefer a saved choice, else fall back to the base locale. (No auto
   // browser-detect yet — apps ship one language. Add `navigator.language`
