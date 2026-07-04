@@ -3,6 +3,7 @@ import { ref, reactive, watch } from "vue";
 import { useEventSource } from "@vueuse/core";
 import { api, ApiError, type AccessMode, type TunnelStatus } from "../api";
 import type { ActionName, ActionResult, Repo, UpdateApplyResult, UpdateStatus } from "../types";
+import { useSelfUpdate } from "@/lib/useSelfUpdate";
 import { useRepoActions, type StatusKey } from "./repo";
 import { useAi } from "./ai";
 import { useGitOps } from "./git-ops";
@@ -24,9 +25,8 @@ export const useStore = defineStore("repoyeti", () => {
   const repos = ref<Repo[]>([]);
   const loading = ref(true);
   const connected = ref(false);
-  const updateStatus = ref<UpdateStatus | null>(null);
-  const updateChecking = ref(false);
-  const updateApplying = ref(false);
+  const { updateStatus, updateChecking, updateApplying, checkForUpdate, applyUpdate } =
+    useSelfUpdate<UpdateStatus, UpdateApplyResult>(api);
 
   /** repoId → the action currently in flight (drives per-button loading state). */
   const busy = reactive<Record<string, ActionName | undefined>>({});
@@ -94,7 +94,7 @@ export const useStore = defineStore("repoyeti", () => {
 
   /** Normalise any thrown ApiError into the structured {ok,code,message} the UI toasts. */
   function asResult(e: unknown): ActionResult {
-    if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message };
+    if (e instanceof ApiError) return { ok: false, code: e.code ?? "ERROR", message: e.message };
     return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
   }
 
@@ -295,30 +295,6 @@ export const useStore = defineStore("repoyeti", () => {
         void recordPulse("app_opened");
       }
       void checkForUpdate();
-    }
-  }
-
-  async function checkForUpdate(): Promise<UpdateStatus | null> {
-    if (updateChecking.value) return updateStatus.value;
-    updateChecking.value = true;
-    try {
-      updateStatus.value = await api.checkUpdate();
-      return updateStatus.value;
-    } catch {
-      return updateStatus.value;
-    } finally {
-      updateChecking.value = false;
-    }
-  }
-
-  async function applyUpdate(): Promise<UpdateApplyResult> {
-    updateApplying.value = true;
-    try {
-      const result = await api.applyUpdate();
-      updateStatus.value = result.status;
-      return result;
-    } finally {
-      updateApplying.value = false;
     }
   }
 

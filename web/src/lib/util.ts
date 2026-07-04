@@ -1,5 +1,6 @@
 import type { ChangedFile, TreeNode } from "@/types";
 import { t } from "@/i18n";
+import { formatAgo } from "@/lib/relativeTime";
 
 /**
  * Build a folder tree from a flat changed-file list, compressing single-child folder
@@ -70,11 +71,5 @@ export function buildChangeTree(files: ChangedFile[]): TreeNode[] {
 
 /** Compact relative time, e.g. "12s ago", "4m ago", "2h ago" (localised). */
 export function fromNow(ts: number): string {
-  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (s < 60) return t("time.secondsAgo", { n: s });
-  const m = Math.round(s / 60);
-  if (m < 60) return t("time.minutesAgo", { n: m });
-  const h = Math.round(m / 60);
-  if (h < 24) return t("time.hoursAgo", { n: h });
-  return t("time.daysAgo", { n: Math.round(h / 24) });
+  return formatAgo(Date.now(), ts, (key, params) => t(key, params));
 }

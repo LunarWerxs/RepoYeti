@@ -26,31 +26,18 @@ import type {
   UpdateApplyResult,
   UpdateStatus,
 } from "./types";
-
-export class ApiError extends Error {
-  code: string;
-  status: number;
-  constructor(status: number, code: string, message: string) {
-    super(message);
-    this.code = code;
-    this.status = status;
-  }
-}
+import { httpJson } from "@/lib/httpClient";
+export { ApiError } from "@/lib/httpClient";
 
 async function req<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(path, {
+  const data = await httpJson<T>(path, {
     method,
     headers: body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: "include",
     signal,
   });
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!res.ok) {
-    throw new ApiError(res.status, data.code ?? "ERROR", data.message ?? data.error ?? res.statusText);
-  }
-  return data as T;
+  return (data ?? ({} as T)) as T;
 }
 
 export type AccessMode = "local" | "remote";

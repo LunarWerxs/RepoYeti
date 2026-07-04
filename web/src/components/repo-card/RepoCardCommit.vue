@@ -94,7 +94,7 @@ async function runYolo(): Promise<void> {
     void loadRecentMsgs();
     toast.success(t("repo.smartCommit.done"));
   } catch (e) {
-    toast.error(e instanceof ApiError ? friendly(e.code) || e.message : t("repo.smartCommit.failed"));
+    toast.error(e instanceof ApiError ? friendly(e.code ?? "ERROR") || e.message : t("repo.smartCommit.failed"));
   } finally {
     smartBusy.value = false;
   }
@@ -117,7 +117,7 @@ async function generate(): Promise<void> {
   try {
     commitMsg.value = await store.genCommitMessage(props.repo.id);
   } catch (e) {
-    const msg = e instanceof ApiError ? (friendly(e.code) || e.message) : t("repo.commit.generateFailed");
+    const msg = e instanceof ApiError ? (friendly(e.code ?? "ERROR") || e.message) : t("repo.commit.generateFailed");
     toast.error(msg);
   } finally {
     generating.value = false;

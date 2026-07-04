@@ -149,7 +149,7 @@ async function toggleCommit(hash: string): Promise<void> {
   try {
     commitCache.value = { ...commitCache.value, [hash]: await api.commitDetail(props.repoId, hash) };
   } catch (e) {
-    const message = e instanceof ApiError ? friendly(e.code) || e.message : t("repo.history.detailUnavailable");
+    const message = e instanceof ApiError ? friendly(e.code ?? "ERROR") || e.message : t("repo.history.detailUnavailable");
     commitCache.value = {
       ...commitCache.value,
       [hash]: {
