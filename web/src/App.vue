@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Toaster } from "vue-sonner";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useRepoYetiColorMode } from "@/lib/theme";
 import AppShell from "./AppShell.vue";
@@ -19,7 +19,6 @@ const toasterTheme = computed(() => (mode.value === "auto" ? "system" : mode.val
       position="bottom-center"
       :duration="3500"
       :offset="16"
-      rich-colors
       close-button
     />
   </TooltipProvider>

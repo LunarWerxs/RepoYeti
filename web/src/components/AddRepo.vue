@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import { FolderGit2, FolderPlus, DownloadCloud, Server, FolderSearch, Loader2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
-import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const { t } = useI18n();
 
@@ -79,13 +79,11 @@ const canSubmit = computed(() => {
   return path.value.trim().length > 0;
 });
 
-const seg = (active: boolean): string =>
-  cn(
-    "flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] font-medium outline-none transition-all active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-ring/40",
-    active
-      ? "bg-card text-foreground shadow-sm"
-      : "text-muted-foreground hover:bg-card/50 hover:text-foreground active:bg-card/70",
-  );
+// Single-select mode switch. reka-ui's ToggleGroup lets you toggle the active item
+// OFF (empty) — guard against that so a mode is always selected.
+function selectMode(v: unknown): void {
+  if (v && typeof v === "string") mode.value = v as Mode;
+}
 
 // Hand off to the one "Scan for projects" modal — scanning lives there, not in this dialog.
 function openScan(): void {
@@ -144,20 +142,25 @@ async function submit(): Promise<void> {
         <DialogDescription>{{ $t("addRepo.description") }}</DialogDescription>
       </DialogHeader>
 
-      <div class="grid grid-cols-2 gap-1 rounded-lg bg-secondary p-1">
-        <button :class="seg(mode === 'register')" :aria-pressed="mode === 'register'" @click="mode = 'register'">
+      <ToggleGroup
+        type="single"
+        :model-value="mode"
+        class="grid w-full grid-cols-2 gap-1 rounded-lg bg-secondary p-1"
+        @update:model-value="selectMode"
+      >
+        <ToggleGroupItem value="register" class="justify-center gap-1.5">
           <FolderGit2 :size="14" /> {{ $t("addRepo.modeRegister") }}
-        </button>
-        <button :class="seg(mode === 'create')" :aria-pressed="mode === 'create'" @click="mode = 'create'">
+        </ToggleGroupItem>
+        <ToggleGroupItem value="create" class="justify-center gap-1.5">
           <FolderPlus :size="14" /> {{ $t("addRepo.modeCreate") }}
-        </button>
-        <button :class="seg(mode === 'clone')" :aria-pressed="mode === 'clone'" @click="mode = 'clone'">
+        </ToggleGroupItem>
+        <ToggleGroupItem value="clone" class="justify-center gap-1.5">
           <DownloadCloud :size="14" /> {{ $t("addRepo.modeClone") }}
-        </button>
-        <button :class="seg(mode === 'lore')" :aria-pressed="mode === 'lore'" @click="mode = 'lore'">
+        </ToggleGroupItem>
+        <ToggleGroupItem value="lore" class="justify-center gap-1.5">
           <Server :size="14" /> {{ $t("addRepo.modeLore") }}
-        </button>
-      </div>
+        </ToggleGroupItem>
+      </ToggleGroup>
 
       <!-- hand-off to the dedicated Scan-for-projects modal -->
       <button
