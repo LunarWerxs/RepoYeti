@@ -10,10 +10,13 @@
  *
  * Untrusted-path safe: any file path is normalised + confined to the repo (reusing
  * resolveRepoPath) before it reaches a spawn argv, so a crafted `?path=` can never launch an
- * editor on a file outside the repo. The editor id is validated against a fixed catalog.
+ * editor on a file outside the repo. The editor id is validated against a fixed catalog. On
+ * Windows, an editor resolved as a `.cmd`/`.bat` shim is launched via `cmd /c`, whose re-parse
+ * would expand `%…%` / strip `^` in the path AFTER confinement — so such a path is refused up
+ * front (see cmdReparseHazard) to keep the confinement guarantee intact.
  */
 import { existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve, dirname } from "node:path";
 import { getRepo } from "../db.ts";
 import { resolveRepoPath } from "./files.ts";
 
@@ -32,6 +35,10 @@ interface EditorDef {
   commands?: string[];
   /** Known absolute install paths to probe on Windows (may contain %ENV% tokens). */
   winPaths?: string[];
+  /** The real GUI exe basename (e.g. "Code.exe") for VS Code-style editors whose PATH launcher is
+   *  a `<install>\bin\<name>.cmd` shim. When `which` finds that shim, we prefer the sibling
+   *  `<install>\<winExe>` so we can spawn the exe directly and skip cmd /c's re-parse entirely. */
+  winExe?: string;
   /** Known absolute install paths to probe on Linux. */
   linuxPaths?: string[];
   /** macOS .app name for the `open -a "<name>"` fallback when no CLI launcher is on PATH. */
@@ -54,6 +61,7 @@ const CATALOG: readonly EditorDef[] = [
     label: "VS Code",
     folder: true,
     commands: ["code"],
+    winExe: "Code.exe",
     winPaths: [
       "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe",
       "%PROGRAMFILES%\\Microsoft VS Code\\Code.exe",
@@ -66,6 +74,7 @@ const CATALOG: readonly EditorDef[] = [
     label: "Cursor",
     folder: true,
     commands: ["cursor"],
+    winExe: "Cursor.exe",
     winPaths: ["%LOCALAPPDATA%\\Programs\\Cursor\\Cursor.exe"],
     macApp: "Cursor",
     linuxPaths: ["/usr/bin/cursor", "/opt/Cursor/cursor"],
@@ -75,6 +84,7 @@ const CATALOG: readonly EditorDef[] = [
     label: "Windsurf",
     folder: true,
     commands: ["windsurf"],
+    winExe: "Windsurf.exe",
     winPaths: ["%LOCALAPPDATA%\\Programs\\Windsurf\\Windsurf.exe"],
     macApp: "Windsurf",
     linuxPaths: ["/usr/bin/windsurf", "/opt/Windsurf/windsurf"],
@@ -84,6 +94,7 @@ const CATALOG: readonly EditorDef[] = [
     label: "VSCodium",
     folder: true,
     commands: ["codium"],
+    winExe: "VSCodium.exe",
     winPaths: [
       "%LOCALAPPDATA%\\Programs\\VSCodium\\VSCodium.exe",
       "%PROGRAMFILES%\\VSCodium\\VSCodium.exe",
@@ -96,6 +107,7 @@ const CATALOG: readonly EditorDef[] = [
     label: "VS Code Insiders",
     folder: true,
     commands: ["code-insiders"],
+    winExe: "Code - Insiders.exe",
     winPaths: [
       "%LOCALAPPDATA%\\Programs\\Microsoft VS Code Insiders\\Code - Insiders.exe",
       "%PROGRAMFILES%\\Microsoft VS Code Insiders\\Code - Insiders.exe",
@@ -192,12 +204,21 @@ export function probeEditor(
   // 2) A launcher on PATH (Bun.which resolves PATHEXT → code.cmd etc. on Windows).
   for (const cmd of def.commands ?? []) {
     const found = deps.which(cmd);
-    if (found) return { kind: "exe", exe: found };
+    if (!found) continue;
+    // On Windows `which` usually resolves a `.cmd` shim (…\bin\code.cmd). Prefer the sibling real
+    // exe (…\Code.exe) so we spawn it DIRECTLY — no cmd /c, so no %VAR%/^ re-parse of the path.
+    if (platform === "win32" && def.winExe && isWindowsScript(found)) {
+      const exe = resolve(dirname(found), "..", def.winExe);
+      if (deps.exists(exe)) return { kind: "exe", exe };
+    }
+    return { kind: "exe", exe: found };
   }
 
   // 3) macOS: fall back to `open -a "<App>"` when the app bundle is present but no CLI is linked.
+  //    /Applications is always a POSIX path — build it literally (node's path.join would emit
+  //    backslashes when the daemon dev-runs on Windows).
   if (platform === "darwin" && def.macApp) {
-    if (deps.exists(join("/Applications", `${def.macApp}.app`))) return { kind: "macApp", app: def.macApp };
+    if (deps.exists(`/Applications/${def.macApp}.app`)) return { kind: "macApp", app: def.macApp };
   }
   return null;
 }
@@ -224,6 +245,21 @@ export function wrapForPlatform(
   // Windows shell shim (code.cmd) can't be spawned directly → run through cmd /c.
   if (platform === "win32" && isWindowsScript(res.exe)) return ["cmd", "/c", res.exe, ...editorArgs];
   return [res.exe, ...editorArgs];
+}
+
+/**
+ * True when launching `exe` on `platform` would route `args` through `cmd /c` (a .cmd/.bat shim)
+ * AND some arg carries a character cmd.exe re-parses destructively:
+ *   · `%…%`  → cmd expands it against the environment INSIDE its own command-line parse, AFTER our
+ *              repo confinement — a repo file literally named `%COMSPEC%` would reach the editor as
+ *              an env-derived path OUTSIDE the repo (a confinement bypass).
+ *   · `^`    → cmd's escape char, silently stripped — the editor opens a different/nonexistent path.
+ * Bun.spawn's argv quoting keeps these contained (no command injection), but the *value* the editor
+ * receives is wrong, so such a launch is refused up front rather than silently misbehaving. Only the
+ * uncommon PATH-shim launch is affected — a real .exe install (the winPaths probe) spawns directly.
+ */
+export function cmdReparseHazard(platform: EditorPlatform, exe: string, args: string[]): boolean {
+  return platform === "win32" && isWindowsScript(exe) && args.some((a) => /[%^]/.test(a));
 }
 
 /** Reveal a folder in the OS file manager (the `system` pseudo-editor). Always resolvable. */
@@ -345,6 +381,16 @@ export async function openInEditor(
     if (!res) return { ok: false, code: "NO_EDITOR", message: `${def.label} isn't installed`, editor: wanted };
     const editorArgs = buildEditorArgs(def, folderAbs, fileAbs);
     if (!editorArgs) return { ok: false, code: "BAD_PATH", message: `${def.label} can't open a folder`, editor: wanted };
+    // Refuse a path cmd.exe would re-parse when this editor is launched via a .cmd/.bat shim —
+    // see cmdReparseHazard (a `%…%` in the path is a confinement bypass; a `^` corrupts it).
+    if (res.kind === "exe" && cmdReparseHazard(platform, res.exe, editorArgs)) {
+      return {
+        ok: false,
+        code: "BAD_PATH",
+        message: "the file path contains a character (% or ^) this editor's Windows launcher can't open safely",
+        editor: wanted,
+      };
+    }
     argv = wrapForPlatform(platform, res, editorArgs);
   }
 

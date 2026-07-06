@@ -23,7 +23,13 @@
     "discardTitle": "Discard changes?",
     "discardBody": "You have unsaved changes. They'll be lost if you continue.",
     "keepEditing": "Keep editing",
-    "discard": "Discard"
+    "discard": "Discard",
+    "openWith": "Open with",
+    "openWithHint": "Open this repo & file in your editor",
+    "openWithMenu": "Choose an editor",
+    "openingIn": "Opening in {editor}…",
+    "openingEditor": "Opening in your editor…",
+    "openFailed": "Couldn't open the editor"
   },
   "addRepo": {
     "cancel": "Cancel",
@@ -340,6 +346,10 @@
     "dragToReorder": "Drag to reorder",
     "hide": "Hide",
     "moreActions": "More actions",
+    "openWith": "Open with",
+    "openingIn": "Opening in {editor}…",
+    "openingEditor": "Opening in your editor…",
+    "openFailed": "Couldn't open the editor",
     "pin": "Pin",
     "unpin": "Unpin",
     "star": "Star",
@@ -604,6 +614,12 @@
     "serversRemoveFailed": "Couldn't remove that server",
     "cardAi": "AI commit messages",
     "cardAppearance": "Appearance",
+    "cardEditor": "External editor",
+    "editorDefault": "Default \"Open with\" editor",
+    "editorAuto": "Auto (first installed)",
+    "editorNotInstalled": "{name} · not installed",
+    "editorHint": "Which editor the file viewer's \"Open with\" button launches. Editors run on this computer, so it only works when you're using RepoYeti locally.",
+    "editorDefaultFailed": "Couldn't change the default editor",
     "cardCloudSync": "Cloud sync",
     "cloudSync": {
       "title": "Sync settings",

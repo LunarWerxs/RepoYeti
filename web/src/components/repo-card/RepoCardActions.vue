@@ -9,6 +9,7 @@ import {
   ArrowUpFromLine,
   Cloud,
   DownloadCloud,
+  ExternalLink,
   Eye,
   EyeOff,
   Loader2,
@@ -23,6 +24,7 @@ import {
 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
+import { ApiError } from "@/api";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 import StashPanel from "../StashPanel.vue";
 import RepoManage from "../RepoManage.vue";
@@ -33,6 +35,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { VCS_CAPABILITIES } from "../../types";
@@ -123,6 +128,24 @@ async function toggleAutoCommit(): Promise<void> {
   }
 }
 
+// ── "Open with…" — open the repo FOLDER in an external editor (local only) ────
+// Only folder-capable targets make sense here (there's no file to hand a single-file editor
+// like Notepad); the File Explorer / Finder reveal is always in the list.
+const folderEditors = computed(() => store.editorsCatalog.filter((e) => e.available && e.folder));
+// Lazy-load the catalogue the first time the overflow menu opens (no-ops after the first fetch).
+function onMenuToggle(open: boolean): void {
+  if (open && store.canContinueLocal) void store.loadEditors();
+}
+async function openRepoWith(editor?: string): Promise<void> {
+  try {
+    const r = await store.openInEditor(props.repo.id, editor ? { editor } : {});
+    const label = store.editorsCatalog.find((e) => e.id === r.editor)?.label;
+    toast.success(label ? t("repo.openingIn", { editor: label }) : t("repo.openingEditor"));
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t("repo.openFailed"));
+  }
+}
+
 // ── remote & tags management (self-contained dialog) ─────────────────────────
 const manageOpen = ref(false);
 </script>
@@ -180,7 +203,7 @@ const manageOpen = ref(false);
       <TooltipContent>{{ $t("repo.actions.refresh") }}</TooltipContent>
     </Tooltip>
     <!-- overflow menu (hide / unhide this repo from the dashboard) -->
-    <DropdownMenu>
+    <DropdownMenu @update:open="onMenuToggle">
       <DropdownMenuTrigger
         class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
         :aria-label="$t('repo.moreActions')"
@@ -188,6 +211,21 @@ const manageOpen = ref(false);
         <MoreVertical :size="16" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" class="w-44">
+        <!-- Open the repo folder in an external editor (local sessions only). -->
+        <template v-if="store.canContinueLocal">
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <ExternalLink :size="15" />
+              <span>{{ $t("repo.openWith") }}</span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent class="w-48">
+              <DropdownMenuItem v-for="e in folderEditors" :key="e.id" @select="openRepoWith(e.id)">
+                <span class="truncate">{{ e.label }}</span>
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSeparator />
+        </template>
         <DropdownMenuItem @select="togglePinned">
           <PinOff v-if="repo.pinned" :size="15" />
           <Pin v-else :size="15" />

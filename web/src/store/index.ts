@@ -91,6 +91,10 @@ export const useStore = defineStore("repoyeti", () => {
   const mcpApprovalGate = ref(true);
   // Auto-deny timeout for a pending approval, in seconds. From /api/status; 120 until loaded.
   const mcpApprovalTimeoutSecs = ref(120);
+  // Owner setting: default "Open with…" external editor id (null = auto-pick the first installed).
+  // From /api/status, kept live via `settings_changed`. The catalogue + availability come from a
+  // separate GET /api/editors (loaded lazily by the file viewer / Settings).
+  const defaultEditor = ref<string | null>(null);
 
   // Min query length before the changed-files "search content" toggle greps. Server-owned
   // (from /api/status) so the UI gate never drifts from the daemon's; 3 until status loads.
@@ -260,6 +264,14 @@ export const useStore = defineStore("repoyeti", () => {
     setAutoScan,
     setMcpApprovalGate,
     setMcpApprovalTimeoutSecs,
+    editorsCatalog,
+    editorsPlatform,
+    effectiveEditor,
+    editorsLoaded,
+    editorsLoading,
+    loadEditors,
+    setDefaultEditor,
+    openInEditor,
     pendingApprovals,
     approvalBusy,
     loadApprovals,
@@ -313,6 +325,7 @@ export const useStore = defineStore("repoyeti", () => {
     autoScan,
     mcpApprovalGate,
     mcpApprovalTimeoutSecs,
+    defaultEditor,
   });
 
   async function loadAll(): Promise<void> {
@@ -373,6 +386,7 @@ export const useStore = defineStore("repoyeti", () => {
       autoScan.value = s.autoScan ?? false;
       mcpApprovalGate.value = s.mcpApprovalGate ?? true;
       mcpApprovalTimeoutSecs.value = s.mcpApprovalTimeoutSecs ?? 120;
+      defaultEditor.value = s.defaultEditor ?? null;
       contentSearchMin.value = s.minContentSearch ?? 3;
     } catch {
       /* status is optional — leave whatever we have */
@@ -482,6 +496,15 @@ export const useStore = defineStore("repoyeti", () => {
           if (typeof payload.mcpApprovalGate === "boolean") mcpApprovalGate.value = payload.mcpApprovalGate;
           if (typeof payload.mcpApprovalTimeoutSecs === "number")
             mcpApprovalTimeoutSecs.value = payload.mcpApprovalTimeoutSecs;
+          // defaultEditor is broadcast as string|null (present only when it changed) — a null is
+          // a legitimate "cleared" value, so gate on the key existing, not on truthiness.
+          if (payload.defaultEditor !== undefined) {
+            defaultEditor.value = (payload.defaultEditor as string | null) ?? null;
+            // The stored pref just changed elsewhere (another tab/device) → the resolved
+            // effectiveEditor (drives the Open-with dropdown's "current default" check) is now
+            // stale. Re-fetch the catalogue, but only for a tab that already uses it.
+            if (editorsLoaded.value) void loadEditors(true);
+          }
           if (payload.tunnel) tunnelConfig.value = payload.tunnel as TunnelStatus;
           // The daemon applied a pulled cloud-sync doc (possibly from another device) — re-fetch
           // status and re-apply the synced appearance (loadSyncStatus applies it internally).
@@ -641,6 +664,15 @@ export const useStore = defineStore("repoyeti", () => {
     mcpApprovalTimeoutSecs,
     setMcpApprovalGate,
     setMcpApprovalTimeoutSecs,
+    defaultEditor,
+    editorsCatalog,
+    editorsPlatform,
+    effectiveEditor,
+    editorsLoaded,
+    editorsLoading,
+    loadEditors,
+    setDefaultEditor,
+    openInEditor,
     pendingApprovals,
     approvalBusy,
     loadApprovals,

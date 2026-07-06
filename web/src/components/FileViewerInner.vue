@@ -2,7 +2,19 @@
 // Shared content of the file viewer (header + body), rendered inside either the desktop
 // push-drawer or the mobile bottom sheet. Owns the fetch + the lazily-loaded editor.
 import { computed, defineAsyncComponent, h, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import { X, Loader2, FileWarning, Columns2, AlignJustify, Pencil, Save, MoreVertical, Check } from "@lucide/vue";
+import {
+  X,
+  Loader2,
+  FileWarning,
+  Columns2,
+  AlignJustify,
+  Pencil,
+  Save,
+  MoreVertical,
+  Check,
+  ExternalLink,
+  ChevronDown,
+} from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { t } from "@/i18n";
 import { api, ApiError } from "@/api";
@@ -91,6 +103,22 @@ const STATUS_COLOR: Record<string, string> = {
 const statusColor = computed(() =>
   props.target?.status ? (STATUS_COLOR[props.target.status] ?? "#9aa0a6") : "#9aa0a6",
 );
+
+// ── "Open with…" external editor (local-only: editors launch on the daemon's machine) ──
+// The main button opens the owner's default editor; the caret picks a specific one. We open the
+// repo FOLDER + the current file, so the editor shows the whole file tree (the "see the file list"
+// intent). Only the editors detected as installed are offered.
+const openableEditors = computed(() => store.editorsCatalog.filter((e) => e.available));
+async function openWith(editor?: string): Promise<void> {
+  if (!props.target) return;
+  try {
+    const r = await store.openInEditor(props.target.repoId, { editor, path: props.target.path });
+    const label = store.editorsCatalog.find((e) => e.id === r.editor)?.label;
+    toast.success(label ? t("fileViewer.openingIn", { editor: label }) : t("fileViewer.openingEditor"));
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t("fileViewer.openFailed"));
+  }
+}
 
 // ── fetch (Content = whole file · Diff = HEAD ↔ working tree) ────────────────────
 const loading = ref(false);
@@ -257,6 +285,9 @@ function onBeforeUnload(e: BeforeUnloadEvent): void {
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("beforeunload", onBeforeUnload);
+  // Populate the Open-with editor list — only meaningful for a local session (the editor opens
+  // on this machine), so skip the request entirely over the tunnel.
+  if (store.canContinueLocal) void store.loadEditors();
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
@@ -320,6 +351,38 @@ onBeforeUnmount(() => {
         >
           {{ $t("fileViewer.tabDiff") }}
         </button>
+      </div>
+
+      <!-- Open with… — launch the repo + this file in an external editor (local only, since the
+           editor opens on this machine). Split button: click opens the default editor, the caret
+           picks a specific one. -->
+      <div
+        v-if="store.canContinueLocal"
+        class="flex shrink-0 items-center rounded-md border border-border bg-secondary/40 text-[12px] font-medium"
+      >
+        <button
+          type="button"
+          class="flex h-[26px] items-center gap-1 rounded-l-md px-2 text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          :title="$t('fileViewer.openWithHint')"
+          @click="openWith()"
+        >
+          <ExternalLink :size="13" />
+          <span class="hidden sm:inline">{{ $t("fileViewer.openWith") }}</span>
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            class="flex h-[26px] items-center rounded-r-md border-l border-border px-1 text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            :aria-label="$t('fileViewer.openWithMenu')"
+          >
+            <ChevronDown :size="13" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-52">
+            <DropdownMenuItem v-for="e in openableEditors" :key="e.id" @select="openWith(e.id)">
+              <span class="truncate">{{ e.label }}</span>
+              <Check v-if="e.id === store.effectiveEditor" :size="14" class="ml-auto text-primary" />
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <!-- Cancel / Save — while editing (Content tab, or the Diff tab's side-by-side view) -->

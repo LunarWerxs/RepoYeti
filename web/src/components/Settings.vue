@@ -6,6 +6,7 @@ import IdentityAccessSection from "./settings/IdentityAccessSection.vue";
 import DiscoverySection from "./settings/DiscoverySection.vue";
 import CloudSyncSection from "./settings/CloudSyncSection.vue";
 import AppearanceSection from "./settings/AppearanceSection.vue";
+import EditorSection from "./settings/EditorSection.vue";
 import SyncHotkeysSection from "./settings/SyncHotkeysSection.vue";
 import AutoCommitSection from "./settings/AutoCommitSection.vue";
 import AgentSafetySection from "./settings/AgentSafetySection.vue";
@@ -46,6 +47,9 @@ const props = withDefaults(defineProps<{ side?: PushPanelSide; rightOffsetPx?: n
 
       <!-- Appearance + diff display preferences ──────────────────────────── -->
       <AppearanceSection />
+
+      <!-- "Open with…" default external editor ────────────────────────────── -->
+      <EditorSection />
 
       <!-- Background sync + keyboard shortcuts ────────────────────────────── -->
       <SyncHotkeysSection />

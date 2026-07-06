@@ -1,6 +1,14 @@
 import { ref, reactive, computed, watch, type Ref } from "vue";
 import { toast } from "vue-sonner";
-import { api, ApiError, type AccessMode, type TunnelStatus, type SyncStatus } from "../api";
+import {
+  api,
+  ApiError,
+  type AccessMode,
+  type TunnelStatus,
+  type SyncStatus,
+  type EditorInfo,
+  type OpenResult,
+} from "../api";
 import { t } from "../i18n";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import type { PendingApproval } from "../types";
@@ -82,6 +90,7 @@ export function useSettings(deps: {
   autoScan: Ref<boolean>;
   mcpApprovalGate: Ref<boolean>;
   mcpApprovalTimeoutSecs: Ref<number>;
+  defaultEditor: Ref<string | null>;
 }) {
   const {
     mode,
@@ -104,6 +113,7 @@ export function useSettings(deps: {
     autoScan,
     mcpApprovalGate,
     mcpApprovalTimeoutSecs,
+    defaultEditor,
   } = deps;
 
   // auth
@@ -341,6 +351,67 @@ export function useSettings(deps: {
       mcpApprovalTimeoutSecs.value = prev; // roll back
       throw e;
     }
+  }
+
+  // ── "Open with…" external editors (loopback-only convenience) ─────────────────
+  // The detected editor catalogue for this machine (from GET /api/editors). Loaded lazily the
+  // first time the file viewer / Settings needs it; `defaultEditor` (the stored pref) rides the
+  // normal settings hydration + `settings_changed` SSE like every other owner setting.
+  const editorsCatalog = ref<EditorInfo[]>([]);
+  const editorsPlatform = ref("");
+  const effectiveEditor = ref(""); // the id the Open-with button actually launches
+  const editorsLoaded = ref(false);
+  const editorsLoading = ref(false);
+  let editorsRefreshPending = false; // a force-refresh requested while a load was already in flight
+
+  /** Fetch the editor catalogue (best-effort). No-ops after the first success unless `force` is set
+   *  (e.g. the default changed, or an editor was installed). A `force` that arrives while a load is
+   *  already in flight is deferred and re-run once that load settles — so it never silently drops. */
+  async function loadEditors(force = false): Promise<void> {
+    if (editorsLoading.value) {
+      if (force) editorsRefreshPending = true; // coalesce into a single follow-up after this load
+      return;
+    }
+    if (editorsLoaded.value && !force) return;
+    editorsLoading.value = true;
+    try {
+      const r = await api.editors();
+      editorsCatalog.value = r.editors;
+      editorsPlatform.value = r.platform;
+      effectiveEditor.value = r.effectiveDefault;
+      if (defaultEditor.value == null) defaultEditor.value = r.defaultEditor;
+      editorsLoaded.value = true;
+    } catch {
+      /* editors are optional — leave whatever we have */
+    } finally {
+      editorsLoading.value = false;
+      if (editorsRefreshPending) {
+        editorsRefreshPending = false;
+        void loadEditors(true); // run the refresh that arrived while we were busy
+      }
+    }
+  }
+
+  /** Set the default "Open with…" editor (""=auto-pick first installed). Optimistic; rolls back
+   *  on failure. Re-derives the effective default from the fresh choice. */
+  async function setDefaultEditor(id: string): Promise<void> {
+    const prev = defaultEditor.value;
+    defaultEditor.value = id === "" ? null : id;
+    try {
+      const r = await api.setDefaultEditor(id);
+      defaultEditor.value = r.defaultEditor;
+      // A changed preference can change which editor the button targets → refresh the catalogue.
+      void loadEditors(true);
+    } catch (e) {
+      defaultEditor.value = prev; // roll back
+      throw e;
+    }
+  }
+
+  /** Launch a repo folder (and optional changed file) in an editor. Throws ApiError on failure
+   *  (the caller toasts); resolves with the OpenResult on success. */
+  async function openInEditor(repoId: string, opts: { editor?: string; path?: string } = {}): Promise<OpenResult> {
+    return api.openInEditor(repoId, opts);
   }
 
   // ── ⭐ Agent Safety Rail — pending approvals (SSE-driven; hydrated on boot) ────
@@ -751,6 +822,14 @@ export function useSettings(deps: {
     setAutoScan,
     setMcpApprovalGate,
     setMcpApprovalTimeoutSecs,
+    editorsCatalog,
+    editorsPlatform,
+    effectiveEditor,
+    editorsLoaded,
+    editorsLoading,
+    loadEditors,
+    setDefaultEditor,
+    openInEditor,
     pendingApprovals,
     approvalBusy,
     loadApprovals,
