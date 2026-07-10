@@ -1,0 +1,12 @@
+/* RepoYeti — entry stylesheet. The design system (Mira tokens + the green accent)
+   comes from the shared LunarWerx kit files in ./styles/. Only RepoYeti-specific
+   bits live here; keep the kit files app-agnostic. */
+@import "./styles/kit-base.css";
+@import "./styles/kit-accent.css";
+
+/* File viewer — when "word-level diff" is toggled off, suppress the inner
+   character highlight (Monaco) so only the whole-line background shows. */
+.gm-line-level-diff .char-insert,
+.gm-line-level-diff .char-delete {
+  background-color: transparent !important;
+}

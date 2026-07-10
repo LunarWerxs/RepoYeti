@@ -1,0 +1,77 @@
+# deps & build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local secrets / env (bun auto-loads .env at startup) — NEVER commit
+.env
+.env.*
+!.env.example
+
+# local runtime state (the daemon writes to ~/.repoyeti, but never commit any local db copies)
+*.db
+*.db-wal
+*.db-shm
+.repoyeti/
+
+# editor / os
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# logs & test/coverage output
+*.log
+coverage/
+tmp/
+
+# Playwright E2E artifacts (web/) — regenerated per run, never committed
+web/test-results/
+web/playwright-report/
+web/.playwright/
+
+# bundled binaries (fetched per-platform, not committed)
+vendor/cloudflared/
+
+# tray launcher: the .lnk stores absolute paths — regenerate it per machine with
+# misc\Create-Shortcut.ps1 (the scripts + icon under misc/ are committed).
+/RepoYeti.lnk
+
+# Architect (connections-arkitect) — local audit profile + run archives, not tracked
+.arkitect/
+
+# Claude Code local config (dev tooling, not part of the project)
+.claude/
+
+# Landing site (repoyeti.com) — its OWN git repo (RepoYeti/RepoYeti.github.io),
+# nested here for convenience. Never commit it into this repo.
+/site/
+
+# compiled single-file binaries (built with `bun --compile`, per-platform)
+repoyeti
+repoyeti.exe
+*.exe
+
+# secrets / keys — belt-and-suspenders, never commit
+*.pem
+*.key
+*.p12
+id_rsa
+id_ed25519
+*.pfx
+
+# editor / OS cruft
+*.swp
+*.swo
+*~
+*.bak
+.Spotlight-V100
+.Trashes
+$RECYCLE.BIN/
+
+# misc caches / local overrides
+.cache/
+.turbo/
+*.local

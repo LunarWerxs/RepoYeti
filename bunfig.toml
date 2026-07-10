@@ -1,0 +1,7 @@
+[test]
+preload = ["./tests/setup.ts"]
+# NOTE (pre-release follow-up): a coverage GATE is desirable but bun's `coverageThreshold` is
+# PER-FILE, so a flat floor fails on the low-coverage integration entrypoints (daemon.ts/index.ts)
+# even though overall coverage is ~92%. Add `coveragePathIgnorePatterns` for the entrypoints, then
+# a threshold on the rest — best done on a quiet tree. CI runs `bun test` (and can add `--coverage`
+# for reporting) until then.

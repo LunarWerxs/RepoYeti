@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  daemon:
+    name: daemon (test + typecheck)
+    # The shipped artifact is a per-OS `bun --compile` binary, so run the suite on all three.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14" # pin so a Bun upgrade can't silently change the build
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run check # ApiErrorCode drift guard + architectural boundary guard
+      # Some hosted runners ship without a global git identity; annotated tags (and commits
+      # without an explicit identity) need a tagger/committer, so set one for the suite.
+      - name: Configure a git identity
+        shell: bash
+        run: |
+          git config --global user.name "RepoYeti CI"
+          git config --global user.email "ci@users.noreply.github.com"
+      - run: bun run check:coverage # runs the suite with coverage + an overall-% floor
+      - run: bun audit # dependency CVE scan
+        continue-on-error: true # advisory only — surfaces advisories without failing on upstream CVEs
+
+  web:
+    name: web (i18n + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-web-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: bun-web-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run i18n:check # fail on untranslated strings / missing keys / locale parity drift
+      - run: bun run test # Vitest: pure-lib units + component render + store smoke (no server needed)
+      - run: bun run build # vue-tsc type-check + production bundle (re-runs i18n:check)
+      # The Playwright SSE E2E (test:e2e) is intentionally NOT in CI — it needs a live daemon + a
+      # registered repo + a browser binary. Run it locally: start the daemon + `bun run dev`, then
+      # `bunx playwright install chromium && bun run test:e2e`.

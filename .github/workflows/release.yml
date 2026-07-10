@@ -1,0 +1,70 @@
+name: Release
+
+# Tag a version (e.g. `git tag v0.1.0 && git push --tags`) to build the compiled binary on
+# each OS and publish them to a GitHub Release. The single self-contained binary IS the product,
+# so it ships as a first-class, CI-produced artifact rather than a local build.
+#
+# NOTE: arch labels below are nominal (ubuntu→x64, macos-latest→arm64). Adjust the matrix /
+# `bun build --compile --target` in scripts/build.ts if you need additional arch variants.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: repoyeti-linux-x64
+          - os: macos-latest
+            asset: repoyeti-macos-arm64
+          - os: windows-latest
+            asset: repoyeti-windows-x64.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      - run: bun run build
+      - name: Stage compiled binary
+        shell: bash
+        run: |
+          mkdir -p out
+          bin=""
+          for f in dist/repoyeti.exe dist/repoyeti; do
+            if [ -f "$f" ]; then bin="$f"; break; fi
+          done
+          if [ -z "$bin" ]; then echo "::error::no compiled binary found in dist/"; ls -la dist || true; exit 1; fi
+          cp "$bin" "out/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

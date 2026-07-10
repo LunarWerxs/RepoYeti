@@ -1,0 +1,17 @@
+/* RepoYeti brand accent — git-graph green. Overrides the neutral --primary/--ring
+   from base.css (light + dark). Kept as exact brand hex. Part of the shared kit;
+   do not edit the in-app copy. */
+:root {
+  --primary: #15a35c;            /* deepened green, legible on light surfaces */
+  --primary-foreground: #ffffff;
+  --ring: #15a35c;
+  --sidebar-primary: #15a35c;
+  --sidebar-ring: #15a35c;
+}
+.dark {
+  --primary: #3ddc84;            /* bright git-graph green on near-black */
+  --primary-foreground: #06140c;
+  --ring: #3ddc84;
+  --sidebar-primary: #3ddc84;
+  --sidebar-ring: #3ddc84;
+}
