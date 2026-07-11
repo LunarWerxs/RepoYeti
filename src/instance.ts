@@ -19,6 +19,7 @@ const pointer = createInstancePointer({
 
 export const instanceFilePath = pointer.instanceFilePath;
 export const writeInstanceInfo = pointer.writeInstanceInfo;
+export const updateInstanceInfo = pointer.updateInstanceInfo;
 export const readInstanceInfo = pointer.readInstanceInfo;
 export const clearInstanceInfo = pointer.clearInstanceInfo;
 export const findLiveInstance = pointer.findLiveInstance;

@@ -89,6 +89,10 @@ export const useStore = defineStore("repoyeti", () => {
   // kept live via `settings_changed`; off until status loads (opt-in) — see AppShell.vue's
   // scheduleIdle(() => autoScan && startScan()) on mount.
   const autoScan = ref(false);
+  // Owner setting: open the app UI in a chromeless Chromium app window instead of a browser
+  // tab. From /api/status, kept live via `settings_changed`; off until status loads. The
+  // desktop launcher/tray follows the same preference (read off runtime.json, not this).
+  const portableMode = ref(false);
   // ⭐ Agent Safety Rail: whether mutating MCP tool calls are gated behind owner approve/deny.
   // From /api/status, kept live via `settings_changed`; on until status loads (safe default).
   const mcpApprovalGate = ref(true);
@@ -268,6 +272,8 @@ export const useStore = defineStore("repoyeti", () => {
     setAutoCommitPull,
     setAutoCommitPush,
     setAutoScan,
+    setPortableMode,
+    openPortableWindow,
     setMcpApprovalGate,
     setMcpApprovalTimeoutSecs,
     editorsCatalog,
@@ -330,9 +336,11 @@ export const useStore = defineStore("repoyeti", () => {
     autoCommitPush,
     autoUpdate,
     autoScan,
+    portableMode,
     mcpApprovalGate,
     mcpApprovalTimeoutSecs,
     defaultEditor,
+    pullRepo: (repoId) => doAction(repoId, "pull"),
   });
 
   async function loadAll(): Promise<void> {
@@ -392,6 +400,7 @@ export const useStore = defineStore("repoyeti", () => {
       autoCommitPush.value = s.autoCommitPush ?? true;
       autoUpdate.value = s.autoUpdate ?? false;
       autoScan.value = s.autoScan ?? false;
+      portableMode.value = s.portableMode ?? false;
       mcpApprovalGate.value = s.mcpApprovalGate ?? true;
       mcpApprovalTimeoutSecs.value = s.mcpApprovalTimeoutSecs ?? 120;
       defaultEditor.value = s.defaultEditor ?? null;
@@ -502,6 +511,7 @@ export const useStore = defineStore("repoyeti", () => {
           if (typeof payload.autoCommitPull === "boolean") autoCommitPull.value = payload.autoCommitPull;
           if (typeof payload.autoCommitPush === "boolean") autoCommitPush.value = payload.autoCommitPush;
           if (typeof payload.autoScan === "boolean") autoScan.value = payload.autoScan;
+          if (typeof payload.portableMode === "boolean") portableMode.value = payload.portableMode;
           if (typeof payload.mcpApprovalGate === "boolean") mcpApprovalGate.value = payload.mcpApprovalGate;
           if (typeof payload.mcpApprovalTimeoutSecs === "number")
             mcpApprovalTimeoutSecs.value = payload.mcpApprovalTimeoutSecs;
@@ -673,6 +683,9 @@ export const useStore = defineStore("repoyeti", () => {
     setRepoAutoCommit,
     autoScan,
     setAutoScan,
+    portableMode,
+    setPortableMode,
+    openPortableWindow,
     mcpApprovalGate,
     mcpApprovalTimeoutSecs,
     setMcpApprovalGate,

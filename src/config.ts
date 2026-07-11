@@ -292,6 +292,14 @@ export interface RepoYetiConfig {
    */
   autoScan?: boolean;
   /**
+   * Open the app UI in a chromeless Chromium app window (msedge/chrome --app=URL) instead of a
+   * normal browser tab. Absent/false = OFF (a plain tab). Applies both to the in-app toggle
+   * (POST /api/portable-window, fired the moment it's switched on) and to the desktop
+   * launcher/tray, which reads this flag off runtime.json (see src/instance.ts) so a cold start
+   * follows the same preference before the daemon is even up. See src/portable-window.mjs.
+   */
+  portableMode?: boolean;
+  /**
    * "Open with…" default external editor id (see src/service/editors.ts CATALOG — "vscode",
    * "cursor", "notepad++", the "system" file-manager pseudo-editor, …). The file viewer's
    * Open-with button launches this when the owner doesn't pick a specific editor from the

@@ -38,6 +38,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { useTooltipConfig } from "@/lib/tooltip-config";
 import type { Repo } from "../../types";
 
 const props = withDefaults(defineProps<{ repo: Repo; draggable?: boolean; expanded: boolean }>(), {
@@ -46,6 +47,9 @@ const props = withDefaults(defineProps<{ repo: Repo; draggable?: boolean; expand
 const emit = defineEmits<{ toggle: [] }>();
 const store = useStore();
 const { t } = useI18n();
+// Dropdown triggers can't take the reka Tooltip wrapper (stacked as-child triggers break the
+// popper anchor), so their native :title is gated on the same "show tooltips" setting instead.
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 const st = computed(() => props.repo.status);
 const isClean = computed(
@@ -232,38 +236,44 @@ function onAccount(a: { host: string; login: string } | null): void {
           {{ $t("repo.badge.behindTooltip", { count: st.behind }) }}{{ st.fetchedAt ? ` · ${fromNow(st.fetchedAt)}` : "" }}
         </TooltipContent>
       </Tooltip>
-      <span
-        v-if="st && st.ahead > 0"
-        :class="statusChip('success')"
-        :title="$t('repo.badge.aheadLabel', { count: st.ahead })"
-        :aria-label="$t('repo.badge.aheadLabel', { count: st.ahead })"
-      >
-        <ArrowUp :size="12" /><span class="ml-0.5">{{ st.ahead }}</span
-        ><span :class="statusWord">&nbsp;{{ $t("repo.badge.ahead") }}</span>
-      </span>
-      <span
-        v-if="st && st.dirty > 0"
-        :class="statusChip('warning')"
-        :title="$t('repo.badge.changedLabel', { count: st.dirty })"
-        :aria-label="$t('repo.badge.changedLabel', { count: st.dirty })"
-      >
-        <Pencil :size="12" /><span class="ml-0.5">{{ st.dirty }}</span
-        ><span :class="statusWord">&nbsp;{{ $t("repo.badge.changed") }}</span>
-      </span>
-      <span v-if="isClean" :class="statusChip('muted')" :title="$t('repo.badge.clean')" :aria-label="$t('repo.badge.clean')">
-        <Check :size="12" /><span :class="statusWord">&nbsp;{{ $t("repo.badge.clean") }}</span>
-      </span>
+      <Tooltip v-if="st && st.ahead > 0">
+        <TooltipTrigger as-child>
+          <span :class="statusChip('success')" :aria-label="$t('repo.badge.aheadLabel', { count: st.ahead })">
+            <ArrowUp :size="12" /><span class="ml-0.5">{{ st.ahead }}</span
+            ><span :class="statusWord">&nbsp;{{ $t("repo.badge.ahead") }}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{{ $t("repo.badge.aheadLabel", { count: st.ahead }) }}</TooltipContent>
+      </Tooltip>
+      <Tooltip v-if="st && st.dirty > 0">
+        <TooltipTrigger as-child>
+          <span :class="statusChip('warning')" :aria-label="$t('repo.badge.changedLabel', { count: st.dirty })">
+            <Pencil :size="12" /><span class="ml-0.5">{{ st.dirty }}</span
+            ><span :class="statusWord">&nbsp;{{ $t("repo.badge.changed") }}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{{ $t("repo.badge.changedLabel", { count: st.dirty }) }}</TooltipContent>
+      </Tooltip>
+      <Tooltip v-if="isClean">
+        <TooltipTrigger as-child>
+          <span :class="statusChip('muted')" :aria-label="$t('repo.badge.clean')">
+            <Check :size="12" /><span :class="statusWord">&nbsp;{{ $t("repo.badge.clean") }}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{{ $t("repo.badge.clean") }}</TooltipContent>
+      </Tooltip>
       <AlertTriangle v-if="st?.error" :size="14" class="text-destructive" />
     </div>
 
     <!-- identity avatar → dropdown picker (stops row toggle; no Tooltip wrapper —
-         stacking two as-child triggers on one element breaks reka's popper anchor) -->
+         stacking two as-child triggers on one element breaks reka's popper anchor, so the
+         hover hint is a native :title, gated on the "show tooltips" setting) -->
     <DropdownMenu>
       <DropdownMenuTrigger
-        :title="[
+        :title="tooltipsEnabled ? ([
           repo.syncAccountLogin ? `Syncs as ${repo.syncAccountLogin}` : null,
           identity ? `${identity.displayName} · ${identity.gitEmail}` : null,
-        ].filter(Boolean).join(' · ') || $t('repo.identity.setTitle')"
+        ].filter(Boolean).join(' · ') || $t('repo.identity.setTitle')) : undefined"
         :class="
           cn(
             'flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50',

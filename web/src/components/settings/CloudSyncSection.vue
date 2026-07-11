@@ -7,6 +7,7 @@ import { useStore } from "../../store";
 import { fromNow } from "@/lib/util";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import SettingsRow from "@/shell/SettingsRow.vue";
+import InfoHint from "@/shell/InfoHint.vue";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
@@ -72,10 +73,7 @@ async function disconnect(): Promise<void> {
 </script>
 
 <template>
-  <SettingsGroup :label="$t('settings.cardCloudSync')">
-    <p class="px-3.5 py-2.5 text-[12px] leading-snug text-muted-foreground">
-      {{ $t("settings.cloudSync.privacyNote") }}
-    </p>
+  <SettingsGroup :label="$t('settings.cardCloudSync')" :description="$t('settings.cloudSync.privacyNote')">
     <!-- signed out entirely → the primary action is signing in with Connections -->
     <div v-if="!store.owner" class="flex flex-col gap-2.5 px-3.5 py-3">
       <span class="flex flex-col gap-0.5">
@@ -94,7 +92,8 @@ async function disconnect(): Promise<void> {
 
     <template v-else>
       <!-- master toggle -->
-      <SettingsRow :label="$t('settings.cloudSync.enableLabel')" :description="$t('settings.cloudSync.enableHint')">
+      <SettingsRow :label="$t('settings.cloudSync.enableLabel')">
+        <template #info><InfoHint :text="$t('settings.cloudSync.enableHint')" /></template>
         <template #control>
           <Loader2 v-if="store.syncLoading" :size="15" class="animate-spin text-muted-foreground" />
           <Switch

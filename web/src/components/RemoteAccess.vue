@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const open = defineModel<boolean>("open", { required: true });
 const store = useStore();
@@ -56,14 +57,22 @@ watch(
   { immediate: true },
 );
 
+// Set when enabling remote is refused because no Connections owner has claimed this
+// daemon yet. Discloses the inline sign-in prompt under the toggle instead of
+// redirecting the page out from under the dialog.
+const needsOwner = ref(false);
+watch(open, (isOpen) => {
+  if (isOpen) needsOwner.value = false;
+});
+
 async function setMode(toRemote: boolean): Promise<void> {
   switching.value = true;
   try {
     await store.setMode(toRemote ? "remote" : "local");
+    needsOwner.value = false;
   } catch (e) {
     if (e instanceof ApiError && e.code === "NEEDS_OWNER") {
-      toast.message(t("remote.needsOwner"));
-      window.location.href = "/oauth/login"; // claim ownership, then come back and re-toggle
+      needsOwner.value = true;
       return;
     }
     toast.error(t("remote.modeFailed"));
@@ -124,8 +133,22 @@ async function copyLink(): Promise<void> {
         />
       </label>
 
-      <!-- editing-over-remote policy (applies whenever remote access is on) -->
+      <!-- Turning remote on needs a claimed Connections owner: disclose the sign-in step
+           inline instead of redirecting out from under the toggle. -->
+      <div
+        v-if="needsOwner && !isRemote"
+        class="flex flex-col gap-2.5 rounded-md border border-info/30 bg-info/10 p-3"
+      >
+        <p class="text-[12.5px] leading-snug text-foreground/90">{{ $t("remote.needsOwner") }}</p>
+        <Button as="a" href="/oauth/login" size="sm" class="self-start">
+          <Cloud />
+          {{ $t("remote.connectCta") }}
+        </Button>
+      </div>
+
+      <!-- editing-over-remote policy — only meaningful while remote access is on -->
       <label
+        v-if="isRemote"
         class="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-secondary/30 px-3 py-2.5"
       >
         <span class="flex flex-col gap-0.5">
@@ -163,10 +186,15 @@ async function copyLink(): Promise<void> {
             <code
               class="mono min-w-0 flex-1 truncate rounded-md border border-border bg-secondary/40 px-2.5 py-2 text-[12px]"
             >{{ store.tunnelUrl }}</code>
-            <Button variant="secondary" size="icon" :aria-label="$t('remote.copy')" @click="copyLink">
-              <Check v-if="copied" class="text-success" />
-              <Copy v-else />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="secondary" size="icon" :aria-label="$t('remote.copy')" @click="copyLink">
+                  <Check v-if="copied" class="text-success" />
+                  <Copy v-else />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ $t("remote.copy") }}</TooltipContent>
+            </Tooltip>
           </div>
           <a
             :href="store.tunnelUrl"

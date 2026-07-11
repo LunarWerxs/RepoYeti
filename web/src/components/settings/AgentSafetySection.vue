@@ -51,11 +51,9 @@ const on = computed(() => store.mcpApprovalGate);
 </script>
 
 <template>
-  <SettingsGroup :label="$t('settings.cardMcpApprovalGate')">
-    <p class="px-3.5 py-2.5 text-[12px] leading-snug text-muted-foreground">
-      {{ $t("settings.mcpApprovalGateDescription") }}
-    </p>
-    <SettingsRow :label="$t('settings.mcpApprovalGate')" :description="$t('settings.mcpApprovalGateHint')">
+  <SettingsGroup :label="$t('settings.cardMcpApprovalGate')" :description="$t('settings.mcpApprovalGateDescription')">
+    <SettingsRow :label="$t('settings.mcpApprovalGate')">
+      <template #info><InfoHint :text="$t('settings.mcpApprovalGateHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.mcpApprovalGate"

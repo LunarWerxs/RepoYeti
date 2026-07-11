@@ -7,6 +7,7 @@ import { useStore } from "../../store";
 import { ApiError } from "../../api";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import SettingsRow from "@/shell/SettingsRow.vue";
+import InfoHint from "@/shell/InfoHint.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -161,10 +162,7 @@ async function onStyle(style: string): Promise<void> {
 
 <template>
   <!-- AI commit messages ──────────────────────────────────────── -->
-  <SettingsGroup :label="$t('settings.cardAi')">
-    <p class="px-3.5 py-2.5 text-[12px] leading-snug text-muted-foreground">
-      {{ $t("settings.aiDescription") }}
-    </p>
+  <SettingsGroup :label="$t('settings.cardAi')" :description="$t('settings.aiDescription')">
     <!-- Providers -->
     <div class="flex flex-col gap-1.5 px-3.5 py-3">
       <span class="text-[12px] text-muted-foreground">{{ $t("settings.providers") }}</span>
@@ -361,7 +359,8 @@ async function onStyle(style: string): Promise<void> {
     </div>
 
     <!-- Smart-commit YOLO mode -->
-    <SettingsRow :label="$t('settings.aiYolo')" :description="$t('settings.aiYoloHint')">
+    <SettingsRow :label="$t('settings.aiYolo')">
+      <template #info><InfoHint :text="$t('settings.aiYoloHint')" /></template>
       <template #control>
         <Switch
           :model-value="settings.yolo"
@@ -372,7 +371,8 @@ async function onStyle(style: string): Promise<void> {
     </SettingsRow>
 
     <!-- AI commit-message style -->
-    <SettingsRow :label="$t('settings.aiStyle')" :description="$t('settings.aiStyleHint')">
+    <SettingsRow :label="$t('settings.aiStyle')">
+      <template #info><InfoHint :text="$t('settings.aiStyleHint')" /></template>
       <template #control>
         <select
           :value="settings.style"

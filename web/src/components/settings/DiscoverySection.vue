@@ -18,8 +18,8 @@ const newRoot = ref("");
 const addingRoot = ref(false);
 const confirmRemoveRoot = ref<string | null>(null);
 // Load the current roots/servers whenever the sheet opens. Split out of the combined
-// open-watcher that used to live in Settings.vue; the identities/accounts/tunnel half of it
-// now lives in IdentityAccessSection.
+// open-watcher that used to live in Settings.vue; the identities/accounts half now lives
+// in IdentitiesSection and the access/tunnel half in AccessSection.
 watch(
   () => props.open,
   (isOpen) => {
@@ -94,10 +94,7 @@ async function removeServer(id: string): Promise<void> {
 
 <template>
   <!-- Scan folders (discovery roots) ───────────────────────────────── -->
-  <SettingsGroup :label="$t('settings.cardRoots')">
-    <p class="px-3.5 py-2.5 text-[12px] leading-snug text-muted-foreground">
-      {{ $t("settings.rootsHint") }}
-    </p>
+  <SettingsGroup :label="$t('settings.cardRoots')" :description="$t('settings.rootsHint')">
     <div class="flex flex-col gap-2.5 px-3.5 py-3">
       <p v-if="!store.roots.length" class="text-[12.5px] text-muted-foreground">
         {{ $t("settings.rootsEmpty") }}
@@ -138,9 +135,8 @@ async function removeServer(id: string): Promise<void> {
 
   <!-- Lore servers (clone-from-server registry) ─────────────────────────── -->
   <SettingsGroup :label="$t('settings.cardServers')">
-    <p class="px-3.5 py-2.5 text-[12px] leading-snug text-muted-foreground">
-      {{ $t("settings.serversHint") }}
-    </p>
+    <!-- Both the section blurb and the IP tip live behind the one info icon. -->
+    <template #description>{{ $t("settings.serversHint") }} {{ $t("settings.serversIpHint") }}</template>
     <div class="flex flex-col gap-2.5 px-3.5 py-3">
       <p v-if="!store.servers.length" class="text-[12.5px] text-muted-foreground">
         {{ $t("settings.serversEmpty") }}
@@ -186,7 +182,6 @@ async function removeServer(id: string): Promise<void> {
             {{ $t("settings.serversAdd") }}
           </Button>
         </div>
-        <p class="text-[11.5px] text-muted-foreground">{{ $t("settings.serversIpHint") }}</p>
       </form>
     </div>
   </SettingsGroup>

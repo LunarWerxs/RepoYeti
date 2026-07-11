@@ -8,6 +8,7 @@ import { toast } from "vue-sonner";
 import { i18n } from "@/i18n";
 import { useStore } from "@/store";
 import BranchPanel from "@/components/BranchPanel.vue";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("vue-sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -38,11 +39,19 @@ function mountPanel() {
   // DropdownMenuContent teleports into document.body (reka-ui's DropdownMenuPortal), so the
   // component must be attached to a live document for the portal target to exist and for the
   // dropdown to actually open in happy-dom.
-  activeWrapper = mount(BranchPanel, {
-    props: { repoId, branch: "main", detached: false },
-    global: { plugins: [i18n] },
-    attachTo: document.body,
-  });
+  activeWrapper = mount(
+    {
+      components: { BranchPanel, TooltipProvider },
+      props: ["repoId", "branch", "detached"],
+      template:
+        '<TooltipProvider><BranchPanel :repo-id="repoId" :branch="branch" :detached="detached" /></TooltipProvider>',
+    },
+    {
+      props: { repoId, branch: "main", detached: false },
+      global: { plugins: [i18n] },
+      attachTo: document.body,
+    },
+  );
   return activeWrapper;
 }
 
@@ -98,7 +107,7 @@ describe("BranchPanel.vue", () => {
 
     const wrapper = mountPanel();
     // Open the inline create-branch form via the "+" toggle button.
-    const plusBtn = wrapper.findAll("button").find((b) => b.attributes("title")?.includes("Create"))!;
+    const plusBtn = wrapper.findAll("button").find((b) => b.attributes("aria-label")?.includes("Create"))!;
     await plusBtn.trigger("click");
     await wrapper.vm.$nextTick();
 

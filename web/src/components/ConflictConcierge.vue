@@ -7,6 +7,7 @@
 import { X, GitMerge, ChevronRight } from "@lucide/vue";
 import { useStore } from "../store";
 import { t } from "../i18n";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Repo } from "../types";
 
 const store = useStore();
@@ -79,15 +80,19 @@ function goToRepo(repo: Repo): void {
           <div class="truncate text-[11px] text-warning">{{ reason(repo) }}</div>
         </div>
         <ChevronRight :size="14" class="shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" />
-        <button
-          type="button"
-          class="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-warning/15 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-          :aria-label="$t('triage.dismissAria', { name: repo.name })"
-          :title="$t('triage.dismiss')"
-          @click.stop="store.dismissAttention(repo.id)"
-        >
-          <X :size="13" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              class="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-warning/15 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              :aria-label="$t('triage.dismissAria', { name: repo.name })"
+              @click.stop="store.dismissAttention(repo.id)"
+            >
+              <X :size="13" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("triage.dismiss") }}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   </div>

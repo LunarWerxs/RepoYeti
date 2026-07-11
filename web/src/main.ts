@@ -11,6 +11,12 @@ import "vue-sonner/style.css";
 // exists on disk and the import rejects (Vite fires `vite:preloadError`). Reload once to
 // pull the fresh build instead of showing a dead editor. A short timestamp guard prevents a
 // reload loop if the new build is genuinely broken (chunk truly missing).
+//
+// Before reloading, nudge the service worker to check for the new build (registration
+// .update() fetches the fresh sw.js). Without this, the reload could resurrect the same
+// stale shell from the old SW's precache and 404 on the same chunk again — the second half
+// of the "Monaco fails even after a reload" bug (the first half was the non-atomic dist
+// swap, fixed by scripts/swap-dist.mjs).
 window.addEventListener("vite:preloadError", (event) => {
   const KEY = "repoyeti:last-chunk-reload";
   const now = Date.now();
@@ -22,7 +28,15 @@ window.addEventListener("vite:preloadError", (event) => {
   }
   sessionStorage.setItem(KEY, String(now));
   event.preventDefault();
-  window.location.reload();
+  const swUpdate =
+    navigator.serviceWorker
+      ?.getRegistrations()
+      .then((regs) => Promise.all(regs.map((r) => r.update())))
+      .catch(() => undefined) ?? Promise.resolve();
+  // Cap the SW check so a hung update can never stall recovery.
+  void Promise.race([swUpdate, new Promise((r) => setTimeout(r, 1500))]).finally(() =>
+    window.location.reload(),
+  );
 });
 
 createApp(App).use(createPinia()).use(autoAnimatePlugin).use(i18n).mount("#app");

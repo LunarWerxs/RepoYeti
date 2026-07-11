@@ -5,6 +5,7 @@ import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { changesViewSize } from "@/lib/changes-view";
 import { useTheme } from "@/lib/theme";
+import { useTooltipConfig } from "@/lib/tooltip-config";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import SettingsRow from "@/shell/SettingsRow.vue";
 import InfoHint from "@/shell/InfoHint.vue";
@@ -22,6 +23,10 @@ const { t } = useI18n();
 
 // Shared kit light/dark/system theme — writes to the same store App.vue reads.
 const { mode: theme } = useTheme();
+
+// Kit-wide tooltip kill-switch (localStorage, like theme). The root TooltipProvider reads
+// this flag; InfoHints opt out and stay on (see kit lib/tooltip-config.ts + InfoHint.vue).
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 // Toggle the per-file/per-repo diff statistics (server setting; rolls back + toasts on fail).
 async function onDiffStats(enabled: boolean): Promise<void> {
@@ -62,6 +67,28 @@ async function onAlwaysSideBySide(always: boolean): Promise<void> {
     toast.error(t("settings.diffPatchAlwaysFailed"));
   }
 }
+
+// Toggle "Portable window" (server setting). Turning it ON also opens one right away, so the
+// owner sees the effect immediately instead of only on the next launch.
+async function onPortableMode(enabled: boolean): Promise<void> {
+  try {
+    await store.setPortableMode(enabled);
+  } catch {
+    toast.error(t("settings.portableWindowFailed"));
+    return;
+  }
+  if (!enabled) return;
+  // The setting is already persisted; the immediate open is best-effort on top of it,
+  // so a transport failure here (daemon mid-restart, expired session) must surface a
+  // toast too, not become an unhandled rejection.
+  try {
+    const r = await store.openPortableWindow();
+    if (r.ok) toast.success(t("settings.portableWindowOpened"));
+    else toast.error(t("settings.portableWindowNoBrowser"));
+  } catch {
+    toast.error(t("settings.portableWindowFailed"));
+  }
+}
 </script>
 
 <template>
@@ -77,6 +104,22 @@ async function onAlwaysSideBySide(always: boolean): Promise<void> {
             <SelectItem value="system">{{ $t("settings.themeSystem") }}</SelectItem>
           </SelectContent>
         </Select>
+      </template>
+    </SettingsRow>
+    <SettingsRow :label="$t('settings.showTooltips')">
+      <template #info><InfoHint :text="$t('settings.showTooltipsHint')" /></template>
+      <template #control>
+        <Switch v-model="tooltipsEnabled" :aria-label="$t('settings.showTooltips')" />
+      </template>
+    </SettingsRow>
+    <SettingsRow :label="$t('settings.portableWindow')">
+      <template #info><InfoHint :text="$t('settings.portableWindowHint')" /></template>
+      <template #control>
+        <Switch
+          :model-value="store.portableMode"
+          :aria-label="$t('settings.portableWindow')"
+          @update:model-value="(v: boolean) => onPortableMode(v)"
+        />
       </template>
     </SettingsRow>
     <div class="flex flex-col gap-1.5 px-3.5 py-3">
@@ -97,7 +140,8 @@ async function onAlwaysSideBySide(always: boolean): Promise<void> {
 
   <!-- Diffs ─────────────────────────────────────────────────────── -->
   <SettingsGroup :label="$t('settings.cardDiffs')">
-    <SettingsRow :label="$t('settings.diffStats')" :description="$t('settings.diffStatsHint')">
+    <SettingsRow :label="$t('settings.diffStats')">
+      <template #info><InfoHint :text="$t('settings.diffStatsHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.diffStatsEnabled"
@@ -106,7 +150,8 @@ async function onAlwaysSideBySide(always: boolean): Promise<void> {
         />
       </template>
     </SettingsRow>
-    <SettingsRow :label="$t('settings.diffPatchAlways')" :description="$t('settings.diffPatchAlwaysHint')">
+    <SettingsRow :label="$t('settings.diffPatchAlways')">
+      <template #info><InfoHint :text="$t('settings.diffPatchAlwaysHint')" /></template>
       <template #control>
         <Switch
           :model-value="!store.diffPatchEnabled"

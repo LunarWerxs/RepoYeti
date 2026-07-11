@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { Settings as SettingsIcon } from "@lucide/vue";
 import type { PushPanelSide } from "@/shell/usePushPanel";
 import SettingsPanel from "@/shell/SettingsPanel.vue";
-import IdentityAccessSection from "./settings/IdentityAccessSection.vue";
+import SettingsTabs from "@/shell/SettingsTabs.vue";
+import IdentitiesSection from "./settings/IdentitiesSection.vue";
+import AccessSection from "./settings/AccessSection.vue";
 import DiscoverySection from "./settings/DiscoverySection.vue";
 import CloudSyncSection from "./settings/CloudSyncSection.vue";
 import AppearanceSection from "./settings/AppearanceSection.vue";
@@ -17,6 +21,23 @@ const open = defineModel<boolean>("open", { required: true });
 const props = withDefaults(defineProps<{ side?: PushPanelSide; rightOffsetPx?: number }>(), {
   side: "right",
   rightOffsetPx: 0,
+});
+
+const { t } = useI18n();
+
+// The panel groups its sections into tabs so the everyday knobs (General) aren't
+// buried under the power-user ones (firewall, agent rail, tunnel, AI providers).
+type TabId = "general" | "identities" | "automation" | "access";
+const tab = ref<TabId>("general");
+const tabs = computed<{ id: TabId; label: string }[]>(() => [
+  { id: "general", label: t("settings.tabs.general") },
+  { id: "identities", label: t("settings.tabs.identities") },
+  { id: "automation", label: t("settings.tabs.automation") },
+  { id: "access", label: t("settings.tabs.access") },
+]);
+// Every open lands back on General — the tab most visits need.
+watch(open, (isOpen) => {
+  if (isOpen) tab.value = "general";
 });
 </script>
 
@@ -33,35 +54,38 @@ const props = withDefaults(defineProps<{ side?: PushPanelSide; rightOffsetPx?: n
     </template>
 
     <div class="flex flex-col gap-4">
-      <!-- Identities, connected account, and access mode ────────────────── -->
-      <IdentityAccessSection :open="open" />
+      <SettingsTabs v-model="tab" :tabs="tabs" />
 
-      <!-- ⭐ Identity Firewall: pin a required identity per repo-path glob ─── -->
-      <IdentityFirewallSection :open="open" />
+      <!-- All sections stay MOUNTED (v-show, not v-if): several refresh their data from an
+           `open` watcher that fires when the panel opens, which would never run for a section
+           first mounted by a later tab click. -->
 
-      <!-- Discovery: scan folders + lore servers ─────────────────────────── -->
-      <DiscoverySection :open="open" />
+      <!-- General: appearance, folders to scan, editor, sync + hotkeys ──────── -->
+      <div v-show="tab === 'general'" class="flex flex-col gap-4">
+        <AppearanceSection />
+        <DiscoverySection :open="open" />
+        <EditorSection />
+        <SyncHotkeysSection />
+      </div>
 
-      <!-- Opt-in cloud sync of theme/preferences via Connections ──────────── -->
-      <CloudSyncSection />
+      <!-- Identities: git identities, GitHub accounts, ⭐ Identity Firewall ──── -->
+      <div v-show="tab === 'identities'" class="flex flex-col gap-4">
+        <IdentitiesSection :open="open" />
+        <IdentityFirewallSection :open="open" />
+      </div>
 
-      <!-- Appearance + diff display preferences ──────────────────────────── -->
-      <AppearanceSection />
+      <!-- Automation: auto-commit, ⭐ Agent Safety Rail, AI providers ────────── -->
+      <div v-show="tab === 'automation'" class="flex flex-col gap-4">
+        <AutoCommitSection />
+        <AgentSafetySection />
+        <AiProvidersSection :open="open" />
+      </div>
 
-      <!-- "Open with…" default external editor ────────────────────────────── -->
-      <EditorSection />
-
-      <!-- Background sync + keyboard shortcuts ────────────────────────────── -->
-      <SyncHotkeysSection />
-
-      <!-- Auto-commit timer (opt-in per repo on each card) ────────────────── -->
-      <AutoCommitSection />
-
-      <!-- ⭐ Agent Safety Rail: MCP mutating-call approval gate + auto-deny timeout ── -->
-      <AgentSafetySection />
-
-      <!-- AI commit-message providers, YOLO mode, and style ───────────────── -->
-      <AiProvidersSection :open="open" />
+      <!-- Access: Connections account, remote access + tunnel, cloud sync ───── -->
+      <div v-show="tab === 'access'" class="flex flex-col gap-4">
+        <AccessSection :open="open" />
+        <CloudSyncSection />
+      </div>
     </div>
   </SettingsPanel>
 </template>

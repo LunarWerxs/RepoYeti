@@ -24,11 +24,13 @@ const { t } = useI18n();
 // Load the detected-editor catalogue when Settings mounts (lazy; no-ops after the first success).
 onMounted(() => void store.loadEditors());
 
-// <Select> is string-valued; the empty string is our "auto-pick the first installed editor"
-// sentinel (maps to a null preference on the daemon).
+// <Select> is string-valued and reka-ui rejects an empty-string item value, so AUTO is the
+// non-empty sentinel for "auto-pick the first installed editor" (stored as a null preference
+// on the daemon — the store/API layer still uses "" for "clear").
+const AUTO = "__auto__";
 const editorChoice = computed<string>({
-  get: () => store.defaultEditor ?? "",
-  set: (v: string) => void onPick(v),
+  get: () => store.defaultEditor ?? AUTO,
+  set: (v: string) => void onPick(v === AUTO ? "" : v),
 });
 
 async function onPick(id: string): Promise<void> {
@@ -56,7 +58,7 @@ function editorLabel(e: EditorInfo): string {
       <Select v-model="editorChoice">
         <SelectTrigger class="w-full" :aria-label="$t('settings.editorDefault')"><SelectValue /></SelectTrigger>
         <SelectContent>
-          <SelectItem value="">{{ $t("settings.editorAuto") }}</SelectItem>
+          <SelectItem :value="AUTO">{{ $t("settings.editorAuto") }}</SelectItem>
           <SelectItem
             v-for="e in store.editorsCatalog"
             :key="e.id"

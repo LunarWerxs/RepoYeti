@@ -43,9 +43,10 @@ describe("IdentityManager.vue", () => {
 
   it("opens and focuses the new identity form from the empty state", async () => {
     const wrapper = mountManager();
-    // The blurb now renders as an always-visible footer paragraph (identity.description),
-    // replacing the old info-button tooltip the earlier version of this test looked for.
-    expect(wrapper.text()).toContain("RepoYeti-managed git identities");
+    // The identity.description blurb now lives behind the SettingsGroup's InfoHint (circle-i)
+    // tooltip trigger rather than as always-visible page text — assert the trigger renders.
+    const infoHint = wrapper.findAll("button").find((b) => b.attributes("aria-label") === "More information");
+    expect(infoHint).toBeTruthy();
 
     const addButton = wrapper.findAll("button").find((b) => b.text().includes("Add identity"));
     expect(addButton).toBeTruthy();

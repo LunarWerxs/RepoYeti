@@ -3,6 +3,9 @@ import type { Deps } from "../deps.ts";
 import { VERSION, accessMode, redactTunnel, saveConfig } from "../../config.ts";
 import { getTunnelUrl, tunnelActive } from "../../runtime.ts";
 import { broadcast } from "../../bus.ts";
+import { readInstanceInfo, updateInstanceInfo, instanceFilePath } from "../../instance.ts";
+import { openPortableWindow } from "../../portable-window.mjs";
+import { dirname, join } from "node:path";
 import { diffStatsEnabled, setDiffStatsEnabled } from "../../read/diffstat.ts";
 import {
   refreshAllRepos,
@@ -95,6 +98,11 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       // Auto-scan the whole machine on every app start (owner setting; off by default). A pure
       // stored flag — the web client acts on it at boot; the daemon has no runtime side effect.
       autoScan: cfg.autoScan === true,
+      // Whether the app UI opens in a chromeless Chromium app window instead of a browser tab
+      // (owner setting; off by default). The desktop launcher/tray reads the same flag off
+      // runtime.json (see src/instance.ts), not this endpoint, so it can act before the daemon
+      // is up — this is just what the Settings UI reflects on load.
+      portableMode: cfg.portableMode === true,
       // ⭐ Agent Safety Rail: whether mutating MCP tool calls are gated behind a human
       // approve/deny (owner setting; default ON), and the auto-deny timeout in seconds.
       mcpApprovalGate: approvalGateEnabled(),
@@ -215,6 +223,14 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       saveConfig(cfg);
       broadcast("settings_changed", { autoScan: cfg.autoScan });
     }
+    if (typeof b.portableMode === "boolean") {
+      cfg.portableMode = b.portableMode;
+      saveConfig(cfg);
+      // Keep runtime.json current so the tray launcher picks up the new preference on its
+      // very next cold start, even though it never talks to this daemon to learn it.
+      updateInstanceInfo({ portableMode: cfg.portableMode });
+      broadcast("settings_changed", { portableMode: cfg.portableMode });
+    }
     // ── ⭐ Agent Safety Rail settings ────────────────────────────────────────
     if (typeof b.mcpApprovalGate === "boolean") {
       cfg.mcpApprovalGate = b.mcpApprovalGate;
@@ -256,9 +272,29 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       autoUpdate: autoUpdateEnabled(),
       autoUpdateIntervalSecs: getAutoUpdateIntervalSecs(),
       autoScan: cfg.autoScan === true,
+      portableMode: cfg.portableMode === true,
       mcpApprovalGate: approvalGateEnabled(),
       mcpApprovalTimeoutSecs: getApprovalTimeoutSecs(),
       defaultEditor: cfg.defaultEditor ?? null,
     });
+  });
+
+  // Open this daemon's own UI in a chromeless Chromium app window (msedge/chrome --app=URL)
+  // instead of a browser tab. Fired the moment the owner flips the "Portable window" toggle
+  // on, and available any time after (e.g. a manual re-open). Same auth/guard posture as every
+  // other mutating route here — gated by the single /api/* auth middleware, nothing extra.
+  app.post("/api/portable-window", async (c) => {
+    // Prefer the pointer's recorded URL (the port the daemon ACTUALLY bound, which can differ
+    // from the configured one — see writeInstanceInfo in cli/lifecycle.ts); fall back to the
+    // URL this very request arrived on, since the daemon is always loopback-only.
+    const url = readInstanceInfo()?.url ?? new URL(c.req.url).origin;
+    // Dedicated profile (sibling of runtime.json) so the window remembers its own
+    // size/position across launches instead of sharing the user's main browser profile.
+    // Derived from instanceFilePath()'s dirname — the exact dir runtime.json itself lives
+    // in — so this and the tray launcher (which reads the same runtime.json path) always
+    // agree, and REPOYETI_HOME is honoured automatically.
+    const profileDir = join(dirname(instanceFilePath()), "portable-profile");
+    const result = await openPortableWindow(url, { profileDir });
+    return c.json(result);
   });
 }

@@ -33,7 +33,7 @@ function loadRows(): void {
 }
 
 // Seed the editable rows whenever the Settings sheet opens or the store's rules change under us
-// (e.g. another tab saved first) — mirrors IdentityAccessSection's on-open refresh pattern.
+// (e.g. another tab saved first) — mirrors IdentitiesSection's on-open refresh pattern.
 watch(() => props.open, (isOpen) => {
   if (isOpen) void store.loadIdentityRules().then(loadRows);
 });
@@ -67,10 +67,7 @@ async function save(): Promise<void> {
 </script>
 
 <template>
-  <SettingsGroup :label="$t('identity.firewall.title')">
-    <p class="px-3.5 py-2.5 text-[12px] leading-snug text-muted-foreground">
-      {{ $t("identity.firewall.description") }}
-    </p>
+  <SettingsGroup :label="$t('identity.firewall.title')" :description="$t('identity.firewall.description')">
     <div class="flex flex-col gap-3 px-3.5 py-3">
       <div v-if="rows.length" class="flex flex-col gap-2">
         <div

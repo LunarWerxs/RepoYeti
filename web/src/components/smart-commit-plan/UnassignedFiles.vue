@@ -13,6 +13,8 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { useTooltipConfig } from "@/lib/tooltip-config";
+import ExpandTransition from "@/shell/ExpandTransition.vue";
 
 interface EditableGroup {
   key: string;
@@ -34,6 +36,7 @@ const emit = defineEmits<{
   "toggle-diff": [path: string];
   "move-file": [path: string, target: string];
 }>();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 function statusVariant(letter: string | undefined): "success" | "warning" | "destructive" | "info" | "secondary" {
   switch (letter) {
@@ -84,7 +87,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
             <button
               type="button"
               class="flex shrink-0 items-center border-l border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-              :title="$t('repo.smartCommit.fileMenu')"
+              :title="tooltipsEnabled ? $t('repo.smartCommit.fileMenu') : undefined"
               :aria-label="$t('repo.smartCommit.fileMenu')"
             >
               <MoreVertical :size="13" />
@@ -106,13 +109,15 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
     </div>
 
     <!-- inline diff of an expanded unassigned file (shares the single-open slot) -->
-    <div v-if="openDiff && leftovers.includes(openDiff)" class="mt-2">
-      <SmartCommitFileDiff
-        :key="openDiff"
-        :repo-id="repoId"
-        :path="openDiff"
-        :status="statusByPath[openDiff]"
-      />
-    </div>
+    <ExpandTransition :open="!!(openDiff && leftovers.includes(openDiff))">
+      <div v-if="openDiff && leftovers.includes(openDiff)" class="mt-2">
+        <SmartCommitFileDiff
+          :key="openDiff"
+          :repo-id="repoId"
+          :path="openDiff"
+          :status="statusByPath[openDiff]"
+        />
+      </div>
+    </ExpandTransition>
   </div>
 </template>

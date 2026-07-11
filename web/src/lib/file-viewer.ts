@@ -5,8 +5,9 @@
 // reactive state. On desktop the viewer is a right-side push panel — the page reserves
 // `pageShiftPx` of right padding so it slides left and stays centered (no overlay). On
 // mobile it's an overlay bottom sheet, so there's no page shift.
-import { reactive, ref, computed, watch } from "vue";
+import { reactive, ref, computed } from "vue";
 import { useLocalStorage, useMediaQuery } from "@vueuse/core";
+import { contributeContentInset } from "@/lib/content-inset";
 
 /** A changed file the viewer can display (repo-relative path + its git status). */
 export interface ViewerTarget {
@@ -135,11 +136,8 @@ export const pageShiftPx = computed(() =>
   state.open && isDesktopViewer.value ? viewerWidth.value : 0,
 );
 
-/** While the desktop drawer is open, lock the page behind it so its scrollbar is hidden (the
- *  drawer scrolls its own body). Restores on close; the mobile bottom sheet locks scroll itself. */
-if (typeof document !== "undefined") {
-  watch(
-    () => state.open && isDesktopViewer.value,
-    (locked) => document.documentElement.classList.toggle("overflow-hidden", locked),
-  );
-}
+// The drawer covers the viewport's right edge — publish its width so centered dialogs
+// re-center over the remaining content (kit lib/content-inset.ts). The page itself keeps
+// its native scrollbar: this is a push panel, the content beside it must stay scrollable
+// (the drawer's body scrolls independently via its own overflow-y-auto region).
+contributeContentInset(pageShiftPx);

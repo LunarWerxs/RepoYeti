@@ -25,6 +25,7 @@ import { STATUS_COLOR } from "@/lib/git-status-colors";
 import { cn } from "@/lib/utils";
 import type { EditorTheme } from "@/lib/monaco-setup";
 import { useTheme } from "@/lib/theme";
+import { useTooltipConfig } from "@/lib/tooltip-config";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -33,6 +34,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   viewerMode,
   wordLevelDiff,
@@ -52,6 +54,7 @@ const props = withDefaults(
 defineEmits<{ close: [] }>();
 
 const store = useStore();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 // Monaco is heavy — load it (and its chunk) only when a file is actually shown.
 const Spinner = (): ReturnType<typeof h> =>
@@ -384,7 +387,12 @@ onBeforeUnmount(() => {
            Stays visible in BOTH Content and Diff views whenever not mid-edit (word wrap has no gate). -->
       <DropdownMenu v-if="!editing">
         <DropdownMenuTrigger as-child>
-          <Button variant="ghost" size="icon-sm" :aria-label="'View options'">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            :title="tooltipsEnabled ? $t('fileViewer.viewOptions') : undefined"
+            :aria-label="$t('fileViewer.viewOptions')"
+          >
             <MoreVertical />
           </Button>
         </DropdownMenuTrigger>
@@ -421,14 +429,18 @@ onBeforeUnmount(() => {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <button
-        v-if="props.showClose"
-        class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-        :aria-label="$t('fileViewer.close')"
-        @click="$emit('close')"
-      >
-        <X :size="17" />
-      </button>
+      <Tooltip v-if="props.showClose">
+        <TooltipTrigger as-child>
+          <button
+            class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            :aria-label="$t('fileViewer.close')"
+            @click="$emit('close')"
+          >
+            <X :size="17" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{{ $t("fileViewer.close") }}</TooltipContent>
+      </Tooltip>
     </div>
 
     <!-- body -->

@@ -161,8 +161,10 @@ export async function start(rest: string[]): Promise<void> {
   server = await listen(app, port);
   const url = `http://127.0.0.1:${server.port}`;
   // Advertise where we actually landed (the port may have hopped) so the launcher
-  // opens the right URL and a second launch can detect us. Cleared on clean exit.
-  writeInstanceInfo(server.port ?? port);
+  // opens the right URL and a second launch can detect us. Cleared on clean exit. The extra
+  // portableMode field lets the tray launcher pick an app-window vs. a normal tab on cold start,
+  // before the daemon (and therefore /api/status) is reachable.
+  writeInstanceInfo(server.port ?? port, { portableMode: liveCfg.portableMode === true });
 
   // "Sync my settings with Connections" — load the persisted refresh token, then (if the owner
   // enabled sync) pull the cloud copy in the BACKGROUND so a fresh machine converges without

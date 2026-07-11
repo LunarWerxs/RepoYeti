@@ -8,6 +8,7 @@ import { i18n } from "@/i18n";
 import { useStore } from "@/store";
 import { api } from "@/api";
 import LogPanel from "@/components/LogPanel.vue";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { fileViewer } from "@/lib/file-viewer";
 import type { CommitDetail } from "@/types";
 
@@ -57,18 +58,24 @@ describe("LogPanel.vue", () => {
       .spyOn(api, "commitDetail")
       .mockResolvedValue(detailFor("abc123def"));
 
-    const wrapper = mount(LogPanel, {
-      props: { repoId },
-      global: { plugins: [i18n] },
-    });
-
+    const outer = mount(
+      {
+        components: { LogPanel, TooltipProvider },
+        props: ["repoId"],
+        template: '<TooltipProvider><LogPanel :repo-id="repoId" /></TooltipProvider>',
+      },
+      {
+        props: { repoId },
+        global: { plugins: [i18n] },
+      },
+    );
     // Open the History section.
-    const historyBtn = wrapper.findAll("button").find((b) => b.text().includes("History"))!;
+    const historyBtn = outer.findAll("button").find((b) => b.text().includes("History"))!;
     await historyBtn.trigger("click");
-    await wrapper.vm.$nextTick();
+    await outer.vm.$nextTick();
 
     // Click the commit row (toggleCommit) → fetch #1.
-    const row = wrapper.findAll("div[aria-expanded]")[0]!;
+    const row = outer.findAll("div[aria-expanded]")[0]!;
     await row.trigger("click");
     await flush();
     expect(detailSpy).toHaveBeenCalledOnce();
@@ -97,10 +104,17 @@ describe("LogPanel.vue", () => {
       detailFor(hash),
     );
 
-    const wrapper = mount(LogPanel, {
-      props: { repoId },
-      global: { plugins: [i18n] },
-    });
+    const wrapper = mount(
+      {
+        components: { LogPanel, TooltipProvider },
+        props: ["repoId"],
+        template: '<TooltipProvider><LogPanel :repo-id="repoId" /></TooltipProvider>',
+      },
+      {
+        props: { repoId },
+        global: { plugins: [i18n] },
+      },
+    );
 
     const historyBtn = wrapper.findAll("button").find((b) => b.text().includes("History"))!;
     await historyBtn.trigger("click");
@@ -135,7 +149,14 @@ describe("LogPanel.vue", () => {
     };
     vi.spyOn(api, "commitDetail").mockResolvedValue(detail);
 
-    const wrapper = mount(LogPanel, { props: { repoId }, global: { plugins: [i18n] } });
+    const wrapper = mount(
+      {
+        components: { LogPanel, TooltipProvider },
+        props: ["repoId"],
+        template: '<TooltipProvider><LogPanel :repo-id="repoId" /></TooltipProvider>',
+      },
+      { props: { repoId }, global: { plugins: [i18n] } },
+    );
     const historyBtn = wrapper.findAll("button").find((b) => b.text().includes("History"))!;
     await historyBtn.trigger("click");
     await wrapper.vm.$nextTick();

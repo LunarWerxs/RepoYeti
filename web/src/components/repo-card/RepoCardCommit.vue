@@ -12,6 +12,7 @@ import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
 import { cn } from "@/lib/utils";
 import { useRepoFeedback } from "@/lib/repo-feedback";
+import { useTooltipConfig } from "@/lib/tooltip-config";
 import { shortcutsActive } from "@/lib/hotkeys";
 import SmartCommitPlan from "../SmartCommitPlan.vue";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ const props = defineProps<{ repo: Repo; treeSelection: TreeSelectionApi }>();
 const store = useStore();
 const { t } = useI18n();
 const { friendly } = useRepoFeedback();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 const st = computed(() => props.repo.status);
 const hasRemote = computed(() => !!st.value?.remote);
@@ -229,7 +231,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
         <DropdownMenu v-if="recentMsgs.length">
           <DropdownMenuTrigger
             class="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-            :title="$t('repo.commit.recent')"
+            :title="tooltipsEnabled ? $t('repo.commit.recent') : undefined"
             :aria-label="$t('repo.commit.recent')"
             @click.stop
           >
@@ -247,18 +249,21 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <button
-          v-if="aiHere"
-          type="button"
-          :disabled="generating"
-          :title="$t('repo.commit.generateTitle')"
-          :aria-label="$t('repo.commit.generateTitle')"
-          class="flex size-7 items-center justify-center rounded-md text-primary outline-none transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/40"
-          @click="generate"
-        >
-          <Loader2 v-if="generating" :size="16" class="animate-spin" />
-          <Sparkles v-else :size="16" />
-        </button>
+        <Tooltip v-if="aiHere">
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              :disabled="generating"
+              :aria-label="$t('repo.commit.generateTitle')"
+              class="flex size-7 items-center justify-center rounded-md text-primary outline-none transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/40"
+              @click="generate"
+            >
+              <Loader2 v-if="generating" :size="16" class="animate-spin" />
+              <Sparkles v-else :size="16" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("repo.commit.generateTitle") }}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
 
@@ -278,6 +283,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             <Button
               class="h-9 rounded-l-none border-l border-l-black/15 px-1.5 dark:border-l-white/20"
               :disabled="!commitMsg.trim() || committing"
+              :title="tooltipsEnabled ? $t('repo.commit.moreOptions') : undefined"
               :aria-label="$t('repo.commit.menuLabel')"
             >
               <ChevronDown :size="16" />

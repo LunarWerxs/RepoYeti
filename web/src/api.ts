@@ -122,6 +122,9 @@ export interface RuntimeStatus {
   autoUpdateIntervalSecs: number;
   /** Whether the whole machine is auto-scanned for repos on every app start (owner setting). */
   autoScan: boolean;
+  /** Whether the app UI opens in a chromeless Chromium app window instead of a browser tab
+   *  (owner setting; off by default). The desktop launcher/tray follows the same preference. */
+  portableMode: boolean;
   /** ⭐ Agent Safety Rail: whether mutating MCP tool calls are gated behind owner approve/deny
    *  (owner setting; default ON). */
   mcpApprovalGate: boolean;
@@ -159,6 +162,11 @@ export interface OpenResult {
   message?: string;
   editor?: string;
 }
+
+/** Result of opening the app UI in a chromeless app window (POST /api/portable-window). */
+export type PortableWindowResult =
+  | { ok: true; browser: string }
+  | { ok: false; reason: "no-browser" | "spawn-failed" };
 
 export interface ModeResult {
   ok: boolean;
@@ -299,6 +307,12 @@ export const api = {
   /** Toggle auto-scanning the whole machine on every app start (owner setting; persisted). */
   setAutoScan: (enabled: boolean) =>
     req<{ ok: boolean; autoScan: boolean }>("PUT", "/api/settings", { autoScan: enabled }),
+  /** Toggle opening the app UI in a chromeless app window instead of a browser tab (owner
+   *  setting; persisted). The desktop launcher/tray follows the same preference. */
+  setPortableMode: (enabled: boolean) =>
+    req<{ ok: boolean; portableMode: boolean }>("PUT", "/api/settings", { portableMode: enabled }),
+  /** Open THIS daemon's UI in a chromeless Chromium app window right now. */
+  openPortableWindow: () => req<PortableWindowResult>("POST", "/api/portable-window"),
   /** Toggle silent auto-update + restart of the app on a schedule (owner setting; persisted). */
   setAutoUpdate: (enabled: boolean) =>
     req<{ ok: boolean; autoUpdate: boolean }>("PUT", "/api/settings", { autoUpdate: enabled }),

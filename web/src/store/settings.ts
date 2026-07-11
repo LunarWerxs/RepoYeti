@@ -5,8 +5,9 @@ import {
   type TunnelStatus,
   type EditorInfo,
   type OpenResult,
+  type PortableWindowResult,
 } from "../api";
-import type { PendingApproval } from "../types";
+import type { ActionResult, PendingApproval } from "../types";
 import { useSettingsCloudSync } from "./settings-cloud-sync.ts";
 import { useSettingsNotifications } from "./settings-notifications.ts";
 
@@ -68,9 +69,12 @@ export function useSettings(deps: {
   autoCommitPush: Ref<boolean>;
   autoUpdate: Ref<boolean>;
   autoScan: Ref<boolean>;
+  portableMode: Ref<boolean>;
   mcpApprovalGate: Ref<boolean>;
   mcpApprovalTimeoutSecs: Ref<number>;
   defaultEditor: Ref<string | null>;
+  /** The barrel's doAction("pull") — powers the behind-toast's "Pull now" action. */
+  pullRepo?: (repoId: string) => Promise<ActionResult>;
 }) {
   const {
     mode,
@@ -92,6 +96,7 @@ export function useSettings(deps: {
     autoCommitPush,
     autoUpdate,
     autoScan,
+    portableMode,
     mcpApprovalGate,
     mcpApprovalTimeoutSecs,
     defaultEditor,
@@ -312,6 +317,23 @@ export function useSettings(deps: {
     }
   }
 
+  /** Toggle "Portable window" (optimistic; rolls back on failure). The caller is responsible
+   *  for actually opening the window (openPortableWindow) when this resolves true. */
+  async function setPortableMode(enabled: boolean): Promise<void> {
+    portableMode.value = enabled;
+    try {
+      await api.setPortableMode(enabled);
+    } catch (e) {
+      portableMode.value = !enabled; // roll back
+      throw e;
+    }
+  }
+  /** Open THIS daemon's UI in a chromeless app window right now. Never throws (the daemon
+   *  always answers 200 with an {ok:true|false} body — see openPortableWindow.mjs). */
+  async function openPortableWindow(): Promise<PortableWindowResult> {
+    return api.openPortableWindow();
+  }
+
   /** Toggle silent auto-update + restart of the app (optimistic; rolls back on failure). */
   async function setAutoUpdate(enabled: boolean): Promise<void> {
     autoUpdate.value = enabled;
@@ -497,7 +519,7 @@ export function useSettings(deps: {
     notifyAutoCommitted,
     notifyAutoCommitBlocked,
     notifyNewProjects,
-  } = useSettingsNotifications();
+  } = useSettingsNotifications(deps.pullRepo);
 
   return {
     authReady,
@@ -528,6 +550,8 @@ export function useSettings(deps: {
     setAutoCommitPush,
     setAutoScan,
     setAutoUpdate,
+    setPortableMode,
+    openPortableWindow,
     setMcpApprovalGate,
     setMcpApprovalTimeoutSecs,
     editorsCatalog,

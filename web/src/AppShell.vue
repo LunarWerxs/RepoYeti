@@ -24,7 +24,9 @@ const store = useStore();
 const showAdd = ref(false);
 const showSettings = ref(false);
 const showRemote = ref(false);
-const { side: settingsSide, shiftPx: settingsShiftPx } = usePushPanel(showSettings);
+const { side: settingsSide, shiftPx: settingsShiftPx } = usePushPanel(showSettings, {
+  shellMaxWidth: () => 800,
+});
 const appShiftPx = computed(() => pageShiftPx.value + settingsShiftPx.value);
 
 // Only one right-side push panel is open at a time — opening the file viewer closes Settings /

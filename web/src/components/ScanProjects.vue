@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const open = defineModel<boolean>("open", { required: true });
 const store = useStore();
@@ -95,14 +96,19 @@ function start(): void {
           <span>{{ $t("scan.scanning") }}</span>
           <span class="truncate text-muted-foreground">{{ $t("scan.foundCount", { count: store.scanFound }) }}</span>
         </div>
-        <button
-          type="button"
-          class="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-          :aria-label="$t('scan.stop')"
-          @click="store.cancelScan()"
-        >
-          <X :size="15" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              class="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              :aria-label="$t('scan.stop')"
+              @click="store.cancelScan()"
+            >
+              <X :size="15" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("scan.stop") }}</TooltipContent>
+        </Tooltip>
       </div>
       <div
         v-else-if="store.scanDone"

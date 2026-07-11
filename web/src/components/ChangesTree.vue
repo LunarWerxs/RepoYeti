@@ -10,6 +10,7 @@ import { useTreeCollapse } from "@/lib/changes-tree";
 import { useTreeSelection } from "@/lib/changes-selection";
 import { statusColor } from "@/lib/git-status-colors";
 import DiffStat from "./DiffStat.vue";
+import ExpandTransition from "@/shell/ExpandTransition.vue";
 
 const { t } = useI18n();
 
@@ -197,7 +198,7 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
       <button
         v-if="n.type === 'dir'"
         type="button"
-        class="group flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+        class="tree-row-cv group flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
         :class="dragOverPath === n.path && 'bg-primary/15 ring-1 ring-primary/40'"
         :style="{ paddingLeft: (depth ?? 0) * 14 + 8 + 'px' }"
         :title="n.path"
@@ -220,7 +221,7 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
       </button>
       <!-- file row — opens the read-only viewer (spacer keeps it aligned under folders).
            Wrapped so the hover "discard" button is a SIBLING (button-in-button is invalid). -->
-      <div v-else class="group/file relative">
+      <div v-else class="tree-row-cv group/file relative">
         <button
           type="button"
           draggable="true"
@@ -254,13 +255,16 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
         <!-- per-file selection checkbox: sits over the (empty) chevron column on the left so it
              never shifts the row. Toggling it adds/removes this file from the shared selection that
              drives RepoCard's "Commit selected (N)". A sibling (not nested) since the row is a
-             <button>; tabindex -1 to stay out of the tree's roving tabindex (matches discard). -->
+             <button>; tabindex -1 to stay out of the tree's roving tabindex (matches discard).
+             Native `title` (like the row itself) rather than a reka Tooltip: two Tooltip instances
+             per file row made mounting a 2000-file tree measurably janky. -->
         <button
           type="button"
           role="checkbox"
           tabindex="-1"
           :aria-checked="selection.isSelected(n.path)"
           :aria-label="$t('repo.changes.select', { name: n.name })"
+          :title="$t('repo.changes.selectFile')"
           class="absolute top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded outline-none transition focus-visible:ring-2 focus-visible:ring-ring/40"
           :style="{ left: (depth ?? 0) * 14 + 3 + 'px' }"
           @click.stop="selection.toggle(n.path)"
@@ -283,23 +287,36 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
           type="button"
           tabindex="-1"
           class="absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded bg-card/80 text-muted-foreground opacity-0 pointer-coarse:opacity-70 outline-none transition group-hover/file:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
-          :title="$t('repo.discard.action')"
           :aria-label="$t('repo.discard.action')"
+          :title="$t('repo.discard.action')"
           @click.stop="emit('discard', n.path)"
         >
           <Undo2 :size="12" />
         </button>
       </div>
       <!-- children render only while this folder is expanded -->
-      <ChangesTree
-        v-if="n.children && n.children.length && isOpen(n.path)"
-        :nodes="n.children"
-        :repo-id="repoId"
-        :depth="(depth ?? 0) + 1"
-        :force-expand="forceExpand"
-        @discard="emit('discard', $event)"
-        @move="emit('move', $event)"
-      />
+      <ExpandTransition v-if="n.children && n.children.length" :open="isOpen(n.path)">
+        <ChangesTree
+          :nodes="n.children"
+          :repo-id="repoId"
+          :depth="(depth ?? 0) + 1"
+          :force-expand="forceExpand"
+          @discard="emit('discard', $event)"
+          @move="emit('move', $event)"
+        />
+      </ExpandTransition>
     </template>
   </div>
 </template>
+
+<style scoped>
+/* Rows outside the scroll viewport skip layout + paint entirely (a tree can hold up to the
+   server's MAX_CHANGED_FILES = 2000 files). The fixed 26px placeholder keeps the scrollbar
+   exact (every row is h-[26px]). This is what keeps huge trees smooth while the card's
+   collapse/expand height animation runs: each animation frame lays out only the ~20 visible
+   rows instead of thousands. */
+.tree-row-cv {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 26px;
+}
+</style>

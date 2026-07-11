@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Check, Trash2, LogOut, Loader2 } from "@lucide/vue";
+import { Check, Trash2, LogOut, Loader2, Cloud } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { ApiError } from "../../api";
@@ -11,10 +11,8 @@ import InfoHint from "@/shell/InfoHint.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import IdentityManager from "../IdentityManager.vue";
-import AccountSwitcher from "../AccountSwitcher.vue";
 
-/** Whether the parent Settings sheet is open — drives the on-open refresh below. */
+/** Whether the parent Settings sheet is open — drives the on-open reset/seed below. */
 const props = defineProps<{ open: boolean }>();
 const store = useStore();
 const { t } = useI18n();
@@ -22,14 +20,18 @@ const { t } = useI18n();
 // ── access mode (local ↔ remote) ──────────────────────────────────────────────
 const isRemote = computed(() => store.mode === "remote");
 const switchingMode = ref(false);
+// Set when enabling remote is refused because no Connections owner has claimed this
+// daemon yet. Discloses the inline sign-in prompt below the toggle instead of
+// bouncing the whole page to OAuth mid-toggle.
+const needsOwner = ref(false);
 async function setAccessMode(toRemote: boolean): Promise<void> {
   switchingMode.value = true;
   try {
     await store.setMode(toRemote ? "remote" : "local");
+    needsOwner.value = false;
   } catch (e) {
     if (e instanceof ApiError && e.code === "NEEDS_OWNER") {
-      toast.message(t("remote.needsOwner"));
-      window.location.href = "/oauth/login"; // claim ownership, then re-toggle
+      needsOwner.value = true;
       return;
     }
     toast.error(t("remote.modeFailed"));
@@ -96,26 +98,23 @@ async function signOutAll(): Promise<void> {
   }
 }
 
-// Load the current identities/accounts whenever the sheet opens, and seed the stable-address
-// field from the live config (the token stays blank — it's write-only). Split out of the
-// combined open-watcher that used to live in Settings.vue; the roots/servers half of it now
-// lives in DiscoverySection.
+// Seed the stable-address field from the live config whenever the sheet opens (the token
+// stays blank — it's write-only) and reset the transient disclosure/confirm states.
 watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
-      void store.loadDetectedIdentities();
-      void store.loadAccounts();
       tunnelHost.value = store.tunnelConfig.hostname ?? "";
       confirmForgetTunnel.value = false;
+      needsOwner.value = false;
     }
   },
 );
 </script>
 
 <template>
-  <!-- Signed-in account (the daemon owner). Its own row above the sections — it's the
-       Connections account, NOT a git identity, so it no longer lives inside Identities.
+  <!-- Signed-in account (the daemon owner). Its own row above the group — it's the
+       Connections account remote access authenticates against, NOT a git identity.
        Shown only when actually signed in (store.owner). -->
   <div
     v-if="store.owner"
@@ -131,18 +130,10 @@ watch(
     </Button>
   </div>
 
-  <!-- Identities (git author identities) ────────────────────────────── -->
-  <IdentityManager />
-
-  <!-- GitHub accounts (machine-wide active account switcher via gh) ────── -->
-  <AccountSwitcher />
-
   <!-- Access (local ↔ remote) ───────────────────────────────────── -->
   <SettingsGroup :label="$t('settings.cardAccess')">
-    <SettingsRow
-      :label="$t('settings.accessMode')"
-      :description="isRemote ? $t('remote.modeOnHint') : $t('remote.modeOffHint')"
-    >
+    <SettingsRow :label="$t('settings.accessMode')">
+      <template #info><InfoHint :text="isRemote ? $t('remote.modeOnHint') : $t('remote.modeOffHint')" /></template>
       <template #control>
         <Switch
           :model-value="isRemote"
@@ -153,70 +144,86 @@ watch(
       </template>
     </SettingsRow>
 
-    <!-- stable address (named Cloudflare tunnel) — a permanent URL instead of a rotating one -->
-    <div class="flex flex-col gap-2.5 px-3.5 py-3">
-      <div class="flex items-center gap-1.5">
-        <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.tunnelLabel") }}</span>
-        <InfoHint :text="$t('settings.tunnelHint')" />
-      </div>
-      <p
-        v-if="store.tunnelConfig.named"
-        class="flex items-center gap-1.5 text-[12px] text-success"
-      >
-        <Check :size="13" class="shrink-0" />
-        <span class="min-w-0 break-all">{{ $t("settings.tunnelActive", { host: store.tunnelConfig.hostname }) }}</span>
-      </p>
-      <Input
-        v-model="tunnelHost"
-        class="mono text-[12.5px]"
-        :placeholder="$t('settings.tunnelHostPlaceholder')"
-        :aria-label="$t('settings.tunnelHostLabel')"
-      />
-      <Input
-        v-if="!store.tunnelConfig.tokenFromEnv"
-        v-model="tunnelToken"
-        type="password"
-        class="text-[12.5px]"
-        :placeholder="store.tunnelConfig.hasToken ? $t('settings.tunnelTokenSaved') : $t('settings.tunnelTokenPlaceholder')"
-        :aria-label="$t('settings.tunnelTokenLabel')"
-      />
-      <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
-      <div class="flex items-center gap-2">
-        <Button size="sm" :disabled="savingTunnel" @click="saveTunnel">
-          <Loader2 v-if="savingTunnel" class="animate-spin" />
-          <Check v-else />
-          {{ $t("settings.tunnelSave") }}
-        </Button>
-        <Button
-          v-if="store.tunnelConfig.hostname || store.tunnelConfig.hasToken"
-          :variant="confirmForgetTunnel ? 'destructive' : 'ghost'"
-          size="sm"
-          class="ml-auto"
-          @click="forgetTunnel"
-          @blur="confirmForgetTunnel = false"
-        >
-          <Trash2 />
-          {{ confirmForgetTunnel ? $t("settings.tunnelForgetConfirm") : $t("settings.tunnelForget") }}
+    <!-- Turning remote on needs a claimed Connections owner: disclose the sign-in step
+         inline instead of redirecting out from under the toggle. -->
+    <div v-if="needsOwner && !isRemote" class="px-3.5 pb-3">
+      <div class="flex flex-col gap-2.5 rounded-lg border border-info/30 bg-info/10 p-3">
+        <p class="text-[12.5px] leading-snug text-foreground/90">{{ $t("remote.needsOwner") }}</p>
+        <Button as="a" href="/oauth/login" size="sm" class="self-start">
+          <Cloud />
+          {{ $t("remote.connectCta") }}
         </Button>
       </div>
     </div>
 
-    <!-- sign out everywhere (rotates the signing key → invalidates all devices) -->
-    <div v-if="store.authEnforced" class="flex items-center justify-between gap-3 px-3.5 py-3">
-      <span class="flex items-center gap-1.5">
-        <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.signOutAll") }}</span>
-        <InfoHint :text="$t('settings.signOutAllHint')" />
-      </span>
-      <Button
-        :variant="confirmSignOutAll ? 'destructive' : 'outline'"
-        size="sm"
-        class="shrink-0"
-        @click="signOutAll"
-        @blur="confirmSignOutAll = false"
-      >
-        <LogOut />
-        {{ confirmSignOutAll ? $t("settings.signOutAllConfirm") : $t("settings.signOutAll") }}
-      </Button>
-    </div>
+    <!-- The rows below only mean anything while remote access is on: the tunnel names the
+         remote URL, and "sign out everywhere" revokes remote sessions. Hidden otherwise. -->
+    <template v-if="isRemote">
+      <!-- stable address (named Cloudflare tunnel) — a permanent URL instead of a rotating one -->
+      <div class="flex flex-col gap-2.5 px-3.5 py-3">
+        <div class="flex items-center gap-1.5">
+          <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.tunnelLabel") }}</span>
+          <InfoHint :text="$t('settings.tunnelHint')" />
+        </div>
+        <p
+          v-if="store.tunnelConfig.named"
+          class="flex items-center gap-1.5 text-[12px] text-success"
+        >
+          <Check :size="13" class="shrink-0" />
+          <span class="min-w-0 break-all">{{ $t("settings.tunnelActive", { host: store.tunnelConfig.hostname }) }}</span>
+        </p>
+        <Input
+          v-model="tunnelHost"
+          class="mono text-[12.5px]"
+          :placeholder="$t('settings.tunnelHostPlaceholder')"
+          :aria-label="$t('settings.tunnelHostLabel')"
+        />
+        <Input
+          v-if="!store.tunnelConfig.tokenFromEnv"
+          v-model="tunnelToken"
+          type="password"
+          class="text-[12.5px]"
+          :placeholder="store.tunnelConfig.hasToken ? $t('settings.tunnelTokenSaved') : $t('settings.tunnelTokenPlaceholder')"
+          :aria-label="$t('settings.tunnelTokenLabel')"
+        />
+        <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
+        <div class="flex items-center gap-2">
+          <Button size="sm" :disabled="savingTunnel" @click="saveTunnel">
+            <Loader2 v-if="savingTunnel" class="animate-spin" />
+            <Check v-else />
+            {{ $t("settings.tunnelSave") }}
+          </Button>
+          <Button
+            v-if="store.tunnelConfig.hostname || store.tunnelConfig.hasToken"
+            :variant="confirmForgetTunnel ? 'destructive' : 'ghost'"
+            size="sm"
+            class="ml-auto"
+            @click="forgetTunnel"
+            @blur="confirmForgetTunnel = false"
+          >
+            <Trash2 />
+            {{ confirmForgetTunnel ? $t("settings.tunnelForgetConfirm") : $t("settings.tunnelForget") }}
+          </Button>
+        </div>
+      </div>
+
+      <!-- sign out everywhere (rotates the signing key → invalidates all devices) -->
+      <div v-if="store.authEnforced" class="flex items-center justify-between gap-3 px-3.5 py-3">
+        <span class="flex items-center gap-1.5">
+          <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.signOutAll") }}</span>
+          <InfoHint :text="$t('settings.signOutAllHint')" />
+        </span>
+        <Button
+          :variant="confirmSignOutAll ? 'destructive' : 'outline'"
+          size="sm"
+          class="shrink-0"
+          @click="signOutAll"
+          @blur="confirmSignOutAll = false"
+        >
+          <LogOut />
+          {{ confirmSignOutAll ? $t("settings.signOutAllConfirm") : $t("settings.signOutAll") }}
+        </Button>
+      </div>
+    </template>
   </SettingsGroup>
 </template>

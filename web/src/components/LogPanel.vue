@@ -19,7 +19,8 @@ import { computeGraph, type GraphCommit, type GraphLink } from "@/lib/git-graph"
 import { splitUnifiedDiff } from "@/lib/unified-diff";
 import { statusColor } from "@/lib/git-status-colors";
 import { openFile, isViewing } from "@/lib/file-viewer";
-import type { CommitDetail, LogEntry } from "../types";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { ChangedFile, CommitDetail, LogEntry } from "../types";
 
 const props = defineProps<{ repoId: string }>();
 const store = useStore();
@@ -216,6 +217,11 @@ function openCommitFile(f: DetailFile): void {
   void openFile({ repoId: props.repoId, path: f.path, status: f.status, commit: expandedCommit.value });
 }
 
+/** Open an uncommitted file's working-tree diff in the shared Monaco viewer. */
+function openWorktreeFile(f: ChangedFile): void {
+  void openFile({ repoId: props.repoId, path: f.path, status: f.status, staged: f.staged });
+}
+
 // ── uncommitted-files expand (reuses the store's changed-file read) ──────────────────
 const wtOpen = ref(false);
 async function toggleWorktree(): Promise<void> {
@@ -279,7 +285,12 @@ watch(
       <ChevronDown :size="14" :class="cn('ml-auto transition-transform', showHistory && 'rotate-180')" />
     </button>
 
-    <div v-if="showHistory" class="mt-2">
+    <!-- Section body animates open/closed with the same grid-rows trick as the per-commit
+         detail below (Transition name="expand"), instead of a hard v-if pop. -->
+    <Transition name="expand">
+    <div v-if="showHistory" class="expand-grid">
+    <div class="min-h-0 overflow-hidden">
+    <div class="mt-2">
       <!-- toolbar: branch-scope toggle + refresh -->
       <div class="mb-2 flex items-center gap-2">
         <div
@@ -305,16 +316,20 @@ watch(
             {{ opt.label }}
           </button>
         </div>
-        <button
-          type="button"
-          class="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
-          :title="$t('repo.history.refresh')"
-          :aria-label="$t('repo.history.refresh')"
-          :disabled="loadingLog"
-          @click="reload"
-        >
-          <RefreshCw :size="13" :class="loadingLog && 'animate-spin'" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              class="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+              :aria-label="$t('repo.history.refresh')"
+              :disabled="loadingLog"
+              @click="reload"
+            >
+              <RefreshCw :size="13" :class="loadingLog && 'animate-spin'" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("repo.history.refresh") }}</TooltipContent>
+        </Tooltip>
       </div>
 
       <!-- loading / error / empty -->
@@ -378,23 +393,43 @@ watch(
                   />
                 </div>
               </div>
-              <div
-                v-if="wtOpen"
-                class="mb-1 border-l-2 border-warning/40 py-1 pl-2 text-[11px]"
-                :style="{ marginLeft: `${gutterW}px` }"
-              >
-                <div v-if="!wtFiles.length" class="text-muted-foreground">{{ $t("repo.history.noUncommitted") }}</div>
-                <div v-else class="flex flex-wrap gap-1">
-                  <span
-                    v-for="f in wtFiles.slice(0, 60)"
-                    :key="f.path"
-                    class="mono inline-flex max-w-full items-center gap-1 rounded bg-secondary px-1.5 py-0.5"
-                  >
-                    <span class="font-semibold text-muted-foreground">{{ f.status }}</span>
-                    <span class="truncate" :title="f.path">{{ f.path }}</span>
-                  </span>
+              <!-- Same clickable micro-table a commit's detail uses (not the old flex-wrapped
+                   chip cloud) — each row opens the file's working-tree diff in the viewer. -->
+              <Transition name="expand">
+                <div v-if="wtOpen" class="expand-grid">
+                  <div class="min-h-0 overflow-hidden">
+                    <div
+                      class="mb-1 border-l-2 border-warning/40 py-1 pl-2 text-[11px]"
+                      :style="{ marginLeft: `${gutterW}px` }"
+                    >
+                      <div v-if="!wtFiles.length" class="text-muted-foreground">{{ $t("repo.history.noUncommitted") }}</div>
+                      <template v-else>
+                        <div class="overflow-hidden rounded-md border border-border">
+                          <button
+                            v-for="f in wtFiles.slice(0, 60)"
+                            :key="`${f.path}:${f.staged}`"
+                            type="button"
+                            class="flex w-full items-center gap-2 border-b border-border px-2 py-1 text-left transition-colors last:border-b-0 hover:bg-accent/40"
+                            :class="isViewing(props.repoId, f.path) && 'bg-accent/60'"
+                            :title="f.path"
+                            @click.stop="openWorktreeFile(f)"
+                          >
+                            <span class="mono shrink-0 text-[11px] font-bold" :style="{ color: statusColor(f.status) }">{{ f.status }}</span>
+                            <span class="mono min-w-0 flex-1 truncate text-[11.5px]">
+                              <span class="text-foreground">{{ splitPath(f.path).name }}</span><span v-if="splitPath(f.path).dir" class="ml-1.5 text-muted-foreground/55">{{ splitPath(f.path).dir.replace(/\/+$/, "") }}</span>
+                            </span>
+                            <span v-if="f.stat?.addedLines" class="mono shrink-0 text-[10.5px] text-success">+{{ f.stat.addedLines }}</span>
+                            <span v-if="f.stat?.removedLines" class="mono shrink-0 text-[10.5px] text-destructive">−{{ f.stat.removedLines }}</span>
+                          </button>
+                        </div>
+                        <div v-if="wtFiles.length > 60" class="mt-1 text-muted-foreground">
+                          {{ $t("repo.history.moreFiles", { count: wtFiles.length - 60 }) }}
+                        </div>
+                      </template>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </Transition>
             </template>
 
             <!-- ══ commit row ══ -->
@@ -525,15 +560,19 @@ watch(
                   <!-- meta: short hash + copy · parents -->
                   <div class="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
                     <span class="mono text-muted-foreground">{{ expandedDetail.shortHash }}</span>
-                    <button
-                      type="button"
-                      class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-                      :title="$t('repo.history.copyHash')"
-                      :aria-label="$t('repo.history.copyHash')"
-                      @click.stop="copyHash(expandedDetail.hash)"
-                    >
-                      <Copy :size="12" />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <button
+                          type="button"
+                          class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                          :aria-label="$t('repo.history.copyHash')"
+                          @click.stop="copyHash(expandedDetail.hash)"
+                        >
+                          <Copy :size="12" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{{ $t("repo.history.copyHash") }}</TooltipContent>
+                    </Tooltip>
                     <template v-if="expandedDetail.parents.length">
                       <span class="ml-1 text-muted-foreground/70">{{ $t("repo.history.parents") }}:</span>
                       <button
@@ -614,6 +653,9 @@ watch(
         </div>
       </template>
     </div>
+    </div>
+    </div>
+    </Transition>
   </div>
 </template>
 

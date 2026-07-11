@@ -23,8 +23,11 @@ import {
   MAX_CHANGES_PX,
 } from "@/lib/changes-view";
 import { shortcutsActive } from "@/lib/hotkeys";
+import { useGripDrag } from "@/lib/grip-drag";
+import { useTooltipConfig } from "@/lib/tooltip-config";
 import ChangesTree from "../ChangesTree.vue";
 import BranchPanel from "../BranchPanel.vue";
+import ExpandTransition from "@/shell/ExpandTransition.vue";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -44,6 +47,11 @@ const { toastResult } = useRepoFeedback();
 
 const st = computed(() => props.repo.status);
 const hasRemote = computed(() => !!st.value?.remote);
+
+// The toolbar's icon-only buttons are Tooltip-labelled; when the app-wide "show tooltips"
+// switch is off, reka suppresses those, so a native :title takes over as the only visible
+// label (the same gated-title pattern as RepoCardHeader's dropdown triggers).
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 // ── collapse + changed-files tree ─────────────────────────────────────────────
 const changeTree = computed(() => buildChangeTree(store.changesByRepo[props.repo.id] ?? []));
@@ -202,32 +210,24 @@ const clampPx = (px: number): number =>
 let dragStartY = 0;
 let dragStartH = 0;
 
-function onGripMove(e: PointerEvent): void {
-  dragHeight.value = clampPx(dragStartH + (e.clientY - dragStartY));
-}
-function onGripUp(): void {
-  window.removeEventListener("pointermove", onGripMove);
-  window.removeEventListener("pointerup", onGripUp);
-  window.removeEventListener("pointercancel", onGripUp);
-  if (dragHeight.value != null) {
-    setChangesOverride(props.repo.id, dragHeight.value); // commit the final height
-    dragHeight.value = null;
-  }
-}
-function onGripDown(e: PointerEvent): void {
-  if (!treeScroll.value) return;
-  dragStartY = e.clientY;
-  dragStartH = treeScroll.value.clientHeight;
-  // Capture so the drag keeps tracking even if the pointer leaves the viewport.
-  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-  window.addEventListener("pointermove", onGripMove);
-  window.addEventListener("pointerup", onGripUp);
-  // Also release on pointercancel — the browser fires that (not pointerup) on a
-  // touch/gesture takeover or capture loss, and without it the move listener would
-  // stay live and the drag "sticks" to the cursor forever.
-  window.addEventListener("pointercancel", onGripUp);
-  e.preventDefault();
-}
+// All the release/stuck-drag handling (button filtering, capture loss, swallowed pointerup,
+// blur, unmount) lives in useGripDrag — see @/lib/grip-drag.
+const onGripDown = useGripDrag({
+  onStart: (e) => {
+    if (!treeScroll.value) return false;
+    dragStartY = e.clientY;
+    dragStartH = treeScroll.value.clientHeight;
+  },
+  onMove: (e) => {
+    dragHeight.value = clampPx(dragStartH + (e.clientY - dragStartY));
+  },
+  onEnd: () => {
+    if (dragHeight.value != null) {
+      setChangesOverride(props.repo.id, dragHeight.value); // commit the final height
+      dragHeight.value = null;
+    }
+  },
+});
 function resetTreeHeight(): void {
   dragHeight.value = null;
   clearChangesOverride(props.repo.id);
@@ -237,7 +237,6 @@ function nudgeHeight(delta: number): void {
   const base = treeScroll.value?.clientHeight;
   if (base) setChangesOverride(props.repo.id, base + delta);
 }
-onBeforeUnmount(onGripUp);
 
 // The changed-files grip's keyboard resize (↑/↓/Del) only fires when shortcuts are on.
 function gripKey(action: () => void): void {
@@ -313,8 +312,8 @@ async function onMove(payload: { from: string; toDir: string }): Promise<void> {
   </div>
 
   <!-- changed-files tree (height from Settings preset; drag the grip to resize) -->
+  <ExpandTransition :open="!!(st && st.dirty > 0)">
   <div
-    v-if="st && st.dirty > 0"
     class="overflow-hidden rounded-md border border-border bg-background/40"
   >
     <!-- tree toolbar: filter the changed files + collapse-all ⇄ expand-all -->
@@ -332,16 +331,20 @@ async function onMove(payload: { from: string; toDir: string }): Promise<void> {
         />
         <!-- right cluster: clear (only with a query) + the "search inside files" toggle -->
         <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">
-          <button
-            v-if="treeQuery"
-            type="button"
-            :aria-label="$t('repo.changes.searchClear')"
-            :title="$t('repo.changes.searchClear')"
-            class="flex size-6 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-            @click="treeQuery = ''"
-          >
-            <X :size="12" />
-          </button>
+          <Tooltip v-if="treeQuery">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                :aria-label="$t('repo.changes.searchClear')"
+                :title="tooltipsEnabled ? undefined : $t('repo.changes.searchClear')"
+                class="flex size-6 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                @click="treeQuery = ''"
+              >
+                <X :size="12" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{{ $t("repo.changes.searchClear") }}</TooltipContent>
+          </Tooltip>
           <!-- greps inside the changed files (fires at ≥ min chars); highlighted while on,
                spinner while a search is in flight. Tooltip replaces the old text label. -->
           <Tooltip>
@@ -351,6 +354,7 @@ async function onMove(payload: { from: string; toDir: string }): Promise<void> {
                 role="checkbox"
                 :aria-checked="contentMode"
                 :aria-label="$t('repo.changes.searchContent')"
+                :title="tooltipsEnabled ? undefined : $t('repo.changes.searchContent')"
                 class="flex size-6 items-center justify-center rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40"
                 :class="contentMode ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'"
                 @click="contentMode = !contentMode"
@@ -372,6 +376,7 @@ async function onMove(payload: { from: string; toDir: string }): Promise<void> {
             :aria-checked="isList"
             class="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
             :aria-label="isList ? $t('repo.changes.viewAsTree') : $t('repo.changes.viewAsList')"
+            :title="tooltipsEnabled ? undefined : (isList ? $t('repo.changes.viewAsTree') : $t('repo.changes.viewAsList'))"
             @click="toggleDisplayMode"
           >
             <component :is="isList ? ListTree : List" :size="14" />
@@ -379,20 +384,28 @@ async function onMove(payload: { from: string; toDir: string }): Promise<void> {
         </TooltipTrigger>
         <TooltipContent>{{ isList ? $t("repo.changes.viewAsTree") : $t("repo.changes.viewAsList") }}</TooltipContent>
       </Tooltip>
-      <button
-        v-if="dirPaths.length && !searching && !isList"
-        type="button"
-        class="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-        :aria-label="allCollapsed ? $t('repo.changes.expandAll') : $t('repo.changes.collapseAll')"
-        :title="allCollapsed ? $t('repo.changes.expandAll') : $t('repo.changes.collapseAll')"
-        @click="toggleCollapseAll"
-      >
-        <component :is="allCollapsed ? ChevronsUpDown : ChevronsDownUp" :size="14" />
-      </button>
+      <Tooltip v-if="dirPaths.length && !searching && !isList">
+        <TooltipTrigger as-child>
+          <button
+            type="button"
+            class="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            :aria-label="allCollapsed ? $t('repo.changes.expandAll') : $t('repo.changes.collapseAll')"
+            :title="tooltipsEnabled ? undefined : (allCollapsed ? $t('repo.changes.expandAll') : $t('repo.changes.collapseAll'))"
+            @click="toggleCollapseAll"
+          >
+            <component :is="allCollapsed ? ChevronsUpDown : ChevronsDownUp" :size="14" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{{ allCollapsed ? $t("repo.changes.expandAll") : $t("repo.changes.collapseAll") }}</TooltipContent>
+      </Tooltip>
     </div>
     <div ref="treeScroll" class="scroll-slim overflow-y-auto p-1" :style="treeStyle">
+      <!-- Spinner only before the FIRST load: changesLoading also flips on every background
+           refresh, and swapping the whole (possibly huge) tree for a spinner and back would
+           unmount/remount thousands of rows on each refresh. Once data exists, the old tree
+           stays up and patches in place when the new list lands. -->
       <div
-        v-if="store.changesLoading[repo.id]"
+        v-if="store.changesLoading[repo.id] && !store.changesByRepo[repo.id]"
         class="flex items-center gap-2 px-2.5 py-2 text-[12.5px] text-muted-foreground"
       >
         <Loader2 :size="14" class="animate-spin" /> {{ $t("repo.changes.loading") }}
@@ -449,6 +462,7 @@ async function onMove(payload: { from: string; toDir: string }): Promise<void> {
       />
     </button>
   </div>
+  </ExpandTransition>
 
   <!-- confirm before discarding a file's working-tree changes (destructive) -->
   <Dialog v-model:open="discardOpen">

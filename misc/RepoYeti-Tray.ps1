@@ -86,9 +86,74 @@ $port = $Port
 # Runtime pointer the daemon writes (honours REPOYETI_HOME, like the daemon does).
 $gmHome = if ($env:REPOYETI_HOME) { $env:REPOYETI_HOME } else { Join-Path $env:USERPROFILE ".repoyeti" }
 $infoFile = Join-Path $gmHome "runtime.json"
+# Where the daemon self-logs (see src/log-file.ts) — surfaced in the crash balloons so the
+# user knows where to look when the watchdog reports a restart.
+$logPath = Join-Path $gmHome "logs\daemon.log"
 # Current live URL — refreshed whenever we (re)start the daemon, so the tray menu
 # always opens wherever the daemon actually is now.
 $script:url = "http://127.0.0.1:$port"
+
+# Probe the usual Chromium install locations, most-preferred first (Edge is preinstalled on
+# every supported Windows; Chrome may be absent). Mirrors src/portable-window.mjs's candidate
+# order so the cold-start launcher and the running daemon agree on which browser to use.
+function Resolve-ChromiumBrowser {
+  $candidates = @()
+  if (${env:ProgramFiles(x86)}) {
+    $candidates += (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe")
+  }
+  if ($env:ProgramFiles) {
+    $candidates += (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe")
+  }
+  if ($env:ProgramFiles) {
+    $candidates += (Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe")
+  }
+  if (${env:ProgramFiles(x86)}) {
+    $candidates += (Join-Path ${env:ProgramFiles(x86)} "Google\Chrome\Application\chrome.exe")
+  }
+  if ($env:LOCALAPPDATA) {
+    $candidates += (Join-Path $env:LOCALAPPDATA "Google\Chrome\Application\chrome.exe")
+  }
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
+}
+
+# Open the app UI: a chromeless Chromium app window when Portable window is on (runtime.json,
+# re-read fresh every call so a toggle flipped mid-run takes effect on the very next open) and a
+# Chromium browser is installed; a normal tab otherwise. Never throws — worst case it falls back.
+function Open-AppUi([string]$url) {
+  $portable = $false
+  try {
+    if (Test-Path $infoFile) {
+      $info = Get-Content $infoFile -Raw | ConvertFrom-Json
+      if ($info.portableMode) { $portable = $true }
+    }
+  } catch { $portable = $false }
+
+  if ($portable) {
+    $browser = Resolve-ChromiumBrowser
+    if ($browser) {
+      # Dedicated profile (sibling of runtime.json) so the window remembers its own
+      # size/position across launches — same family convention + path the daemon's
+      # POST /api/portable-window uses, so both open paths share one profile.
+      $profileDir = Join-Path (Split-Path -Parent $infoFile) "portable-profile"
+      $profileOk = $true
+      try {
+        if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Force -Path $profileDir | Out-Null }
+      } catch { $profileOk = $false }
+
+      if ($profileOk) {
+        Start-Process $browser -ArgumentList @("--user-data-dir=`"$profileDir`"", "--no-first-run", "--no-default-browser-check", "--app=$url")
+      } else {
+        # Profile dir couldn't be created — still open the window, just without geometry memory.
+        Start-Process $browser -ArgumentList "--app=$url"
+      }
+      return
+    }
+  }
+  Start-Process $url
+}
 
 # --- Daemon control ---------------------------------------------------------------
 # Defined once as a scriptblock so the exact same functions run on the UI thread
@@ -181,7 +246,7 @@ $script:trayMutex = New-Object System.Threading.Mutex($true, "RepoYetiTrayHost",
 if (-not $createdMutex) {
   $u = Get-RunningUrl $infoFile $port
   if (-not $u) { $u = "http://127.0.0.1:$port" }
-  Start-Process $u
+  Open-AppUi $u
   return
 }
 
@@ -283,6 +348,23 @@ $script:busy = $false
 $script:ps = $null
 $script:psAsync = $null
 $script:jobKind = ''
+# --- Auto-restart watchdog state --------------------------------------------------
+# The daemon exits (code 1) on any uncaught exception — see src/index.ts — and nothing
+# else brings it back. This host is the natural supervisor: a timer probes /api/health and
+# relaunches a daemon that died on its own. Guards keep it from fighting deliberate stops:
+#   · $intentionalStop — set during Quit so we never resurrect a daemon the user is closing.
+#   · $script:busy      — a Rebuild/Restart worker owns the daemon; the watchdog stands down.
+#   · reviveGraceUntil  — after firing a relaunch, wait for it to bind before trying again
+#                         (a fresh daemon takes a few seconds), so we don't spawn a pile-up.
+#   · crash-loop guard  — >= MAX restarts within WINDOW seconds ⇒ pause auto-restart and tell
+#                         the user (a persistently-broken build must not spin forever; mirrors
+#                         the daemon's own "never relaunch without a successor" caution).
+$script:intentionalStop = $false
+$script:autoRestartPaused = $false
+$script:reviveGraceUntil = [DateTime]::MinValue
+$script:restartTimes = New-Object System.Collections.Generic.List[DateTime]
+$CrashLoopMax = 4       # restarts…
+$CrashLoopWindowSec = 120  # …within this many seconds ⇒ pause
 # Shared with the worker runspace (same process heap): the worker records the PIDs it
 # spawns so Quit can reap them, and Quit sets `cancel` to stop the worker early.
 $script:shared = [hashtable]::Synchronized(@{ buildPid = 0; serverPid = 0; cancel = $false })
@@ -321,7 +403,7 @@ $pollTimer.Add_Tick({
     $tray.ShowBalloonTip(3500, "RepoYeti", "Web build failed. See misc\RepoYeti-Rebuild.log.", [System.Windows.Forms.ToolTipIcon]::Error)
   } elseif ($out -and $out.Ready) {
     if ($out.Url) { $script:url = $out.Url }
-    if ($script:jobKind -eq 'rebuild') { Start-Process $script:url }
+    if ($script:jobKind -eq 'rebuild') { Open-AppUi $script:url }
   } else {
     $tray.ShowBalloonTip(3500, "RepoYeti", "Restarted, but RepoYeti isn't answering yet.", [System.Windows.Forms.ToolTipIcon]::Warning)
   }
@@ -334,6 +416,10 @@ function Start-Job-Async([bool]$doRebuild) {
   if ($script:busy) { return }
   $script:busy = $true
   $script:jobKind = if ($doRebuild) { 'rebuild' } else { 'restart' }
+  # An explicit Restart/Rebuild is the user re-arming things: clear any crash-loop pause and
+  # the restart history so the watchdog resumes cleanly once the worker hands the daemon back.
+  $script:autoRestartPaused = $false
+  $script:restartTimes.Clear()
   $rebuildItem.Enabled = $false
   $restartItem.Enabled = $false
 
@@ -361,10 +447,14 @@ function Start-Job-Async([bool]$doRebuild) {
   }
 }
 
-$openItem.Add_Click({ Start-Process $script:url })
+$openItem.Add_Click({ Open-AppUi $script:url })
 $rebuildItem.Add_Click({ Start-Job-Async $true })
 $restartItem.Add_Click({ Start-Job-Async $false })
 $quitItem.Add_Click({
+  # Tell the watchdog we're closing on purpose BEFORE we kill the daemon, so it doesn't
+  # relaunch what we're about to stop.
+  $script:intentionalStop = $true
+  if ($healthTimer) { $healthTimer.Stop() }
   $script:shared.cancel = $true
   $pollTimer.Stop()
   # If a job is in flight, reap what the worker spawned (build + a daemon that may not
@@ -388,8 +478,45 @@ $menu.Items.Add($restartItem) | Out-Null
 $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $menu.Items.Add($quitItem) | Out-Null
 $tray.ContextMenuStrip = $menu
-$tray.Add_MouseDoubleClick({ Start-Process $script:url })
+$tray.Add_MouseDoubleClick({ Open-AppUi $script:url })
+
+# --- Auto-restart watchdog --------------------------------------------------------
+# Ticks on the UI thread; each tick is cheap (one /api/health probe) and NEVER blocks —
+# a relaunch is fire-and-forget (Start-RepoYeti returns as soon as it spawns), and recovery
+# is observed on a later tick, so the tray stays responsive even while the daemon reboots.
+$healthTimer = New-Object System.Windows.Forms.Timer
+$healthTimer.Interval = 5000
+$healthTimer.Add_Tick({
+  # Deliberate close, or a Rebuild/Restart worker owns the daemon → stand down.
+  if ($script:intentionalStop -or $script:busy) { return }
+
+  $u = Get-RunningUrl $infoFile $port
+  if ($u) { $script:url = $u; return }         # healthy (track where it actually bound)
+
+  # Down. Wait out the grace window after a relaunch so a still-booting daemon isn't
+  # double-spawned, and honour a crash-loop pause.
+  if ((Get-Date) -lt $script:reviveGraceUntil) { return }
+  if ($script:autoRestartPaused) { return }
+
+  # Crash-loop guard: prune attempts outside the window, then bail if we've hit the cap.
+  $cutoff = (Get-Date).AddSeconds(-$CrashLoopWindowSec)
+  for ($i = $script:restartTimes.Count - 1; $i -ge 0; $i--) {
+    if ($script:restartTimes[$i] -lt $cutoff) { $script:restartTimes.RemoveAt($i) }
+  }
+  if ($script:restartTimes.Count -ge $CrashLoopMax) {
+    $script:autoRestartPaused = $true
+    $tray.ShowBalloonTip(6000, "RepoYeti", "RepoYeti keeps crashing - auto-restart paused. See $logPath, then use Restart to try again.", [System.Windows.Forms.ToolTipIcon]::Error)
+    return
+  }
+
+  # Relaunch (same path the tray uses everywhere else — cmd->bun so taskkill /T can reap it).
+  $script:restartTimes.Add((Get-Date))
+  $script:reviveGraceUntil = (Get-Date).AddSeconds(20)
+  Start-RepoYeti $root $port | Out-Null
+  $tray.ShowBalloonTip(4000, "RepoYeti", "RepoYeti stopped unexpectedly - restarting. Log: $logPath", [System.Windows.Forms.ToolTipIcon]::Warning)
+})
+$healthTimer.Start()
 
 $tray.ShowBalloonTip(2500, "RepoYeti", "Running in the tray - right-click for options.", [System.Windows.Forms.ToolTipIcon]::Info)
-Start-Process $script:url
+Open-AppUi $script:url
 [System.Windows.Forms.Application]::Run()       # keeps the tray alive until Quit

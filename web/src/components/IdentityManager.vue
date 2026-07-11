@@ -9,6 +9,7 @@ import { identityInitials, identityTint } from "@/lib/identity-display";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { DetectedIdentity, DetectedIdentitySource, Identity } from "../types";
 
 const { t } = useI18n();
@@ -138,20 +139,25 @@ async function remove(id: string): Promise<void> {
 
 <template>
   <div class="flex flex-col gap-1.5">
-    <SettingsGroup :label="$t('identity.title')">
+    <SettingsGroup :label="$t('identity.title')" :description="$t('identity.description')">
     <div class="flex flex-col gap-3 px-3.5 py-3">
         <!-- local machine suggestions -->
         <div class="flex items-center justify-between gap-2">
           <div class="text-[12px] font-medium text-muted-foreground">{{ $t("identity.detected.title") }}</div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            :aria-label="$t('identity.detected.refresh')"
-            :disabled="store.detectedIdentitiesLoading"
-            @click="store.loadDetectedIdentities()"
-          >
-            <RefreshCw :class="store.detectedIdentitiesLoading && 'animate-spin'" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="$t('identity.detected.refresh')"
+                :disabled="store.detectedIdentitiesLoading"
+                @click="store.loadDetectedIdentities()"
+              >
+                <RefreshCw :class="store.detectedIdentitiesLoading && 'animate-spin'" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ $t("identity.detected.refresh") }}</TooltipContent>
+          </Tooltip>
         </div>
         <div v-if="shownDetected.length" v-auto-animate class="flex flex-col gap-2">
           <div
@@ -220,23 +226,38 @@ async function remove(id: string): Promise<void> {
                 <Check />
                 {{ $t("identity.action.confirmDelete") }}
               </Button>
-              <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.cancel')" @click="confirmId = null">
-                <X />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.cancel')" @click="confirmId = null">
+                    <X />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{{ $t("identity.action.cancel") }}</TooltipContent>
+              </Tooltip>
             </div>
             <div v-else class="flex shrink-0 items-center gap-0.5">
-              <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.edit')" @click="openEdit(i)">
-                <Pencil />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                class="text-muted-foreground hover:text-destructive"
-                :aria-label="$t('identity.action.delete')"
-                @click="confirmId = i.id"
-              >
-                <Trash2 />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.edit')" @click="openEdit(i)">
+                    <Pencil />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{{ $t("identity.action.edit") }}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    class="text-muted-foreground hover:text-destructive"
+                    :aria-label="$t('identity.action.delete')"
+                    @click="confirmId = i.id"
+                  >
+                    <Trash2 />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{{ $t("identity.action.delete") }}</TooltipContent>
+              </Tooltip>
             </div>
           </div>
         </div>
@@ -287,6 +308,5 @@ async function remove(id: string): Promise<void> {
         </Button>
     </div>
     </SettingsGroup>
-    <p class="px-1 text-[11px] text-muted-foreground/70">{{ $t("identity.description") }}</p>
   </div>
 </template>

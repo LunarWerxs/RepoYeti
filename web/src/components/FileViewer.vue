@@ -4,8 +4,8 @@
 //     (see AppShell) so it slides left and stays centered. Non-modal, no backdrop.
 //   · mobile            → an overlay bottom sheet (reka Dialog), like Settings.
 // The header + body + editor live in FileViewerInner, shared by both.
-import { onBeforeUnmount } from "vue";
 import { useEventListener } from "@vueuse/core";
+import { useGripDrag } from "@/lib/grip-drag";
 import {
   fileViewer,
   isDesktopViewer,
@@ -20,39 +20,19 @@ import FileViewerInner from "./FileViewerInner.vue";
 import ConfirmDiscardDialog from "./ConfirmDiscardDialog.vue";
 
 // ── desktop: drag the left edge to resize (page padding tracks viewerWidth live) ──
+// All the release/stuck-drag handling (button filtering, capture loss, swallowed pointerup,
+// blur, unmount, the grip's v-if'd <aside> vanishing mid-drag) lives in useGripDrag — see
+// @/lib/grip-drag.
 let startX = 0;
 let startW = 0;
-let dragging = false;
-function onMove(e: PointerEvent): void {
-  setViewerWidth(startW + (startX - e.clientX));
-}
-// Idempotent (guarded by `dragging`) so it's safe to fire from pointerup, pointercancel,
-// lostpointercapture, AND onBeforeUnmount without double-committing or throwing.
-function onUp(): void {
-  if (!dragging) return;
-  dragging = false;
-  window.removeEventListener("pointermove", onMove);
-  window.removeEventListener("pointerup", onUp);
-  window.removeEventListener("pointercancel", onUp);
-  commitViewerWidth(viewerWidth.value);
-}
-function onGripDown(e: PointerEvent): void {
-  startX = e.clientX;
-  startW = viewerWidth.value;
-  dragging = true;
-  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("pointerup", onUp);
-  // Release on pointercancel too (touch/gesture takeover or capture loss fires cancel,
-  // not pointerup) — otherwise the move listener sticks and the resize never releases.
-  window.addEventListener("pointercancel", onUp);
-  e.preventDefault();
-}
-// The grip lives inside a v-if'd <aside>: if the panel unmounts mid-drag (closeFile, or the
-// viewport crossing the desktop breakpoint) the window listeners would orphan and the resize
-// would "stick" to the cursor after release. Both this and any pointer-capture loss funnel
-// through onUp so a release is never missed.
-onBeforeUnmount(onUp);
+const onGripDown = useGripDrag({
+  onStart: (e) => {
+    startX = e.clientX;
+    startW = viewerWidth.value;
+  },
+  onMove: (e) => setViewerWidth(startW + (startX - e.clientX)),
+  onEnd: () => commitViewerWidth(viewerWidth.value),
+});
 
 // Escape closes the desktop panel (the mobile sheet handles its own Escape).
 useEventListener(window, "keydown", (e: KeyboardEvent) => {
@@ -85,7 +65,6 @@ function onMobileOpenChange(open: boolean): void {
           :aria-label="$t('fileViewer.resize')"
           :title="$t('fileViewer.resize')"
           @pointerdown="onGripDown"
-          @lostpointercapture="onUp"
         >
           <span
             class="h-10 w-1 rounded-full bg-border transition-colors group-hover/grip:bg-primary/60 group-focus-visible/grip:bg-primary/60"

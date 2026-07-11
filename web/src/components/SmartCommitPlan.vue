@@ -33,6 +33,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const props = defineProps<{ open: boolean; repoId: string; repoName: string; hasRemote: boolean; defaultSync?: boolean }>();
 const emit = defineEmits<{ "update:open": [boolean]; committed: [] }>();
@@ -374,9 +375,20 @@ async function execute(sync: boolean): Promise<void> {
           </button>
         </div>
         <div class="flex items-center gap-2">
-          <Button variant="secondary" size="sm" :disabled="loading || committing" @click="generate">
-            <RefreshCw :size="15" :class="cn(loading && 'animate-spin')" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="secondary"
+                size="sm"
+                :disabled="loading || committing"
+                :aria-label="$t('repo.smartCommit.regeneratePlan')"
+                @click="generate"
+              >
+                <RefreshCw :size="15" :class="cn(loading && 'animate-spin')" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ $t("repo.smartCommit.regeneratePlan") }}</TooltipContent>
+          </Tooltip>
           <Button
             size="sm"
             :variant="defaultSync && hasRemote ? 'secondary' : 'default'"

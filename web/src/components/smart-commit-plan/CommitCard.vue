@@ -29,6 +29,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTooltipConfig } from "@/lib/tooltip-config";
+import ExpandTransition from "@/shell/ExpandTransition.vue";
 
 interface EditableGroup {
   key: string;
@@ -60,6 +63,7 @@ const emit = defineEmits<{
   regenerate: [];
   "move-file": [path: string, target: string];
 }>();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 function statusVariant(letter: string | undefined): "success" | "warning" | "destructive" | "info" | "secondary" {
   switch (letter) {
@@ -82,33 +86,47 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
 <template>
   <div class="rounded-lg border border-border bg-card/40 p-3">
     <div class="flex items-center gap-1.5">
-      <button
-        type="button"
-        class="sc-drag flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/50 outline-none transition-colors hover:bg-accent hover:text-muted-foreground active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring/40"
-        :title="$t('repo.smartCommit.drag')"
-        :aria-label="$t('repo.smartCommit.drag')"
-      >
-        <GripVertical :size="15" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <button
+            type="button"
+            class="sc-drag flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/50 outline-none transition-colors hover:bg-accent hover:text-muted-foreground active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring/40"
+            :aria-label="$t('repo.smartCommit.drag')"
+          >
+            <GripVertical :size="15" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{{ $t("repo.smartCommit.drag") }}</TooltipContent>
+      </Tooltip>
       <Input
         v-model="group.subjectLine"
         :placeholder="$t('repo.smartCommit.subjectPlaceholder')"
         class="h-8 flex-1 font-mono text-[12.5px]"
       />
-      <button
-        type="button"
-        :disabled="regenBusy"
-        class="flex size-8 shrink-0 items-center justify-center rounded-md text-primary outline-none transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/40"
-        :title="$t('repo.smartCommit.regen')"
-        :aria-label="$t('repo.smartCommit.regen')"
-        @click="emit('regenerate')"
-      >
-        <Loader2 v-if="regenBusy" :size="15" class="animate-spin" />
-        <Sparkles v-else :size="15" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <button
+            type="button"
+            :disabled="regenBusy"
+            class="flex size-8 shrink-0 items-center justify-center rounded-md text-primary outline-none transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/40"
+            :aria-label="$t('repo.smartCommit.regen')"
+            @click="emit('regenerate')"
+          >
+            <Loader2 v-if="regenBusy" :size="15" class="animate-spin" />
+            <Sparkles v-else :size="15" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{{ $t("repo.smartCommit.regen") }}</TooltipContent>
+      </Tooltip>
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
-          <Button variant="ghost" size="icon" class="size-8 shrink-0" :aria-label="$t('repo.smartCommit.cardMenu')">
+          <Button
+            variant="ghost"
+            size="icon"
+            class="size-8 shrink-0"
+            :title="tooltipsEnabled ? $t('repo.smartCommit.cardMenu') : undefined"
+            :aria-label="$t('repo.smartCommit.cardMenu')"
+          >
             <MoreVertical :size="15" />
           </Button>
         </DropdownMenuTrigger>
@@ -173,7 +191,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
             <button
               type="button"
               class="flex shrink-0 items-center border-l border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-              :title="$t('repo.smartCommit.fileMenu')"
+              :title="tooltipsEnabled ? $t('repo.smartCommit.fileMenu') : undefined"
               :aria-label="$t('repo.smartCommit.fileMenu')"
             >
               <MoreVertical :size="13" />
@@ -200,14 +218,16 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
     </div>
 
     <!-- inline diff of the expanded file (single-open across the whole editor) -->
-    <div v-if="openDiff && group.files.includes(openDiff)" class="mt-2 pl-6">
-      <SmartCommitFileDiff
-        :key="openDiff"
-        :repo-id="repoId"
-        :path="openDiff"
-        :status="statusByPath[openDiff]"
-      />
-    </div>
+    <ExpandTransition :open="!!(openDiff && group.files.includes(openDiff))">
+      <div v-if="openDiff && group.files.includes(openDiff)" class="mt-2 pl-6">
+        <SmartCommitFileDiff
+          :key="openDiff"
+          :repo-id="repoId"
+          :path="openDiff"
+          :status="statusByPath[openDiff]"
+        />
+      </div>
+    </ExpandTransition>
 
     <!-- combined per-commit review: every file's diff stacked (companion to the
          single-file zoom above). Only meaningful with more than one file. -->
@@ -221,14 +241,15 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
         <ChevronDown :size="13" :class="cn('transition-transform', openAll === group.key && 'rotate-180')" />
         <span>{{ openAll === group.key ? $t("repo.smartCommit.hideAll") : $t("repo.smartCommit.reviewAll") }}</span>
       </button>
-      <SmartCommitCommitDiff
-        v-if="openAll === group.key"
-        :key="group.files.join('|')"
-        :repo-id="repoId"
-        :files="group.files"
-        :status-by-path="statusByPath"
-        class="mt-2"
-      />
+      <ExpandTransition :open="openAll === group.key">
+        <SmartCommitCommitDiff
+          :key="group.files.join('|')"
+          :repo-id="repoId"
+          :files="group.files"
+          :status-by-path="statusByPath"
+          class="mt-2"
+        />
+      </ExpandTransition>
     </div>
   </div>
 </template>

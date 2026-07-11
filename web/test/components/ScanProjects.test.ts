@@ -4,6 +4,7 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useStore } from "@/store";
 import ScanProjects from "@/components/ScanProjects.vue";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("vue-sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() },
@@ -13,11 +14,18 @@ let activeWrapper: ReturnType<typeof mount> | undefined;
 
 // The modal content is teleported to <body> via DialogPortal, so query the document, not the wrapper.
 function mountScan() {
-  activeWrapper = mount(ScanProjects, {
-    props: { open: true },
-    global: { plugins: [i18n] },
-    attachTo: document.body,
-  });
+  activeWrapper = mount(
+    {
+      components: { ScanProjects, TooltipProvider },
+      props: ["open"],
+      template: '<TooltipProvider><ScanProjects :open="open" /></TooltipProvider>',
+    },
+    {
+      props: { open: true },
+      global: { plugins: [i18n] },
+      attachTo: document.body,
+    },
+  );
   return activeWrapper;
 }
 

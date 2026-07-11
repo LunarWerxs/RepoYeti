@@ -7,8 +7,9 @@
   "//test": "Web tests run under VITEST via `bun run test` — NOT `bun test`. Bun's native runner has no Vue SFC compiler, so `.vue` imports resolve to a string path and @vue/test-utils crashes (WeakMap key error). Same reason CI uses `bun run test`.",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/i18n-check.mjs && vue-tsc -b && vite build",
-    "build:fast": "vite build",
+    "//build": "Builds land in dist-next, then swap-dist renames it over dist. The daemon serves dist live — building in place left it empty/partial for the whole build (the Monaco chunk-404 bug).",
+    "build": "node scripts/i18n-check.mjs && vue-tsc -b && vite build --outDir dist-next && node scripts/swap-dist.mjs",
+    "build:fast": "vite build --outDir dist-next && node scripts/swap-dist.mjs",
     "preview": "vite preview",
     "i18n:check": "node scripts/i18n-check.mjs",
     "test": "vitest run",

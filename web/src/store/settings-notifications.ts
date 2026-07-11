@@ -1,6 +1,7 @@
 import { ref, computed } from "vue";
 import { toast } from "vue-sonner";
 import { t } from "../i18n";
+import type { ActionResult } from "../types.ts";
 import type { BehindRepo, SyncedRepo, AutoCommittedRepo, AutoCommitBlockedRepo } from "./settings.ts";
 
 // Desktop-notification opt-in is per-browser (it rides the browser's Notification permission),
@@ -25,8 +26,11 @@ function saveDesktopNotifyPref(on: boolean): void {
  * Desktop-notification opt-in (header bell + OS notifications) and the toast/notification
  * helpers that SSE events (repo_behind, repo_synced, repo_auto_committed, …) and the scan flow
  * drive. Split out of settings.ts (same module, just its own file) — no behavioral change.
+ *
+ * `pullRepo` (the barrel's doAction("pull") bound by settings.ts) powers the behind-toast's
+ * "Pull now / Pull all" action button; optional so tests and future callers can omit it.
  */
-export function useSettingsNotifications() {
+export function useSettingsNotifications(pullRepo?: (repoId: string) => Promise<ActionResult>) {
   // Client-only (per browser): also raise an OS notification on a fresh fall-behind. Persisted
   // in localStorage; only fires when the browser's Notification permission is granted.
   const desktopNotify = ref(loadDesktopNotifyPref());
@@ -87,6 +91,29 @@ export function useSettingsNotifications() {
   // "new projects found" toast raised from inside this store) can open the one modal.
   const scanOpen = ref(false);
 
+  /** Pull every behind repo from the toast's action button, then toast the outcome. */
+  async function pullBehind(behind: BehindRepo[]): Promise<void> {
+    if (!pullRepo) return;
+    const results = await Promise.all(
+      behind.map(async (r) => {
+        try {
+          return { repo: r, res: await pullRepo(r.id) };
+        } catch {
+          return { repo: r, res: { ok: false, code: "ERROR", message: "" } as ActionResult };
+        }
+      }),
+    );
+    const failed = results.filter((r) => !r.res.ok);
+    if (!failed.length) {
+      toast.success(t("notify.behindPullDone", { count: behind.length }, behind.length));
+    } else if (failed.length === 1 && behind.length === 1) {
+      const f = failed[0]!;
+      toast.error(f.res.message || t("notify.behindPullFailed", { name: f.repo.name }));
+    } else {
+      toast.error(t("notify.behindPullSomeFailed", { count: failed.length }, failed.length));
+    }
+  }
+
   /** Warn about repos that just fell behind: always a toast, plus a system notification when the
    *  owner opted in and the browser granted permission. Summarised when several land at once. */
   function notifyBehind(behind: BehindRepo[]): void {
@@ -96,7 +123,18 @@ export function useSettingsNotifications() {
     const body = one
       ? t("notify.behindBody", { name: one.name, count: one.behind }, one.behind)
       : t("notify.behindManyBody", { count: behind.length }, behind.length);
-    toast.warning(title, { description: body });
+    toast.warning(title, {
+      description: body,
+      // Resolve it right from the toast: pull the repo(s) that fell behind.
+      action: pullRepo
+        ? {
+            label: one ? t("notify.behindPull") : t("notify.behindPullAll"),
+            onClick: () => {
+              void pullBehind(behind);
+            },
+          }
+        : undefined,
+    });
     if (
       desktopNotify.value &&
       typeof Notification !== "undefined" &&

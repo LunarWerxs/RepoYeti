@@ -6,6 +6,44 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Brand tray/taskbar icon regenerated** from the current yeti-medallion vector (the shipped
+  `misc/RepoYeti.ico` had drifted to a generic placeholder). `misc/Make-Icon.ps1` rebuilds it
+  from the committed `misc/RepoYeti-icon.png` master (re-rendered from `web/public/icon.svg`).
+- **Settings split into tabs.** The settings sidebar now groups its ten sections under four tabs
+  (General / Identities / Automation / Access) instead of one long scroll, landing on General so
+  the everyday knobs come first and the power-user sections (Identity Firewall, Agent Safety
+  Rail, AI providers, tunnel) stay one click away. The old combined identity-and-access section
+  was split into `IdentitiesSection` and `AccessSection`.
+- **Remote access asks, not redirects.** Flipping the Remote access toggle (Settings → Access,
+  or the header Connection dialog) on an unclaimed daemon no longer bounces the page to the
+  Connections OAuth login mid-toggle; it discloses an inline "Sign in with Connections" prompt
+  instead. The Stable address (tunnel) block, "Sign out everywhere", and the
+  editing-over-remote policy toggle are now hidden while remote access is off; they only
+  apply when it is on.
+- **Quieter search bar.** The repo filter box on the main page sits on a faint fill with no
+  border until focused, so it reads as a utility instead of competing with the repo list.
+
+### Fixed
+
+- **Settings sidebar no longer opens with a tooltip already showing.** Opening the panel
+  autofocuses its first control, and reka-ui discloses tooltips on focus, so the identities
+  info-hint popped instantly. The shared kit's `InfoHint` now ignores non-keyboard focus
+  (hover and keyboard Tab still disclose).
+
+### Added
+
+- **Portable window.** A Settings → Appearance toggle ("Portable window") that opens RepoYeti in
+  a chromeless Chromium app window (`msedge`/`chrome --app=URL`, its own taskbar entry, no tabs
+  or address bar) instead of a normal browser tab. Turning it on persists the setting and opens
+  one immediately (`POST /api/portable-window`); the desktop tray launcher follows the same
+  preference on every subsequent open, including a cold start before the daemon is up, by
+  reading it off `runtime.json`. Off by default (a plain tab). Falls back to a normal tab/browser
+  window when no Edge/Chrome install can be found. The window uses a dedicated Chromium profile
+  (`~/.repoyeti/portable-profile`, shared by both the server route and the tray launcher) so it
+  remembers its own size/position across launches instead of inheriting the main browser profile.
+
 ## [0.2.0] - 2026-07-09
 
 A self-hosted remote git manager: a background daemon plus a mobile dashboard, packaged

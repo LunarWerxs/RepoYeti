@@ -5,6 +5,7 @@ import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import SettingsRow from "@/shell/SettingsRow.vue";
+import InfoHint from "@/shell/InfoHint.vue";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -83,12 +84,10 @@ const on = computed(() => store.autoCommit);
 </script>
 
 <template>
-  <SettingsGroup :label="$t('settings.cardAutoCommit')">
-    <p class="px-3.5 py-2.5 text-[12px] leading-snug text-muted-foreground">
-      {{ $t("settings.autoCommitDescription") }}
-    </p>
+  <SettingsGroup :label="$t('settings.cardAutoCommit')" :description="$t('settings.autoCommitDescription')">
     <!-- master enable -->
-    <SettingsRow :label="$t('settings.autoCommit')" :description="$t('settings.autoCommitHint')">
+    <SettingsRow :label="$t('settings.autoCommit')">
+      <template #info><InfoHint :text="$t('settings.autoCommitHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.autoCommit"
@@ -140,9 +139,9 @@ const on = computed(() => store.autoCommit);
     <!-- pull before pushing -->
     <SettingsRow
       :label="$t('settings.autoCommitPull')"
-      :description="$t('settings.autoCommitPullHint')"
       :class="['transition-opacity', on ? '' : 'pointer-events-none opacity-50']"
     >
+      <template #info><InfoHint :text="$t('settings.autoCommitPullHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.autoCommitPull"
@@ -156,9 +155,9 @@ const on = computed(() => store.autoCommit);
     <!-- push after committing -->
     <SettingsRow
       :label="$t('settings.autoCommitPush')"
-      :description="$t('settings.autoCommitPushHint')"
       :class="['transition-opacity', on ? '' : 'pointer-events-none opacity-50']"
     >
+      <template #info><InfoHint :text="$t('settings.autoCommitPushHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.autoCommitPush"

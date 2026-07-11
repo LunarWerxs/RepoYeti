@@ -84,7 +84,8 @@ async function onDesktopNotify(on: boolean): Promise<void> {
 <template>
   <!-- App updates ─────────────────────────────────────────────────── -->
   <SettingsGroup :label="$t('settings.cardUpdates')">
-    <SettingsRow :label="$t('settings.autoUpdate')" :description="$t('settings.autoUpdateHint')">
+    <SettingsRow :label="$t('settings.autoUpdate')">
+      <template #info><InfoHint :text="$t('settings.autoUpdateHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.autoUpdate"
@@ -96,11 +97,9 @@ async function onDesktopNotify(on: boolean): Promise<void> {
   </SettingsGroup>
 
   <!-- Background sync ─────────────────────────────────────────────── -->
-  <SettingsGroup :label="$t('settings.cardSync')">
-    <p class="px-3.5 py-2.5 text-[12px] leading-snug text-muted-foreground">
-      {{ $t("settings.syncDescription") }}
-    </p>
-    <SettingsRow :label="$t('settings.syncCheck')" :description="$t('settings.syncCheckHint')">
+  <SettingsGroup :label="$t('settings.cardSync')" :description="$t('settings.syncDescription')">
+    <SettingsRow :label="$t('settings.syncCheck')">
+      <template #info><InfoHint :text="$t('settings.syncCheckHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.syncCheckEnabled"
@@ -112,9 +111,9 @@ async function onDesktopNotify(on: boolean): Promise<void> {
     <!-- keep in sync (auto fast-forward) — only acts as part of the check → gate on it -->
     <SettingsRow
       :label="$t('settings.keepInSync')"
-      :description="$t('settings.keepInSyncHint')"
       :class="['transition-opacity', store.syncCheckEnabled ? '' : 'pointer-events-none opacity-50']"
     >
+      <template #info><InfoHint :text="$t('settings.keepInSyncHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.keepInSync"
@@ -145,9 +144,9 @@ async function onDesktopNotify(on: boolean): Promise<void> {
     <!-- desktop notifications (per-browser; rides the OS Notification permission) -->
     <SettingsRow
       :label="$t('settings.desktopNotify')"
-      :description="$t('settings.desktopNotifyHint')"
       :class="['transition-opacity', store.notifyPermission === 'unsupported' ? 'pointer-events-none opacity-50' : '']"
     >
+      <template #info><InfoHint :text="$t('settings.desktopNotifyHint')" /></template>
       <template #control>
         <Switch
           :model-value="store.desktopNotify"
@@ -164,7 +163,8 @@ async function onDesktopNotify(on: boolean): Promise<void> {
 
   <!-- Keyboard shortcuts ───────────────────────────────────────── -->
   <SettingsGroup :label="$t('settings.cardHotkeys')">
-    <SettingsRow :label="$t('settings.hotkeysEnable')" :description="$t('settings.hotkeysEnableHint')">
+    <SettingsRow :label="$t('settings.hotkeysEnable')">
+      <template #info><InfoHint :text="$t('settings.hotkeysEnableHint')" /></template>
       <template #control>
         <Switch v-model="hotkeysEnabled" :aria-label="$t('settings.hotkeysEnable')" />
       </template>
@@ -172,9 +172,9 @@ async function onDesktopNotify(on: boolean): Promise<void> {
 
     <SettingsRow
       :label="$t('settings.hotkeysPower')"
-      :description="$t('settings.hotkeysPowerHint')"
       :class="['transition-opacity', hotkeysEnabled ? '' : 'pointer-events-none opacity-50']"
     >
+      <template #info><InfoHint :text="$t('settings.hotkeysPowerHint')" /></template>
       <template #control>
         <Switch
           v-model="powerShortcuts"

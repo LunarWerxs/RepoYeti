@@ -58,6 +58,9 @@ const isLore = computed(() => props.repo.vcs === "lore");
 const hasUpstream = computed(() => isLore.value || hasRemote.value);
 // "Pull" for git; "Sync" for a centralized backend (Lore), where pull maps to `lore sync`.
 const pullLabel = computed(() => (caps.value.fetch ? t("repo.actions.pull") : t("repo.actions.sync")));
+const pullTooltip = computed(() =>
+  caps.value.fetch ? t("repo.actions.pullTooltip") : t("repo.actions.syncTooltip"),
+);
 const busyAction = computed(() => store.busy[props.repo.id]);
 const anyBusy = computed(() => !!busyAction.value);
 
@@ -153,37 +156,51 @@ const manageOpen = ref(false);
 <template>
   <!-- git actions -->
   <div class="flex flex-wrap items-center gap-2">
-    <Button
-      v-if="caps.fetch"
-      variant="secondary"
-      size="sm"
-      :disabled="!hasRemote || anyBusy"
-      @click="run('fetch')"
-    >
-      <Loader2 v-if="busyAction === 'fetch'" class="animate-spin" />
-      <DownloadCloud v-else />
-      {{ $t("repo.actions.fetch") }}
-    </Button>
-    <Button
-      :variant="st && st.behind > 0 ? 'default' : 'outline'"
-      size="sm"
-      :disabled="!hasUpstream || anyBusy"
-      @click="run('pull')"
-    >
-      <Loader2 v-if="busyAction === 'pull'" class="animate-spin" />
-      <ArrowDownToLine v-else />
-      {{ pullLabel }}
-    </Button>
-    <Button
-      :variant="st && st.ahead > 0 ? 'default' : 'outline'"
-      size="sm"
-      :disabled="!hasUpstream || anyBusy"
-      @click="run('push')"
-    >
-      <Loader2 v-if="busyAction === 'push'" class="animate-spin" />
-      <ArrowUpFromLine v-else />
-      {{ $t("repo.actions.push") }}
-    </Button>
+    <Tooltip v-if="caps.fetch">
+      <TooltipTrigger as-child>
+        <Button
+          variant="secondary"
+          size="sm"
+          :disabled="!hasRemote || anyBusy"
+          @click="run('fetch')"
+        >
+          <Loader2 v-if="busyAction === 'fetch'" class="animate-spin" />
+          <DownloadCloud v-else />
+          {{ $t("repo.actions.fetch") }}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{{ $t("repo.actions.fetchTooltip") }}</TooltipContent>
+    </Tooltip>
+    <Tooltip>
+      <TooltipTrigger as-child>
+        <Button
+          :variant="st && st.behind > 0 ? 'default' : 'outline'"
+          size="sm"
+          :disabled="!hasUpstream || anyBusy"
+          @click="run('pull')"
+        >
+          <Loader2 v-if="busyAction === 'pull'" class="animate-spin" />
+          <ArrowDownToLine v-else />
+          {{ pullLabel }}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{{ pullTooltip }}</TooltipContent>
+    </Tooltip>
+    <Tooltip>
+      <TooltipTrigger as-child>
+        <Button
+          :variant="st && st.ahead > 0 ? 'default' : 'outline'"
+          size="sm"
+          :disabled="!hasUpstream || anyBusy"
+          @click="run('push')"
+        >
+          <Loader2 v-if="busyAction === 'push'" class="animate-spin" />
+          <ArrowUpFromLine v-else />
+          {{ $t("repo.actions.push") }}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{{ $t("repo.actions.pushTooltip") }}</TooltipContent>
+    </Tooltip>
     <!-- stash save + stash-list (pop / drop) — see StashPanel.vue -->
     <StashPanel :repo-id="repo.id" :can-stash="caps.stash" :dirty="st?.dirty ?? 0" />
     <span class="flex-1" />

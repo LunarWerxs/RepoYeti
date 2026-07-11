@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { Search, X, Check, ChevronDown, User, GitBranch, SlidersHorizontal, EyeOff } from "@lucide/vue";
 import { useStore, type StatusKey } from "../store";
 import { cn } from "@/lib/utils";
+import { useTooltipConfig } from "@/lib/tooltip-config";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -20,6 +21,7 @@ import {
 
 const { t } = useI18n();
 const store = useStore();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 // The filter controls live in a flyout (Popover) opened from the icon in the search bar.
 const open = ref(false);
@@ -56,13 +58,20 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
     <Search
       class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
     />
-    <Input v-model="store.filterQuery" :placeholder="$t('filters.searchPlaceholder')" class="h-11 pl-8 pr-10 sm:h-9" />
+    <!-- Deliberately quiet: borderless resting state on a faint fill, so the search bar
+         reads as a utility, not a call to action. The border/ring only appear on focus. -->
+    <Input
+      v-model="store.filterQuery"
+      :placeholder="$t('filters.searchPlaceholder')"
+      class="h-11 border-transparent bg-secondary/25 pl-8 pr-10 hover:bg-secondary/40 focus-visible:border-ring/40 focus-visible:bg-secondary/40 focus-visible:ring-1 dark:bg-secondary/25 sm:h-9"
+    />
 
     <Popover v-model:open="open">
       <PopoverTrigger as-child>
         <button
           type="button"
           :aria-label="$t('filters.filtersTooltip')"
+          :title="tooltipsEnabled ? $t('filters.filtersTooltip') : undefined"
           :class="
             cn(
               'absolute top-1/2 right-1.5 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40',

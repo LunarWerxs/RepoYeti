@@ -8,6 +8,7 @@ import { useI18n } from "vue-i18n";
 import { Archive, ChevronDown, CornerDownLeft, Trash2, Loader2 } from "@lucide/vue";
 import { useStore } from "../store";
 import { useRepoFeedback } from "@/lib/repo-feedback";
+import { useTooltipConfig } from "@/lib/tooltip-config";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -15,11 +16,13 @@ import {
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const props = defineProps<{ repoId: string; canStash: boolean; dirty: number }>();
 const store = useStore();
 const { t } = useI18n();
 const { toastResult } = useRepoFeedback();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 const stashes = computed(() => store.stashesByRepo[props.repoId]?.stashes ?? []);
 const gitBusy = computed(() => store.gitOpBusy[props.repoId]);
@@ -39,23 +42,26 @@ async function stashDrop(index: number): Promise<void> {
 </script>
 
 <template>
-  <Button
-    v-if="canStash && dirty > 0"
-    variant="outline"
-    size="sm"
-    :disabled="!!gitBusy"
-    :title="$t('repo.stash.stashTooltip')"
-    @click="stashSave"
-  >
-    <Loader2 v-if="gitBusy === 'stash'" class="animate-spin" />
-    <Archive v-else />
-    {{ $t("repo.stash.stash") }}
-  </Button>
+  <Tooltip v-if="canStash && dirty > 0">
+    <TooltipTrigger as-child>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="!!gitBusy"
+        @click="stashSave"
+      >
+        <Loader2 v-if="gitBusy === 'stash'" class="animate-spin" />
+        <Archive v-else />
+        {{ $t("repo.stash.stash") }}
+      </Button>
+    </TooltipTrigger>
+    <TooltipContent>{{ $t("repo.stash.stashTooltip") }}</TooltipContent>
+  </Tooltip>
   <!-- existing stashes: pop / drop -->
   <DropdownMenu v-if="canStash && stashes.length">
     <DropdownMenuTrigger
       class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-transparent px-2.5 text-[13px] font-medium text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40"
-      :title="$t('repo.stash.menuLabel')"
+      :title="tooltipsEnabled ? $t('repo.stash.menuLabel') : undefined"
       :aria-label="$t('repo.stash.menuLabel')"
     >
       <Archive :size="15" />
@@ -74,7 +80,7 @@ async function stashDrop(index: number): Promise<void> {
           type="button"
           class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
           :disabled="!!gitBusy"
-          :title="$t('repo.stash.popTooltip')"
+          :title="tooltipsEnabled ? $t('repo.stash.popTooltip') : undefined"
           :aria-label="$t('repo.stash.pop')"
           @click="stashPop(s.index)"
         >
@@ -84,7 +90,7 @@ async function stashDrop(index: number): Promise<void> {
           type="button"
           class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
           :disabled="!!gitBusy"
-          :title="$t('repo.stash.dropTooltip')"
+          :title="tooltipsEnabled ? $t('repo.stash.dropTooltip') : undefined"
           :aria-label="$t('repo.stash.drop')"
           @click="stashDrop(s.index)"
         >

@@ -6,6 +6,7 @@ import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useStore } from "@/store";
 import StashPanel from "@/components/StashPanel.vue";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("vue-sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -22,11 +23,19 @@ function mountPanel(props: { canStash: boolean; dirty: number }) {
   // DropdownMenuContent teleports into document.body (reka-ui's DropdownMenuPortal), so the
   // component must be attached to a live document for the portal target to exist and for the
   // pop/drop dropdown to actually open in happy-dom (mirrors BranchPanel.test.ts's approach).
-  activeWrapper = mount(StashPanel, {
-    props: { repoId, ...props },
-    global: { plugins: [i18n] },
-    attachTo: document.body,
-  });
+  activeWrapper = mount(
+    {
+      components: { StashPanel, TooltipProvider },
+      props: ["repoId", "canStash", "dirty"],
+      template:
+        '<TooltipProvider><StashPanel :repo-id="repoId" :can-stash="canStash" :dirty="dirty" /></TooltipProvider>',
+    },
+    {
+      props: { repoId, ...props },
+      global: { plugins: [i18n] },
+      attachTo: document.body,
+    },
+  );
   return activeWrapper;
 }
 

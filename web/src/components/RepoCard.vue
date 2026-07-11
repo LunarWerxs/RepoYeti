@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useStore } from "../store";
 import { cn } from "@/lib/utils";
+import { cardKeepAlive } from "@/lib/card-keepalive";
 import { provideTreeSelection } from "@/lib/changes-selection";
 import { VCS_CAPABILITIES } from "../types";
 import type { Repo } from "../types";
@@ -24,6 +25,18 @@ const caps = computed(() => VCS_CAPABILITIES[props.repo.vcs] ?? VCS_CAPABILITIES
 
 // ── collapse + changed-files tree ─────────────────────────────────────────────
 const expanded = ref(false);
+// Body lifecycle: nothing mounts until the first expand (48 collapsed cards stay cheap at
+// startup), but after that the body is KEPT mounted — unmount-on-hide flips to false, so
+// collapsing just hides it (hidden="until-found") and re-expanding is a pure CSS height
+// animation. With reka's default (unmount on every collapse) a repo with hundreds/thousands
+// of changed files rebuilt its whole tree on every toggle, freezing the animation.
+// Residency is LRU-capped so collapsed bodies (their DOM + a shallow re-render per SSE
+// status tick) can't accumulate across a long session — see @/lib/card-keepalive. The
+// expensive part (the changed-files tree) only reloads while expanded either way
+// (loadChanges is gated on `expanded` below).
+const keepAlive = cardKeepAlive(props.repo.id);
+const keepMounted = computed(() => keepAlive.keep());
+onBeforeUnmount(keepAlive.release);
 
 // Owned here (not in the children below) because RepoCardChanges/RepoCardCommit render inside
 // <CollapsibleContent>, which unmounts its content on collapse (reka-ui's default
@@ -57,6 +70,7 @@ const commitRef = ref<InstanceType<typeof RepoCardCommit> | null>(null);
 
 function toggle(): void {
   expanded.value = !expanded.value;
+  keepAlive.onToggle(expanded.value);
   if (expanded.value) {
     if ((st.value?.dirty ?? 0) > 0) {
       void store.loadChanges(props.repo.id);
@@ -81,6 +95,7 @@ watch(
   <Collapsible
     :id="`repo-card-${repo.id}`"
     :open="expanded"
+    :unmount-on-hide="!keepMounted"
     :class="
       cn(
         'overflow-hidden rounded-md border border-border bg-card transition-colors',

@@ -12,6 +12,7 @@ import { identityInitials, identityTint } from "@/lib/identity-display";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { GhAccount } from "../types";
 
 // <Select> can't hold an empty value, so "no identity" rides this sentinel.
@@ -45,18 +46,23 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
 
 <template>
   <div class="flex flex-col gap-1.5">
-    <SettingsGroup :label="$t('accounts.title')">
+    <SettingsGroup :label="$t('accounts.title')" :description="$t('accounts.description')">
     <div class="flex flex-col gap-3 px-3.5 py-3">
       <div class="flex items-center justify-end">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          :aria-label="$t('accounts.refresh')"
-          :disabled="store.accountsLoading"
-          @click="store.loadAccounts()"
-        >
-          <RefreshCw :class="store.accountsLoading && 'animate-spin'" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="$t('accounts.refresh')"
+              :disabled="store.accountsLoading"
+              @click="store.loadAccounts()"
+            >
+              <RefreshCw :class="store.accountsLoading && 'animate-spin'" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("accounts.refresh") }}</TooltipContent>
+        </Tooltip>
       </div>
 
       <!-- gh not installed / unreachable -->
@@ -153,6 +159,5 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
       </div>
     </div>
     </SettingsGroup>
-    <p class="px-1 text-[11px] text-muted-foreground/70">{{ $t("accounts.description") }}</p>
   </div>
 </template>

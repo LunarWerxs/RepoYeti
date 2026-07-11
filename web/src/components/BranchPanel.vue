@@ -10,6 +10,7 @@ import { GitBranch, ChevronDown, Loader2, Trash2, Plus } from "@lucide/vue";
 import { useStore } from "../store";
 import { cn } from "@/lib/utils";
 import { useRepoFeedback } from "@/lib/repo-feedback";
+import { useTooltipConfig } from "@/lib/tooltip-config";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -17,11 +18,14 @@ import {
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import ExpandTransition from "@/shell/ExpandTransition.vue";
 
 const props = defineProps<{ repoId: string; branch: string | null; detached: boolean }>();
 const store = useStore();
 const { t } = useI18n();
 const { toastResult } = useRepoFeedback();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 const branchList = computed(() => store.branchesByRepo[props.repoId]);
 const otherBranches = computed(() => (branchList.value?.branches ?? []).filter((b) => !b.current));
@@ -56,7 +60,7 @@ async function removeBranch(name: string): Promise<void> {
     <DropdownMenu>
       <DropdownMenuTrigger
         class="mono flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-[12px] text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
-        :title="$t('repo.branches.manageTooltip')"
+        :title="tooltipsEnabled ? $t('repo.branches.manageTooltip') : undefined"
         :aria-label="$t('repo.branches.manageTooltip')"
         :disabled="gitBusy === 'checkout' || gitBusy === 'branch'"
       >
@@ -96,7 +100,7 @@ async function removeBranch(name: string): Promise<void> {
           <button
             type="button"
             class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 pointer-coarse:opacity-100 outline-none transition group-hover/br:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
-            :title="$t('repo.branches.deleteTooltip')"
+            :title="tooltipsEnabled ? $t('repo.branches.deleteTooltip') : undefined"
             :aria-label="$t('repo.branches.deleteTooltip')"
             @click="removeBranch(b.name)"
           >
@@ -105,18 +109,23 @@ async function removeBranch(name: string): Promise<void> {
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
-    <button
-      type="button"
-      class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-      :title="$t('repo.branches.createTooltip')"
-      :aria-label="$t('repo.branches.create')"
-      @click="creatingBranch = !creatingBranch"
-    >
-      <Plus :size="15" />
-    </button>
+    <Tooltip>
+      <TooltipTrigger as-child>
+        <button
+          type="button"
+          class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          :aria-label="$t('repo.branches.create')"
+          @click="creatingBranch = !creatingBranch"
+        >
+          <Plus :size="15" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{{ $t("repo.branches.createTooltip") }}</TooltipContent>
+    </Tooltip>
   </div>
   <!-- inline create-branch form (toggled by ＋) -->
-  <form v-if="creatingBranch" class="flex items-center gap-2" @submit.prevent="createBranch">
+  <ExpandTransition :open="creatingBranch">
+  <form class="flex items-center gap-2" @submit.prevent="createBranch">
     <input
       v-model="newBranch"
       type="text"
@@ -130,4 +139,5 @@ async function removeBranch(name: string): Promise<void> {
       {{ $t("repo.branches.create") }}
     </Button>
   </form>
+  </ExpandTransition>
 </template>

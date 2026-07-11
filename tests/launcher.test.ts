@@ -91,6 +91,43 @@ test("launcher chain is wired: shortcut → wscript → RepoYeti.vbs → RepoYet
   must(trayGate >= 0, "RepoYeti-Tray.ps1 doesn't create the tray icon before daemon startup");
   must(daemonLaunch >= 0 && trayGate < daemonLaunch, "RepoYeti-Tray.ps1 can start the daemon before the tray icon exists");
   must(!/SystemIcons\]::Application/.test(tray), "RepoYeti-Tray.ps1 falls back to a generic icon instead of refusing to start");
+
+  // Portable window: every browser-open call site goes through Open-AppUi (which picks a
+  // chromeless --app= window vs. a normal tab based on runtime.json's portableMode), not a bare
+  // Start-Process $url/$u.
+  must(/function Open-AppUi/.test(tray), "RepoYeti-Tray.ps1 is missing the Open-AppUi helper");
+  must(/--app=\$url/.test(tray), "RepoYeti-Tray.ps1's Open-AppUi doesn't launch a chromeless --app= window");
+  must(/function Resolve-ChromiumBrowser/.test(tray), "RepoYeti-Tray.ps1 is missing the Resolve-ChromiumBrowser helper");
+  must(
+    !/Start-Process\s+\$(script:url|u)\b/.test(tray),
+    "RepoYeti-Tray.ps1 still opens the browser directly instead of going through Open-AppUi",
+  );
+
+  // Dedicated portable-window profile: same family convention as POST /api/portable-window
+  // (src/http/routes/health.ts) — <dir of runtime.json>/portable-profile — so both open paths
+  // share one profile and Chromium remembers the window's size/position across launches.
+  must(
+    /--user-data-dir=`"\$profileDir`"/.test(tray),
+    "RepoYeti-Tray.ps1's Open-AppUi doesn't pass --user-data-dir for the dedicated portable profile",
+  );
+  must(
+    /Join-Path\s+\(Split-Path -Parent \$infoFile\)\s+"portable-profile"/.test(tray),
+    "RepoYeti-Tray.ps1 doesn't derive the portable profile dir from the same runtime.json path ($infoFile)",
+  );
+
+  // Auto-restart watchdog: a health timer must relaunch a daemon that died on its own, and it
+  // must NOT fight a deliberate stop (Quit sets $intentionalStop). Both are load-bearing —
+  // without the timer a crash is unrecoverable; without the guard Quit would be undone.
+  must(/\$healthTimer\b/.test(tray), "RepoYeti-Tray.ps1 has no health/watchdog timer to auto-restart a crashed daemon");
+  must(
+    /\$healthTimer\.Add_Tick/.test(tray) && /Start-RepoYeti\s+\$root\s+\$port/.test(tray),
+    "RepoYeti-Tray.ps1's watchdog doesn't relaunch the daemon on its tick",
+  );
+  must(
+    /\$script:intentionalStop\s*=\s*\$true/.test(tray),
+    "RepoYeti-Tray.ps1 doesn't guard the watchdog against a deliberate Quit ($intentionalStop)",
+  );
+  must(/\$healthTimer\.Start\(\)/.test(tray), "RepoYeti-Tray.ps1 never starts the watchdog timer");
 });
 
 // ── Windows-only runtime proofs (the tray is Windows-only) ────────────────────────
