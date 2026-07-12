@@ -1,11 +1,8 @@
-# RepoYeti system-tray host (Windows). THIN ADAPTER over the shared LunarWerx
-# Tray-Host engine (misc/Tray-Host.ps1, kit-synced — DO NOT EDIT THAT FILE HERE;
-# edit lunarwerx-ui/src/tray-host/Tray-Host.ps1 and run `node sync.mjs`). This file
-# owns only what's genuinely RepoYeti-specific: names, paths, the daemon start
-# command, and the handful of documented divergences from the other family members
-# (ReDesign / DevWebUI / CC Manager UI). Everything else — mutex/tray lifecycle,
-# watchdog, background rebuild/restart worker, hide-tray live-sync, portable-window
-# open path, full-shutdown sentinel — lives in the engine and is shared verbatim.
+# RepoYeti system-tray host (Windows). Thin adapter over the shared Tray-Host engine
+# (misc/Tray-Host.ps1). This file owns only what's genuinely app-specific: names,
+# paths, the daemon start command, and a few documented behavior tweaks. Everything
+# else -- mutex/tray lifecycle, watchdog, rebuild/restart worker, hide-tray live-sync,
+# open path, full-shutdown sentinel -- lives in the shared engine.
 #
 # RepoYeti specifics worth knowing:
 #  * Port comes from the --port CLI FLAG, not an env var — so PortEnvVar is $null
