@@ -1,6 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import {
@@ -15,9 +14,10 @@ import {
 import { gitCommitGroups, collectCommitPlanInput, collectPathsDiff, isNoisyPath } from "../src/git-actions.ts";
 import { smartCommitRepo, planCommitInput, collectRepoPathsDiff } from "../src/service/index.ts";
 import { createApp } from "../src/http/app.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import type { Identity } from "../src/db.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Force the built-in Groq key OFF so "no provider configured" is deterministic regardless of
 // any REPOYETI_BUILTIN_GROQ_KEY in a dev .env (mirrors tests/ai.test.ts).
@@ -29,7 +29,7 @@ const J = (body: unknown) => ({ method: "POST", headers: { "content-type": "appl
 
 /** A git repo with one seed commit, local author configured (so null-identity commits work). */
 async function repo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-smart-"));
+  const dir = mkScratchDir("gm-smart-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} config user.name Seed`.quiet();
   await $`git -C ${dir} config user.email s@s.io`.quiet();
@@ -231,7 +231,7 @@ test("gitCommitGroups refuses a clean tree with NOTHING_TO_COMMIT", async () => 
 test("gitCommitGroups works on an unborn HEAD (fresh repo, no initial commit)", async () => {
   // A brand-new repo with changes but NO commit yet: `git reset` would fail here, so the
   // executor must tolerate that and still create the first commits.
-  const dir = mkdtempSync(join(tmpdir(), "gm-smart-unborn-"));
+  const dir = mkScratchDir("gm-smart-unborn-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} config user.name Seed`.quiet();
   await $`git -C ${dir} config user.email s@s.io`.quiet();
@@ -271,7 +271,7 @@ test("isNoisyPath folds lockfiles / generated / minified, not real source", () =
 });
 
 test("collectCommitPlanInput folds a lockfile's body out of the diff but keeps it in the file list", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "gm-fold-"));
+  const dir = mkScratchDir("gm-fold-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} config user.name Seed`.quiet();
   await $`git -C ${dir} config user.email s@s.io`.quiet();
@@ -294,7 +294,7 @@ test("collectCommitPlanInput folds a lockfile's body out of the diff but keeps i
 
 async function registerRepo(): Promise<{ dir: string; id: string }> {
   const dir = await repo();
-  return { dir, id: upsertRepo(dir, "smart", "auto", false) };
+  return { dir, id: mustUpsertRepo(dir, "smart", "auto", false) };
 }
 
 test("smartCommitRepo validates against the live tree: PLAN_STALE for a vanished path", async () => {

@@ -19,6 +19,10 @@ export function useSources(
   const roots = ref<string[]>([]);
   // Registered Lore servers — lazily loaded when Settings / Add-repo opens.
   const servers = ref<LoreServer[]>([]);
+  // Owner setting: whether the Lore-servers settings section is expanded (collapsed by
+  // default for owners who don't use Lore). From /api/status, kept live via `settings_changed`;
+  // true until status loads so the section doesn't flash collapsed-then-open for existing users.
+  const loreServersEnabled = ref(true);
   // True while a bulk "fetch all" is running (drives the header button spinner).
   const fetchingAll = ref(false);
 
@@ -71,6 +75,16 @@ export function useSources(
     const r = await api.deleteServer(id);
     servers.value = r.servers;
   }
+  /** Toggle the Lore-servers section's expanded/collapsed state (optimistic; rolls back). */
+  async function setLoreServersEnabled(enabled: boolean): Promise<void> {
+    loreServersEnabled.value = enabled;
+    try {
+      await api.setLoreServersEnabled(enabled);
+    } catch (e) {
+      loreServersEnabled.value = !enabled; // roll back
+      throw e;
+    }
+  }
   /** Clone a repo from a registered Lore server into a folder under a scan root. */
   async function cloneFromServer(input: { url: string; parentPath: string; name?: string }): Promise<Repo> {
     const repo = await api.cloneFromServer(input);
@@ -88,6 +102,14 @@ export function useSources(
     } finally {
       fetchingAll.value = false;
     }
+  }
+
+  /** Remove every repo entry whose local path no longer exists on disk. The victims drop from
+   *  the list live via `repo_removed` SSE (mirrors removeScanRoot). Returns how many were
+   *  removed, for the caller to toast. */
+  async function cleanupMissingRepos(): Promise<number> {
+    const r = await api.cleanupMissingRepos();
+    return r.removed;
   }
   async function shutdown(): Promise<void> {
     await api.shutdown();
@@ -142,6 +164,7 @@ export function useSources(
   return {
     roots,
     servers,
+    loreServersEnabled,
     fetchingAll,
     loadRoots,
     addScanRoot,
@@ -151,8 +174,10 @@ export function useSources(
     loadServers,
     addServer,
     removeServer,
+    setLoreServersEnabled,
     cloneFromServer,
     fetchAll,
+    cleanupMissingRepos,
     shutdown,
     logoutAll,
     addRepo,

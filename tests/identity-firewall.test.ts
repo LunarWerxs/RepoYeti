@@ -6,8 +6,7 @@
  * funnel through those exact same service functions.
  */
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import {
@@ -18,24 +17,26 @@ import {
   setIdentityRulesConfig,
   currentIdentityRules,
 } from "../src/identity.ts";
-import { upsertRepo, createIdentity, getRepo, setRepoIdentity, type RepoView } from "../src/db.ts";
+import { createIdentity, getRepo, setRepoIdentity, type RepoView } from "../src/db.ts";
 import { commitRepo, pushRepo } from "../src/service/index.ts";
 import { smartCommitRepo, commitSelectedRepo } from "../src/service/actions.ts";
 import { setApprovalGateEnabled } from "../src/approvals.ts";
 import { contextFor } from "../src/mcp/core.ts";
 import { serviceBackend } from "../src/mcp/adapter-service.ts";
 import type { RepoYetiConfig, IdentityRule } from "../src/config.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 /** A real git repo with one seed commit + local author, registered with the daemon. */
 async function gitRepo(name: string): Promise<{ dir: string; id: string; view: RepoView }> {
-  const dir = mkdtempSync(join(tmpdir(), `gm-idfw-${name}-`));
+  const dir = mkScratchDir(`gm-idfw-${name}-`);
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} config user.name Seed`.quiet();
   await $`git -C ${dir} config user.email s@s.io`.quiet();
   writeFileSync(join(dir, "a.txt"), "a0\n");
   await $`git -C ${dir} add -A`.quiet();
   await $`git -C ${dir} commit -q -m init`.quiet();
-  const id = upsertRepo(dir, name, "auto", false);
+  const id = mustUpsertRepo(dir, name, "auto", false);
   return { dir, id, view: getRepo(id)! };
 }
 

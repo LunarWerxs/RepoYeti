@@ -19,6 +19,8 @@ cd web && bun install && bun run dev # web dev server on :4319 (proxies /api →
 # daemon
 bun test
 bun run typecheck
+bun run check            # lint + code/boundary checks
+bun run check:coverage   # coverage gate
 
 # web
 cd web

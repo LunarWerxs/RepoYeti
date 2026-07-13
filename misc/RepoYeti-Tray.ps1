@@ -19,7 +19,8 @@
 #  * The daemon serves the BUILT PWA from web\dist and refuses to start with no scan
 #    root configured — RepoYeti gets a domain-specific MessageBox for that case
 #    (NoScanRootHint) with the exact `add-root` remediation command.
-#  * "Rebuild & Restart" is always shown (no dev/distribution split for this app).
+#  * "Rebuild & Restart" is dev-only — it shows only when REPOYETI_DEV=1 is set in the
+#    environment; public users rebuild via misc/Rebuild.bat instead.
 #  * Cold start can take up to 60s (large scan roots), well above the engine's
 #    12-15s family default — pinned via StartupWaitSec/WorkerWaitSec.
 param([int]$Port = 7171, [switch]$SelfTest)   # preferred port (matches config.ts DEFAULTS)
@@ -64,7 +65,7 @@ $TrayConfig = @{
 
   RebuildCommand      = "bun run --cwd web build:fast"
   RebuildLogName      = "RepoYeti-Rebuild.log"
-  IsDevTree           = $true   # always show "Rebuild & Restart" (no distribution split for this app)
+  IsDevTree           = ($env:REPOYETI_DEV -eq "1")   # dev-only: "Rebuild & Restart" shows only when REPOYETI_DEV=1 (public users use misc/Rebuild.bat)
 
   SentinelFile         = Join-Path $repoyetiHome "shutdown.request"
   ShutdownTokenEnvVar  = $null   # force-kill flavor — no HTTP shutdown token

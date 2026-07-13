@@ -122,6 +122,9 @@ export interface RuntimeStatus {
   autoUpdateIntervalSecs: number;
   /** Whether the whole machine is auto-scanned for repos on every app start (owner setting). */
   autoScan: boolean;
+  /** Whether the Lore-servers settings section is expanded (owner setting; a pure display
+   *  preference; collapses to just its header when off). */
+  loreServersEnabled: boolean;
   /** Whether the app UI opens in a chromeless Chromium app window instead of a browser tab
    *  (owner setting; off by default). The desktop launcher/tray follows the same preference. */
   portableMode: boolean;
@@ -250,6 +253,8 @@ export const api = {
     req<{ repo: Repo }>("POST", "/api/servers/clone", input).then((r) => r.repo),
   /** Fetch every repo that has a remote; returns a per-repo summary. */
   fetchAll: () => req<FetchAllResult>("POST", "/api/repos/fetch-all"),
+  /** Remove every repo entry (any source) whose local path no longer exists on disk. */
+  cleanupMissingRepos: () => req<{ ok: boolean; removed: number }>("POST", "/api/repos/cleanup-missing"),
   /** Cleanly stop the local daemon. */
   shutdown: () => req<{ ok: boolean }>("POST", "/api/shutdown"),
 
@@ -311,6 +316,9 @@ export const api = {
   /** Toggle auto-scanning the whole machine on every app start (owner setting; persisted). */
   setAutoScan: (enabled: boolean) =>
     req<{ ok: boolean; autoScan: boolean }>("PUT", "/api/settings", { autoScan: enabled }),
+  /** Toggle whether the Lore-servers settings section is expanded (owner setting; persisted). */
+  setLoreServersEnabled: (enabled: boolean) =>
+    req<{ ok: boolean; loreServersEnabled: boolean }>("PUT", "/api/settings", { loreServersEnabled: enabled }),
   /** Toggle opening the app UI in a chromeless app window instead of a browser tab (owner
    *  setting; persisted). The desktop launcher/tray follows the same preference. */
   setPortableMode: (enabled: boolean) =>

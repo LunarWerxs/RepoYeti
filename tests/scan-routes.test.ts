@@ -1,12 +1,12 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { getRepos } from "../src/db.ts";
 import { rescanFolder, cancelScan, isScanning } from "../src/service/index.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 const localCfg = (roots: string[] = []): RepoYetiConfig => ({ roots, port: 7171, maxDepth: 6, maxRepos: 200 });
 
@@ -24,7 +24,7 @@ async function waitIdle(): Promise<void> {
 }
 
 test("rescanFolder finds repos under a folder and counts only genuinely-new ones", async () => {
-  const root = mkdtempSync(join(tmpdir(), "gm-scan-"));
+  const root = mkScratchDir("gm-scan-");
   await gitRepoIn(root, "alpha");
   await gitRepoIn(root, "beta");
 
@@ -41,7 +41,7 @@ test("rescanFolder finds repos under a folder and counts only genuinely-new ones
 });
 
 test("POST /api/scan starts a scan and indexes the repos it finds", async () => {
-  const root = mkdtempSync(join(tmpdir(), "gm-scanroute-"));
+  const root = mkScratchDir("gm-scanroute-");
   const child = await gitRepoIn(root, "gamma");
   const app = createApp(localCfg([root]));
 
@@ -70,7 +70,7 @@ test("cancelScan() returns false when idle", () => {
 });
 
 test("POST /api/repos/:id/account pins then clears a repo's GitHub sync account", async () => {
-  const root = mkdtempSync(join(tmpdir(), "gm-acct-"));
+  const root = mkScratchDir("gm-acct-");
   await gitRepoIn(root, "delta");
   const app = createApp(localCfg([root]));
   await rescanFolder(root); // await → fully indexed when it resolves

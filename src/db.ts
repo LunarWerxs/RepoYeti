@@ -9,6 +9,7 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { DB_PATH, ensureConfigDir } from "./config.ts";
+import { isUnderTempDir } from "./paths.ts";
 import type { DiffStat } from "./read/diffstat.ts";
 import type { VcsKind } from "./vcs/types.ts";
 
@@ -203,22 +204,179 @@ export function initDb(): Database {
   } catch {
     /* column already present */
   }
+  // Repair any temp-path repo rows already sitting in a pre-existing DB (historic test-fixture
+  // writes and old whole-machine scans indexed under the OS temp dir, e.g. `%TEMP%\gm-*`, before
+  // upsertRepo's hard guard existed). Same prevention-first shape as the identity merge below:
+  // clean up what's already there, THEN the choke-point guard (upsertRepo) stops it recurring.
+  pruneTempRepos(handle);
+  // One-time merge of any duplicate identities already sitting in a pre-existing DB (the
+  // test-isolation-gap fixture garbage, "Required" x8 etc.), THEN the unique index that makes
+  // new accumulation impossible. Order matters: the index creation would fail on a DB that still
+  // has duplicates, so the merge must run first, every boot, before it.
+  lastIdentityMergeSummary = mergeDuplicateIdentities(handle);
+  try {
+    handle.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS identities_natkey ON identities " +
+        "(lower(trim(display_name)), lower(trim(git_username)), lower(trim(git_email)));",
+    );
+  } catch (e) {
+    // Should be unreachable (the merge above just ran), but never block daemon boot over it;
+    // surface it loudly instead of throwing out of initDb().
+    console.error("[repoyeti] failed to create identities_natkey unique index:", e);
+  }
   db = handle;
   return db;
+}
+
+/**
+ * Delete every existing repo row whose absolute path is under the OS temp directory (see
+ * `isUnderTempDir` in src/paths.ts). Repairs a pre-existing DB that accumulated temp-path rows
+ * before `upsertRepo`'s hard guard existed (historic test-fixture writes and old whole-machine
+ * scans indexed things like `%TEMP%\gm-*`); the guard stops it happening again, this cleans up
+ * what already landed.
+ *
+ * SQLite can't compute `os.tmpdir()`/env-var containment itself, so this reads every row, filters
+ * in JS, then deletes the matches by id inside one transaction: same pattern as
+ * `mergeDuplicateIdentities`. Deletes EVEN IF the folder still exists on disk (unlike
+ * `cleanupMissingRepos`, which is existence-based); a temp-path repo is unwanted regardless of
+ * whether it's still there. Runs before the boot watch-hydrate (see initDb / cli/lifecycle.ts), so
+ * no SSE broadcast or unwatch is needed here: no clients are connected yet, and the watch list is
+ * built afterward from `getWatchableRepos()`, which simply won't include the deleted rows.
+ *
+ * Idempotent: a DB with no temp-path rows deletes nothing and logs nothing. Exported (in addition
+ * to being called from initDb()) so tests can exercise it directly against a scratch `Database`,
+ * the same way tests/identity-hygiene.test.ts exercises mergeDuplicateIdentities.
+ */
+export function pruneTempRepos(handle: Database): number {
+  const rows = handle.query(`SELECT id, abs_path FROM repos`).all() as Array<{
+    id: string;
+    abs_path: string;
+  }>;
+  const victims = rows.filter((r) => isUnderTempDir(r.abs_path));
+  if (victims.length === 0) return 0;
+
+  const stmt = handle.query(`DELETE FROM repos WHERE id = ?`);
+  const tx = handle.transaction((xs: typeof victims) => {
+    for (const v of xs) stmt.run(v.id);
+  });
+  tx(victims);
+
+  console.log(`[repoyeti] repos: removed ${victims.length} temp-path row(s)`);
+  return victims.length;
+}
+
+/** id to id remap produced by the last mergeDuplicateIdentities() run (empty until initDb() has
+ *  run at least once). Read by the daemon boot sequence (src/cli/lifecycle.ts) to also repoint
+ *  config.json's identityRules[].requiredIdentityId, those live outside this SQLite file. */
+let lastIdentityMergeSummary: IdentityMergeSummary = { mergedCount: 0, remap: {} };
+
+export function getLastIdentityMergeSummary(): IdentityMergeSummary {
+  return lastIdentityMergeSummary;
+}
+
+export interface IdentityMergeSummary {
+  /** How many duplicate rows were deleted (i.e. total rows merged away, across all groups). */
+  mergedCount: number;
+  /** Every merged-away identity id → the surviving identity id it was folded into. */
+  remap: Record<string, string>;
+}
+
+/**
+ * Merge existing duplicate identities by normalized natural key (case-insensitively trimmed
+ * display name + git username + git email, same definition as natKey/createIdentity's
+ * idempotency check and the identities_natkey index). For each group of duplicates: keep the
+ * OLDEST row (lowest SQLite rowid; identities.id is a random UUID, not time-ordered, but rowid
+ * increases with insertion order for an ordinary rowid table like this one), re-point every
+ * reference to a merged-away id onto the survivor, then delete the losers.
+ *
+ * References repointed (searched the full schema for every place an identity id is stored):
+ *   - repos.identity_id            (a repo's identity override)
+ *   - account_identities.identity_id (a GitHub account to commit-identity link)
+ * config.json's identityRules[].requiredIdentityId is NOT a SQLite reference; src/cli/lifecycle.ts
+ * applies this function's `remap` to that separately at boot, right after initDb().
+ *
+ * Idempotent and safe to run on every boot: a DB with no duplicates (the common case after the
+ * first merge, and every fresh install) does nothing and logs nothing.
+ *
+ * Exported (in addition to being called from initDb()) so tests can exercise it directly against
+ * a scratch `Database` seeded with pre-migration duplicate rows, without needing a whole second
+ * daemon process. See tests/identity-hygiene.test.ts.
+ */
+export function mergeDuplicateIdentities(handle: Database): IdentityMergeSummary {
+  const rows = handle
+    .query(
+      `SELECT rowid AS rowid_, id, display_name, git_username, git_email FROM identities ORDER BY rowid_ ASC`,
+    )
+    .all() as Array<{ rowid_: number; id: string; display_name: string; git_username: string; git_email: string }>;
+
+  const groups = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const key = natKey(r.display_name, r.git_username, r.git_email);
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
+  }
+
+  const remap: Record<string, string> = {};
+  let mergedCount = 0;
+
+  const tx = handle.transaction(() => {
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      // Rows are already in ascending rowid order (the query's ORDER BY), so group[0] is the oldest.
+      const survivor = group[0]!;
+      const losers = group.slice(1);
+      for (const loser of losers) {
+        // Re-point every FK-style reference (no real FK constraints are declared, so this is
+        // manual, same pattern deleteIdentity already uses for the same two tables). Both tables
+        // key on something OTHER than identity_id (repos.id / account_identities' (host, login)
+        // PK), so two duplicates linked from DIFFERENT accounts/repos both remap onto the same
+        // survivor with no collision; account_identities' PK just can't collide here since a
+        // given (host, login) row only ever pointed at ONE identity (the loser) to begin with.
+        handle.query(`UPDATE repos SET identity_id = ? WHERE identity_id = ?`).run(survivor.id, loser.id);
+        handle
+          .query(`UPDATE account_identities SET identity_id = ? WHERE identity_id = ?`)
+          .run(survivor.id, loser.id);
+        handle.query(`DELETE FROM identities WHERE id = ?`).run(loser.id);
+        remap[loser.id] = survivor.id;
+        mergedCount++;
+      }
+    }
+  });
+  tx();
+
+  if (mergedCount > 0) {
+    const survivorCount = new Set(Object.values(remap)).size;
+    console.log(`[repoyeti] identities: merged ${mergedCount} duplicate row(s) into ${survivorCount} survivor(s)`);
+  }
+  return { mergedCount, remap };
 }
 
 function getDb(): Database {
   return db ?? initDb();
 }
 
-/** Insert (or refresh name/submodule of) a repo by absolute path. Returns its id. */
+/**
+ * Insert (or refresh name/submodule of) a repo by absolute path. Returns its id, or null if
+ * `absPath` is under the OS temp directory (see `isUnderTempDir`): a repo living there is NEVER
+ * imported, by owner directive, no matter which caller reaches this choke point (auto-discovery,
+ * a manual "Point to Folder" pin, or a clone/create destination). This is the single write
+ * choke point every import path shares, so this one check is the hard, unbypassable backstop;
+ * src/discovery.ts's SKIP_DIRS pruning of "temp"/"tmp" during the walk is scan-time efficiency
+ * only, not a guarantee (a pin or clone destination never goes through that walk at all).
+ *
+ * Deliberately non-throwing (a throw here would abort a scan loop mid-walk); callers check for
+ * null instead. See src/service/repo-mgmt.ts (registerRepo/cloneRepo/cloneLoreRepo/createRepo
+ * surface it as a RepoMutation) and the auto/boot/scan callers (which just skip the entry).
+ */
 export function upsertRepo(
   absPath: string,
   name: string,
   source: RepoSource,
   isSubmodule: boolean,
   vcs: VcsKind = "git",
-): string {
+): string | null {
+  if (isUnderTempDir(absPath)) return null;
   const row = getDb()
     .query(
       `INSERT INTO repos (id, abs_path, name, source, vcs, is_submodule, updated_at)
@@ -340,7 +498,61 @@ function toIdentity(r: IdentityRow): Identity {
   };
 }
 
+/** Case-insensitively-trimmed natural key for an identity: (name, git username, git email). This
+ *  is the identity's "same thing" test, used by createIdentity's idempotency check AND mirrored
+ *  by the `identities_natkey` SQL expression index (see initDb) so accumulation is impossible even
+ *  if a future code path skips this function. Keep the two in lockstep: `lower(trim(x))` here must
+ *  match `lower(trim(x))` in the SQL index expression exactly. */
+function natKey(displayName: string, gitUsername: string, gitEmail: string): string {
+  return [displayName, gitUsername, gitEmail].map((s) => s.trim().toLowerCase()).join("\0");
+}
+
+/** Thrown by createIdentity on obviously-invalid input. Routes catch this and map it to the
+ *  standard VALIDATION error code (see http/routes/identities.ts); kept as a plain Error (not an
+ *  ApiErrorCode-aware type) so db.ts stays free of the HTTP contract layer's vocabulary, the route
+ *  is the one place that translates "identity input is invalid" into the wire shape. */
+export class IdentityValidationError extends Error {}
+
+/** Reject empty/whitespace-only name or username, and an obviously malformed email (must contain
+ *  an "@" with something on both sides, no whitespace), a deliberately low bar; RFC 5322-grade
+ *  validation isn't the point, catching blank/garbage fixture-style input is. */
+function assertValidIdentityInput(displayName: string, gitUsername: string, gitEmail: string): void {
+  if (!displayName.trim()) throw new IdentityValidationError("display name is required");
+  if (!gitUsername.trim()) throw new IdentityValidationError("git username is required");
+  if (!gitEmail.trim()) throw new IdentityValidationError("git email is required");
+  if (!/^\S+@\S+\.\S+$/.test(gitEmail.trim())) {
+    throw new IdentityValidationError(`git email looks malformed: "${gitEmail.trim()}"`);
+  }
+}
+
+/** Find an existing identity whose natural key matches, or null. Shared by createIdentity and the
+ *  detected-suggestion accept flow (identity-detect's "Use" button goes through createIdentity, so
+ *  it inherits this for free; see IdentityManager.vue's `shownDetected` client-side prefilter for
+ *  the separate "don't even offer it" UX, which this backstops). */
+function findByNatKey(displayName: string, gitUsername: string, gitEmail: string): Identity | null {
+  const key = natKey(displayName, gitUsername, gitEmail);
+  const rows = getDb()
+    .query(`SELECT id, display_name, git_username, git_email, ssh_key_path FROM identities`)
+    .all() as IdentityRow[];
+  const hit = rows.find((r) => natKey(r.display_name, r.git_username, r.git_email) === key);
+  return hit ? toIdentity(hit) : null;
+}
+
+/**
+ * Create an identity, idempotent by natural key (case-insensitively trimmed display name + git
+ * username + git email). Creating one that already matches an existing row does NOT insert a
+ * second one; it returns the EXISTING row's id unchanged (this is the single choke point: every
+ * entry point, the manual "Add identity" form, the inline editor's create path, and the detected-
+ * suggestion "Use" button, all call this same function). The `identities_natkey` unique index
+ * (initDb) is the backstop for any future code path that writes to the table directly.
+ *
+ * Throws IdentityValidationError on empty/whitespace name or username, or an obviously malformed
+ * email; see assertValidIdentityInput.
+ */
 export function createIdentity(input: IdentityInput): string {
+  assertValidIdentityInput(input.displayName, input.gitUsername, input.gitEmail);
+  const existing = findByNatKey(input.displayName, input.gitUsername, input.gitEmail);
+  if (existing) return existing.id;
   const id = randomUUID();
   getDb()
     .query(
@@ -367,6 +579,13 @@ export function getIdentity(id: string): Identity | null {
   return r ? toIdentity(r) : null;
 }
 
+/**
+ * Update an identity. Validates the resulting (post-patch) name/username/email the same way
+ * createIdentity does, and rejects (returns false, changes nothing) an edit that would collide
+ * with a DIFFERENT existing identity's natural key: the friendly counterpart to the
+ * `identities_natkey` unique index, which would otherwise surface as a raw SQLite constraint
+ * error. Editing a row to match ITS OWN current key (a no-op change) is always fine.
+ */
 export function updateIdentity(id: string, patch: Partial<IdentityInput>): boolean {
   const existing = getIdentity(id);
   if (!existing) return false;
@@ -377,6 +596,9 @@ export function updateIdentity(id: string, patch: Partial<IdentityInput>): boole
     gitEmail: patch.gitEmail ?? existing.gitEmail,
     sshKeyPath: patch.sshKeyPath === undefined ? existing.sshKeyPath : patch.sshKeyPath,
   };
+  assertValidIdentityInput(next.displayName, next.gitUsername, next.gitEmail);
+  const collision = findByNatKey(next.displayName, next.gitUsername, next.gitEmail);
+  if (collision && collision.id !== id) return false;
   getDb()
     .query(
       `UPDATE identities SET display_name = ?, git_username = ?, git_email = ?, ssh_key_path = ? WHERE id = ?`,

@@ -31,6 +31,18 @@ const SKIP_DIRS = new Set(
     "venv",
     "__pycache__",
     "bower_components",
+    ".cache",
+    ".turbo",
+    ".next",
+    ".nuxt",
+    ".parcel-cache",
+    "coverage",
+    // transient/temp trees, wherever they live (not just under AppData; a custom TEMP/TMP env
+    // or a stray top-level "Temp"/"tmp" folder on any drive should never be walked either; this
+    // is what let test-fixture directories like `%TEMP%\gm-*` get indexed by whole-machine scans
+    // run under a different TEMP location than the default AppData one).
+    "temp",
+    "tmp",
     // OS + user-data trees
     "library",
     "appdata",

@@ -29,6 +29,9 @@ export async function discoverRoot(absPath: string, maxDepth: number, maxRepos: 
   let count = 0;
   await discoverStream([absPath], maxDepth, maxRepos, (f) => {
     const id = upsertRepo(f.absPath, f.name, "auto", f.isSubmodule, f.vcs);
+    // null → refused (path is under the OS temp dir); SKIP_DIRS already prunes these during the
+    // walk, so this should essentially never fire, but never watch/broadcast a null id.
+    if (!id) return;
     watchOne(id, f.absPath);
     // Fire-and-forget: a bad repo can't halt discovery of the rest; its status row stays stale.
     void refreshRepo(id, f.absPath).catch(() => {});
@@ -56,6 +59,23 @@ export function forgetReposUnder(rootAbs: string): number {
   return victims.length;
 }
 
+/**
+ * "Clean up missing directories": drop every repo entry (regardless of source: auto, pinned,
+ * or created) whose absolute path no longer exists on disk. Unlike `forgetReposUnder`, this is
+ * NOT scoped to a removed scan root or to auto-discovered repos: a manually pinned/cloned repo
+ * whose folder was since deleted or moved is exactly as stale as an auto-discovered one, and
+ * nothing else in the app ever re-validates a repo row's path once it's indexed. Unwatches +
+ * deletes + broadcasts `repo_removed` per victim (mirrors forgetReposUnder). Returns how many
+ * entries were removed.
+ */
+export function cleanupMissingRepos(): number {
+  const victims = getRepos().filter((r) => !existsSync(r.absPath));
+  for (const r of victims) unwatchOne(r.id);
+  deleteRepos(victims.map((r) => r.id));
+  for (const r of victims) broadcast("repo_removed", { id: r.id });
+  return victims.length;
+}
+
 // ── manual targeting: register an existing repo, or create a new one ──────────────
 export interface RepoMutation {
   ok: boolean;
@@ -77,6 +97,13 @@ export async function registerRepo(inputPath: string): Promise<RepoMutation> {
   // Only a git worktree has the `.git`-as-file submodule marker; Lore has no submodule concept.
   const isSubmodule = vcs === "git" && lstatSync(join(p, ".git")).isFile();
   const id = upsertRepo(p, basename(p) || p, "pinned", isSubmodule, vcs);
+  if (!id) {
+    return {
+      ok: false,
+      code: "TEMP_PATH_REFUSED",
+      message: "that folder is inside a temporary directory and will not be added",
+    };
+  }
   watchOne(id, p);
   await refreshRepo(id, p);
   return { ok: true, code: "OK", message: "registered", repo: getRepo(id) ?? undefined };
@@ -99,6 +126,13 @@ export async function cloneRepo(
   if (!res.ok) return { ok: false, code: res.code, message: res.message };
   const dest = join(parentAbs, name);
   const id = upsertRepo(dest, name, "created", false);
+  if (!id) {
+    return {
+      ok: false,
+      code: "TEMP_PATH_REFUSED",
+      message: "that folder is inside a temporary directory and will not be added",
+    };
+  }
   watchOne(id, dest);
   await refreshRepo(id, dest);
   const repo = getRepo(id);
@@ -116,6 +150,13 @@ export async function cloneLoreRepo(parentAbs: string, name: string, url: string
   const res = await loreClone(parentAbs, url, dest);
   if (!res.ok) return { ok: false, code: "ERROR", message: res.message ?? "lore clone failed" };
   const id = upsertRepo(dest, name, "created", false, "lore");
+  if (!id) {
+    return {
+      ok: false,
+      code: "TEMP_PATH_REFUSED",
+      message: "that folder is inside a temporary directory and will not be added",
+    };
+  }
   watchOne(id, dest);
   await refreshRepo(id, dest);
   const repo = getRepo(id);
@@ -136,6 +177,13 @@ export async function createRepo(inputPath: string): Promise<RepoMutation> {
     return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
   }
   const id = upsertRepo(p, basename(p) || p, "created", false);
+  if (!id) {
+    return {
+      ok: false,
+      code: "TEMP_PATH_REFUSED",
+      message: "that folder is inside a temporary directory and will not be added",
+    };
+  }
   watchOne(id, p);
   await refreshRepo(id, p);
   return { ok: true, code: "OK", message: "created", repo: getRepo(id) ?? undefined };

@@ -32,6 +32,7 @@ export type ApiErrorCode =
   | "NOT_A_REPO"
   | "EXISTS"
   | "SUBMODULE_NOT_ACTIONABLE"
+  | "TEMP_PATH_REFUSED"
   // ── Identity Firewall (mirror src/identity.ts checkIdentityPolicy) ──
   | "IDENTITY_POLICY_VIOLATION"
   // ── branches / stash / discard (mirror inspect.ts + git-actions.ts) ──
@@ -158,6 +159,7 @@ export function statusForCode(code: ApiCode): ContentfulStatusCode {
     case "NOTHING_TO_COMMIT":
     case "EXISTS":
     case "SUBMODULE_NOT_ACTIONABLE":
+    case "TEMP_PATH_REFUSED":
     case "NEEDS_OWNER":
     case "BRANCH_EXISTS":
     case "UNMERGED_BRANCH":
@@ -189,6 +191,7 @@ const DEFAULT_MESSAGE: Partial<Record<ApiErrorCode, string>> = {
   VALIDATION: "invalid request",
   BAD_PROVIDER: "unknown provider",
   SUBMODULE_NOT_ACTIONABLE: "submodule worktree is not actionable",
+  TEMP_PATH_REFUSED: "that folder is inside a temporary directory and will not be added",
   ERROR: "internal error",
 };
 

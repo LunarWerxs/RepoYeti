@@ -1,13 +1,13 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { gitRemoteSet, gitRemoteRemove, gitTagCreate } from "../src/git-actions.ts";
 import { readTags } from "../src/read/inspect.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 const J = (method: string, body: unknown) => ({
@@ -17,7 +17,7 @@ const J = (method: string, body: unknown) => ({
 });
 
 async function repo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-rt-"));
+  const dir = mkScratchDir("gm-rt-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   writeFileSync(join(dir, "f.txt"), "x\n");
   await $`git -C ${dir} -c user.name=S -c user.email=s@s.io add -A`.quiet();
@@ -63,7 +63,7 @@ test("readTags lists tags newest-first; empty when there are none", async () => 
 
 test("POST/DELETE /api/repos/:id/remote validate the URL and update config", async () => {
   const dir = await repo();
-  const id = upsertRepo(dir, "rt-route", "auto", false);
+  const id = mustUpsertRepo(dir, "rt-route", "auto", false);
   const app = createApp(localCfg());
 
   const bad = await app.request(`/api/repos/${id}/remote`, J("POST", { url: "not a url" }));
@@ -82,7 +82,7 @@ test("POST/DELETE /api/repos/:id/remote validate the URL and update config", asy
 test("GET /api/repos/:id/tags returns tags; unknown repo 404s", async () => {
   const dir = await repo();
   await $`git -C ${dir} tag v2.0.0`.quiet();
-  const id = upsertRepo(dir, "rt-tags", "auto", false);
+  const id = mustUpsertRepo(dir, "rt-tags", "auto", false);
   const app = createApp(localCfg());
 
   const res = await app.request(`/api/repos/${id}/tags`);
@@ -105,7 +105,7 @@ test("gitTagCreate makes lightweight + annotated tags, rejects duplicates and ba
 
 test("POST /api/repos/:id/tag creates a tag (201) and validates the name", async () => {
   const dir = await repo();
-  const id = upsertRepo(dir, "tag-route", "auto", false);
+  const id = mustUpsertRepo(dir, "tag-route", "auto", false);
   const app = createApp(localCfg());
 
   const ok = await app.request(`/api/repos/${id}/tag`, J("POST", { name: "v3.0.0", message: "three" }));

@@ -1,11 +1,11 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Local mode (no OIDC) → /api/* is ungated, so routes are exercised directly.
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
@@ -16,12 +16,12 @@ const J = (body: unknown) => ({
 });
 
 async function repoWithId(): Promise<{ dir: string; id: string }> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-broute-"));
+  const dir = mkScratchDir("gm-broute-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   writeFileSync(join(dir, "seed.txt"), "seed\n");
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io add -A`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m init`.quiet();
-  return { dir, id: upsertRepo(dir, "broute", "auto", false) };
+  return { dir, id: mustUpsertRepo(dir, "broute", "auto", false) };
 }
 
 test("GET /branches lists branches; unknown repo 404s", async () => {

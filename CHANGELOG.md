@@ -6,6 +6,8 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-13
+
 ### Changed
 
 - **Brand tray/taskbar icon regenerated** from the current yeti-medallion vector (the shipped

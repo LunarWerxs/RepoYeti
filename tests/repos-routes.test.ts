@@ -1,11 +1,10 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { MIN_CONTENT_SEARCH } from "../src/service/index.ts";
-import { upsertRepo, getRepo, setRepoHidden, setRepoPinned, setRepoStarred } from "../src/db.ts";
+import { getRepo, setRepoHidden, setRepoPinned, setRepoStarred } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Local mode (no OIDC) → /api/* is not gated, so we can exercise the routes directly.
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
@@ -22,8 +21,8 @@ test("GET /api/status reports the version and a null tunnel URL until one is set
 });
 
 test("setRepoHidden toggles the dashboard-hidden flag", () => {
-  const path = mkdtempSync(join(tmpdir(), "gm-hidden-"));
-  const id = upsertRepo(path, "hidden-test", "auto", false);
+  const path = mkScratchDir("gm-hidden-");
+  const id = mustUpsertRepo(path, "hidden-test", "auto", false);
   expect(getRepo(id)?.hidden).toBe(false);
 
   setRepoHidden(id, true);
@@ -34,8 +33,8 @@ test("setRepoHidden toggles the dashboard-hidden flag", () => {
 });
 
 test("POST /api/repos/:id/hidden hides a known repo and 404s an unknown one", async () => {
-  const path = mkdtempSync(join(tmpdir(), "gm-hidden-route-"));
-  const id = upsertRepo(path, "hidden-route", "auto", false);
+  const path = mkScratchDir("gm-hidden-route-");
+  const id = mustUpsertRepo(path, "hidden-route", "auto", false);
   const app = createApp(localCfg());
 
   const hide = await app.request(`/api/repos/${id}/hidden`, {
@@ -56,8 +55,8 @@ test("POST /api/repos/:id/hidden hides a known repo and 404s an unknown one", as
 });
 
 test("setRepoPinned / setRepoStarred toggle independent flags", () => {
-  const path = mkdtempSync(join(tmpdir(), "gm-fav-"));
-  const id = upsertRepo(path, "fav-test", "auto", false);
+  const path = mkScratchDir("gm-fav-");
+  const id = mustUpsertRepo(path, "fav-test", "auto", false);
   expect(getRepo(id)?.pinned).toBe(false);
   expect(getRepo(id)?.starred).toBe(false);
 
@@ -76,8 +75,8 @@ test("setRepoPinned / setRepoStarred toggle independent flags", () => {
 });
 
 test("POST /api/repos/:id/pinned + /starred update a known repo and 404 an unknown one", async () => {
-  const path = mkdtempSync(join(tmpdir(), "gm-fav-route-"));
-  const id = upsertRepo(path, "fav-route", "auto", false);
+  const path = mkScratchDir("gm-fav-route-");
+  const id = mustUpsertRepo(path, "fav-route", "auto", false);
   const app = createApp(localCfg());
 
   const pin = await app.request(`/api/repos/${id}/pinned`, {

@@ -1,13 +1,11 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { handleRpc } from "../src/mcp/core.ts";
 import { serviceBackend } from "../src/mcp/adapter-service.ts";
 import { processLine } from "../src/mcp/stdio.ts";
 import { TOOLS } from "../src/mcp/tools.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { VERSION } from "../src/config.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 const backend = serviceBackend();
 
@@ -61,8 +59,8 @@ test("tools/list returns the catalog including the key tools", async () => {
 
 // ── protocol: tools/call (service backend against a seeded repo) ───────────────────────
 test("tools/call list_repos returns content listing a seeded repo", async () => {
-  const path = mkdtempSync(join(tmpdir(), "gm-mcp-list-"));
-  const id = upsertRepo(path, "mcp-list-repo", "auto", false);
+  const path = mkScratchDir("gm-mcp-list-");
+  const id = mustUpsertRepo(path, "mcp-list-repo", "auto", false);
 
   const res = (await handleRpc(
     { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "list_repos", arguments: {} } },
@@ -76,8 +74,8 @@ test("tools/call list_repos returns content listing a seeded repo", async () => 
 });
 
 test("tools/call repo_status resolves a seeded repo by name", async () => {
-  const path = mkdtempSync(join(tmpdir(), "gm-mcp-status-"));
-  upsertRepo(path, "mcp-status-repo", "auto", false);
+  const path = mkScratchDir("gm-mcp-status-");
+  mustUpsertRepo(path, "mcp-status-repo", "auto", false);
 
   const res = (await handleRpc(
     {

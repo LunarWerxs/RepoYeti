@@ -9,6 +9,7 @@ import {
   createIdentity,
   updateIdentity,
   deleteIdentity,
+  IdentityValidationError,
 } from "../../db.ts";
 import { detectIdentities } from "../../identity-detect.ts";
 
@@ -25,8 +26,17 @@ export function register(app: Hono, _deps: Deps): void {
     const p = await parseBody(c, IdentityCreateSchema);
     if (!p.ok) return p.res;
     const { displayName, gitUsername, gitEmail } = p.data;
-    const id = createIdentity({ displayName, gitUsername, gitEmail, sshKeyPath: p.data.sshKeyPath || null });
-    return c.json({ identity: getIdentity(id) }, 201);
+    // createIdentity is idempotent by natural key (name + git username + git email, trimmed and
+    // case-insensitive): a submission matching an existing identity returns that identity's id
+    // instead of inserting a duplicate, so this route never needs to distinguish "created" from
+    // "already existed" to the caller, it just always reflects the current row back as 201.
+    try {
+      const id = createIdentity({ displayName, gitUsername, gitEmail, sshKeyPath: p.data.sshKeyPath || null });
+      return c.json({ identity: getIdentity(id) }, 201);
+    } catch (e) {
+      if (e instanceof IdentityValidationError) return jsonError(c, "VALIDATION", e.message);
+      throw e;
+    }
   });
 
   app.put("/api/identities/:id", async (c) => {
@@ -35,14 +45,22 @@ export function register(app: Hono, _deps: Deps): void {
     const p = await parseBody(c, IdentityUpdateSchema);
     if (!p.ok) return p.res;
     const b = p.data;
-    updateIdentity(id, {
-      displayName: b.displayName,
-      gitUsername: b.gitUsername,
-      gitEmail: b.gitEmail,
-      // undefined = leave unchanged; null or "" = clear it.
-      sshKeyPath: b.sshKeyPath === undefined ? undefined : b.sshKeyPath || null,
-    });
-    return c.json({ identity: getIdentity(id) });
+    try {
+      const applied = updateIdentity(id, {
+        displayName: b.displayName,
+        gitUsername: b.gitUsername,
+        gitEmail: b.gitEmail,
+        // undefined = leave unchanged; null or "" = clear it.
+        sshKeyPath: b.sshKeyPath === undefined ? undefined : b.sshKeyPath || null,
+      });
+      // The row exists (checked above), so `false` here means the edit collided with a DIFFERENT
+      // identity's natural key: the friendly form of the identities_natkey unique-index backstop.
+      if (!applied) return jsonError(c, "EXISTS", "another identity already has this name/username/email");
+      return c.json({ identity: getIdentity(id) });
+    } catch (e) {
+      if (e instanceof IdentityValidationError) return jsonError(c, "VALIDATION", e.message);
+      throw e;
+    }
   });
 
   app.delete("/api/identities/:id", (c) => {

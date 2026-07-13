@@ -1,10 +1,10 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 import {
   buildEditorArgs,
   wrapForPlatform,
@@ -24,7 +24,7 @@ import {
 process.env.REPOYETI_EDITOR_DRYRUN = "1";
 
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
-const plainRepo = (): string => mkdtempSync(join(tmpdir(), "gm-open-"));
+const plainRepo = (): string => mkScratchDir("gm-open-");
 
 // ── pure argv builders ────────────────────────────────────────────────────────
 test("buildEditorArgs: folder editors get [folder, file?]; file-only editors get [file]", () => {
@@ -60,19 +60,25 @@ test("wrapForPlatform: direct exe vs cmd shim vs macOS open -a", () => {
   expect(wrapForPlatform("linux", { kind: "exe", exe: "/usr/bin/code" }, ["/r"])).toEqual(["/usr/bin/code", "/r"]);
 });
 
-test("cmdReparseHazard: %VAR% / ^ in a path is unsafe ONLY through a Windows .cmd shim", () => {
-  // A .cmd/.bat shim routes args through `cmd /c`, which expands %VAR% (confinement bypass) and
-  // strips ^ (silent corruption) — those must be refused.
-  expect(cmdReparseHazard("win32", "C:/VS/bin/code.cmd", ["C:/repo", "C:/repo/%COMSPEC%"])).toBe(true);
-  expect(cmdReparseHazard("win32", "C:/VS/bin/code.cmd", ["C:/repo/foo^bar.ts"])).toBe(true);
-  // A clean path through a .cmd shim is fine.
-  expect(cmdReparseHazard("win32", "C:/VS/bin/code.cmd", ["C:/repo", "C:/repo/a.ts"])).toBe(false);
-  // A real .exe is spawned directly (no cmd re-parse) → never hazardous, even with % in the path.
-  expect(cmdReparseHazard("win32", "C:/VS/Code.exe", ["C:/repo/%X%"])).toBe(false);
+test("cmdReparseHazard: %VAR% / ^ in an arg is unsafe on EVERY win32 launch (all go through cmd /c start)", () => {
+  // Every win32 editor launch now routes through `cmd /c start ""` (buildDetachedSpawn), which expands
+  // %VAR% (confinement bypass) and strips ^ (silent corruption); those must be refused.
+  expect(cmdReparseHazard("win32", ["C:/repo", "C:/repo/%COMSPEC%"])).toBe(true);
+  expect(cmdReparseHazard("win32", ["C:/repo/foo^bar.ts"])).toBe(true);
+  // A clean path is fine.
+  expect(cmdReparseHazard("win32", ["C:/repo", "C:/repo/a.ts"])).toBe(false);
+  // A real .exe is now ALSO routed through cmd /c start, so a % in its path IS hazardous (unlike
+  // the old direct-spawn behavior).
+  expect(cmdReparseHazard("win32", ["C:/repo/%X%"])).toBe(true);
   // Non-Windows never uses cmd /c.
-  expect(cmdReparseHazard("linux", "/usr/bin/code", ["/repo/%X%"])).toBe(false);
-  expect(cmdReparseHazard("darwin", "/usr/bin/code", ["/repo/a^b"])).toBe(false);
+  expect(cmdReparseHazard("linux", ["/repo/%X%"])).toBe(false);
+  expect(cmdReparseHazard("darwin", ["/repo/a^b"])).toBe(false);
 });
+
+// NOTE: the win32 `cmd /c start ""` detach contract itself is guarded by the SHARED kit primitive's
+// test (tests/server-lib/detached-spawn.test.ts, synced from lunarwerx-ui). Here we only cover the
+// RepoYeti-specific pieces layered ON TOP of it: cmdReparseHazard (above) and the `.cmd`-shim
+// exception that deliberately stays OFF the detach hand-off (openInEditor test below).
 
 test("systemRevealArgv: the OS file manager per platform", () => {
   expect(systemRevealArgv("win32", "C:/r")).toEqual(["explorer", "C:/r"]);
@@ -191,7 +197,7 @@ test("effectiveDefaultEditor: honour an available choice, else first installed, 
 // ── openInEditor (dry-run: resolves argv, spawns nothing) ─────────────────────
 test("openInEditor: system editor reveals the repo folder (deterministic, no install needed)", async () => {
   const dir = plainRepo();
-  const id = upsertRepo(dir, "open-system", "auto", false);
+  const id = mustUpsertRepo(dir, "open-system", "auto", false);
   const r = await openInEditor(id, "system", undefined, { dryRun: true, platform: "win32" });
   expect(r.ok).toBe(true);
   expect(r.editor).toBe("system");
@@ -207,7 +213,7 @@ test("openInEditor: 404s an unknown repo", async () => {
 
 test("openInEditor: a path escaping the repo is refused (BAD_PATH), before any launch", async () => {
   const dir = plainRepo();
-  const id = upsertRepo(dir, "open-escape", "auto", false);
+  const id = mustUpsertRepo(dir, "open-escape", "auto", false);
   const r = await openInEditor(id, "system", "../escape.txt", { dryRun: true, platform: "win32" });
   expect(r.ok).toBe(false);
   expect(r.code).toBe("BAD_PATH");
@@ -215,7 +221,7 @@ test("openInEditor: a path escaping the repo is refused (BAD_PATH), before any l
 
 test("openInEditor: an unknown editor id is rejected (NO_EDITOR)", async () => {
   const dir = plainRepo();
-  const id = upsertRepo(dir, "open-bogus", "auto", false);
+  const id = mustUpsertRepo(dir, "open-bogus", "auto", false);
   const r = await openInEditor(id, "not-a-real-editor", undefined, { dryRun: true });
   expect(r.ok).toBe(false);
   expect(r.code).toBe("NO_EDITOR");
@@ -236,7 +242,7 @@ test("GET /api/editors lists the catalogue + an effective default", async () => 
 test("POST /api/repos/:id/open opens locally (dry-run) but is 403 over the tunnel", async () => {
   const dir = plainRepo();
   writeFileSync(join(dir, "a.txt"), "hi\n");
-  const id = upsertRepo(dir, "open-route", "auto", false);
+  const id = mustUpsertRepo(dir, "open-route", "auto", false);
   const app = createApp(localCfg());
 
   // A local request opens with the system file-manager (dry-run → no window).

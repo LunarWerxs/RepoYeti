@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
-import { VERSION, accessMode, redactTunnel, saveConfig } from "../../config.ts";
+import { VERSION, accessMode, redactTunnel, saveConfig, type RepoYetiConfig } from "../../config.ts";
 import { getTunnelUrl, tunnelActive } from "../../runtime.ts";
 import { broadcast } from "../../bus.ts";
 import {
@@ -56,6 +56,19 @@ import {
 } from "../../approvals.ts";
 import { isKnownEditor } from "../../service/index.ts";
 
+/**
+ * Resolve `loreServersEnabled`, deriving + persisting a one-time default on first read so
+ * existing owners with servers already configured don't see the section suddenly collapse
+ * (see RepoYetiConfig.loreServersEnabled).
+ */
+function resolveLoreServersEnabled(cfg: RepoYetiConfig): boolean {
+  if (typeof cfg.loreServersEnabled === "boolean") return cfg.loreServersEnabled;
+  const enabled = (cfg.servers?.length ?? 0) > 0;
+  cfg.loreServersEnabled = enabled;
+  saveConfig(cfg);
+  return enabled;
+}
+
 export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
   // ── auth surface ───────────────────────────────────────────────────────────
   app.get("/api/health", (c) =>
@@ -103,6 +116,10 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       // Auto-scan the whole machine on every app start (owner setting; off by default). A pure
       // stored flag — the web client acts on it at boot; the daemon has no runtime side effect.
       autoScan: cfg.autoScan === true,
+      // Lore-servers settings section expanded/collapsed (owner setting; pure stored flag,
+      // no daemon side effect). First read with no explicit value → derive a sensible default
+      // (expanded if servers are already configured) and persist it so it sticks from here on.
+      loreServersEnabled: resolveLoreServersEnabled(cfg),
       // Whether the app UI opens in a chromeless Chromium app window instead of a browser tab
       // (owner setting; off by default). The desktop launcher/tray reads the same flag off
       // runtime.json (see src/instance.ts), not this endpoint, so it can act before the daemon
@@ -233,10 +250,16 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       broadcast("settings_changed", { autoUpdateIntervalSecs: cfg.autoUpdateIntervalSecs });
     }
     if (typeof b.autoScan === "boolean") {
-      // Pure stored flag — no runtime call (the web client is what acts on it at boot).
+      // Pure stored flag; no runtime call (the web client is what acts on it at boot).
       cfg.autoScan = b.autoScan;
       saveConfig(cfg);
       broadcast("settings_changed", { autoScan: cfg.autoScan });
+    }
+    if (typeof b.loreServersEnabled === "boolean") {
+      // Pure stored flag: no runtime call, just whether the Settings section is expanded.
+      cfg.loreServersEnabled = b.loreServersEnabled;
+      saveConfig(cfg);
+      broadcast("settings_changed", { loreServersEnabled: cfg.loreServersEnabled });
     }
     if (typeof b.portableMode === "boolean") {
       cfg.portableMode = b.portableMode;
@@ -295,6 +318,7 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       autoUpdate: autoUpdateEnabled(),
       autoUpdateIntervalSecs: getAutoUpdateIntervalSecs(),
       autoScan: cfg.autoScan === true,
+      loreServersEnabled: resolveLoreServersEnabled(cfg),
       portableMode: cfg.portableMode === true,
       hideTrayIcon: cfg.hideTrayIcon === true,
       mcpApprovalGate: approvalGateEnabled(),

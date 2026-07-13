@@ -1,9 +1,8 @@
 import { test, expect } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
-import { upsertRepo, getRepo, setRepoStatus, type RepoStatus } from "../src/db.ts";
+import { getRepo, setRepoStatus, type RepoStatus } from "../src/db.ts";
 import { enqueue } from "../src/opqueue.ts";
 import {
   getChanges,
@@ -14,11 +13,13 @@ import {
   watcherHealth,
   MAX_CHANGED_FILES,
 } from "../src/service/index.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
-const tmp = (): string => mkdtempSync(join(tmpdir(), "gm-svc-"));
+const tmp = (): string => mkScratchDir("gm-svc-");
 
 async function gitRepo(prefix = "gm-svc-repo-"): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const dir = mkScratchDir(prefix);
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;
@@ -38,7 +39,7 @@ const status = (fetchedAt: number | null): RepoStatus => ({
 
 test("refreshRepo preserves fetchedAt on non-fetch refreshes", async () => {
   const dir = await gitRepo();
-  const id = upsertRepo(dir, "repo", "auto", false);
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
   setRepoStatus(id, status(12345));
 
   await refreshRepo(id, dir);
@@ -49,7 +50,7 @@ test("refreshRepo preserves fetchedAt on non-fetch refreshes", async () => {
 test("getChanges waits behind the per-repo operation queue", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, "x.txt"), "dirty");
-  const id = upsertRepo(dir, "repo-queued", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-queued", "auto", false);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -85,7 +86,7 @@ test("manual registration preserves .git file actionability semantics", async ()
 
 test("explicit registration upgrades an auto-discovered repo source", async () => {
   const dir = await gitRepo("gm-svc-source-");
-  const id = upsertRepo(dir, "repo-source", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-source", "auto", false);
 
   const result = await registerRepo(dir);
 
@@ -100,7 +101,7 @@ test("getChanges caps an oversized changed-file list and flags truncation", asyn
   for (let i = 0; i < MAX_CHANGED_FILES + extra; i++) {
     writeFileSync(join(dir, `f${i}.txt`), "x"); // untracked → shows up in git status
   }
-  const id = upsertRepo(dir, "repo-cap", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-cap", "auto", false);
 
   const result = await getChanges(id);
 
@@ -113,7 +114,7 @@ test("getChanges caps an oversized changed-file list and flags truncation", asyn
 // NOTE: stopWatching() here clears the global watch registry, so this must stay LAST.
 test("watchOne falls back to polling when the filesystem watch can't be installed", () => {
   stopWatching(); // clean slate — earlier tests registered live watchers via registerRepo
-  const bare = mkdtempSync(join(tmpdir(), "gm-svc-nowatch-")); // no .git → watch unhealthy
+  const bare = mkScratchDir("gm-svc-nowatch-"); // no .git → watch unhealthy
 
   watchOne("poll-fallback", bare);
 

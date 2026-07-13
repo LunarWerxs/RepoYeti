@@ -1,14 +1,13 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { upsertRepo, setRepoStatus, type RepoStatus } from "../src/db.ts";
+import { setRepoStatus, type RepoStatus } from "../src/db.ts";
 import { resolveBaseUrl, resolveRepo, get, ApiError } from "../src/cli/client.ts";
 import { runGitVerb } from "../src/cli/git.ts";
 import type { RepoView } from "../src/db.ts";
 import { clearInstanceInfo } from "../src/instance.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Local mode (no OIDC) → /api/* is not gated, so the CLI client can hit the daemon directly.
 const minimalConfig = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
@@ -50,8 +49,8 @@ test("resolveBaseUrl prefers REPOYETI_BASE_URL", async () => {
 });
 
 test("client lists a seeded repo and resolveRepo finds it by name", async () => {
-  const path = mkdtempSync(join(tmpdir(), "gm-cli-list-"));
-  const id = upsertRepo(path, "cli-list-repo", "auto", false);
+  const path = mkScratchDir("gm-cli-list-");
+  const id = mustUpsertRepo(path, "cli-list-repo", "auto", false);
   await withDaemon(async () => {
     const { repos } = await get<{ repos: RepoView[] }>("/api/repos");
     expect(repos.some((r) => r.id === id)).toBe(true);
@@ -79,10 +78,10 @@ test("resolveRepo throws an ApiError for an unknown repo", async () => {
 });
 
 test("repos and drift verbs run against the live daemon", async () => {
-  const aheadPath = mkdtempSync(join(tmpdir(), "gm-cli-ahead-"));
-  const cleanPath = mkdtempSync(join(tmpdir(), "gm-cli-clean-"));
-  const aheadId = upsertRepo(aheadPath, "cli-ahead", "auto", false);
-  upsertRepo(cleanPath, "cli-clean", "auto", false);
+  const aheadPath = mkScratchDir("gm-cli-ahead-");
+  const cleanPath = mkScratchDir("gm-cli-clean-");
+  const aheadId = mustUpsertRepo(aheadPath, "cli-ahead", "auto", false);
+  mustUpsertRepo(cleanPath, "cli-clean", "auto", false);
   setRepoStatus(aheadId, status({ ahead: 2, behind: 1 }));
 
   await withDaemon(async () => {

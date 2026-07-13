@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
+import { mkScratchDir } from "./helpers/scratch.ts";
 import {
   registerRepo,
   collectRepoDiff,
@@ -29,7 +29,7 @@ const RUN = Boolean(LORE) && SERVER_UP;
 
 test.skipIf(!RUN)("lore parity: AI diff · content search · plan input · smart-commit grouping", async () => {
   process.env.REPOYETI_LORE = "1"; // so detectVcs recognises the `.lore` working copy
-  const root = mkdtempSync(join(tmpdir(), "ry-lore-"));
+  const root = mkScratchDir("ry-lore-");
   const proj = join(root, "proj");
   await $`mkdir ${proj}`.nothrow().quiet();
   const name = `parity${Date.now()}`;

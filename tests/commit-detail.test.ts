@@ -1,14 +1,14 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { registerRepo, getLog, getCommit, readCommitFile, stopWatching } from "../src/service/index.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Covers the commit-detail read path (the History "tap a commit → see its changed files + diff"
 // feature): readCommit → VcsBackend → service.getCommit → GET /api/repos/:id/commit/:hash.
 test("getCommit returns a commit's changed files + bounded diff", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ry-commit-"));
+  const dir = mkScratchDir("ry-commit-");
   try {
     await $`git -C ${dir} init -q -b main`.quiet();
     await $`git -C ${dir} config user.name T`.quiet();

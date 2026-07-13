@@ -12,6 +12,7 @@ import {
   cloneRepo,
   reorderRepos,
   fetchAllRepos,
+  cleanupMissingRepos,
 } from "../../service/index.ts";
 import { repoFromPath, looksLikeGitUrl, deriveCloneName } from "../respond.ts";
 
@@ -63,4 +64,7 @@ export function register(app: Hono, { cfg }: Deps): void {
 
   // Fetch every repo that has a remote (bounded by the network gate). Returns a summary.
   app.post("/api/repos/fetch-all", async (c) => c.json(await fetchAllRepos()));
+
+  // Remove every repo entry (any source) whose local path no longer exists on disk.
+  app.post("/api/repos/cleanup-missing", (c) => c.json({ ok: true, removed: cleanupMissingRepos() }));
 }

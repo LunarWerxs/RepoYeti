@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
-import { RefreshCw, Plus, Settings, Cloud, CloudOff, CircleUser, Check, DownloadCloud, FolderSearch, Loader2, MoreVertical, Power, Bell } from "@lucide/vue";
+import { RefreshCw, Plus, Settings, Cloud, CloudOff, CircleUser, Check, DownloadCloud, FolderSearch, FolderX, Loader2, MoreVertical, Power, Bell } from "@lucide/vue";
+import type { SortMode } from "../store/repo";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,12 @@ import { useStore } from "../store";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 
 defineProps<{ connected: boolean; repoCount: number }>();
-const emit = defineEmits<{ reload: []; add: []; settings: []; remote: [] }>();
+const emit = defineEmits<{
+  reload: [];
+  add: [];
+  settings: [mode: "toggle" | "open"];
+  remote: [];
+}>();
 
 const store = useStore();
 const { t } = useI18n();
@@ -81,6 +87,25 @@ async function fetchAll(): Promise<void> {
     }
   } catch (e) {
     toastFetchError(e);
+  }
+}
+
+// Remove every repo entry whose local path no longer exists on disk, then toast the count.
+const cleaningUpMissing = ref(false);
+async function cleanupMissing(): Promise<void> {
+  if (cleaningUpMissing.value) return;
+  actionsOpen.value = false;
+  cleaningUpMissing.value = true;
+  try {
+    const removed = await store.cleanupMissingRepos();
+    if (removed === 0) toast.message(t("header.cleanupMissingNone"));
+    else toast.success(t("header.cleanupMissingDone", { count: removed }, removed));
+  } catch (e) {
+    toast.error(t("header.cleanupMissingFailed"), {
+      description: e instanceof Error ? e.message : undefined,
+    });
+  } finally {
+    cleaningUpMissing.value = false;
   }
 }
 
@@ -148,7 +173,7 @@ async function switchAccount(login: string, host: string): Promise<void> {
 
 function manageAccounts(): void {
   accountsOpen.value = false;
-  emit("settings");
+  emit("settings", "open");
 }
 
 function onWindowPointerDown(e: PointerEvent): void {
@@ -191,9 +216,20 @@ function openScan(): void {
   store.scanOpen = true;
 }
 
+// Sort-order submenu (Y7): a client-only display preference, so no toast/await needed; it
+// takes effect immediately and never touches the drag-persisted manual order (see store/repo.ts).
+const sortOptions: { mode: SortMode; label: () => string }[] = [
+  { mode: "manual", label: () => t("header.sortManual") },
+  { mode: "name", label: () => t("header.sortName") },
+  { mode: "recent", label: () => t("header.sortRecent") },
+];
+function setSort(mode: SortMode): void {
+  store.setSortMode(mode);
+}
+
 function openSettings(): void {
   actionsOpen.value = false;
-  emit("settings");
+  emit("settings", "toggle");
 }
 
 function openShutdownConfirm(): void {
@@ -435,6 +471,34 @@ onBeforeUnmount(() => {
             >
               <FolderSearch />
               <span>{{ $t("header.scanProjects") }}</span>
+            </button>
+            <div class="-mx-1 my-1 h-px bg-border" />
+            <!-- sort order (Y7): a client-only display preference, applied instantly -->
+            <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{{ $t("header.sortBy") }}</div>
+            <button
+              v-for="opt in sortOptions"
+              :key="opt.mode"
+              type="button"
+              role="menuitemradio"
+              :aria-checked="store.sortMode === opt.mode"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              @click="setSort(opt.mode)"
+            >
+              <Check v-if="store.sortMode === opt.mode" class="text-primary" />
+              <span v-else class="size-4 shrink-0" />
+              <span>{{ opt.label() }}</span>
+            </button>
+            <div class="-mx-1 my-1 h-px bg-border" />
+            <button
+              type="button"
+              role="menuitem"
+              :disabled="cleaningUpMissing"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
+              @click="cleanupMissing"
+            >
+              <Loader2 v-if="cleaningUpMissing" class="animate-spin" />
+              <FolderX v-else />
+              <span>{{ $t("header.cleanupMissing") }}</span>
             </button>
             <button
               type="button"

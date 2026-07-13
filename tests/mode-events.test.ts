@@ -1,12 +1,12 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
 import { registerRepo, refreshRepo, stopWatching } from "../src/service/index.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { rmrf } from "./rmrf.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Closes E4: the PUT /api/mode start/stop toggle and the watcher→broadcast→SSE delivery path
 // (a repo refresh reaching a live subscriber) had no test. tunnel.test.ts only covers the
@@ -105,7 +105,7 @@ test("PUT /api/mode toggles remote↔local once an owner is configured", async (
 // lands on a GET /api/events subscriber.
 
 test("a repo state change is delivered to a GET /api/events subscriber", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ry-e4-"));
+  const dir = mkScratchDir("ry-e4-");
   try {
     await $`git -C ${dir} init -q -b main`.quiet();
     await $`git -C ${dir} -c user.name=T -c user.email=t@t.io commit -q --allow-empty -m init`.quiet();

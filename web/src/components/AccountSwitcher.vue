@@ -3,13 +3,15 @@
 // and any tool using git's `gh auth git-credential` helper, including AI agents — authenticates as.
 // Switching flips the active account AND aligns the credential username pin so it actually sticks
 // (see src/gh-cli.ts). Commit authorship is separate — it lives under Identities.
-import { ArrowLeftRight, Check, RefreshCw, Loader2 } from "@lucide/vue";
+import { reactive } from "vue";
+import { ArrowLeftRight, Check, RefreshCw, Loader2, Link2, ChevronDown } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useI18n } from "vue-i18n";
 import { useStore } from "../store";
 import { cn } from "@/lib/utils";
 import { identityInitials, identityTint } from "@/lib/identity-display";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
+import ExpandTransition from "@/shell/ExpandTransition.vue";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -20,6 +22,15 @@ const NONE = "__none__";
 
 const { t } = useI18n();
 const store = useStore();
+
+// Y4: the commit-identity picker takes space it doesn't earn on every account row, so it's
+// behind progressive disclosure (collapsed by default, toggled open per-account; local,
+// display-only state; nothing to persist). The linked identity's name still shows collapsed
+// so the info isn't lost from view.
+const linkOpen = reactive<Record<string, boolean>>({});
+function toggleLink(a: GhAccount): void {
+  linkOpen[a.login] = !linkOpen[a.login];
+}
 
 async function switchTo(a: GhAccount): Promise<void> {
   if (a.active || store.switchingAccount) return;
@@ -103,23 +114,47 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
             <div v-if="a.scopes.length" class="mono truncate text-[11px] text-muted-foreground/70">
               {{ a.scopes.join(", ") }}
             </div>
-            <div class="mt-1.5 flex items-center gap-2">
-              <span class="shrink-0 text-[11px] text-muted-foreground">{{ $t("accounts.linkLabel") }}</span>
-              <Select
-                v-if="store.identities.length"
-                :model-value="a.identityId ?? NONE"
-                @update:model-value="(v) => onMap(a, String(v))"
-              >
-                <SelectTrigger class="h-7 w-full max-w-[13rem] text-[12px]" :aria-label="$t('accounts.linkLabel')">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem :value="NONE">{{ $t("accounts.linkNone") }}</SelectItem>
-                  <SelectItem v-for="i in store.identities" :key="i.id" :value="i.id">{{ i.displayName }}</SelectItem>
-                </SelectContent>
-              </Select>
-              <span v-else class="text-[11px] text-muted-foreground/70">{{ $t("accounts.linkEmpty") }}</span>
+            <!-- commit-identity link: collapsed by default (progressive disclosure); a
+                 compact summary shows the current state, the toggle reveals the picker. -->
+            <div class="mt-1.5 flex items-center gap-1.5">
+              <span class="shrink-0 text-[11px] text-muted-foreground">{{ $t("accounts.linkLabel") }}:</span>
+              <span class="truncate text-[11px] text-foreground/80">
+                {{ a.identityId ? (store.identityById[a.identityId]?.displayName ?? $t("accounts.linkNotSet")) : $t("accounts.linkNotSet") }}
+              </span>
+              <Tooltip v-if="store.identities.length">
+                <TooltipTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    class="size-5 shrink-0 text-muted-foreground"
+                    :aria-label="$t('accounts.linkToggle')"
+                    :aria-expanded="!!linkOpen[a.login]"
+                    @click="toggleLink(a)"
+                  >
+                    <Link2 :size="12" />
+                    <ChevronDown :size="10" :class="cn('transition-transform', linkOpen[a.login] && 'rotate-180')" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{{ $t("accounts.linkToggle") }}</TooltipContent>
+              </Tooltip>
+              <span v-else class="text-[11px] text-muted-foreground/70">· {{ $t("accounts.linkEmpty") }}</span>
             </div>
+            <ExpandTransition :open="!!linkOpen[a.login] && store.identities.length > 0">
+              <div class="pt-1.5">
+                <Select
+                  :model-value="a.identityId ?? NONE"
+                  @update:model-value="(v) => onMap(a, String(v))"
+                >
+                  <SelectTrigger class="h-7 w-full max-w-[13rem] text-[12px]" :aria-label="$t('accounts.linkLabel')">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem :value="NONE">{{ $t("accounts.linkNone") }}</SelectItem>
+                    <SelectItem v-for="i in store.identities" :key="i.id" :value="i.id">{{ i.displayName }}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </ExpandTransition>
           </div>
           <Button
             v-if="!a.active"

@@ -1,15 +1,15 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { registerRepo, getLog, stopWatching } from "../src/service/index.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Covers the "Git Graph" data path: the log's ref-scope (?refs=head|local|all → readLog's
 // scopeArgs) plus the parent-hash / ref-decoration fields the DAG renderer needs. A repo with an
 // UNMERGED side branch proves head-only ≠ all, and a merge proves parents/isMerge come through.
 test("getLog ref-scope: head is current-branch only, all spans branches, merges carry 2 parents", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ry-graph-"));
+  const dir = mkScratchDir("ry-graph-");
   try {
     await $`git -C ${dir} init -q -b main`.quiet();
     await $`git -C ${dir} config user.name T`.quiet();

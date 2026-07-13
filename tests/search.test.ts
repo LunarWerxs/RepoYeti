@@ -1,13 +1,13 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { searchChangedContent } from "../src/service/index.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 async function gitRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-search-"));
+  const dir = mkScratchDir("gm-search-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;
@@ -28,7 +28,7 @@ test("returns only CHANGED files whose content matches — clean files are never
   // Now dirty the tree: a tracked modification + a brand-new untracked file, both with the needle.
   writeFileSync(join(dir, "modified.ts"), "export const other = 1;\n// needleWord lives here\n");
   writeFileSync(join(dir, "untracked.ts"), "const x = 'needleWord';\n");
-  const id = upsertRepo(dir, "repo-search", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-search", "auto", false);
 
   const res = await searchChangedContent(id, "needleWord");
 
@@ -44,7 +44,7 @@ test("is case-insensitive, and matches a tracked modification (not just untracke
   writeFileSync(join(dir, "a.ts"), "const Foo = 1;\n");
   await commitAll(dir, "seed a"); // commit first, so the match below is a tracked modification
   writeFileSync(join(dir, "a.ts"), "const Foo = 'BarBaz';\n");
-  const id = upsertRepo(dir, "repo-ci", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-ci", "auto", false);
 
   const res = await searchChangedContent(id, "barbaz");
 
@@ -55,7 +55,7 @@ test("treats the query as a literal string, not a regex", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, "dot.ts"), "const re = a.b.c;\n");
   writeFileSync(join(dir, "nodot.ts"), "const re = axbxc;\n");
-  const id = upsertRepo(dir, "repo-literal", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-literal", "auto", false);
 
   const res = await searchChangedContent(id, "a.b.c");
 
@@ -68,7 +68,7 @@ test("skips binary files", async () => {
   const dir = await gitRepo();
   // "need\0le" — the needle bytes are present, but the NUL marks the file binary (-I skips it).
   writeFileSync(join(dir, "blob.bin"), Buffer.from([0x6e, 0x65, 0x65, 0x64, 0x00, 0x6c, 0x65]));
-  const id = upsertRepo(dir, "repo-bin", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-bin", "auto", false);
 
   const res = await searchChangedContent(id, "need");
 
@@ -78,7 +78,7 @@ test("skips binary files", async () => {
 test("queries shorter than the threshold never touch git", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, "a.ts"), "abcdef\n");
-  const id = upsertRepo(dir, "repo-short", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-short", "auto", false);
 
   const res = await searchChangedContent(id, "ab");
 
@@ -89,7 +89,7 @@ test("queries shorter than the threshold never touch git", async () => {
 test("a no-match query yields an empty list", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, "a.ts"), "nothing relevant here\n");
-  const id = upsertRepo(dir, "repo-nomatch", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-nomatch", "auto", false);
 
   const res = await searchChangedContent(id, "zzzzz");
 

@@ -4,8 +4,7 @@
  * passthrough, and that a read-only tool is never gated.
  */
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import {
@@ -25,21 +24,22 @@ import {
 } from "../src/approvals.ts";
 import { contextFor } from "../src/mcp/core.ts";
 import { serviceBackend } from "../src/mcp/adapter-service.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { addListener, removeListener } from "../src/bus.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 /** A real git repo with one seed commit + local author (mirrors tests/smart-commit.test.ts's
  *  `repo()`), registered with the daemon. Real `git` calls fail FAST here (NOTHING_TO_COMMIT / no
  *  remote) instead of hanging, unlike a bare mkdtemp dir that was never `git init`'d. */
 async function gitRepo(name: string): Promise<{ dir: string; id: string }> {
-  const dir = mkdtempSync(join(tmpdir(), `gm-approvals-${name}-`));
+  const dir = mkScratchDir(`gm-approvals-${name}-`);
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} config user.name Seed`.quiet();
   await $`git -C ${dir} config user.email s@s.io`.quiet();
   writeFileSync(join(dir, "a.txt"), "a0\n");
   await $`git -C ${dir} add -A`.quiet();
   await $`git -C ${dir} commit -q -m init`.quiet();
-  return { dir, id: upsertRepo(dir, name, "auto", false) };
+  return { dir, id: mustUpsertRepo(dir, name, "auto", false) };
 }
 
 // Restore the gate to its default (ON) + default timeout + clear any leftover pending entries

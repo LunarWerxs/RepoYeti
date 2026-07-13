@@ -8,6 +8,7 @@ import { ApiError } from "../../api";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import SettingsRow from "@/shell/SettingsRow.vue";
 import InfoHint from "@/shell/InfoHint.vue";
+import ExpandTransition from "@/shell/ExpandTransition.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +59,9 @@ function rowFor(id: AiProviderId): Row {
 
 const settings = computed(() => store.aiSettings);
 const isConfigured = (id: AiProviderId): boolean => !!settings.value.providers[id];
+// Y5: the YOLO/style rows below act on AI-generated commit messages, moot with zero
+// providers connected, so collapse them away entirely rather than show dead controls.
+const anyProviderConfigured = computed(() => Object.keys(settings.value.providers).length > 0);
 /** Groq served by the free built-in key (owner hasn't pasted their own key for it). */
 const isBuiltin = (id: AiProviderId): boolean => settings.value.providers[id]?.builtin === true;
 const savedModel = (id: AiProviderId): string | null => settings.value.providers[id]?.model ?? null;
@@ -358,32 +362,38 @@ async function onStyle(style: string): Promise<void> {
       </div>
     </div>
 
-    <!-- Smart-commit YOLO mode -->
-    <SettingsRow :label="$t('settings.aiYolo')">
-      <template #info><InfoHint :text="$t('settings.aiYoloHint')" /></template>
-      <template #control>
-        <Switch
-          :model-value="settings.yolo"
-          :aria-label="$t('settings.aiYolo')"
-          @update:model-value="(v: boolean) => onYolo(v)"
-        />
-      </template>
-    </SettingsRow>
+    <!-- Both rows below act on AI-generated commit messages, moot with no provider
+         connected, so collapse them away entirely rather than show dead controls. -->
+    <ExpandTransition :open="anyProviderConfigured">
+      <div class="flex flex-col">
+        <!-- Smart-commit YOLO mode -->
+        <SettingsRow :label="$t('settings.aiYolo')">
+          <template #info><InfoHint :text="$t('settings.aiYoloHint')" /></template>
+          <template #control>
+            <Switch
+              :model-value="settings.yolo"
+              :aria-label="$t('settings.aiYolo')"
+              @update:model-value="(v: boolean) => onYolo(v)"
+            />
+          </template>
+        </SettingsRow>
 
-    <!-- AI commit-message style (themed Select — a native <select>'s popup ignores our theme
-         entirely, rendering with the OS's own near-black dark-mode background). -->
-    <SettingsRow :label="$t('settings.aiStyle')">
-      <template #info><InfoHint :text="$t('settings.aiStyleHint')" /></template>
-      <template #control>
-        <Select :model-value="settings.style" @update:model-value="(v) => typeof v === 'string' && onStyle(v)">
-          <SelectTrigger class="w-44" :aria-label="$t('settings.aiStyle')"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="conventional">{{ $t("settings.aiStyleConventional") }}</SelectItem>
-            <SelectItem value="concise">{{ $t("settings.aiStyleConcise") }}</SelectItem>
-            <SelectItem value="detailed">{{ $t("settings.aiStyleDetailed") }}</SelectItem>
-          </SelectContent>
-        </Select>
-      </template>
-    </SettingsRow>
+        <!-- AI commit-message style (themed Select; a native <select>'s popup ignores our theme
+             entirely, rendering with the OS's own near-black dark-mode background). -->
+        <SettingsRow :label="$t('settings.aiStyle')">
+          <template #info><InfoHint :text="$t('settings.aiStyleHint')" /></template>
+          <template #control>
+            <Select :model-value="settings.style" @update:model-value="(v) => typeof v === 'string' && onStyle(v)">
+              <SelectTrigger class="w-44" :aria-label="$t('settings.aiStyle')"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="conventional">{{ $t("settings.aiStyleConventional") }}</SelectItem>
+                <SelectItem value="concise">{{ $t("settings.aiStyleConcise") }}</SelectItem>
+                <SelectItem value="detailed">{{ $t("settings.aiStyleDetailed") }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </template>
+        </SettingsRow>
+      </div>
+    </ExpandTransition>
   </SettingsGroup>
 </template>

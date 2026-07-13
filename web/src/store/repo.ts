@@ -5,6 +5,32 @@ import type { ActionName, ActionResult, ChangedFile, Repo } from "../types";
 /** Sync-status filter keys (multi-select; OR semantics). */
 export type StatusKey = "dirty" | "ahead" | "behind" | "clean" | "error";
 
+/** Display-only list ordering. "manual" is today's drag-persisted `sort_order` from the
+ *  daemon (the backward-compatible default); "name" and "recent" re-sort purely client-side
+ *  and never touch `sort_order`, so switching back to "manual" always restores the owner's
+ *  last drag arrangement. */
+export type SortMode = "manual" | "name" | "recent";
+
+// Client-only display preference (like desktopNotify); no daemon/API involvement, so
+// switching sort mode can never disturb the drag-persisted `sort_order` column.
+const SORT_MODE_KEY = "repoyeti.sortMode";
+function loadSortModePref(): SortMode {
+  try {
+    const v = localStorage.getItem(SORT_MODE_KEY);
+    if (v === "manual" || v === "name" || v === "recent") return v;
+  } catch {
+    /* private mode / storage disabled: fall through to the default */
+  }
+  return "manual";
+}
+function saveSortModePref(mode: SortMode): void {
+  try {
+    localStorage.setItem(SORT_MODE_KEY, mode);
+  } catch {
+    /* private mode / storage disabled; the in-memory ref still drives this session */
+  }
+}
+
 /**
  * Repo-list filters/sections plus the per-repo card actions (fetch/pull/push/refresh,
  * commit, changed-file tree, identity/account assignment, hide/pin/star). Shares `repos`
@@ -15,6 +41,22 @@ export function useRepoActions(
   busy: Record<string, ActionName | undefined>,
   asResult: (e: unknown) => ActionResult,
 ) {
+  // ── display sort mode (client-only; never touches the daemon's drag-persisted order) ──
+  const sortMode = ref<SortMode>(loadSortModePref());
+  function setSortMode(mode: SortMode): void {
+    sortMode.value = mode;
+    saveSortModePref(mode);
+  }
+  function sortRepos(list: Repo[]): Repo[] {
+    switch (sortMode.value) {
+      case "name":
+        return [...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      case "recent":
+        return [...list].sort((a, b) => b.updatedAt - a.updatedAt);
+      default:
+        return list; // "manual": today's server-derived order, untouched
+    }
+  }
   /** repoId → changed-file list (for the expandable tree view), lazily loaded. */
   const changesByRepo = reactive<Record<string, ChangedFile[]>>({});
   const changesLoading = reactive<Record<string, boolean>>({});
@@ -32,9 +74,10 @@ export function useRepoActions(
   // not a "filter" — drag-reorder still works over the visible set when it's off).
   const showHidden = ref(false);
   const hasHidden = computed(() => repos.value.some((r) => r.hidden));
-  /** The repos any non-search view starts from: hidden ones dropped unless showHidden. */
+  /** The repos any non-search view starts from: hidden ones dropped unless showHidden, then
+   *  re-ordered per the display sort mode (a no-op pass-through in "manual" mode). */
   const visibleRepos = computed(() =>
-    showHidden.value ? repos.value : repos.value.filter((r) => !r.hidden),
+    sortRepos(showHidden.value ? repos.value : repos.value.filter((r) => !r.hidden)),
   );
   const filtersActive = computed(
     () =>
@@ -267,6 +310,8 @@ export function useRepoActions(
     clearFilters,
     showHidden,
     hasHidden,
+    sortMode,
+    setSortMode,
     visibleRepos,
     pinnedRepos,
     starredRepos,

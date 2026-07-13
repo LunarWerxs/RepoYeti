@@ -7,6 +7,7 @@ import { useStore } from "../store";
 import { cn } from "@/lib/utils";
 import { identityInitials, identityTint } from "@/lib/identity-display";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
+import ExpandTransition from "@/shell/ExpandTransition.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,6 +17,9 @@ const { t } = useI18n();
 
 const store = useStore();
 
+// editingId drives the inline accordion panel on an EXISTING row (Y3: expand in place,
+// only one row open at a time). showForm is the separate "add new" panel at the bottom of
+// the list, which stays its own affordance since Y3 only concerns editing existing rows.
 const editingId = ref<string | null>(null);
 const showForm = ref(false);
 const saving = ref(false);
@@ -60,6 +64,11 @@ async function revealForm(): Promise<void> {
   formEl.value?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
   formEl.value?.querySelector<HTMLInputElement>('[data-slot="input"]')?.focus();
 }
+/** Focus the first field of a just-opened INLINE row panel (already in view, so no scroll). */
+async function focusInline(rowEl: HTMLElement | null): Promise<void> {
+  await nextTick();
+  rowEl?.querySelector<HTMLInputElement>('[data-slot="input"]')?.focus();
+}
 function openNew(): void {
   editingId.value = null;
   reset();
@@ -67,13 +76,17 @@ function openNew(): void {
   void revealForm();
 }
 function openEdit(i: Identity): void {
+  // Toggle: clicking the already-open row's edit button closes it again.
+  if (editingId.value === i.id) {
+    cancel();
+    return;
+  }
+  showForm.value = false;
   editingId.value = i.id;
   form.displayName = i.displayName;
   form.gitUsername = i.gitUsername;
   form.gitEmail = i.gitEmail;
   form.sshKeyPath = i.sshKeyPath ?? "";
-  showForm.value = true;
-  void revealForm();
 }
 function useDetected(i: DetectedIdentity): void {
   editingId.value = null;
@@ -203,62 +216,107 @@ async function remove(id: string): Promise<void> {
           <div
             v-for="i in store.identities"
             :key="i.id"
-            class="flex items-center gap-3 rounded-xl border border-border bg-secondary/40 p-2.5"
+            class="overflow-hidden rounded-xl border border-border bg-secondary/40"
           >
-            <span
-              :class="cn('flex size-9 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold', identityTint(i.id))"
-            >
-              {{ identityInitials(i.displayName) }}
-            </span>
-            <div class="min-w-0 flex-1">
-              <div class="truncate text-[14px] font-medium">{{ i.displayName }}</div>
-              <div class="mono truncate text-[12px] text-muted-foreground">
-                {{ i.gitUsername }} · {{ i.gitEmail }}
+            <div class="flex items-center gap-3 p-2.5">
+              <span
+                :class="cn('flex size-9 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold', identityTint(i.id))"
+              >
+                {{ identityInitials(i.displayName) }}
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-[14px] font-medium">{{ i.displayName }}</div>
+                <div class="mono truncate text-[12px] text-muted-foreground">
+                  {{ i.gitUsername }} · {{ i.gitEmail }}
+                </div>
+                <div v-if="i.sshKeyPath" class="mono mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground/80">
+                  <KeyRound :size="11" class="shrink-0" /> {{ i.sshKeyPath }}
+                </div>
               </div>
-              <div v-if="i.sshKeyPath" class="mono mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground/80">
-                <KeyRound :size="11" class="shrink-0" /> {{ i.sshKeyPath }}
+
+              <!-- inline delete confirm -->
+              <div v-if="confirmId === i.id" class="flex shrink-0 items-center gap-1">
+                <Button variant="destructive" size="sm" @click="remove(i.id)">
+                  <Check />
+                  {{ $t("identity.action.confirmDelete") }}
+                </Button>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.cancel')" @click="confirmId = null">
+                      <X />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{{ $t("identity.action.cancel") }}</TooltipContent>
+                </Tooltip>
+              </div>
+              <div v-else class="flex shrink-0 items-center gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      :aria-label="editingId === i.id ? $t('identity.action.cancel') : $t('identity.action.edit')"
+                      :aria-expanded="editingId === i.id"
+                      @click="openEdit(i)"
+                    >
+                      <X v-if="editingId === i.id" />
+                      <Pencil v-else />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{{ editingId === i.id ? $t("identity.action.cancel") : $t("identity.action.edit") }}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      class="text-muted-foreground hover:text-destructive"
+                      :aria-label="$t('identity.action.delete')"
+                      @click="confirmId = i.id"
+                    >
+                      <Trash2 />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{{ $t("identity.action.delete") }}</TooltipContent>
+                </Tooltip>
               </div>
             </div>
 
-            <!-- inline delete confirm -->
-            <div v-if="confirmId === i.id" class="flex shrink-0 items-center gap-1">
-              <Button variant="destructive" size="sm" @click="remove(i.id)">
-                <Check />
-                {{ $t("identity.action.confirmDelete") }}
-              </Button>
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.cancel')" @click="confirmId = null">
+            <!-- inline edit panel (accordion, one row open at a time) -->
+            <ExpandTransition :open="editingId === i.id">
+              <div :ref="(el) => focusInline(el as HTMLElement | null)" class="border-t border-border/60 p-3.5">
+                <div class="flex flex-col gap-3">
+                  <label class="block">
+                    <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.displayName") }}</span>
+                    <Input v-model="form.displayName" :placeholder="$t('identity.placeholder.displayName')" />
+                  </label>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <label class="block">
+                      <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.gitUsername") }}</span>
+                      <Input v-model="form.gitUsername" :placeholder="$t('identity.placeholder.gitUsername')" />
+                    </label>
+                    <label class="block">
+                      <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.gitEmail") }}</span>
+                      <Input v-model="form.gitEmail" :placeholder="$t('identity.placeholder.gitEmail')" />
+                    </label>
+                  </div>
+                  <label class="block">
+                    <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.sshKeyPath") }}</span>
+                    <Input v-model="form.sshKeyPath" :placeholder="$t('identity.placeholder.sshKeyPath')" class="mono" />
+                  </label>
+                </div>
+                <div class="mt-4 flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" @click="cancel">
                     <X />
+                    {{ $t("identity.action.cancel") }}
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent>{{ $t("identity.action.cancel") }}</TooltipContent>
-              </Tooltip>
-            </div>
-            <div v-else class="flex shrink-0 items-center gap-0.5">
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.edit')" @click="openEdit(i)">
-                    <Pencil />
+                  <Button size="sm" :disabled="!valid || saving" @click="save">
+                    <Save />
+                    {{ $t("identity.action.save") }}
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent>{{ $t("identity.action.edit") }}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    class="text-muted-foreground hover:text-destructive"
-                    :aria-label="$t('identity.action.delete')"
-                    @click="confirmId = i.id"
-                  >
-                    <Trash2 />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{{ $t("identity.action.delete") }}</TooltipContent>
-              </Tooltip>
-            </div>
+                </div>
+              </div>
+            </ExpandTransition>
           </div>
         </div>
         <div

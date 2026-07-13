@@ -1,13 +1,14 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { upsertRepo, getRepo, setRepoStatus, type RepoStatus } from "../src/db.ts";
+import { getRepo, setRepoStatus, type RepoStatus } from "../src/db.ts";
 import { fetchAllRepos, discoverRoot, forgetReposUnder } from "../src/service/index.ts";
 import { sign, unsign, rotateKey } from "../src/auth.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 const localCfg = (roots: string[] = []): RepoYetiConfig => ({ roots, port: 7171, maxDepth: 6, maxRepos: 200 });
 
@@ -34,14 +35,14 @@ async function gitRepoIn(parent: string, name: string): Promise<string> {
 // ── fetch-all ──────────────────────────────────────────────────────────────────
 
 test("fetchAllRepos attempts only repos with a remote, and reports per-repo failures", async () => {
-  const withRemote = mkdtempSync(join(tmpdir(), "gm-fa-r-"));
+  const withRemote = mkScratchDir("gm-fa-r-");
   await $`git -c init.defaultBranch=main init -q ${withRemote}`.quiet();
-  const idA = upsertRepo(withRemote, "fa-remote", "auto", false);
+  const idA = mustUpsertRepo(withRemote, "fa-remote", "auto", false);
   setRepoStatus(idA, statusWithRemote("origin")); // has a remote, but no real upstream → fetch fails
 
-  const noRemote = mkdtempSync(join(tmpdir(), "gm-fa-n-"));
+  const noRemote = mkScratchDir("gm-fa-n-");
   await $`git -c init.defaultBranch=main init -q ${noRemote}`.quiet();
-  const idB = upsertRepo(noRemote, "fa-noremote", "auto", false);
+  const idB = mustUpsertRepo(noRemote, "fa-noremote", "auto", false);
   setRepoStatus(idB, statusWithRemote(null)); // no remote → skipped entirely
 
   const r = await fetchAllRepos();
@@ -64,7 +65,7 @@ test("POST /api/repos/fetch-all returns a well-formed summary", async () => {
 // ── scan roots ───────────────────────────────────────────────────────────────
 
 test("discoverRoot indexes repos found under a new root", async () => {
-  const root = mkdtempSync(join(tmpdir(), "gm-root-"));
+  const root = mkScratchDir("gm-root-");
   await gitRepoIn(root, "alpha");
   await gitRepoIn(root, "beta");
   const found = await discoverRoot(root, 6, 200);
@@ -72,11 +73,11 @@ test("discoverRoot indexes repos found under a new root", async () => {
 });
 
 test("forgetReposUnder removes auto repos under a root but keeps pinned ones", async () => {
-  const root = mkdtempSync(join(tmpdir(), "gm-forget-"));
+  const root = mkScratchDir("gm-forget-");
   const autoDir = await gitRepoIn(root, "auto-repo");
   const pinnedDir = await gitRepoIn(root, "pinned-repo");
-  const autoId = upsertRepo(autoDir, "auto-repo", "auto", false);
-  const pinnedId = upsertRepo(pinnedDir, "pinned-repo", "pinned", false);
+  const autoId = mustUpsertRepo(autoDir, "auto-repo", "auto", false);
+  const pinnedId = mustUpsertRepo(pinnedDir, "pinned-repo", "pinned", false);
 
   const removed = forgetReposUnder(root);
   expect(removed).toBeGreaterThanOrEqual(1);
@@ -87,7 +88,7 @@ test("forgetReposUnder removes auto repos under a root but keeps pinned ones", a
 test("GET/POST/DELETE /api/roots list, add (validated), and remove a scan root", async () => {
   const cfg = localCfg();
   const app = createApp(cfg);
-  const root = mkdtempSync(join(tmpdir(), "gm-rootroute-"));
+  const root = mkScratchDir("gm-rootroute-");
   await gitRepoIn(root, "child");
 
   // add

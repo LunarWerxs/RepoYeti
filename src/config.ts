@@ -202,6 +202,13 @@ export interface RepoYetiConfig {
   roots: string[];
   /** Registered Lore servers the owner can clone repos from (see LoreServer). */
   servers?: LoreServer[];
+  /**
+   * Whether the Lore-servers settings section is expanded (owner setting; pure stored
+   * flag, no daemon-side effect). Absent = derive a sensible one-time default the first
+   * time /api/status is read: true if the owner already has servers configured, else
+   * false (see health.ts's GET /api/status). Once explicitly set, that value sticks.
+   */
+  loreServersEnabled?: boolean;
   /** Preferred HTTP port (auto-increments if taken). */
   port: number;
   /** Max BFS depth when discovering repos under a root. */
@@ -583,7 +590,36 @@ function migrateLegacyState(): void {
   }
 }
 
+/**
+ * Hard guard against the historic test-isolation accident: for a long stretch before
+ * tests/setup.ts existed, `bun test` ran against the REAL ~/.repoyeti (no REPOYETI_HOME
+ * override), so every test-fixture identity/repo row it created landed in the owner's actual
+ * database. That's how "Required" x8, "Work" x3, "A" x2 ended up in the live identities table.
+ *
+ * `bun test` always sets NODE_ENV=test (verified: it's the signal tests/setup.ts's isolation
+ * implicitly relies on continuing to work), so any code path under test that resolves to the
+ * real default config dir (i.e. REPOYETI_HOME was never set) is the exact precondition for a
+ * repeat. Throw immediately instead of silently writing into the owner's real state again.
+ *
+ * A legitimate test that truly needs the real CONFIG_DIR (there isn't one) would have to set
+ * REPOYETI_ALLOW_REAL_HOME_IN_TESTS=1 explicitly, an intentional, greppable opt-out rather than
+ * a silent gap.
+ */
+function assertNotRealHomeUnderTest(): void {
+  if (process.env.NODE_ENV !== "test") return;
+  if (process.env.REPOYETI_ALLOW_REAL_HOME_IN_TESTS === "1") return;
+  if (process.env.REPOYETI_HOME) return; // isolated, exactly what tests/setup.ts sets up
+  throw new Error(
+    "Refusing to touch the real ~/.repoyeti while running under a test runner (NODE_ENV=test).\n" +
+      "Set REPOYETI_HOME to an isolated temp dir before importing src/config.ts or src/db.ts, " +
+      "see tests/setup.ts (it does this once, in bunfig.toml's [test] preload, for the whole suite).\n" +
+      "This guard exists because test-fixture writes used to pollute the owner's real database " +
+      "before that isolation existed; do not weaken or bypass it.",
+  );
+}
+
 export function ensureConfigDir(): void {
+  assertNotRealHomeUnderTest();
   migrateLegacyState();
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
 }

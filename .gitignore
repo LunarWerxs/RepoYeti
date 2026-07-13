@@ -28,6 +28,9 @@ desktop.ini
 *.log
 coverage/
 tmp/
+# test scratch root (tests/helpers/scratch.ts): deliberately NOT under the OS temp dir, see
+# its doc comment; regenerated per test run, never committed.
+.testtmp/
 
 # Playwright E2E artifacts (web/) — regenerated per run, never committed
 web/test-results/
@@ -46,6 +49,8 @@ vendor/cloudflared/
 
 # Claude Code local config (dev tooling, not part of the project)
 .claude/
+.saydeploy/
+.agents/
 
 # Landing site (repoyeti.com) — its OWN git repo (RepoYeti/RepoYeti.github.io),
 # nested here for convenience. Never commit it into this repo.

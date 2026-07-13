@@ -54,6 +54,12 @@ watch(showRemote, (open) => {
   }
 });
 
+// "toggle" (header Settings menu item) flips the panel; "open" (e.g. the account-switcher's
+// "manage accounts" shortcut) always force-opens it, even if already open.
+function onSettings(mode: "toggle" | "open"): void {
+  showSettings.value = mode === "open" ? true : !showSettings.value;
+}
+
 // The login gate shows only in remote mode, when there's no owner session and no local
 // bypass. Local mode (and the "Continue local for now" bypass) skip straight to the app.
 const needsSignIn = computed(
@@ -100,7 +106,7 @@ onMounted(async () => {
       :repo-count="store.repos.length"
       @reload="store.loadAll()"
       @add="showAdd = true"
-      @settings="showSettings = true"
+      @settings="onSettings"
       @remote="showRemote = true"
     />
 

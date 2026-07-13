@@ -11,12 +11,14 @@
  * Untrusted-path safe: any file path is normalised + confined to the repo (reusing
  * resolveRepoPath) before it reaches a spawn argv, so a crafted `?path=` can never launch an
  * editor on a file outside the repo. The editor id is validated against a fixed catalog. On
- * Windows, an editor resolved as a `.cmd`/`.bat` shim is launched via `cmd /c`, whose re-parse
- * would expand `%…%` / strip `^` in the path AFTER confinement — so such a path is refused up
- * front (see cmdReparseHazard) to keep the confinement guarantee intact.
+ * Windows every editor launch goes through a `cmd /c start ""` hand-off (the shared kit primitive
+ * buildDetachedSpawn) so the editor escapes the daemon's process tree and survives a tray Quit; cmd
+ * re-parses each arg and would expand `%…%` / strip `^` in the path AFTER confinement, so such a
+ * path is refused up front (see cmdReparseHazard) to keep the confinement guarantee intact.
  */
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
+import { buildDetachedSpawn } from "../detached-spawn.mjs";
 import { getRepo } from "../db.ts";
 import { resolveRepoPath } from "./files.ts";
 
@@ -248,18 +250,20 @@ export function wrapForPlatform(
 }
 
 /**
- * True when launching `exe` on `platform` would route `args` through `cmd /c` (a .cmd/.bat shim)
- * AND some arg carries a character cmd.exe re-parses destructively:
- *   · `%…%`  → cmd expands it against the environment INSIDE its own command-line parse, AFTER our
- *              repo confinement — a repo file literally named `%COMSPEC%` would reach the editor as
- *              an env-derived path OUTSIDE the repo (a confinement bypass).
- *   · `^`    → cmd's escape char, silently stripped — the editor opens a different/nonexistent path.
- * Bun.spawn's argv quoting keeps these contained (no command injection), but the *value* the editor
- * receives is wrong, so such a launch is refused up front rather than silently misbehaving. Only the
- * uncommon PATH-shim launch is affected — a real .exe install (the winPaths probe) spawns directly.
+ * True when a win32 launch carries an arg with a character cmd.exe re-parses destructively.
+ * Every win32 editor launch now routes through `cmd /c start ""` (buildDetachedSpawn, so the editor
+ * escapes the daemon's process tree and survives Quit), and cmd re-parses each arg:
+ *   · `%…%`  cmd expands it against the environment INSIDE its own command-line parse, AFTER our
+ *            repo confinement; a repo file literally named `%COMSPEC%` would reach the editor as an
+ *            env-derived path OUTSIDE the repo (a confinement bypass). Verified 2026-07-12.
+ *   · `^`    cmd's escape char, silently stripped, so the editor opens a different/nonexistent path.
+ * The argv quoting keeps these contained (no command injection), but the *value* the editor receives
+ * is wrong, so such a launch is refused up front rather than silently misbehaving. This used to apply
+ * only to the .cmd/.bat PATH-shim launch (real .exe installs spawned directly); now that all win32
+ * launches go through `cmd /c start`, it applies to every win32 editor launch.
  */
-export function cmdReparseHazard(platform: EditorPlatform, exe: string, args: string[]): boolean {
-  return platform === "win32" && isWindowsScript(exe) && args.some((a) => /[%^]/.test(a));
+export function cmdReparseHazard(platform: EditorPlatform, args: string[]): boolean {
+  return platform === "win32" && args.some((a) => /[%^]/.test(a));
 }
 
 /** Reveal a folder in the OS file manager (the `system` pseudo-editor). Always resolvable. */
@@ -373,7 +377,11 @@ export async function openInEditor(
   if (!isKnownEditor(wanted)) return { ok: false, code: "NO_EDITOR", message: `unknown editor: ${wanted}` };
 
   let argv: string[];
+  let detached = false;
   if (wanted === SYSTEM_FILE_MANAGER) {
+    // The OS file manager (explorer / open / xdg-open) hands the request to the existing shell
+    // singleton and exits; it is never a lasting child of the daemon, so it needs no detach
+    // hand-off (and stays off the `cmd /c start` path, so a `%`/`^` folder name isn't refused).
     argv = systemRevealArgv(platform, folderAbs);
   } else {
     const def = CATALOG.find((e) => e.id === wanted)!;
@@ -381,9 +389,13 @@ export async function openInEditor(
     if (!res) return { ok: false, code: "NO_EDITOR", message: `${def.label} isn't installed`, editor: wanted };
     const editorArgs = buildEditorArgs(def, folderAbs, fileAbs);
     if (!editorArgs) return { ok: false, code: "BAD_PATH", message: `${def.label} can't open a folder`, editor: wanted };
-    // Refuse a path cmd.exe would re-parse when this editor is launched via a .cmd/.bat shim —
-    // see cmdReparseHazard (a `%…%` in the path is a confinement bypass; a `^` corrupts it).
-    if (res.kind === "exe" && cmdReparseHazard(platform, res.exe, editorArgs)) {
+    // A real GUI editor must OUTLIVE the daemon (quitting RepoYeti must not close your editor), so
+    // on win32 it's launched through a `cmd /c start ""` hand-off (buildDetachedSpawn below) to escape
+    // the tray's `taskkill /T` Quit. cmd re-parses every arg, expanding `%…%` (a post-confinement bypass)
+    // and stripping `^` — so refuse such a path up front, on every win32 launch that goes through cmd
+    // (both the detached `cmd /c start` and the .cmd-shim `cmd /c` below), keeping the repo-confinement
+    // guarantee intact. See cmdReparseHazard.
+    if (cmdReparseHazard(platform, editorArgs)) {
       return {
         ok: false,
         code: "BAD_PATH",
@@ -391,7 +403,17 @@ export async function openInEditor(
         editor: wanted,
       };
     }
-    argv = wrapForPlatform(platform, res, editorArgs);
+    const wrapped = wrapForPlatform(platform, res, editorArgs);
+    // Detach so the editor survives a tray Quit — EXCEPT a win32 .cmd/.bat shim, which `cmd /c start`
+    // can't reliably relaunch (start's internal `cmd /c "<batch>"` hits cmd's double-quote-strip on a
+    // spaced path and launches nothing). Such a shim keeps its plain `cmd /c <shim>` launch, unchanged
+    // (it stays a daemon child that a Quit reaps — same as before this fix). probeEditor resolves
+    // nearly every catalog editor to its real .exe, which IS detached, so this is a rare fallback.
+    if (platform === "win32" && res.kind === "exe" && isWindowsScript(res.exe)) {
+      argv = wrapped;
+    } else {
+      ({ argv, detached } = buildDetachedSpawn(platform, wrapped));
+    }
   }
 
   if (opts.dryRun || process.env.REPOYETI_EDITOR_DRYRUN === "1") {
@@ -399,9 +421,16 @@ export async function openInEditor(
   }
 
   try {
-    const proc = Bun.spawn(argv, { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-    // Don't await exit — a GUI editor runs for as long as the user keeps it open. Unref so the
-    // child never keeps the daemon's event loop alive.
+    // `detached` (POSIX setsid) plus the win32 `cmd /c start` hand-off in buildDetachedSpawn keep the
+    // editor out of the daemon's process tree, so a tray Quit (taskkill /T) can't reap it. Don't
+    // await exit — a GUI editor runs for as long as the user keeps it open. Unref so the child
+    // never keeps the daemon's event loop alive.
+    const proc = Bun.spawn(argv, {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      ...(detached ? { detached: true } : {}),
+    });
     proc.unref();
     return { ok: true, code: "OK", editor: wanted, argv };
   } catch (e) {

@@ -1,9 +1,9 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 import {
   readFileContent,
   readFileDiff,
@@ -14,7 +14,7 @@ import {
 } from "../src/service/index.ts";
 
 async function gitRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-file-"));
+  const dir = mkScratchDir("gm-file-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;
@@ -23,7 +23,7 @@ async function gitRepo(): Promise<string> {
 test("reads a working-tree file's contents", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, "hello.ts"), "export const x = 1;\n");
-  const id = upsertRepo(dir, "repo", "auto", false);
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
 
   const res = await readFileContent(id, "hello.ts");
 
@@ -36,7 +36,7 @@ test("reads a working-tree file's contents", async () => {
 test("flags a binary file instead of dumping its bytes", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, "blob.bin"), Buffer.from([0x89, 0x50, 0x00, 0x01, 0x02, 0x00]));
-  const id = upsertRepo(dir, "repo-bin", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-bin", "auto", false);
 
   const res = await readFileContent(id, "blob.bin");
 
@@ -51,7 +51,7 @@ test("a deleted working-tree file falls back to its last-committed version", asy
   await $`git -C ${dir} add gone.txt`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m add`.quiet();
   rmSync(join(dir, "gone.txt"));
-  const id = upsertRepo(dir, "repo-del", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-del", "auto", false);
 
   const res = await readFileContent(id, "gone.txt");
 
@@ -63,7 +63,7 @@ test("a deleted working-tree file falls back to its last-committed version", asy
 test("refuses a path that escapes the repository", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, "ok.txt"), "ok");
-  const id = upsertRepo(dir, "repo-esc", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-esc", "auto", false);
 
   const res = await readFileContent(id, "../../../etc/passwd");
 
@@ -84,7 +84,7 @@ test("diff of a modified file gives HEAD as original and working tree as modifie
   await $`git -C ${dir} add f.ts`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m add`.quiet();
   writeFileSync(join(dir, "f.ts"), "const a = 2;\n");
-  const id = upsertRepo(dir, "repo-diff", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-diff", "auto", false);
 
   const res = await readFileDiff(id, "f.ts");
 
@@ -104,7 +104,7 @@ test("a large modified file comes back as a compact patch, not both whole sides"
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m add`.quiet();
   lines[5] = `line 5 CHANGED ${filler}`;
   writeFileSync(join(dir, "big.txt"), `${lines.join("\n")}\n`);
-  const id = upsertRepo(dir, "repo-big-diff", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-big-diff", "auto", false);
 
   const res = await readFileDiff(id, "big.txt");
 
@@ -126,7 +126,7 @@ test("the diff-patch threshold is configurable — raising it sends a 'large' fi
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m add`.quiet();
   lines[5] = `line 5 CHANGED ${filler}`;
   writeFileSync(join(dir, "big.txt"), `${lines.join("\n")}\n`);
-  const id = upsertRepo(dir, "repo-thresh", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-thresh", "auto", false);
 
   const prev = getDiffPatchBytes();
   try {
@@ -148,7 +148,7 @@ test("turning compact diff off forces a large modified file back to side-by-side
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m add`.quiet();
   lines[5] = `line 5 CHANGED ${filler}`;
   writeFileSync(join(dir, "big.txt"), `${lines.join("\n")}\n`);
-  const id = upsertRepo(dir, "repo-nopatch", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-nopatch", "auto", false);
 
   const prev = getDiffPatchEnabled();
   try {
@@ -166,7 +166,7 @@ test("a large ADDED file stays on the model path (the diff IS the whole file)", 
   const filler = "y".repeat(60);
   const big = `${Array.from({ length: 12_000 }, (_, i) => `row ${i} ${filler}`).join("\n")}\n`;
   writeFileSync(join(dir, "fresh.txt"), big); // untracked, never committed
-  const id = upsertRepo(dir, "repo-big-add", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-big-add", "auto", false);
 
   const res = await readFileDiff(id, "fresh.txt");
 
@@ -179,7 +179,7 @@ test("a large ADDED file stays on the model path (the diff IS the whole file)", 
 test("diff of an untracked file has empty original (all added)", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, "new.ts"), "export const fresh = true;\n");
-  const id = upsertRepo(dir, "repo-add", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-add", "auto", false);
 
   const res = await readFileDiff(id, "new.ts");
 
@@ -194,7 +194,7 @@ test("diff of a deleted file has empty modified (all removed)", async () => {
   await $`git -C ${dir} add old.ts`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m add`.quiet();
   rmSync(join(dir, "old.ts"));
-  const id = upsertRepo(dir, "repo-del-diff", "auto", false);
+  const id = mustUpsertRepo(dir, "repo-del-diff", "auto", false);
 
   const res = await readFileDiff(id, "old.ts");
 

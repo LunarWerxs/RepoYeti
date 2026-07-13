@@ -128,15 +128,17 @@ function onAccount(a: { host: string; login: string } | null): void {
     tabindex="0"
     :aria-expanded="expanded"
     :aria-label="expanded ? $t('repo.collapse') : $t('repo.expand')"
-    class="flex cursor-pointer items-center gap-1.5 rounded-md p-2 outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring/40 sm:gap-2 sm:p-2.5"
+    class="group flex cursor-pointer items-center gap-1.5 rounded-md p-2 outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring/40 sm:gap-2 sm:p-2.5"
     @click="emit('toggle')"
     @keydown.enter.prevent="emit('toggle')"
     @keydown.space.prevent="emit('toggle')"
   >
-    <!-- drag handle (hidden in filtered view, where reordering is disabled) -->
+    <!-- drag handle: hidden entirely when a preset sort is active (draggable=false, since
+         dragging is meaningless then; see RepoList.vue); otherwise rendered but only
+         revealed on row hover/focus, so it doesn't clutter the row at rest. -->
     <button
       v-if="draggable"
-      class="drag-handle flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/60 outline-none transition-colors hover:bg-accent hover:text-muted-foreground active:bg-accent/70 active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring/40"
+      class="drag-handle flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/60 opacity-0 outline-none transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-accent hover:text-muted-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40 active:bg-accent/70 active:cursor-grabbing"
       :aria-label="$t('repo.dragToReorder')"
       @click.stop
     >

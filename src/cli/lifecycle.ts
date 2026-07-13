@@ -12,6 +12,7 @@ import qrcode from "qrcode-terminal";
 import {
   VERSION,
   loadConfig,
+  saveConfig,
   addRoot,
   authEnforced,
   accessMode,
@@ -19,7 +20,7 @@ import {
   hydrateSecrets,
   type RepoYetiConfig,
 } from "../config.ts";
-import { initDb, upsertRepo, getRepo, getRepos, getWatchableRepos } from "../db.ts";
+import { initDb, upsertRepo, getRepo, getRepos, getWatchableRepos, getLastIdentityMergeSummary } from "../db.ts";
 import { discoverStream } from "../discovery.ts";
 import { createApp } from "../http/app.ts";
 import { initCloudSync, pullNow } from "../connections-sync.ts";
@@ -65,6 +66,30 @@ export function statusCmd(): void {
   }
 }
 
+/**
+ * Repoint config.json's identityRules[].requiredIdentityId through the id→id remap produced by
+ * initDb()'s one-time duplicate-identity merge (src/db.ts mergeDuplicateIdentities). A no-op
+ * (and no save) when nothing merged, the overwhelmingly common case on every boot after the
+ * first. Must run AFTER initDb() (so the merge has already happened) and BEFORE anything reads
+ * `cfg.identityRules` for enforcement (setIdentityRulesConfig in app.ts, wired further down).
+ */
+function applyIdentityMergeToConfig(cfg: RepoYetiConfig): void {
+  const { remap } = getLastIdentityMergeSummary();
+  if (Object.keys(remap).length === 0 || !cfg.identityRules?.length) return;
+  let changed = false;
+  for (const rule of cfg.identityRules) {
+    const survivor = remap[rule.requiredIdentityId];
+    if (survivor) {
+      rule.requiredIdentityId = survivor;
+      changed = true;
+    }
+  }
+  if (changed) {
+    saveConfig(cfg);
+    console.log("[repoyeti] identityRules: repointed rule(s) onto a merged identity's survivor");
+  }
+}
+
 // ── daemon ────────────────────────────────────────────────────────────────────
 
 export async function start(rest: string[]): Promise<void> {
@@ -98,6 +123,11 @@ export async function start(rest: string[]): Promise<void> {
 
   const liveCfg = loadConfig();
   initDb();
+  // initDb() just merged any duplicate identities it found (see db.ts mergeDuplicateIdentities).
+  // repos.identity_id and account_identities.identity_id are repointed automatically (they're
+  // SQLite rows), but identityRules[].requiredIdentityId lives in config.json instead, so it needs
+  // its own repoint pass here using the id to id remap the merge just produced.
+  applyIdentityMergeToConfig(liveCfg);
   // Pull AI keys / OAuth client_secret from the OS keychain into the in-memory config (and
   // migrate any legacy plaintext secrets out of config.json), before anything serves.
   await hydrateSecrets(liveCfg);
@@ -292,6 +322,9 @@ async function runDiscovery(cfg: RepoYetiConfig, knownIds: Set<string>): Promise
   try {
     const total = await discoverStream(cfg.roots, cfg.maxDepth, cfg.maxRepos, (f) => {
       const id = upsertRepo(f.absPath, f.name, "auto", f.isSubmodule, f.vcs);
+      // null → refused (path is under the OS temp dir); SKIP_DIRS already prunes these during the
+      // walk, so this should essentially never fire, but never watch/broadcast a null id.
+      if (!id) return;
       watchOne(id, f.absPath);
       // Fire-and-forget: a bad repo can't halt discovery; its status row just stays stale.
       void refreshRepo(id, f.absPath).catch(() => {});

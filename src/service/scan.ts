@@ -12,6 +12,7 @@
  */
 import { resolve } from "node:path";
 import { broadcast } from "../bus.ts";
+import { loadConfig } from "../config.ts";
 import { getRepo, getRepos, upsertRepo } from "../db.ts";
 import { discoverStream, machineScanRoots } from "../discovery.ts";
 import { refreshRepo } from "./core.ts";
@@ -39,8 +40,22 @@ const PROGRESS_EVERY = 10;
 // generous repo cap, a deep limit, a wall-clock budget, and real concurrency — a serial walk would
 // spend the entire budget on the first drive and never reach the next. Tuned to finish a typical
 // machine well inside the budget while never hanging the daemon.
-const MACHINE = { maxDepth: 12, maxRepos: 5000, budgetMs: 45_000, concurrency: 48 } as const;
-const FOLDER = { maxDepth: 16, maxRepos: 5000, budgetMs: 30_000, concurrency: 24 } as const;
+//
+// The repo cap here is intentionally NOT the same field as the owner-configured `cfg.maxRepos`
+// (that knob guards the inotify/fs-watch budget for a single explicit root; see discoverRoot).
+// A whole-machine/folder sweep needs its own much higher floor so a large machine isn't silently
+// truncated; `effectiveMaxRepos` lets an owner who deliberately raises `cfg.maxRepos` above this
+// floor actually get the larger cap everywhere, instead of the two limits silently diverging.
+const MACHINE_MAX_REPOS_FLOOR = 5000;
+const FOLDER_MAX_REPOS_FLOOR = 5000;
+const MACHINE = { maxDepth: 12, budgetMs: 45_000, concurrency: 48 } as const;
+const FOLDER = { maxDepth: 16, budgetMs: 30_000, concurrency: 24 } as const;
+
+/** cfg.maxRepos if the owner raised it above the built-in floor, else the floor itself. */
+function effectiveMaxRepos(floor: number): number {
+  const configured = loadConfig().maxRepos;
+  return Number.isFinite(configured) && configured > floor ? configured : floor;
+}
 
 export interface ScanSummary {
   found: number;
@@ -76,6 +91,9 @@ async function runScan(scope: string, roots: string[], limits: ScanLimits): Prom
         // Same index → watch → refresh sequence as boot/add-root discovery. `watchOne` and
         // `upsertRepo` are idempotent, so re-scanning an already-known repo just refreshes it.
         const id = upsertRepo(f.absPath, f.name, "auto", f.isSubmodule, f.vcs);
+        // null → refused (path is under the OS temp dir); SKIP_DIRS already prunes these during
+        // the walk, so this should essentially never fire, but never watch/broadcast a null id.
+        if (!id) return;
         watchOne(id, f.absPath);
         void refreshRepo(id, f.absPath).catch(() => {});
         found++;
@@ -102,10 +120,16 @@ async function runScan(scope: string, roots: string[], limits: ScanLimits): Prom
 
 /** Sweep the whole machine (home + every drive) for repositories. The dashboard's default scan. */
 export function rescanMachine(): Promise<ScanSummary> {
-  return runScan("machine", machineScanRoots(), MACHINE);
+  return runScan("machine", machineScanRoots(), {
+    ...MACHINE,
+    maxRepos: effectiveMaxRepos(MACHINE_MAX_REPOS_FLOOR),
+  });
 }
 
 /** Sweep a single folder (and its subfolders) the owner chose. */
 export function rescanFolder(folder: string): Promise<ScanSummary> {
-  return runScan("folder", [resolve(folder)], FOLDER);
+  return runScan("folder", [resolve(folder)], {
+    ...FOLDER,
+    maxRepos: effectiveMaxRepos(FOLDER_MAX_REPOS_FLOOR),
+  });
 }

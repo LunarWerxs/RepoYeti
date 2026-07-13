@@ -46,14 +46,17 @@ function persist(): void {
 const pinnedParent = ref<HTMLElement>();
 const starredParent = ref<HTMLElement>();
 const otherParent = ref<HTMLElement>();
-// `nativeDrag: false` routes every pointer (mouse + touch) through the synthetic
-// dragger — the native HTML5 drag drops the item on fast flicks, this doesn't.
-// `longPress` gives touch users a tap-and-hold to enter reorder mode (mouse still
-// drags immediately from the handle).
+// `nativeDrag: false` was meant to route every pointer through the library's own synthetic
+// dragger (avoiding native HTML5 drag's fast-flick-drop quirk), but that synthetic path
+// (handleRootPointermove in @formkit/drag-and-drop) explicitly bails out for
+// `pointerType === "mouse"` on non-mobile platforms, so with nativeDrag off AND the
+// synthetic fallback self-excluding desktop mouse, a mouse drag had NO code path that could
+// complete a reorder at all (confirmed by reading the installed library's source). Native
+// drag (the library default) is the only path that handles desktop mouse in this version, so
+// we use it; `longPress` still gives touch users a tap-and-hold to enter reorder mode.
 const dragOpts = {
   dragHandle: ".drag-handle",
   draggingClass: "dragging",
-  nativeDrag: false,
   longPress: true,
   longPressDuration: 250,
   plugins: [animations()],
@@ -80,7 +83,7 @@ onBeforeUnmount(() => {
         <span class="text-muted-foreground/60">{{ pinnedList.length }}</span>
       </div>
       <div ref="pinnedParent" class="flex flex-col gap-2.5">
-        <RepoCard v-for="repo in pinnedList" :key="repo.id" :repo="repo" />
+        <RepoCard v-for="repo in pinnedList" :key="repo.id" :repo="repo" :draggable="store.sortMode === 'manual'" />
       </div>
     </section>
 
@@ -94,7 +97,7 @@ onBeforeUnmount(() => {
         <span class="text-muted-foreground/60">{{ starredList.length }}</span>
       </div>
       <div ref="starredParent" class="flex flex-col gap-2.5">
-        <RepoCard v-for="repo in starredList" :key="repo.id" :repo="repo" />
+        <RepoCard v-for="repo in starredList" :key="repo.id" :repo="repo" :draggable="store.sortMode === 'manual'" />
       </div>
     </section>
 
@@ -109,7 +112,7 @@ onBeforeUnmount(() => {
         <span class="text-muted-foreground/60">{{ otherList.length }}</span>
       </div>
       <div ref="otherParent" class="flex flex-col gap-2.5">
-        <RepoCard v-for="repo in otherList" :key="repo.id" :repo="repo" />
+        <RepoCard v-for="repo in otherList" :key="repo.id" :repo="repo" :draggable="store.sortMode === 'manual'" />
       </div>
     </section>
   </div>

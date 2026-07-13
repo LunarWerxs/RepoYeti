@@ -1,21 +1,21 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { moveFile } from "../src/service/index.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Drag-to-move: moveFile (src/service/files.ts) + POST /api/repos/:id/move. Same path-confinement
 // + .git block as writeFileContent, never overwrites the destination, and stages a git rename for
 // tracked files (plain fs rename for untracked ones).
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7191, maxDepth: 6, maxRepos: 200 });
 
-const plainRepo = (): string => mkdtempSync(join(tmpdir(), "gm-move-"));
+const plainRepo = (): string => mkScratchDir("gm-move-");
 async function gitRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-move-git-"));
+  const dir = mkScratchDir("gm-move-git-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;
@@ -24,7 +24,7 @@ async function gitRepo(): Promise<string> {
 test("moveFile moves an untracked file into a subfolder, creating it", async () => {
   const dir = plainRepo();
   writeFileSync(join(dir, "note.txt"), "hi");
-  const id = upsertRepo(dir, "move-untracked", "auto", false);
+  const id = mustUpsertRepo(dir, "move-untracked", "auto", false);
 
   const r = await moveFile(id, "note.txt", "docs");
   expect(r.ok).toBe(true);
@@ -38,7 +38,7 @@ test("moveFile git-mv's a tracked file (staged rename)", async () => {
   writeFileSync(join(dir, "a.txt"), "content\n");
   await $`git -C ${dir} add a.txt`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m add`.quiet();
-  const id = upsertRepo(dir, "move-tracked", "auto", false);
+  const id = mustUpsertRepo(dir, "move-tracked", "auto", false);
 
   const r = await moveFile(id, "a.txt", "sub");
   expect(r.ok).toBe(true);
@@ -51,7 +51,7 @@ test("moveFile git-mv's a tracked file (staged rename)", async () => {
 
 test("moveFile refuses a source path that escapes the repo", async () => {
   const dir = plainRepo();
-  const id = upsertRepo(dir, "move-escape-src", "auto", false);
+  const id = mustUpsertRepo(dir, "move-escape-src", "auto", false);
   const r = await moveFile(id, "../escape.txt", "docs");
   expect(r.ok).toBe(false);
   expect(r.code).toBe("ERROR");
@@ -60,7 +60,7 @@ test("moveFile refuses a source path that escapes the repo", async () => {
 test("moveFile refuses a destination that escapes the repo", async () => {
   const dir = plainRepo();
   writeFileSync(join(dir, "n.txt"), "x");
-  const id = upsertRepo(dir, "move-escape-dst", "auto", false);
+  const id = mustUpsertRepo(dir, "move-escape-dst", "auto", false);
   const r = await moveFile(id, "n.txt", "../..");
   expect(r.ok).toBe(false);
   expect(existsSync(join(dir, "n.txt"))).toBe(true); // source untouched
@@ -69,7 +69,7 @@ test("moveFile refuses a destination that escapes the repo", async () => {
 test("moveFile refuses moving into a .git directory (no hook RCE)", async () => {
   const dir = plainRepo();
   writeFileSync(join(dir, "hook.sh"), "#!/bin/sh\n");
-  const id = upsertRepo(dir, "move-dotgit", "auto", false);
+  const id = mustUpsertRepo(dir, "move-dotgit", "auto", false);
   const r = await moveFile(id, "hook.sh", ".git/hooks");
   expect(r.ok).toBe(false);
   expect(r.code).toBe("NOT_WRITABLE");
@@ -81,7 +81,7 @@ test("moveFile never overwrites an existing destination file", async () => {
   mkdirSync(join(dir, "docs"));
   writeFileSync(join(dir, "note.txt"), "src");
   writeFileSync(join(dir, "docs", "note.txt"), "existing");
-  const id = upsertRepo(dir, "move-clobber", "auto", false);
+  const id = mustUpsertRepo(dir, "move-clobber", "auto", false);
 
   const r = await moveFile(id, "note.txt", "docs");
   expect(r.ok).toBe(false);
@@ -94,7 +94,7 @@ test("moveFile errors when the file is already in that folder", async () => {
   const dir = plainRepo();
   mkdirSync(join(dir, "docs"));
   writeFileSync(join(dir, "docs", "a.txt"), "x");
-  const id = upsertRepo(dir, "move-samedir", "auto", false);
+  const id = mustUpsertRepo(dir, "move-samedir", "auto", false);
   const r = await moveFile(id, "docs/a.txt", "docs");
   expect(r.ok).toBe(false);
   expect(r.code).toBe("ERROR");
@@ -102,7 +102,7 @@ test("moveFile errors when the file is already in that folder", async () => {
 
 test("moveFile NOT_FOUND for a missing source file", async () => {
   const dir = plainRepo();
-  const id = upsertRepo(dir, "move-missing", "auto", false);
+  const id = mustUpsertRepo(dir, "move-missing", "auto", false);
   const r = await moveFile(id, "ghost.txt", "docs");
   expect(r.ok).toBe(false);
   expect(r.code).toBe("NOT_FOUND");
@@ -117,7 +117,7 @@ test("moveFile 404s an unknown repo", async () => {
 test("POST /api/repos/:id/move moves and 400s a missing body", async () => {
   const dir = plainRepo();
   writeFileSync(join(dir, "f.txt"), "hi");
-  const id = upsertRepo(dir, "move-route", "auto", false);
+  const id = mustUpsertRepo(dir, "move-route", "auto", false);
   const app = createApp(localCfg());
 
   const ok = await app.request(`/api/repos/${id}/move`, {
@@ -139,7 +139,7 @@ test("POST /api/repos/:id/move moves and 400s a missing body", async () => {
 test("POST /api/repos/:id/move is refused over remote when remoteEditing is off", async () => {
   const dir = plainRepo();
   writeFileSync(join(dir, "f.txt"), "hi");
-  const id = upsertRepo(dir, "move-remote-off", "auto", false);
+  const id = mustUpsertRepo(dir, "move-remote-off", "auto", false);
   const app = createApp({ ...localCfg(), remoteEditing: false });
 
   const remote = await app.request(`/api/repos/${id}/move`, {

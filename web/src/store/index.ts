@@ -139,6 +139,8 @@ export const useStore = defineStore("repoyeti", () => {
     clearFilters,
     showHidden,
     hasHidden,
+    sortMode,
+    setSortMode,
     visibleRepos,
     pinnedRepos,
     starredRepos,
@@ -204,6 +206,7 @@ export const useStore = defineStore("repoyeti", () => {
   const {
     roots,
     servers,
+    loreServersEnabled,
     fetchingAll,
     loadRoots,
     addScanRoot,
@@ -213,8 +216,10 @@ export const useStore = defineStore("repoyeti", () => {
     loadServers,
     addServer,
     removeServer,
+    setLoreServersEnabled,
     cloneFromServer,
     fetchAll,
+    cleanupMissingRepos,
     shutdown,
     logoutAll,
     addRepo,
@@ -407,6 +412,7 @@ export const useStore = defineStore("repoyeti", () => {
       autoCommitPush.value = s.autoCommitPush ?? true;
       autoUpdate.value = s.autoUpdate ?? false;
       autoScan.value = s.autoScan ?? false;
+      loreServersEnabled.value = s.loreServersEnabled ?? true;
       portableMode.value = s.portableMode ?? false;
       hideTrayIcon.value = s.hideTrayIcon ?? false;
       mcpApprovalGate.value = s.mcpApprovalGate ?? true;
@@ -519,6 +525,7 @@ export const useStore = defineStore("repoyeti", () => {
           if (typeof payload.autoCommitPull === "boolean") autoCommitPull.value = payload.autoCommitPull;
           if (typeof payload.autoCommitPush === "boolean") autoCommitPush.value = payload.autoCommitPush;
           if (typeof payload.autoScan === "boolean") autoScan.value = payload.autoScan;
+          if (typeof payload.loreServersEnabled === "boolean") loreServersEnabled.value = payload.loreServersEnabled;
           if (typeof payload.portableMode === "boolean") portableMode.value = payload.portableMode;
           if (typeof payload.hideTrayIcon === "boolean") hideTrayIcon.value = payload.hideTrayIcon;
           if (typeof payload.mcpApprovalGate === "boolean") mcpApprovalGate.value = payload.mcpApprovalGate;
@@ -610,6 +617,7 @@ export const useStore = defineStore("repoyeti", () => {
     moveFile,
     roots,
     servers,
+    loreServersEnabled,
     fetchingAll,
     loadRoots,
     addScanRoot,
@@ -625,8 +633,10 @@ export const useStore = defineStore("repoyeti", () => {
     loadServers,
     addServer,
     removeServer,
+    setLoreServersEnabled,
     cloneFromServer,
     fetchAll,
+    cleanupMissingRepos,
     shutdown,
     logoutAll,
     aiSettings,
@@ -745,6 +755,8 @@ export const useStore = defineStore("repoyeti", () => {
     clearFilters,
     showHidden,
     hasHidden,
+    sortMode,
+    setSortMode,
     visibleRepos,
     pinnedRepos,
     starredRepos,

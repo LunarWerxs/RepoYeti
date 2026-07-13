@@ -1,12 +1,12 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { stopWatching } from "../src/service/index.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Per-file (selected) staging for a single ordinary commit: stage + commit ONLY the chosen paths,
 // leaving everything else pending. Reuses the same commitGroups primitive as Smart Commit, so this
@@ -21,7 +21,7 @@ const J = (body: unknown) => ({
 
 /** A git repo with one seed commit + a configured local author (so null-identity commits work). */
 async function seededRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-sel-"));
+  const dir = mkScratchDir("gm-sel-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} config user.name Seed`.quiet();
   await $`git -C ${dir} config user.email s@s.io`.quiet();
@@ -51,7 +51,7 @@ test("POST /api/repos/:id/commit-selected commits only the chosen files; the res
     // Two pending changes: modify a.txt (tracked) and add c.txt (untracked).
     writeFileSync(join(dir, "a.txt"), "a1\n");
     writeFileSync(join(dir, "c.txt"), "c0\n");
-    const id = upsertRepo(dir, "sel", "auto", false);
+    const id = mustUpsertRepo(dir, "sel", "auto", false);
 
     const res = await createApp(localCfg()).request(
       `/api/repos/${id}/commit-selected`,
@@ -76,7 +76,7 @@ test("commit-selected requires a non-empty message (NO_MESSAGE, 400)", async () 
   const dir = await seededRepo();
   try {
     writeFileSync(join(dir, "a.txt"), "a1\n");
-    const id = upsertRepo(dir, "sel-nomsg", "auto", false);
+    const id = mustUpsertRepo(dir, "sel-nomsg", "auto", false);
     const res = await createApp(localCfg()).request(
       `/api/repos/${id}/commit-selected`,
       J({ message: "   ", paths: ["a.txt"] }),
@@ -93,7 +93,7 @@ test("commit-selected rejects a path that is no longer pending (PLAN_STALE, 409)
   const dir = await seededRepo();
   try {
     writeFileSync(join(dir, "a.txt"), "a1\n");
-    const id = upsertRepo(dir, "sel-stale", "auto", false);
+    const id = mustUpsertRepo(dir, "sel-stale", "auto", false);
     const res = await createApp(localCfg()).request(
       `/api/repos/${id}/commit-selected`,
       J({ message: "feat: x", paths: ["ghost.txt"] }),
@@ -113,7 +113,7 @@ test("commit-selected stages both sides of a rename when the new path is selecte
   try {
     // `git mv` stages the rename; identical content → git detects it as a rename.
     await $`git -C ${dir} mv a.txt b.txt`.quiet();
-    const id = upsertRepo(dir, "sel-rename", "auto", false);
+    const id = mustUpsertRepo(dir, "sel-rename", "auto", false);
     const res = await createApp(localCfg()).request(
       `/api/repos/${id}/commit-selected`,
       J({ message: "refactor: rename a to b", paths: ["b.txt"] }),
@@ -137,7 +137,7 @@ test("commit-selected rejects an empty paths array at the schema (400)", async (
   const dir = await seededRepo();
   try {
     writeFileSync(join(dir, "a.txt"), "a1\n");
-    const id = upsertRepo(dir, "sel-empty", "auto", false);
+    const id = mustUpsertRepo(dir, "sel-empty", "auto", false);
     const res = await createApp(localCfg()).request(
       `/api/repos/${id}/commit-selected`,
       J({ message: "x", paths: [] }),
@@ -153,7 +153,7 @@ test("commit-selected dedupes a duplicated path into one clean commit", async ()
   const dir = await seededRepo();
   try {
     writeFileSync(join(dir, "a.txt"), "a1\n");
-    const id = upsertRepo(dir, "sel-dup", "auto", false);
+    const id = mustUpsertRepo(dir, "sel-dup", "auto", false);
     const res = await createApp(localCfg()).request(
       `/api/repos/${id}/commit-selected`,
       J({ message: "feat: dedup", paths: ["a.txt", "a.txt"] }),

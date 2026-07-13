@@ -1,6 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import {
@@ -13,9 +12,10 @@ import {
   isValidBranchName,
 } from "../src/git-actions.ts";
 import { readBranches, readLog, readStashes } from "../src/read/inspect.ts";
-import { upsertRepo } from "../src/db.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { discardFile } from "../src/service/index.ts";
 import type { Identity } from "../src/db.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 const ID: Identity = {
   id: "x",
@@ -27,7 +27,7 @@ const ID: Identity = {
 
 /** A git repo with one seed commit (so HEAD exists), on branch `main`. */
 async function repo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-branch-"));
+  const dir = mkScratchDir("gm-branch-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   writeFileSync(join(dir, "seed.txt"), "seed\n");
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io add -A`.quiet();
@@ -209,7 +209,7 @@ test("stash drop removes an entry and reports empty afterwards", async () => {
 
 test("discardFile restores a modified tracked file to HEAD", async () => {
   const dir = await repo();
-  const id = upsertRepo(dir, "disc-mod", "auto", false);
+  const id = mustUpsertRepo(dir, "disc-mod", "auto", false);
   writeFileSync(join(dir, "seed.txt"), "garbage\n");
 
   const r = await discardFile(id, "seed.txt");
@@ -219,7 +219,7 @@ test("discardFile restores a modified tracked file to HEAD", async () => {
 
 test("discardFile removes an untracked file", async () => {
   const dir = await repo();
-  const id = upsertRepo(dir, "disc-new", "auto", false);
+  const id = mustUpsertRepo(dir, "disc-new", "auto", false);
   writeFileSync(join(dir, "junk.txt"), "delete me\n");
 
   const r = await discardFile(id, "junk.txt");
@@ -229,7 +229,7 @@ test("discardFile removes an untracked file", async () => {
 
 test("discardFile blocks path traversal and .git", async () => {
   const dir = await repo();
-  const id = upsertRepo(dir, "disc-guard", "auto", false);
+  const id = mustUpsertRepo(dir, "disc-guard", "auto", false);
   expect((await discardFile(id, "../escape.txt")).code).toBe("ERROR");
   expect((await discardFile(id, ".git/config")).code).toBe("ERROR");
 });
