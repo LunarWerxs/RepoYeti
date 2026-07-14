@@ -10,57 +10,25 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Added
 
-- **AI key health check at startup.** RepoYeti probes each configured AI provider once at boot and,
-  if a key has been revoked, expired, or run out of quota, raises a dashboard notification instead of
-  letting you discover it only when a commit-message generation fails. The result is recorded, so the
-  alert still shows if you open the dashboard after the daemon booted (the usual headless case).
-- **Right-click menus on changed files.** File rows in the changes tree and the activity log now have
-  a context menu: open, open in your editor, reveal in the OS file manager, copy path, add to
-  `.gitignore`, or discard.
-- **Dirty-diff gutter in the file viewer.** The Content view marks added, changed, and removed lines
-  in the gutter (VS Code style), so you can see what changed at a glance without switching to the diff.
-- **"Add to .gitignore" action.** Send a changed file straight into the repo's `.gitignore` from its
-  right-click menu; the pattern is anchored to the repo root and path-traversal-safe.
-- **Reveal now selects the file.** "Reveal in file manager" highlights the exact file, not just its
-  folder.
-- **Optional auto-approve for agent actions.** Alongside the existing auto-deny timer, you can opt in
-  to an auto-approve timer for pending agent (MCP) approval prompts. Off by default.
-- **Dismiss and restore detected identities.** Git identities RepoYeti auto-detects can be dismissed
-  from the list and restored later.
+- AI key health check at boot: a revoked or expired key raises a dashboard alert instead of failing silently later.
+- Right-click menus on changed files: open, open in editor, reveal, copy path, add to `.gitignore`, discard.
+- Dirty-diff gutter in the file viewer (added/changed/removed line markers).
+- Reveal now selects the file, not just its folder.
+- Optional auto-approve timer for agent (MCP) prompts (off by default).
+- Dismiss and restore auto-detected git identities.
 
 ### Changed
 
-- **AI is now fully bring-your-own-key.** The old built-in provider-key mechanism is gone (a key
-  committed to a public repo gets revoked anyway, so it was never usable); add your own under
-  Settings -> AI. Your key stays in your OS keychain and never leaves the daemon.
-- **Smarter AI model handling.** Provider model lists now hide non-chat models (speech, embeddings,
-  and the like) so a model that cannot write a commit message can never be auto-selected, and each
-  provider suggests a sensible default model on connect.
-- **AI commit buttons follow a toggle.** The Smart Commit and AI-message buttons appear whenever AI
-  commit messages are enabled, with a clear prompt if a key still needs adding, rather than staying
-  hidden until a key is present.
-- **Settings reorganized.** The old Sync & Hotkeys section is split into a Background Sync section
-  (under Automation) and an Updates & Hotkeys section (under General), notifications can jump straight
-  to the relevant settings tab, and the scan-roots list is tucked behind a toggle to keep the panel tidy.
+- AI is now fully bring-your-own-key; the built-in key mechanism is gone. Keys stay in your OS keychain.
+- Model lists hide non-chat models; each provider suggests a default on connect.
+- AI commit buttons follow an "enabled" toggle, prompting if a key is still needed.
+- Settings reorganized: Sync & Hotkeys split into Background Sync (Automation) and Updates & Hotkeys (General); notifications deep-link to the right tab; scan-roots behind a toggle.
 
 ### Fixed
 
-- **Pull no longer refuses a dirty working tree.** A fast-forward pull is safe on a dirty tree, so
-  RepoYeti now lets `git pull --ff-only` run when the tree is dirty: it fast-forwards and keeps your
-  uncommitted edits when the incoming commits don't touch the same files, and stops with a new
-  `WOULD_OVERWRITE` code ("commit or stash first", both doable from the phone) only when they would
-  be overwritten. Previously any uncommitted change blocked the pull outright with
-  `DIRTY_WORKING_TREE`. Because a blocked pull never reached the network, the "behind … as of last
-  fetch" timestamp also went stale (a pull that fails preflight can't refresh it); letting the pull
-  actually run updates both the behind count and the last-fetch time.
-- **Branch switch no longer refuses a dirty working tree.** Same reasoning as pull: `git switch`
-  carries your uncommitted edits onto the target branch when they don't collide and stops with
-  `WOULD_OVERWRITE` ("commit or stash first") only when a file the switch must change is dirty.
-  Previously any uncommitted change blocked the switch, even though git could do it safely.
-- **Background auto-pull ("keep in sync") now covers dirty repos.** The auto fast-forward no longer
-  skips a repo just because its tree is dirty: it pulls when the incoming commits don't touch the
-  uncommitted files and harmlessly leaves the repo flagged "behind" when they would (still skipping
-  a genuinely mid-merge or mid-rebase/cherry-pick tree, which should never be auto-acted on).
+- Pull no longer blocks on a dirty tree: it fast-forwards and keeps your edits, stopping only on a real file collision (`WOULD_OVERWRITE`).
+- Branch switch no longer blocks on a dirty tree (same guard).
+- Background auto-pull now covers dirty repos (still skips mid-merge/rebase).
 
 ## [0.3.0] - 2026-07-13
 
