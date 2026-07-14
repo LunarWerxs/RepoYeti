@@ -113,7 +113,11 @@ export async function start(rest: string[]): Promise<void> {
   // tunnel, and MCP would disagree about which instance is "the" one. The dev
   // watcher sets REPOYETI_DEV=1 (scripts/dev.ts) and must be free to rebind its port
   // on every reload, so that flow is exempt from this guard.
-  if (process.env.REPOYETI_DEV !== "1") {
+  // The auto-update successor (REPOYETI_RELAUNCH=1) is exempt too: its predecessor is
+  // still alive and answering /api/health during the ~800ms handoff, so probing here
+  // would see "already running" and make the successor exit, leaving ZERO daemons.
+  // It instead falls through to the REPOYETI_RELAUNCH port-wait below and takes over.
+  if (process.env.REPOYETI_DEV !== "1" && process.env.REPOYETI_RELAUNCH !== "1") {
     const live = await findLiveInstance();
     if (live) {
       console.log(`\nRepoYeti is already running → ${live.url}\nNot starting a second instance.\n`);
