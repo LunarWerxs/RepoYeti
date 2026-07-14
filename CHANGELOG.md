@@ -6,6 +6,43 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-13
+
+### Added
+
+- **AI key health check at startup.** RepoYeti probes each configured AI provider once at boot and,
+  if a key has been revoked, expired, or run out of quota, raises a dashboard notification instead of
+  letting you discover it only when a commit-message generation fails. The result is recorded, so the
+  alert still shows if you open the dashboard after the daemon booted (the usual headless case).
+- **Right-click menus on changed files.** File rows in the changes tree and the activity log now have
+  a context menu: open, open in your editor, reveal in the OS file manager, copy path, add to
+  `.gitignore`, or discard.
+- **Dirty-diff gutter in the file viewer.** The Content view marks added, changed, and removed lines
+  in the gutter (VS Code style), so you can see what changed at a glance without switching to the diff.
+- **"Add to .gitignore" action.** Send a changed file straight into the repo's `.gitignore` from its
+  right-click menu; the pattern is anchored to the repo root and path-traversal-safe.
+- **Reveal now selects the file.** "Reveal in file manager" highlights the exact file, not just its
+  folder.
+- **Optional auto-approve for agent actions.** Alongside the existing auto-deny timer, you can opt in
+  to an auto-approve timer for pending agent (MCP) approval prompts. Off by default.
+- **Dismiss and restore detected identities.** Git identities RepoYeti auto-detects can be dismissed
+  from the list and restored later.
+
+### Changed
+
+- **AI is now fully bring-your-own-key.** The old built-in provider-key mechanism is gone (a key
+  committed to a public repo gets revoked anyway, so it was never usable); add your own under
+  Settings -> AI. Your key stays in your OS keychain and never leaves the daemon.
+- **Smarter AI model handling.** Provider model lists now hide non-chat models (speech, embeddings,
+  and the like) so a model that cannot write a commit message can never be auto-selected, and each
+  provider suggests a sensible default model on connect.
+- **AI commit buttons follow a toggle.** The Smart Commit and AI-message buttons appear whenever AI
+  commit messages are enabled, with a clear prompt if a key still needs adding, rather than staying
+  hidden until a key is present.
+- **Settings reorganized.** The old Sync & Hotkeys section is split into a Background Sync section
+  (under Automation) and an Updates & Hotkeys section (under General), notifications can jump straight
+  to the relevant settings tab, and the scan-roots list is tucked behind a toggle to keep the panel tidy.
+
 ### Fixed
 
 - **Pull no longer refuses a dirty working tree.** A fast-forward pull is safe on a dirty tree, so
@@ -286,7 +323,9 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
-[Unreleased]: https://github.com/LunarWerxs/repoyeti/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/LunarWerxs/repoyeti/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/LunarWerxs/repoyeti/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/LunarWerxs/repoyeti/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/LunarWerxs/repoyeti/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LunarWerxs/repoyeti/releases/tag/v0.1.0
 [0.0.1]: https://github.com/LunarWerxs/repoyeti/releases/tag/v0.0.1
