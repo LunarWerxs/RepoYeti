@@ -15,3 +15,23 @@ import { scratchRoot } from "./helpers/scratch.ts";
 // without every other test in the suite tripping it.
 process.env.REPOYETI_HOME = mkdtempSync(join(scratchRoot(), "repoyeti-test-home-"));
 process.env.GIT_TERMINAL_PROMPT = "0";
+
+// ── the blast door ────────────────────────────────────────────────────────────────
+// Stop git from ever walking OUT of the scratch root and into this repository.
+//
+// The hazard is structural, and it already bit once. `.testtmp/` lives inside RepoYeti's own
+// working tree (it has to — see scratchRoot() above), and git resolves a repo by walking UP from
+// the working directory until it finds a `.git`. So a fixture directory that isn't a valid git
+// repo is not treated as "no repo": git climbs out of `.testtmp/`, finds RepoYeti's OWN `.git`,
+// and every `git commit` / `git push` the test makes lands on THIS repository. That is not a
+// hypothetical — a fixture built with a hand-made `mkdirSync(".git")` (which git does not
+// recognise) did exactly that: it committed the working tree and pushed it to the public remote.
+//
+// GIT_CEILING_DIRECTORIES is git's own mechanism for this: it refuses to ascend past the listed
+// directory. Now a malformed fixture fails loudly with "not a repository" — the correct, local,
+// obvious failure — instead of silently succeeding against the real repo. Tests that build proper
+// fixtures (`git init`) are unaffected: their `.git` is found immediately, with no ascent.
+//
+// Note this deliberately does NOT hide the mistake; it converts a silent catastrophe into a
+// visible test failure. Fixtures should still be created with a real `git init`.
+process.env.GIT_CEILING_DIRECTORIES = scratchRoot().replaceAll("\\", "/");
