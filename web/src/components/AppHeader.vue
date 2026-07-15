@@ -51,8 +51,10 @@ function toggleNotif(): void {
 // AI providers live), everything else (the scan "new projects" entry) → the scan modal.
 function onNotifClick(n: { kind?: "scan" | "ai-key" }): void {
   notifOpen.value = false;
-  if (n.kind === "ai-key") emit("settings", "open", "automation");
-  else store.scanOpen = true;
+  // Settings deep-link is owner-only — a guest tapping the "ai-key" entry gets no-op.
+  if (n.kind === "ai-key") {
+    if (!store.isGuest) emit("settings", "open", "automation");
+  } else store.scanOpen = true;
 }
 
 function firstFetchFailureDescription(failed: Array<{ name: string; code: string }>): string | undefined {
@@ -268,7 +270,7 @@ onBeforeUnmount(() => {
 
       <div class="flex items-center gap-1">
         <!-- remote-access button, with the live/offline dot pinned to its top-right corner -->
-        <div class="relative">
+        <div v-if="!store.isGuest" class="relative">
           <Tooltip>
             <TooltipTrigger as-child>
               <Button
@@ -364,7 +366,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- GitHub account quick-switcher -->
-        <div v-if="showAccounts" ref="accountsMenuRef" class="relative">
+        <div v-if="showAccounts && !store.isGuest" ref="accountsMenuRef" class="relative">
           <Tooltip>
             <TooltipTrigger as-child>
               <Button
@@ -445,6 +447,7 @@ onBeforeUnmount(() => {
           >
             <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{{ $t("header.actions") }}</div>
             <button
+              v-if="!store.isGuest"
               type="button"
               role="menuitem"
               :disabled="store.fetchingAll"
@@ -456,6 +459,7 @@ onBeforeUnmount(() => {
               <span>{{ $t("header.fetchAll") }}</span>
             </button>
             <button
+              v-if="!store.isGuest"
               type="button"
               role="menuitem"
               :disabled="store.updateChecking || store.updateApplying"
@@ -467,6 +471,7 @@ onBeforeUnmount(() => {
               <span>{{ $t("header.checkUpdates") }}</span>
             </button>
             <button
+              v-if="!store.isGuest"
               type="button"
               role="menuitem"
               class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
@@ -493,6 +498,7 @@ onBeforeUnmount(() => {
             </button>
             <div class="-mx-1 my-1 h-px bg-border" />
             <button
+              v-if="!store.isGuest"
               type="button"
               role="menuitem"
               :disabled="cleaningUpMissing"
@@ -514,6 +520,7 @@ onBeforeUnmount(() => {
               <span>{{ $t("header.reload") }}</span>
             </button>
             <button
+              v-if="!store.isGuest"
               type="button"
               role="menuitem"
               class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
@@ -524,6 +531,7 @@ onBeforeUnmount(() => {
             </button>
             <div class="-mx-1 my-1 h-px bg-border" />
             <button
+              v-if="!store.isGuest"
               type="button"
               role="menuitem"
               :disabled="shuttingDown"
@@ -538,6 +546,7 @@ onBeforeUnmount(() => {
 
         <!-- square by default; the label reveals on hover/focus -->
         <Button
+          v-if="!store.isGuest"
           size="sm"
           class="group/add ml-1 h-8 gap-0 overflow-hidden transition-all"
           :aria-label="$t('header.addRepository')"

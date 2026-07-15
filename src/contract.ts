@@ -57,6 +57,8 @@ export type ApiErrorCode =
   | "NO_MESSAGE"
   | "BAD_MODE"
   | "NEEDS_OWNER"
+  // ── share links (src/share/) — this credential exists, but doesn't reach this far ──
+  | "FORBIDDEN"
   // ── AI (mirror ai.ts AiCode + the route guards) ──
   | "AI_AUTH_FAILED"
   | "AI_UNREACHABLE"
@@ -147,6 +149,9 @@ export function statusForCode(code: ApiCode): ContentfulStatusCode {
     // 401 — a credential was supplied but rejected.
     case "AI_AUTH_FAILED":
       return 401;
+    // 403 — the credential is valid, it just doesn't reach this far (a share link).
+    case "FORBIDDEN":
+      return 403;
     // 404 — the named thing doesn't exist.
     case "NOT_FOUND":
     case "BAD_PROVIDER":

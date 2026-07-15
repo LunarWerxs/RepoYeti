@@ -34,9 +34,11 @@ function loadRows(): void {
 
 // Seed the editable rows whenever the Settings sheet opens or the store's rules change under us
 // (e.g. another tab saved first) — mirrors IdentitiesSection's on-open refresh pattern.
+// `immediate` required — see AccessSection.vue: the sheet's DialogRoot mounts this only once
+// `open` is already true, so a plain watcher never sees the false→true edge and never fired.
 watch(() => props.open, (isOpen) => {
   if (isOpen) void store.loadIdentityRules().then(loadRows);
-});
+}, { immediate: true });
 watch(() => store.identityRules, loadRows, { deep: true });
 
 function addRow(): void {

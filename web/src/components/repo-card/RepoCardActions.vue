@@ -157,7 +157,7 @@ const manageOpen = ref(false);
 <template>
   <!-- git actions -->
   <div class="flex flex-wrap items-center gap-2">
-    <Tooltip v-if="caps.fetch">
+    <Tooltip v-if="caps.fetch && store.canControl">
       <TooltipTrigger as-child>
         <Button
           variant="secondary"
@@ -172,7 +172,7 @@ const manageOpen = ref(false);
       </TooltipTrigger>
       <TooltipContent>{{ $t("repo.actions.fetchTooltip") }}</TooltipContent>
     </Tooltip>
-    <Tooltip>
+    <Tooltip v-if="store.canControl">
       <TooltipTrigger as-child>
         <Button
           :variant="st && st.behind > 0 ? 'default' : 'outline'"
@@ -187,7 +187,7 @@ const manageOpen = ref(false);
       </TooltipTrigger>
       <TooltipContent>{{ pullTooltip }}</TooltipContent>
     </Tooltip>
-    <Tooltip>
+    <Tooltip v-if="store.canControl">
       <TooltipTrigger as-child>
         <Button
           :variant="st && st.ahead > 0 ? 'default' : 'outline'"
@@ -203,12 +203,12 @@ const manageOpen = ref(false);
       <TooltipContent>{{ $t("repo.actions.pushTooltip") }}</TooltipContent>
     </Tooltip>
     <!-- stash save + stash-list (pop / drop) — see StashPanel.vue -->
-    <StashPanel :repo-id="repo.id" :can-stash="caps.stash" :dirty="st?.dirty ?? 0" />
+    <StashPanel v-if="!store.isGuest" :repo-id="repo.id" :can-stash="caps.stash" :dirty="st?.dirty ?? 0" />
     <span class="flex-1" />
     <!-- refresh moved to RepoCardChanges (immediately left of the remote-presence cloud icon,
          directly under the repo title) — see RepoCardChanges.vue. -->
-    <!-- overflow menu (hide / unhide this repo from the dashboard) -->
-    <DropdownMenu @update:open="onMenuToggle">
+    <!-- overflow menu (hide / unhide this repo from the dashboard) — every item in it is owner-only -->
+    <DropdownMenu v-if="!store.isGuest" @update:open="onMenuToggle">
       <DropdownMenuTrigger
         class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
         :aria-label="$t('repo.moreActions')"

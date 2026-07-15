@@ -22,20 +22,15 @@
  * at its HTTP routes (see src/http/routes/auth.ts); a sibling app adopts this by passing its own.
  * Only `authMiddleware` (RepoYeti's local-vs-remote access policy) still takes the full config.
  */
-import { randomBytes, createHmac, createHash, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
-import {
-  CONFIG_DIR,
-  ensureConfigDir,
-  authEnforced,
-  accessMode,
-  type RepoYetiConfig,
-  type OAuthConfig,
-} from "./config.ts";
+import { authEnforced, accessMode, type RepoYetiConfig, type OAuthConfig } from "./config.ts";
+import { sign, unsign, rotateKey } from "./signing.ts";
+import { readGuestShare } from "./share/index.ts";
+import { policyFor, permSatisfies } from "./share/policy.ts";
+import { shareCoversRepo, logShareEvent, type Share } from "./db.ts";
 
 const COOKIE = "gm_session";
 const SESSION_TTL_MS = 90 * 24 * 3600 * 1000;
@@ -91,38 +86,10 @@ export interface OAuthTokens {
   token_type?: string;
 }
 
-// ── signing key (persisted so sessions survive a restart) ──────────────────────
-let KEY: Buffer | null = null;
-function key(): Buffer {
-  if (KEY) return KEY;
-  ensureConfigDir();
-  const p = join(CONFIG_DIR, "session.key");
-  if (existsSync(p)) {
-    KEY = Buffer.from(readFileSync(p, "utf8").trim(), "hex");
-  } else {
-    KEY = randomBytes(32);
-    writeFileSync(p, KEY.toString("hex"), { mode: 0o600 });
-  }
-  return KEY;
-}
-
-/** @internal exported for security tests only — not part of the public API. */
-export function sign(payload: string, secret?: Buffer): string {
-  const body = Buffer.from(payload).toString("base64url");
-  const mac = createHmac("sha256", secret ?? key()).update(body).digest("base64url");
-  return `${body}.${mac}`;
-}
-/** @internal exported for security tests only — not part of the public API. */
-export function unsign(token: string | undefined, secret?: Buffer): string | null {
-  if (!token) return null;
-  const [body, mac] = token.split(".");
-  if (!body || !mac) return null;
-  const expected = createHmac("sha256", secret ?? key()).update(body).digest("base64url");
-  const a = Buffer.from(mac);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  return Buffer.from(body, "base64url").toString();
-}
+// The signing key + sign/unsign/rotateKey now live in signing.ts, so share/index.ts can sign a
+// guest cookie without importing this module (which imports IT, to read one — that pair would be
+// a cycle). Re-exported here because they've always been part of auth.ts's surface.
+export { sign, unsign, rotateKey } from "./signing.ts";
 
 // ── OIDC discovery + JWKS (cached) ─────────────────────────────────────────────
 let discoveryCache: { issuer: string; doc: Record<string, string> } | null = null;
@@ -436,22 +403,6 @@ export function handleLogout(c: Context, opts?: AuthOptions): Response {
   return c.json({ ok: true });
 }
 
-/**
- * Rotate the HMAC signing key — the "sign out everywhere" primitive. Sessions are stateless
- * signed cookies (no server-side session store to revoke), so regenerating the key instantly
- * invalidates EVERY existing `gm_session` (and `gm_local` bypass) cookie on every device: the
- * next request fails `unsign` and is treated as unauthenticated. The new key is persisted so
- * it survives a restart. A login in flight when this fires just fails state verification and
- * the user retries. Returns the new key (for symmetry/testing).
- */
-export function rotateKey(): Buffer {
-  ensureConfigDir();
-  const fresh = randomBytes(32);
-  writeFileSync(join(CONFIG_DIR, "session.key"), fresh.toString("hex"), { mode: 0o600 });
-  KEY = fresh;
-  return fresh;
-}
-
 /** POST /api/auth/logout-all — invalidate sessions on ALL devices, then clear this one.
  *  Note: rotateKey() rotates the module's persisted per-install key — the default signing secret.
  *  An adopter that injects its OWN `opts.secret` would rotate that out-of-band and override this. */
@@ -482,13 +433,96 @@ export function validBearerToken(c: Context, apiToken?: string): boolean {
   return timingSafeEqual(Buffer.from(presented), Buffer.from(apiToken));
 }
 
+/**
+ * The share behind this request — but ONLY if the caller isn't the owner by some other means.
+ *
+ * This is what handlers must use, NOT `readGuestShare()` directly. The difference is the whole
+ * "owner always wins" rule, and getting it wrong is not theoretical: a share cookie ends up in the
+ * OWNER's browser the moment they click their own link to check it, which is the first thing
+ * anyone does after minting one. `readGuestShare()` only asks "is there a share cookie?", so every
+ * handler that projects on it — /api/repos, /api/status, /api/auth/status, the SSE filter — would
+ * quietly serve the owner a guest's narrowed view of their own machine: repos they own vanishing
+ * from their own dashboard, settings blanked. It denies rather than grants, so it was never a
+ * security hole; it just looked exactly like data loss.
+ *
+ * The ordering below mirrors authMiddleware's decision tree exactly, and must keep mirroring it:
+ * the gate and the projections have to agree on who the caller is, or the UI contradicts the
+ * permissions.
+ */
+export function effectiveGuest(c: Context, cfg: RepoYetiConfig): Share | null {
+  if (!authEnforced(cfg)) return null; // no OIDC at all → loopback-only, everyone is the owner
+  if (readSession(c, cfg.oauth!)) return null; // signed-in owner
+  if (validBearerToken(c, cfg.apiToken)) return null; // owner's API token
+  if (!isRemoteRequest(c)) {
+    if (accessMode(cfg) !== "remote") return null; // local mode → open on this machine
+    if (hasLocalBypass(c)) return null; // "Continue local for now" → the owner, at their desk
+  }
+  return readGuestShare(c);
+}
+
+/**
+ * The guest gate: decide whether a share-link holder may make THIS request.
+ *
+ * Split out of authMiddleware so the owner's decision tree below stays readable and so this can be
+ * unit-tested directly. Reached only after every owner check has already failed, so it can never
+ * widen owner access — it only ever admits a caller who would otherwise have received a flat 401.
+ *
+ * Default-deny: an unmatched route is refused. See share/policy.ts for why that's the whole design.
+ */
+async function guestGate(
+  c: Context,
+  share: Share,
+  method: string,
+  path: string,
+  next: () => Promise<void>,
+): Promise<Response | undefined> {
+  const mutating = method !== "GET" && method !== "HEAD";
+  const deny = (status: 403 | 404, repoId: string | null): Response => {
+    // Log every refusal, mutating or not: a guest probing the surface is what the owner would want
+    // to see. That's only true while refusals stay RARE, which is a property of the client, not of
+    // this line — the dashboard's boot sequence originally fetched a dozen owner-only endpoints
+    // unconditionally, so every guest page load wrote ~10 "denied" rows and buried the one entry
+    // the owner opens this trail to find ("did my brother push that?"). The PWA now skips what a
+    // guest is designed to be refused (see web store loadAll + AppShell), so a denial here means
+    // something genuinely went looking. Keep it that way: if you add an owner-only fetch to the
+    // boot path, gate it on isGuest.
+    logShareEvent(share.id, `${method} ${path}`, repoId, "denied");
+    return c.body(null, status);
+  };
+
+  const match = policyFor(method, path);
+  if (!match) return deny(403, null); // not on the allowlist ⇒ owner-only
+  if (!permSatisfies(share.perm, match.policy.need)) return deny(403, null); // view link, control route
+
+  let repoId: string | null = null;
+  if (match.policy.scoped) {
+    repoId = match.params.id ?? null;
+    // 404, not 403: a repo outside the share must be indistinguishable from one that doesn't
+    // exist. 403 would confirm "this repo is real, you just can't have it".
+    if (!repoId || !shareCoversRepo(share, repoId)) return deny(404, repoId);
+  }
+
+  if (mutating) logShareEvent(share.id, `${method} ${path}`, repoId, "allowed");
+  // `await next(); return undefined` rather than `return next()`: it keeps this function's return
+  // type free of `void` (which biome flags inside a union), and Response|undefined is assignable
+  // to the middleware's Promise<Response | void> either way.
+  await next();
+  return undefined;
+}
+
 /** Middleware gating /api/*. The invariants:
  *  - No OIDC client at all (bare test configs) → fully open.
  *  - A request over the tunnel ALWAYS requires a signed-in owner (or a valid API Bearer token),
- *    in any mode.
+ *    in any mode — or, failing that, a live share-link cookie limited to that share's policy.
  *  - A local (loopback) request: open in "local" mode; in "remote" mode it needs either an
  *    owner session, the local bypass ("Continue local for now"), or a valid API Bearer token.
- *  Public endpoints (health + the status probes the gate itself relies on) always pass. */
+ *  Public endpoints (health + the status probes the gate itself relies on) always pass.
+ *
+ *  On share links (see src/share/): the guest branch is deliberately LAST in each arm, so the
+ *  owner always wins when both credentials are present, and a guest can only ever reach routes
+ *  named in share/policy.ts's allowlist, on repos their share covers. Nothing above this comment
+ *  changed when share links were added — the guest path is purely additive, and with no shares
+ *  minted, readGuestShare() returns null and the gate behaves exactly as it always has. */
 export function authMiddleware(cfg: RepoYetiConfig) {
   // biome-ignore lint/suspicious/noConfusingVoidType: `void` is load-bearing — the pass-through branches `return next()` (Promise<void>); narrowing to `undefined` breaks that.
   return async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
@@ -496,11 +530,20 @@ export function authMiddleware(cfg: RepoYetiConfig) {
     const path = new URL(c.req.url).pathname;
     // Public: health + the probes the gate itself relies on. continue-local is here too —
     // it self-guards on loopback, so it must be reachable from the (otherwise-gated) gate.
+    // /api/auth/status and /api/auth/me are safe to leave open: both only ECHO the caller's own
+    // verified cookie (readSession), so an anonymous caller gets nulls, not the owner's identity.
+    //
+    // /api/status is NOT in this list, though it used to be. It returns the full settings dump
+    // (tunnel config, MCP rails, auto-commit schedule, editor, version), and being public meant any
+    // caller who merely knew the tunnel URL could read all of it — contradicting the documented
+    // threat model ("Hit any endpoint → 401, empty body: no surface, no version, no repo data",
+    // docs/ARCHITECTURE.md §7). Nothing needed it open: the PWA only calls it AFTER the auth gate
+    // passes (AppShell.vue returns at the sign-in screen before loadAll()), and local callers are
+    // unaffected because loopback requests never reach this branch in local mode.
     if (
       path === "/api/auth/status" ||
       path === "/api/auth/me" ||
       path === "/api/health" ||
-      path === "/api/status" ||
       path === "/api/auth/continue-local" ||
       path === "/api/openapi.json"
     ) {
@@ -509,12 +552,17 @@ export function authMiddleware(cfg: RepoYetiConfig) {
 
     if (isRemoteRequest(c)) {
       // Over-the-tunnel: owner session required (or a valid API Bearer token, when configured).
-      if (!readSession(c, cfg.oauth!) && !validBearerToken(c, cfg.apiToken)) return c.body(null, 401);
-      return next();
+      if (readSession(c, cfg.oauth!) || validBearerToken(c, cfg.apiToken)) return next();
+      const share = readGuestShare(c);
+      if (share) return guestGate(c, share, c.req.method, path, next);
+      return c.body(null, 401);
     }
     // Local request.
     if (accessMode(cfg) !== "remote") return next(); // local mode → open on this machine
     if (readSession(c, cfg.oauth!) || hasLocalBypass(c) || validBearerToken(c, cfg.apiToken)) return next();
+    // A share link opened on the owner's own machine (loopback) is still just a guest.
+    const share = readGuestShare(c);
+    if (share) return guestGate(c, share, c.req.method, path, next);
     return c.body(null, 401);
   };
 }

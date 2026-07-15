@@ -55,6 +55,10 @@ watch(
       void store.loadServers();
     }
   },
+  // Required: the Settings sheet is a Reka DialogRoot, so this component mounts only once the
+  // sheet is already open — `open` is true on creation and a plain watcher never sees a
+  // false→true edge, so this refresh never ran. See AccessSection.vue for the full note.
+  { immediate: true },
 );
 async function addRoot(): Promise<void> {
   const path = newRoot.value.trim();

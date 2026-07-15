@@ -3,10 +3,12 @@ import { streamSSE } from "hono/streaming";
 import type { Deps } from "../deps.ts";
 import { VERSION } from "../../config.ts";
 import { addListener, removeListener } from "../../bus.ts";
+import { effectiveGuest } from "../../auth.ts";
+import { guestEventData } from "../../share/events.ts";
 
 const MAX_SSE_QUEUE = 500;
 
-export function register(app: Hono, _deps: Deps): void {
+export function register(app: Hono, { cfg }: Deps): void {
   // ── SSE stream ─────────────────────────────────────────────────────────────
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
@@ -14,7 +16,20 @@ export function register(app: Hono, _deps: Deps): void {
       let wake: (() => void) | null = null;
       let aborted = false;
 
-      const listener = (event: string, data: string): void => {
+      // Resolved ONCE, at connect: this is a long-lived stream, so re-reading the cookie per event
+      // would be pointless (the cookie can't change mid-stream). Revocation still bites — every
+      // other request the guest makes re-checks the DB, and the dashboard is useless without them.
+      // The share object is only read for its id/scope here, never for permissions.
+      const share = effectiveGuest(c, cfg);
+
+      const listener = (event: string, data: string, payload: unknown): void => {
+        // A guest sees only events for repos their share covers, and only from an allowlist of
+        // event types — the raw bus carries the owner's settings, tunnel URL, and scan activity.
+        if (share) {
+          const projected = guestEventData(share, event, payload);
+          if (projected === null) return;
+          data = projected;
+        }
         queue.push({ event, data });
         if (queue.length > MAX_SSE_QUEUE) queue.splice(0, queue.length - MAX_SSE_QUEUE);
         wake?.();

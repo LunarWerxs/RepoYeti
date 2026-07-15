@@ -365,7 +365,7 @@ async function onCopyPath(path: string): Promise<void> {
 
   <!-- branch switcher + inline create form — see BranchPanel.vue -->
   <BranchPanel
-    v-if="!st?.error"
+    v-if="!st?.error && !store.isGuest"
     :repo-id="repo.id"
     :branch="st?.branch ?? null"
     :detached="st?.detached ?? false"
@@ -491,6 +491,8 @@ async function onCopyPath(path: string): Promise<void> {
         :repo-id="repo.id"
         :flat="isList"
         :force-expand="searching && !isList"
+        :can-control="store.canControl"
+        :is-guest="store.isGuest"
         @discard="askDiscard"
         @stage="onStage"
         @reveal="onReveal"

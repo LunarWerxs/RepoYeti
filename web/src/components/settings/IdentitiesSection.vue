@@ -18,6 +18,9 @@ watch(
       void store.loadAccounts();
     }
   },
+  // Required — see AccessSection.vue: the sheet's DialogRoot mounts this only once `open` is
+  // already true, so without `immediate` a plain watcher never fires and this never refreshed.
+  { immediate: true },
 );
 </script>
 

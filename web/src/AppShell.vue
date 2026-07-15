@@ -4,6 +4,7 @@ import { Plus, Loader2 } from "@lucide/vue";
 import { useStore } from "./store";
 import { Button } from "@/components/ui/button";
 import AppHeader from "./components/AppHeader.vue";
+import GuestBanner from "./components/GuestBanner.vue";
 import ConflictConcierge from "./components/ConflictConcierge.vue";
 import AgentApprovalCard from "./components/AgentApprovalCard.vue";
 import RepoList from "./components/RepoList.vue";
@@ -81,7 +82,11 @@ onMounted(async () => {
   await store.loadAuth();
   if (needsSignIn.value) return; // show the sign-in gate instead of loading data
   void store.loadAll();
-  void store.loadAccounts();
+  // GET /api/accounts is owner-only (it lists the machine's GitHub logins), so a share-link guest
+  // is 403'd by design. It's best-effort and swallows the error, but asking anyway would write a
+  // "denied" row into that link's audit trail on every page load — burying the entries the owner
+  // actually opens the trail to read ("did my brother push this?") under the app probing itself.
+  if (!store.isGuest) void store.loadAccounts();
   store.connect();
   // Sweep the whole machine for repos on launch, if the owner opted in — deferred so it never
   // competes with the initial paint. Found repos stream in live (repo_added) and a finished scan
@@ -106,6 +111,10 @@ onMounted(async () => {
       paddingRight: appShiftPx ? `${appShiftPx}px` : undefined,
     }"
   >
+    <!-- Above the header, so a guest sees whose machine this is before anything else. Renders
+         nothing for the owner. -->
+    <GuestBanner />
+
     <AppHeader
       :connected="store.connected"
       :repo-count="store.repos.length"
@@ -133,7 +142,9 @@ onMounted(async () => {
         class="mx-auto mt-[20vh] flex max-w-sm flex-col items-center gap-4 text-center"
       >
         <div class="text-sm font-medium text-muted-foreground">{{ $t("shell.noReposTitle") }}</div>
-        <Button @click="showAdd = true">
+        <!-- A guest can't add repos (the daemon refuses it), and an empty dashboard for them means
+             the share simply names no live repo — not that they should go make one. -->
+        <Button v-if="!store.isGuest" @click="showAdd = true">
           <Plus />
           {{ $t("shell.addRepository") }}
         </Button>

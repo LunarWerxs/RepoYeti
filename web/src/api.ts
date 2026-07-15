@@ -23,6 +23,12 @@ import type {
   LoreServer,
   PendingApproval,
   Repo,
+  Share,
+  ShareCreated,
+  ShareDuration,
+  ShareEvent,
+  SharePerm,
+  ShareViewer,
   SmartCommitResult,
   StashList,
   TagList,
@@ -78,6 +84,11 @@ export interface AuthStatus {
   canContinueLocal: boolean;
   /** A live local bypass is in effect (local request only). */
   localBypass: boolean;
+  /** Set when this viewer is a SHARE-LINK GUEST rather than the owner — their link's label, tier,
+   *  and expiry. null for the owner (and the owner always wins if both credentials are present).
+   *  `authenticated` is true for a guest too: they hold a live credential, so they belong on the
+   *  dashboard, not the sign-in gate. */
+  share: ShareViewer | null;
 }
 
 export interface RuntimeStatus {
@@ -85,6 +96,10 @@ export interface RuntimeStatus {
   version: string;
   mode: AccessMode;
   tunnelActive: boolean;
+  /** Set for a share-link guest. When present, this whole object is a NARROW projection: the
+   *  owner's tunnel/MCP/auto-commit/editor settings are absent, not null (see routes/health.ts).
+   *  Every other field here is therefore optional from a guest's point of view. */
+  share?: ShareViewer | null;
   /** Public cloudflared tunnel URL, or null when no tunnel is running. */
   tunnelUrl: string | null;
   /** Redacted named-tunnel config (stable hostname + token-presence flags; never the token). */
@@ -224,6 +239,25 @@ export const api = {
   continueLocal: () => req<{ ok: boolean }>("POST", "/api/auth/continue-local"),
   /** The signed-in Connections identity (email/sub). Throws ApiError when signed out. */
   authMe: () => req<AuthMe>("GET", "/api/auth/me"),
+
+  // ── share links (owner-only; the daemon 403s a guest that tries any of these) ─────
+  /** The owner's live share links. Never carries a link's token — see ShareCreated. */
+  listShares: () => req<{ shares: Share[] }>("GET", "/api/shares"),
+  /** Mint a link. The ONLY call that returns the secret token, and only this once: show it
+   *  immediately, because nothing can recover it afterwards. */
+  createShare: (input: {
+    label: string;
+    perm: SharePerm;
+    duration: ShareDuration;
+    scopeAll: boolean;
+    repoIds: string[];
+  }) => req<ShareCreated>("POST", "/api/shares", input),
+  /** Revoke a link — effective on the guest's very next request. */
+  revokeShare: (id: string) => req<{ ok: boolean }>("DELETE", `/api/shares/${encodeURIComponent(id)}`),
+  /** What this link's holder actually did. The only place that can answer it: a guest's commits
+   *  are authored as the owner, so git history can't. */
+  shareEvents: (id: string) =>
+    req<{ events: ShareEvent[] }>("GET", `/api/shares/${encodeURIComponent(id)}/events`),
 
   // ── "Sync my settings with Connections" (opt-in cloud sync of theme/appearance) ─────
   /** Current sync status: enabled/connected/last-synced/appearance. */

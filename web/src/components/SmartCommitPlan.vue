@@ -436,7 +436,7 @@ async function execute(sync: boolean): Promise<void> {
             <Sparkles :size="18" class="text-primary" />
             {{ $t("repo.smartCommit.title") }}
           </DialogTitle>
-          <DropdownMenu>
+          <DropdownMenu v-if="!store.isGuest">
             <DropdownMenuTrigger as-child>
               <Button
                 variant="ghost"

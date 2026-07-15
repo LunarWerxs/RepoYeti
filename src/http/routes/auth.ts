@@ -13,6 +13,8 @@ import {
   type AuthOptions,
 } from "../../auth.ts";
 import { rememberTokens, clearTokens, pullNow } from "../../connections-sync.ts";
+import { effectiveGuest } from "../../auth.ts";
+import { clearGuestCookie } from "../../share/index.ts";
 
 export function register(app: Hono, { cfg }: Deps): void {
   // Public: lets the PWA decide whether to show the "Sign in with Connections" screen,
@@ -21,15 +23,22 @@ export function register(app: Hono, { cfg }: Deps): void {
     const enforced = authEnforced(cfg);
     const session = enforced ? readSession(c, cfg.oauth!) : null;
     const local = !isRemoteRequest(c);
+    // A share-link guest is "authenticated" for the PWA's purposes — they hold a live credential
+    // and must land on the dashboard, not the sign-in gate — but they are NOT the owner, so none
+    // of the owner's identity (name, email, avatar) appears here. `share` is what the UI keys its
+    // guest banner and control-gating off. Owner wins: if both credentials are present this is a
+    // normal owner session and the guest fields never appear.
+    const share = effectiveGuest(c, cfg);
     return c.json({
       authEnforced: enforced,
       mode: accessMode(cfg),
-      authenticated: enforced ? !!session : true,
+      authenticated: enforced ? !!session || !!share : true,
       owner: session?.name || session?.email || session?.sub || null,
       ownerPicture: session?.picture || null,
       ownerClaimed: ownerConfigured(cfg),
-      canContinueLocal: local,
+      canContinueLocal: local && !share,
       localBypass: local && hasLocalBypass(c),
+      share: share ? { label: share.label, perm: share.perm, expiresAt: share.expiresAt } : null,
     });
   });
   app.get("/api/auth/me", (c) => {
@@ -42,7 +51,16 @@ export function register(app: Hono, { cfg }: Deps): void {
       picture: s?.picture ?? null,
     });
   });
-  app.post("/api/auth/logout", (c) => handleLogout(c));
+  // "Sign out" for the owner; "Leave" for a guest. A guest reaching this (the gate allows it)
+  // has no owner session to clear, so clear their share cookie instead and stop — handleLogout
+  // would be a no-op for them, leaving a live guest cookie behind and a "Leave" button that lies.
+  app.post("/api/auth/logout", (c) => {
+    if (effectiveGuest(c, cfg)) {
+      clearGuestCookie(c);
+      return c.json({ ok: true });
+    }
+    return handleLogout(c);
+  });
   // "Sign out everywhere" — rotate the signing key so every device's session cookie is
   // invalidated at once (sessions are stateless signed cookies; there is no row to revoke). Also
   // forget the Connections refresh token: signing out everywhere severs the settings-sync link too.

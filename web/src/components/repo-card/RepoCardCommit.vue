@@ -226,6 +226,8 @@ defineExpose({ loadRecentMsgs, recentMsgs });
 </script>
 
 <template>
+  <!-- entire commit UI is control-tier: a view-tier guest gets none of it -->
+  <template v-if="store.canControl">
   <!-- commit: auto-growing message box with an inline AI draft button, then a
        split Commit button whose chevron opens the other commit modes. Items align
        to the top so the buttons stay put as the textarea grows downward. -->
@@ -406,6 +408,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
     :selected-paths="[...treeSelection.selected]"
     @committed="onSmartCommitted"
   />
+  </template>
 </template>
 
 <style scoped>

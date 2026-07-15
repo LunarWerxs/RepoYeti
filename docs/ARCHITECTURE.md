@@ -128,7 +128,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | TOTP second factor | n/a | The connections.icu identity (Cognito, behind the owner's own MFA) already satisfies the auth non-negotiable. |
 | PAT / HTTPS remote auth | Phase 5 | SSH-key injection covers GitHub/GitLab/Bitbucket; HTTPS-PAT via `GIT_ASKPASS` is a separate path. |
 | Multi-root discovery | Phase 5 | One root (`~/code`, `~/Projects`) covers the common case. |
-| Session-management UI / per-device revoke | Phase 5 | A "sign out everywhere" clears daemon sessions; the Connections login itself is governed by AEGIS. v1 has a single owner session. |
+| Session-management UI / per-device revoke | Phase 5 | A "sign out everywhere" clears daemon sessions; the Connections login itself is governed by AEGIS. v1 has a single owner session. **Partly landed:** §17's Sharing panel is per-*link* listing + revoke. Per-*device* owner-session revoke is still just the "sign out everywhere" hammer. |
 | Commit signing (GPG/SSH) | post-v1 | Schema slot reserved, not wired. |
 | Diff viewer · merge-conflict UI · rebase · `reset --hard` · `push --force` | **never** | Out of scope by design. Daemon surfaces "resolve at your desk" and stops. |
 | SVN / Mercurial · cloud-synced accounts · auto-updater · native installers | post-v1 | Not on the path. |
@@ -243,7 +243,7 @@ CREATE TABLE sessions (                     -- the daemon's own RP session(s)
 
 ---
 
-## 6. API surface (every route requires an authenticated session for the trusted owner)
+## 6. API surface (every route requires the trusted owner — or, since §17, a scoped share link)
 
 | Method | Route | Purpose | Guards |
 |---|---|---|---|
@@ -264,7 +264,12 @@ CREATE TABLE sessions (                     -- the daemon's own RP session(s)
 
 Auth is a single Hono middleware: every `/api/*` route requires a valid daemon session whose verified
 `sub` equals the trusted owner; otherwise **401, empty body**. The only unauthenticated surface is the
-static PWA shell + manifest and the two `/oauth/*` endpoints that run the login dance. See §7.
+static PWA shell + manifest, the two `/oauth/*` endpoints that run the login dance, and `GET /s/:token`
+(share-link redemption, §17). See §7.
+
+That same middleware is also where a **share-link guest** is admitted — always after every owner check
+has failed, so it can only ever let in a caller who would otherwise have received a flat 401, and only
+to the allowlisted routes in `src/share/policy.ts`, on repos their link covers. See §17.
 
 Every git operation returns a **structured result**: `{ ok, code, message }`. Error codes are
 first-class (`DIRTY_WORKING_TREE`, `NON_FAST_FORWARD`, `SSH_AUTH_FAILED`, `SSH_PASSPHRASE_REQUIRED`,
@@ -372,6 +377,24 @@ owner's own Connections/Cognito login (and its MFA). A valid login by a *differe
 is rejected (`AUTH_WRONG_OWNER`). The daemon holds only a public `client_id` and the user's own
 tokens; there is **no shared secret** whose leak would matter. Tunnel compromise stays neutralized at
 the application layer.
+
+> **`GET /api/status` used to be the exception, and was fixed** (§17). It sat in the gate's public
+> allowlist and returned the whole settings dump — tunnel config, MCP rails, auto-commit schedule,
+> default editor, version — to anyone who knew the tunnel URL, flatly contradicting the paragraph
+> above. Nothing needed it public (the PWA calls it only after the gate passes; the sign-in screen
+> runs on `/api/auth/status` alone), so it is now gated like every other route. `/api/auth/status`
+> and `/api/auth/me` remain public and are safe to be: both only echo the caller's *own* verified
+> cookie, so an anonymous caller gets nulls, never the owner's identity.
+
+### The one deliberate exception: share links (§17)
+
+The claim above — *the only way in is an owner login* — is **no longer the whole truth**, by owner
+decision. A **share link** is a second, strictly-lesser credential: a secret URL the owner mints and
+hands to someone else, with a permission tier, a repo scope, and an expiry. Anyone holding the link
+gets in without any Connections account, exactly like a Google Drive "anyone with the link" share.
+That is the intent, not a weakness — but it means **the URL is now a credential**, and the
+properties that keep it honest are enumerated in §17. If you are auditing this daemon, read §17 as
+part of this section, not as a feature note.
 
 ### Secrets
 
@@ -1126,3 +1149,91 @@ pattern described in §13.
 *Marching orders end. Phase 1 starts with the watcher→SQLite→HTTP loop and the keytar spike — prove
 those two and the rest is wiring. Auth (Phase 2) is a standard "Sign in with Connections" OIDC relying
 party (§7/§13) and lights up the moment the owner registers the RepoYeti OAuth app.*
+
+---
+
+## 17. Share links — the guest principal
+
+> **Owner decision (2026-07-15).** Two people work the same codebase on opposite shifts, both leave
+> AI agents running overnight, and each wants to see — and sometimes flush — the other's uncommitted
+> work without waiting for them to wake up. So: a **share link**. A secret URL, like a Google Drive
+> "anyone with the link" share, that opens the owner's dashboard for someone with **no Connections
+> account and no sign-in**.
+
+This is the only place a non-owner can reach the daemon, so it is written to be audited. §7's threat
+model ("the only way in is an owner login") is amended by this section, not superseded by it: the
+owner login is still the only way to become the **owner**. A share link is a different, lesser thing.
+
+### What a link is
+
+| | |
+|---|---|
+| **The credential** | 32 random bytes (`randomBytes`, base64url) in the URL: `https://<tunnel>/s/<token>`. Guessing is not a threat model at 256 bits — there is no rate limit and none is needed. |
+| **At rest** | Only `sha256(token)`, in `shares.token_hash`. A stolen `repoyeti.db` yields hashes, not links. The plaintext exists **exactly once**, in the mint response; it cannot be recovered afterwards, by design — the owner revokes and re-mints instead. |
+| **Tiers** | `view` — repos, uncommitted files, diffs, history. `control` — plus the sync loop (fetch/pull/push/stage/commit/commit-selected) and Smart Commit (which spends the **owner's** AI key — an explicit owner call). |
+| **Scope** | Named repos, or "all repos" (which includes ones discovered later). A per-repo link never widens on its own. |
+| **Expiry** | 1 hour / day / week / month / year / never. Enforced on every request, not just at redemption. |
+| **Revocation** | One `UPDATE`; effective on the guest's **very next request**. |
+
+### The five properties that make it safe
+
+1. **Default-deny, enforced at the one chokepoint.** `src/share/policy.ts` is an *allowlist* keyed by
+   route pattern; anything absent is owner-only. It is enforced in `authMiddleware` — the single
+   `app.use("/api/*")` every request crosses — because there is **no deeper chokepoint**: `db.getRepo(id)`
+   takes only an id and knows nothing about the caller, and routes reach it three inconsistent ways
+   (respond.ts's helpers, a second lookup in the service layer, and two hand-rolled lookups in
+   `tags.ts` / `files.ts` that bypass the helpers). Enforcing scope anywhere else would silently miss those.
+2. **A new route is denied AND noticed.** `tests/share-policy.test.ts` walks the live Hono routing
+   table and fails unless **every** route appears in exactly one of two lists (guest-allowed, or
+   explicitly owner-only). Default-deny already makes an unclassified route safe; the guard is what
+   makes it *visible*. It reads `app.routes`, **not** openapi.ts's `META` — `META` looks like the
+   registry but isn't (buildOpenApiDoc emits a fallback for anything missing, so its own drift guard
+   passes while `META` silently lacks ~11 real routes).
+3. **Revocation is why there are rows.** Owner sessions are stateless signed cookies (`db.ts` says so:
+   there is intentionally no `sessions` table). Share links are the deliberate exception: a guest
+   cookie carries only a share id and **every request re-reads the row**, because "revoke this one
+   link, now, without touching my own session" is exactly what a stateless token cannot do.
+4. **The guest sees a projection, not the truth.** `GET /api/repos` is scope-filtered; `/api/status`
+   returns display knobs only (never the tunnel/MCP/auto-commit/editor config); `/api/auth/status`
+   carries no owner identity; SSE is filtered per-connection against both the share's scope **and** an
+   event allowlist (`src/share/events.ts`) — the raw bus carries `settings_changed`, `daemon_status`,
+   `scan_*` and `approval_pending`, none of which is a guest's business. Credentials embedded in a
+   remote URL (`https://user:ghp_x@…`) are stripped from everything a guest sees.
+5. **The audit trail exists because git can't answer.** A guest's commits are authored as the **owner**
+   (their machine, their tree, their identity — the owner chose this), so git history genuinely cannot
+   distinguish "my brother pushed this" from "I did". `share_events` can, and is written for every
+   guest mutation, allowed or denied.
+
+### Deliberately NOT granted to a control link
+
+Each of these was considered and refused; they are listed in `OWNER_ONLY` in `src/share/policy.ts`:
+working-tree edits (`PUT /file`) · `discard` (destroys the owner's uncommitted work) · `move` /
+`gitignore` · branch `checkout`/create/delete · `stash` · `tag` · `remote` set/delete (a MITM
+primitive, not a git op) · repo `identity`/`account` (chooses which credential authors and
+authenticates) · `auto-commit` opt-in (arms an unattended push timer) · `fetch-all` (spans every
+repo; not scopeable) · editors/`open` (launches processes on the owner's desktop) · MCP + approvals ·
+all settings/roots/mode/tunnel/updates/shutdown · share administration itself (a guest minting a link
+would be privilege escalation).
+
+**`amend` is the one body-level exception.** Commit and amend are the same route, split only by a
+flag, so the route-level policy cannot separate them — `routes/git-ops.ts` refuses `amend` for a
+guest explicitly. Amend rewrites the previous commit, possibly the owner's own unrelated work; a
+plain commit is additive and recoverable, an amend is neither.
+
+### Operational notes
+
+- A link is worthless without a tunnel (`mode: remote`). The Sharing panel says so rather than
+  minting a link that can't be opened, and builds the URL against the tunnel origin — not the
+  `localhost` the owner is probably reading it on.
+- **Owner always wins.** A browser holding both an owner session and a guest cookie is the owner. The
+  practical consequence: to preview what a guest sees, open the link in a private window.
+- Rotating the signing key ("sign out everywhere") also invalidates every guest cookie — but not the
+  links themselves, which are rows; the next `/s/<token>` open issues a fresh cookie. Revoke to kill
+  a link.
+- **`share_events` is unbounded.** Every guest refusal writes a row, so anyone holding a live link
+  can grow the table by hammering a forbidden route. It's local SQLite and the link-holder is by
+  definition someone the owner chose, so this is noted rather than solved; if it ever matters, cap
+  or age out denied rows (the *allowed* rows are the ones with lasting value).
+- The daemon's own PWA must not fetch owner-only endpoints as a guest. Not a security rule — an
+  audit-legibility one: each such fetch writes a "denied" row and buries the real entries. See the
+  `isGuest` branches in the web store's `loadAll` and `AppShell.onMounted`.

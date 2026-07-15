@@ -100,6 +100,12 @@ async function signOutAll(): Promise<void> {
 
 // Seed the stable-address field from the live config whenever the sheet opens (the token
 // stays blank — it's write-only) and reset the transient disclosure/confirm states.
+//
+// `immediate: true` is required, not cosmetic: the Settings sheet is a Reka DialogRoot, so this
+// component isn't MOUNTED until the sheet opens — meaning `open` is already true on creation and a
+// plain watcher never sees a false→true edge, so this body never ran. The visible symptom was the
+// "Stable address" input rendering EMPTY even with a hostname configured (tunnelHost is a local
+// ref that nothing else seeds), which reads as "not set" and invites re-typing it.
 watch(
   () => props.open,
   (isOpen) => {
@@ -109,6 +115,7 @@ watch(
       needsOwner.value = false;
     }
   },
+  { immediate: true },
 );
 </script>
 

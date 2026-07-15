@@ -82,11 +82,30 @@ test("remote mode → a local request without a session/bypass is 401 (shows the
   expect(res.status).toBe(401);
 });
 
-test("health + status probes stay public even in remote mode over the tunnel", async () => {
+test("the auth probes stay public even in remote mode over the tunnel", async () => {
+  // These two must stay reachable with no session: they are what the sign-in gate itself is built
+  // on. Both are safe to expose because they only ECHO the caller's own verified cookie — an
+  // anonymous caller gets nulls, never the owner's identity (see routes/auth.ts).
   const app = appWith(remoteMode);
   expect((await app.request("/api/health", REMOTE)).status).toBe(200);
   expect((await app.request("/api/auth/status", REMOTE)).status).toBe(200);
-  expect((await app.request("/api/status", REMOTE)).status).toBe(200);
-  // and locally, with no session, the UI can still read mode/tunnel state
-  expect((await app.request("/api/status")).status).toBe(200);
+});
+
+test("GET /api/status is NOT public — it's the owner's settings dump", async () => {
+  // This route used to sit in the public allowlist, and this test used to assert that. It was a
+  // real (if quiet) hole: /api/status returns the tunnel config, MCP rails, auto-commit schedule,
+  // default editor and version, so anyone who merely knew the tunnel URL could read all of it —
+  // flatly contradicting the threat model in docs/ARCHITECTURE.md §7 ("Hit any endpoint → 401,
+  // empty body: no surface, no version, no repo data").
+  //
+  // Nothing actually needed it open. The PWA calls it only AFTER the gate passes (AppShell.vue
+  // returns at the sign-in screen before loadAll()), and SignIn.vue runs entirely off
+  // /api/auth/status. Share-link guests, who DO need it, get a narrow projection instead
+  // (routes/health.ts) — never the owner's settings.
+  const app = appWith(remoteMode);
+  expect((await app.request("/api/status", REMOTE)).status).toBe(401);
+  // Local + remote mode still needs a session/bypass, like every other route in that combination.
+  expect((await app.request("/api/status")).status).toBe(401);
+  // ...and in local mode a loopback request is open, exactly as before.
+  expect((await appWith(localMode).request("/api/status")).status).toBe(200);
 });

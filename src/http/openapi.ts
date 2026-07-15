@@ -45,6 +45,7 @@ import {
   ProviderUpdateSchema,
   CommitMessageSchema,
   CommitPlanSchema,
+  ShareCreateSchema,
 } from "../schemas.ts";
 
 /** One curated entry per route, keyed by `"<METHOD> <hono-path>"` exactly as Hono registers it. */
@@ -232,6 +233,18 @@ export const META: Record<string, RouteMeta> = {
 
   // ── MCP (Model Context Protocol) — AI agent tool access ────────────────────────────
   "POST /api/mcp": { summary: "MCP JSON-RPC endpoint (Streamable HTTP) — AI tool access.", tags: ["mcp"] },
+
+  // ── share links — owner admin (the guest surface is policy'd in src/share/policy.ts) ────
+  "GET /api/shares": { summary: "List the owner's live share links (never returns a link's token).", tags: ["shares"] },
+  "POST /api/shares": {
+    summary: "Mint a share link; returns the secret URL token ONCE (the only time it's returned).",
+    body: ShareCreateSchema,
+    tags: ["shares"],
+  },
+  "DELETE /api/shares/:id": { summary: "Revoke a share link — effective on the guest's next request.", tags: ["shares"] },
+  "GET /api/shares/:id/events": { summary: "Audit trail: what this link's holder did.", tags: ["shares"] },
+  // GET /s/:token (redemption) is intentionally absent: buildOpenApiDoc only walks /api/* and
+  // /oauth/*, so an entry here would never be emitted. It's documented in routes/shares.ts.
 
   // ── ⭐ Agent Safety Rail — pending MCP mutating-call approvals ──────────────────────
   "GET /api/approvals": { summary: "List MCP tool calls currently pending owner approve/deny.", tags: ["mcp"] },

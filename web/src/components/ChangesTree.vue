@@ -34,7 +34,19 @@ function diffTitle(s: DiffStatT): string {
 // path (muted directory prefix + filename) instead of just its name; everything else (open,
 // select, discard, diff-stats, keyboard nav) is unchanged.
 defineOptions({ name: "ChangesTree" });
-const props = defineProps<{ nodes: TreeNode[]; repoId: string; depth?: number; forceExpand?: boolean; flat?: boolean }>();
+const props = withDefaults(
+  defineProps<{
+    nodes: TreeNode[];
+    repoId: string;
+    depth?: number;
+    forceExpand?: boolean;
+    flat?: boolean;
+    /** Share-link gating (see store.canControl/isGuest) — owner defaults keep every other call site as-is. */
+    canControl?: boolean;
+    isGuest?: boolean;
+  }>(),
+  { canControl: true, isGuest: false },
+);
 
 // Directory of a flat-list row WITHOUT the trailing slash, e.g. "src/components". Empty for a
 // repo-root file. Shown muted AFTER the filename in list view (filename-first). Only used when
@@ -105,6 +117,7 @@ function onFolderDragOver(e: DragEvent, dir: TreeNode): void {
   dragOverPath.value = dir.path;
 }
 function onFolderDrop(e: DragEvent, dir: TreeNode): void {
+  if (props.isGuest) return; // guests can't move files (rows are also non-draggable — see below)
   dragOverPath.value = null;
   const from = e.dataTransfer?.getData(DND_MIME);
   if (!from) return;
@@ -247,7 +260,7 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
           <div class="tree-row-cv group/file relative">
         <button
           type="button"
-          draggable="true"
+          :draggable="!isGuest"
           class="group flex h-[26px] w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
           :class="[isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30', draggingPath === n.path && 'opacity-40']"
           :style="{ paddingLeft: (depth ?? 0) * 14 + 8 + 'px' }"
@@ -326,6 +339,7 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
         >
           <!-- reveal this file's repo in the OS file manager (same convention as "Open with…" → File Explorer/Finder). -->
           <button
+            v-if="!isGuest"
             type="button"
             tabindex="-1"
             class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -337,6 +351,7 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
           </button>
           <!-- stage this file's working-tree change into the index (non-destructive; doesn't commit). -->
           <button
+            v-if="canControl"
             type="button"
             tabindex="-1"
             class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition hover:bg-primary/15 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -348,6 +363,7 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
           </button>
           <!-- discard this file's working-tree changes (RepoCard confirms first). -->
           <button
+            v-if="!isGuest"
             type="button"
             tabindex="-1"
             class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -365,11 +381,11 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
             <Eye :size="15" />
             <span>{{ $t("repo.changes.ctxOpen") }}</span>
           </ContextMenuItem>
-          <ContextMenuItem @select="emit('editor', n.path)">
+          <ContextMenuItem v-if="!isGuest" @select="emit('editor', n.path)">
             <SquarePen :size="15" />
             <span>{{ $t("repo.changes.ctxEditor") }}</span>
           </ContextMenuItem>
-          <ContextMenuItem @select="emit('reveal', n.path)">
+          <ContextMenuItem v-if="!isGuest" @select="emit('reveal', n.path)">
             <FolderOpen :size="15" />
             <span>{{ $t("repo.changes.revealAction") }}</span>
           </ContextMenuItem>
@@ -378,16 +394,16 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
             <span>{{ $t("repo.changes.ctxCopyPath") }}</span>
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem @select="emit('stage', n.path)">
+          <ContextMenuItem v-if="canControl" @select="emit('stage', n.path)">
             <Plus :size="15" />
             <span>{{ $t("repo.changes.stageAction") }}</span>
           </ContextMenuItem>
-          <ContextMenuItem @select="emit('gitignore', n.path)">
+          <ContextMenuItem v-if="!isGuest" @select="emit('gitignore', n.path)">
             <Ban :size="15" />
             <span>{{ $t("repo.changes.ctxGitignore") }}</span>
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" @select="emit('discard', n.path)">
+          <ContextMenuItem v-if="!isGuest" variant="destructive" @select="emit('discard', n.path)">
             <Undo2 :size="15" />
             <span>{{ $t("repo.discard.action") }}</span>
           </ContextMenuItem>
@@ -400,6 +416,8 @@ onBeforeUnmount(() => rovingObserver?.disconnect());
           :repo-id="repoId"
           :depth="(depth ?? 0) + 1"
           :force-expand="forceExpand"
+          :can-control="canControl"
+          :is-guest="isGuest"
           @discard="emit('discard', $event)"
           @stage="emit('stage', $event)"
           @reveal="emit('reveal', $event)"

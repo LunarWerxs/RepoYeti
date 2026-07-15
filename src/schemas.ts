@@ -211,3 +211,17 @@ export const CommitSelectedSchema = z.object({
   message: z.string().optional(),
   paths: z.array(nonEmpty).min(1).max(MAX_PLAN_PATHS),
 });
+
+// ── share links ───────────────────────────────────────────────────────────────────
+// Minting a link. `duration` is a preset (see share/index.ts SHARE_DURATIONS) rather than a raw
+// timestamp so the API can't be handed a past/absurd expiry, and so "a week" means the same thing
+// in the UI, the tests, and the audit trail. The perm enum is closed for the same reason the gate
+// default-denies: a typo must fail loudly, not degrade to something permissive.
+export const ShareCreateSchema = z.object({
+  label: z.string().trim().min(1).max(80),
+  perm: z.enum(["view", "control"]),
+  duration: z.enum(["hour", "day", "week", "month", "year", "never"]),
+  /** Every repo, including ones discovered later. Mutually exclusive with a repoIds list. */
+  scopeAll: z.boolean().default(false),
+  repoIds: z.array(nonEmpty).default([]),
+});

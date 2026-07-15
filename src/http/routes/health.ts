@@ -62,6 +62,7 @@ import {
 } from "../../approvals.ts";
 import { isKnownEditor } from "../../service/index.ts";
 import { invalidAiKeys } from "../../ai-keycheck.ts";
+import { effectiveGuest } from "../../auth.ts";
 
 /**
  * Resolve `loreServersEnabled`, deriving + persisting a one-time default on first read so
@@ -83,8 +84,40 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
   );
   // Runtime status for the UI — access mode + the public tunnel URL (null until a
   // cloudflared tunnel yields one) so the web app can show the remote-access link/QR.
-  app.get("/api/status", (c) =>
-    c.json({
+  //
+  // Two audiences now. The owner gets everything below. A share-link guest gets only the handful
+  // of display knobs the dashboard needs in order to render correctly — the rest of this object is
+  // the owner's private configuration (tunnel, MCP rails, auto-commit/auto-update schedule, editor,
+  // dead-AI-key report), none of which is a guest's business. Rather than hand-pick fields to
+  // REMOVE (which silently leaks every field added later), the guest projection hand-picks the few
+  // to KEEP — same default-deny reflex as share/policy.ts.
+  app.get("/api/status", (c) => {
+    const share = effectiveGuest(c, cfg);
+    if (share) {
+      return c.json({
+        ok: true,
+        version: VERSION,
+        // The guest reached this over the tunnel, so "remote" tells them nothing they don't know —
+        // but the tunnel's identity/config is withheld regardless.
+        mode: "remote",
+        tunnelActive: true,
+        tunnelUrl: null,
+        // Display knobs only. remoteEditing is pinned FALSE: a guest cannot write files (the gate
+        // refuses PUT /api/repos/:id/file outright), so the editor must render read-only.
+        diffStats: diffStatsEnabled(),
+        remoteEditing: false,
+        diffPatchBytes: getDiffPatchBytes(),
+        diffPatchEnabled: getDiffPatchEnabled(),
+        minContentSearch: MIN_CONTENT_SEARCH,
+        // Who they are and what they may do — drives the guest banner + control gating in the PWA.
+        share: {
+          label: share.label,
+          perm: share.perm,
+          expiresAt: share.expiresAt,
+        },
+      });
+    }
+    return c.json({
       ok: true,
       version: VERSION,
       mode: accessMode(cfg),
@@ -150,8 +183,8 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       // "Open with…" default external editor id (null = auto-pick the first installed). The
       // catalogue + per-machine availability come from GET /api/editors.
       defaultEditor: cfg.defaultEditor ?? null,
-    }),
-  );
+    });
+  });
 
   app.post("/api/shutdown", (c) => {
     // The tray stops the daemon by port (Stop-RepoYeti) and never calls this route, so any request

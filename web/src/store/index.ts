@@ -1,10 +1,11 @@
 import { defineStore } from "pinia";
-import { ref, reactive, watch } from "vue";
+import { ref, reactive, computed, watch } from "vue";
 import { useEventSource } from "@vueuse/core";
 import { api, ApiError, type AccessMode, type TunnelStatus } from "../api";
 import type {
   ActionName,
   ActionResult,
+  Identity,
   PendingApproval,
   Repo,
   UpdateApplyResult,
@@ -276,6 +277,7 @@ export const useStore = defineStore("repoyeti", () => {
     ownerClaimed,
     canContinueLocal,
     localBypass,
+    shareViewer,
     loadAuth,
     continueLocal,
     setMode,
@@ -376,29 +378,59 @@ export const useStore = defineStore("repoyeti", () => {
     pullRepo: (repoId) => doAction(repoId, "pull"),
   });
 
+  /**
+   * This browser is holding a share link rather than owning this daemon.
+   *
+   * Everything a guest can't do is enforced by the daemon (src/share/policy.ts) — these two flags
+   * exist so the UI doesn't offer buttons that would only 403. Never treat them as the security
+   * boundary; a guest who edits `isGuest` in devtools gets a prettier dashboard and exactly zero
+   * extra access.
+   */
+  const isGuest = computed(() => shareViewer.value !== null);
+  /**
+   * May this viewer trigger the sync loop (fetch/pull/push/stage/commit/Smart Commit)?
+   *
+   * True for the owner — the common case, and the reason this is phrased positively: every control
+   * gates on `store.canControl`, so a component that forgets the guest case still works for the
+   * owner AND stays honest for a guest, rather than the reverse.
+   */
+  const canControl = computed(() => shareViewer.value === null || shareViewer.value.perm === "control");
+
+  /**
+   * Hydrate the dashboard.
+   *
+   * Note the `isGuest` branches: everything skipped here is a route the daemon deliberately
+   * refuses a share-link guest (identities, AI config, GitHub accounts, cloud sync, MCP approvals,
+   * the Identity Firewall, update checks, telemetry — see src/share/policy.ts). Asking anyway
+   * isn't merely wasteful, it's a correctness bug: this is one `Promise.all`, so a single 403
+   * rejects the whole batch and `repos.value = r` never runs — the guest lands on a dashboard that
+   * says "No repositories yet" while /api/repos sits there having returned 200 with their repo.
+   * The owner's path below is byte-for-byte what it always was.
+   */
   async function loadAll(): Promise<void> {
     loading.value = true;
     try {
+      const guest = isGuest.value;
       const [r, i] = await Promise.all([
         api.listRepos(),
-        api.listIdentities(),
-        loadAiSettings(),
-        loadAiCatalog(),
+        guest ? Promise.resolve([] as Identity[]) : api.listIdentities(),
+        guest ? Promise.resolve() : loadAiSettings(),
+        guest ? Promise.resolve() : loadAiCatalog(),
         loadStatus(),
-        loadAccounts(), // best-effort — populates the header account switcher on boot
-        loadSyncStatus(), // best-effort — applies any synced appearance on boot
-        loadApprovals(), // best-effort — hydrates any already-pending MCP approvals on boot
-        loadIdentityRules(), // best-effort — hydrates the Identity Firewall rules on boot
+        guest ? Promise.resolve() : loadAccounts(), // best-effort — populates the header account switcher on boot
+        guest ? Promise.resolve() : loadSyncStatus(), // best-effort — applies any synced appearance on boot
+        guest ? Promise.resolve() : loadApprovals(), // best-effort — hydrates any already-pending MCP approvals on boot
+        guest ? Promise.resolve() : loadIdentityRules(), // best-effort — hydrates the Identity Firewall rules on boot
       ]);
       repos.value = r;
       identities.value = i;
     } finally {
       loading.value = false;
-      if (!appOpenedPulsed) {
+      if (!appOpenedPulsed && !isGuest.value) {
         appOpenedPulsed = true;
-        void recordPulse("app_opened");
+        void recordPulse("app_opened"); // owner-only telemetry; a guest is 403'd on /api/pulse
       }
-      void checkForUpdate();
+      if (!isGuest.value) void checkForUpdate(); // owner-only: /api/updates
     }
   }
 
@@ -703,6 +735,9 @@ export const useStore = defineStore("repoyeti", () => {
     authenticated,
     owner,
     ownerPicture,
+    shareViewer,
+    isGuest,
+    canControl,
     mode,
     ownerClaimed,
     canContinueLocal,

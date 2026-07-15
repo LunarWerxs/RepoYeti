@@ -349,6 +349,8 @@ export type ApiErrorCode =
   | "NO_MESSAGE"
   | "BAD_MODE"
   | "NEEDS_OWNER"
+  // Share links: the credential is valid, it just doesn't reach this far (src/share/policy.ts).
+  | "FORBIDDEN"
   | "AI_AUTH_FAILED"
   | "AI_UNREACHABLE"
   | "AI_BAD_REQUEST"
@@ -535,4 +537,55 @@ export interface PendingApproval {
   expiresAt: number;
   /** What the countdown will do at expiry — "deny", "approve", or null (no timer, hide the countdown). */
   autoAction: "approve" | "deny" | null;
+}
+
+// ── share links ───────────────────────────────────────────────────────────────
+/** What a share link may do. "control" is a superset of "view" (mirrors src/share/policy.ts). */
+export type SharePerm = "view" | "control";
+
+/** The link lifetimes the owner can pick (mirrors src/share/index.ts SHARE_DURATIONS). */
+export type ShareDuration = "hour" | "day" | "week" | "month" | "year" | "never";
+
+/** One share link in the owner's Sharing panel (GET /api/shares).
+ *  Note there is no token field, and never will be: only sha256(secret) is stored, so the link
+ *  itself is shown exactly once — in the response to creating it — and is unrecoverable after. */
+export interface Share {
+  id: string;
+  label: string;
+  perm: SharePerm;
+  /** Every repo, including ones discovered later. When true, `repoIds` is empty and meaningless. */
+  scopeAll: boolean;
+  repoIds: string[];
+  createdAt: number;
+  /** null = never expires. */
+  expiresAt: number | null;
+  lastUsedAt: number | null;
+  useCount: number;
+  /** False once expired — the panel greys these out. */
+  live: boolean;
+}
+
+/** POST /api/shares — the ONLY response that ever carries the secret link token. */
+export interface ShareCreated {
+  ok: boolean;
+  share: Share;
+  token: string;
+}
+
+/** One entry in a link's audit trail (GET /api/shares/:id/events). */
+export interface ShareEvent {
+  id: string;
+  shareId: string;
+  at: number;
+  action: string;
+  repoId: string | null;
+  outcome: "allowed" | "denied";
+}
+
+/** Who the CURRENT viewer is, when they're a guest rather than the owner. Carried by
+ *  /api/auth/status and /api/status; null for the owner. Drives the guest banner + control gating. */
+export interface ShareViewer {
+  label: string;
+  perm: SharePerm;
+  expiresAt: number | null;
 }

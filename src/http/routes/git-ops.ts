@@ -12,8 +12,9 @@ import {
   forceRefresh,
 } from "../../service/index.ts";
 import { action, requireId } from "../respond.ts";
+import { effectiveGuest } from "../../auth.ts";
 
-export function register(app: Hono, _deps: Deps): void {
+export function register(app: Hono, { cfg }: Deps): void {
   // ── safe git actions ───────────────────────────────────────────────────────
   app.post("/api/repos/:id/fetch", action(fetchRepo));
   app.post("/api/repos/:id/pull", action(pullRepo));
@@ -25,7 +26,17 @@ export function register(app: Hono, _deps: Deps): void {
     if (!p.ok) return p.res;
     const message = (p.data.message ?? "").trim();
     if (!message) return jsonError(c, "NO_MESSAGE", "commit message required");
-    const r = await commitRepo(id, message, p.data.amend === true);
+    const amend = p.data.amend === true;
+    // A share-link guest may commit, but NOT amend. The gate (src/share/policy.ts) works on the
+    // route, and "commit" and "amend" are the same route — so this one distinction has to be drawn
+    // here, on the body. It matters: amend REWRITES the previous commit, which may be the owner's
+    // own work that the guest never authored and cannot see the intent of. That's history editing,
+    // not the "commit and sync my tree" the control tier was granted for. Plain commits are always
+    // additive and always recoverable; an amend is neither.
+    if (amend && effectiveGuest(c, cfg)) {
+      return jsonError(c, "FORBIDDEN", "a share link can commit, but cannot amend", 403);
+    }
+    const r = await commitRepo(id, message, amend);
     return c.json(r, r.ok ? 200 : statusForCode(r.code));
   });
 

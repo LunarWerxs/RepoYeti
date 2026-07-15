@@ -327,6 +327,7 @@ async function save(): Promise<void> {
 
 // Ctrl/Cmd+S saves while editing (instead of the browser's save-page dialog).
 function onKeydown(e: KeyboardEvent): void {
+  if (store.isGuest) return; // guests never enter edit mode, but keep the shortcut inert too
   if (editing.value && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
     void save();
@@ -451,7 +452,7 @@ onBeforeUnmount(() => {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" class="w-52">
-          <DropdownMenuItem v-if="showEditControls" @select="startEdit">
+          <DropdownMenuItem v-if="showEditControls && !store.isGuest" @select="startEdit">
             <Pencil :size="14" />
             {{ $t("fileViewer.edit") }}
           </DropdownMenuItem>
@@ -474,7 +475,7 @@ onBeforeUnmount(() => {
             <component :is="diffSplitView ? AlignJustify : Columns2" :size="14" />
             {{ diffSplitView ? $t("fileViewer.unifiedView") : $t("fileViewer.splitView") }}
           </DropdownMenuItem>
-          <template v-if="store.canContinueLocal">
+          <template v-if="store.canContinueLocal && !store.isGuest">
             <DropdownMenuSeparator />
             <DropdownMenuItem @select="openWith()">
               <ExternalLink :size="14" />

@@ -47,7 +47,7 @@ async function onDeny(id: string): Promise<void> {
 
 <template>
   <div
-    v-if="store.pendingApprovals.length"
+    v-if="store.pendingApprovals.length && !store.isGuest"
     class="ring-primary/30 bg-primary/5 mb-2.5 flex flex-col gap-1.5 rounded-lg py-2.5 text-xs/relaxed ring-1"
   >
     <div class="flex items-center gap-1.5 px-3 text-[13px] font-semibold text-primary">

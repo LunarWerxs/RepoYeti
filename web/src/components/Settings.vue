@@ -7,6 +7,7 @@ import SettingsPanel from "@/shell/SettingsPanel.vue";
 import SettingsTabs from "@/shell/SettingsTabs.vue";
 import IdentitiesSection from "./settings/IdentitiesSection.vue";
 import AccessSection from "./settings/AccessSection.vue";
+import SharingSection from "./settings/SharingSection.vue";
 import DiscoverySection from "./settings/DiscoverySection.vue";
 import CloudSyncSection from "./settings/CloudSyncSection.vue";
 import AppearanceSection from "./settings/AppearanceSection.vue";
@@ -99,9 +100,10 @@ watch(
         <AiProvidersSection :open="open" />
       </div>
 
-      <!-- Access: Connections account, remote access + tunnel, cloud sync ───── -->
+      <!-- Access: Connections account, remote access + tunnel, share links, cloud sync ───── -->
       <div v-show="tab === 'access'" class="flex flex-col gap-4">
         <AccessSection :open="open" />
+        <SharingSection :open="open" />
         <CloudSyncSection />
       </div>
     </div>

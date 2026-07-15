@@ -159,6 +159,55 @@ export function initDb(): Database {
     );
     -- Auth uses stateless, HMAC-signed cookies (see auth.ts) — there is no session row
     -- to store or revoke, so there is intentionally NO \`sessions\` table.
+    --
+    -- Share links (src/share/) are the ONE deliberate exception to that stateless posture, and
+    -- the reason is revocation. An owner session is the owner's own cookie on the owner's own
+    -- device; "sign out everywhere" rotates the signing key and is a fine blunt instrument. A
+    -- share link is a credential held by SOMEONE ELSE, so "revoke this one link, right now,
+    -- without touching my other links or my own session" is a hard requirement — and that is
+    -- exactly what a stateless signed token cannot do. Hence rows: every guest request re-reads
+    -- its share here, so revoking is a single UPDATE that takes effect on the next request.
+    --
+    -- INVARIANT (unchanged): no raw secret bytes land in SQLite. token_hash is sha256(secret);
+    -- the plaintext link is shown to the owner EXACTLY ONCE, at mint, and is unrecoverable after.
+    CREATE TABLE IF NOT EXISTS shares (
+      id            TEXT PRIMARY KEY,
+      token_hash    TEXT NOT NULL UNIQUE,     -- sha256(secret) hex — never the secret itself
+      label         TEXT NOT NULL,            -- owner's name for the link ("Brother — nights")
+      perm          TEXT NOT NULL,            -- 'view' | 'control'
+      scope_all     INTEGER NOT NULL DEFAULT 0, -- 1 = every repo, including ones added later
+      created_at    INTEGER NOT NULL,         -- ms
+      expires_at    INTEGER,                  -- ms; NULL = never expires
+      revoked_at    INTEGER,                  -- ms; NULL = still live
+      last_used_at  INTEGER,                  -- ms; NULL = never redeemed
+      use_count     INTEGER NOT NULL DEFAULT 0
+    );
+    -- Which repos a share exposes. Ignored (and not required) when scope_all = 1.
+    -- No REFERENCES clause on purpose: SQLite enforces foreign keys only under
+    -- PRAGMA foreign_keys = ON, which this daemon does not set, so a REFERENCES here would be
+    -- decoration that reads as a guarantee. Dangling grants are instead made harmless by
+    -- construction — every read of this table INNER JOINs repos (see shareRepoIds /
+    -- getSharedRepos), so a grant naming a removed repo resolves to nothing, and repo ids are
+    -- UUIDs, so an id is never recycled into a different repo later.
+    CREATE TABLE IF NOT EXISTS share_repos (
+      share_id  TEXT NOT NULL,
+      repo_id   TEXT NOT NULL,
+      PRIMARY KEY (share_id, repo_id)
+    );
+    -- Audit trail: what a guest actually DID on the owner's machine. A control link can commit
+    -- and push as the owner's own git identity (an explicit owner decision — it's the owner's
+    -- tree, the guest is just syncing it), which means the git history alone cannot answer "did
+    -- my brother push this, or did I?". This table is the only place that can, so it is written
+    -- for every guest-attempted mutation, allowed or denied.
+    CREATE TABLE IF NOT EXISTS share_events (
+      id         TEXT PRIMARY KEY,
+      share_id   TEXT NOT NULL,               -- NOT a FK: the audit trail must outlive the share
+      at         INTEGER NOT NULL,            -- ms
+      action     TEXT NOT NULL,               -- "METHOD /api/path" as attempted
+      repo_id    TEXT,                        -- when the action targeted one repo
+      outcome    TEXT NOT NULL                -- 'allowed' | 'denied'
+    );
+    CREATE INDEX IF NOT EXISTS share_events_share ON share_events (share_id, at DESC);
   `);
   // Migrations: add columns to pre-existing databases. Each throws "duplicate column
   // name" on DBs that already have it (incl. fresh ones) — ignore.
@@ -702,4 +751,233 @@ export function setRepoAutoCommit(repoId: string, autoCommit: boolean): void {
   getDb()
     .query(`UPDATE repos SET auto_commit = ?, updated_at = ? WHERE id = ?`)
     .run(autoCommit ? 1 : 0, Date.now(), repoId);
+}
+
+// ── share links (see src/share/) ─────────────────────────────────────────────────
+// The storage half of the guest principal. The policy half is src/share/policy.ts; the gate is
+// auth.ts authMiddleware. Nothing here decides what a guest may DO — these are plain rows.
+
+/** A share link as stored. `tokenHash` never leaves this module; the secret itself is never stored. */
+export interface Share {
+  id: string;
+  label: string;
+  perm: "view" | "control";
+  /** Every repo, including ones discovered after the link was made. */
+  scopeAll: boolean;
+  createdAt: number;
+  /** null = never expires. */
+  expiresAt: number | null;
+  /** null = still live. */
+  revokedAt: number | null;
+  lastUsedAt: number | null;
+  useCount: number;
+}
+
+interface ShareRow {
+  id: string;
+  label: string;
+  perm: string;
+  scope_all: number;
+  created_at: number;
+  expires_at: number | null;
+  revoked_at: number | null;
+  last_used_at: number | null;
+  use_count: number;
+}
+
+const SHARE_COLS =
+  "id, label, perm, scope_all, created_at, expires_at, revoked_at, last_used_at, use_count";
+
+function toShare(r: ShareRow): Share {
+  return {
+    id: r.id,
+    label: r.label,
+    perm: r.perm === "control" ? "control" : "view", // unknown value degrades to the LESSER tier
+    scopeAll: r.scope_all === 1,
+    createdAt: r.created_at,
+    expiresAt: r.expires_at,
+    revokedAt: r.revoked_at,
+    lastUsedAt: r.last_used_at,
+    useCount: r.use_count,
+  };
+}
+
+export interface ShareInput {
+  label: string;
+  perm: "view" | "control";
+  scopeAll: boolean;
+  /** Ignored when scopeAll — the grant is "everything", so a repo list would be a lie. */
+  repoIds: string[];
+  expiresAt: number | null;
+}
+
+/**
+ * Insert a share. `tokenHash` is sha256(secret) computed by the caller (src/share/tokens.ts) —
+ * this module never sees the secret, which is what makes "the plaintext link exists exactly once,
+ * in the mint response" true by construction rather than by discipline.
+ */
+export function createShare(tokenHash: string, input: ShareInput): Share {
+  const id = randomUUID();
+  const now = Date.now();
+  const db2 = getDb();
+  db2
+    .query(
+      `INSERT INTO shares (id, token_hash, label, perm, scope_all, created_at, expires_at, revoked_at, last_used_at, use_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0)`,
+    )
+    .run(id, tokenHash, input.label, input.perm, input.scopeAll ? 1 : 0, now, input.expiresAt);
+  if (!input.scopeAll) {
+    const ins = db2.query(`INSERT OR IGNORE INTO share_repos (share_id, repo_id) VALUES (?, ?)`);
+    for (const repoId of input.repoIds) ins.run(id, repoId);
+  }
+  return {
+    id,
+    label: input.label,
+    perm: input.perm,
+    scopeAll: input.scopeAll,
+    createdAt: now,
+    expiresAt: input.expiresAt,
+    revokedAt: null,
+    lastUsedAt: null,
+    useCount: 0,
+  };
+}
+
+/** Every share the owner hasn't revoked (expired ones included — the UI shows + lets them clean up). */
+export function listShares(): Share[] {
+  return (
+    getDb()
+      .query(`SELECT ${SHARE_COLS} FROM shares WHERE revoked_at IS NULL ORDER BY created_at DESC`)
+      .all() as ShareRow[]
+  ).map(toShare);
+}
+
+export function getShare(id: string): Share | null {
+  const r = getDb().query(`SELECT ${SHARE_COLS} FROM shares WHERE id = ?`).get(id) as ShareRow | null;
+  return r ? toShare(r) : null;
+}
+
+/**
+ * Look a share up by the sha256 of a presented secret. Returns the row whatever its state — the
+ * caller decides what "usable" means (see share/index.ts shareIsLive), because redemption and the
+ * per-request gate want to tell "revoked" apart from "never existed" for logging, while both refuse.
+ */
+export function getShareByTokenHash(tokenHash: string): Share | null {
+  const r = getDb()
+    .query(`SELECT ${SHARE_COLS} FROM shares WHERE token_hash = ?`)
+    .get(tokenHash) as ShareRow | null;
+  return r ? toShare(r) : null;
+}
+
+/** Revoke a link. Idempotent; returns false when the id is unknown. The row stays (audit trail). */
+export function revokeShare(id: string): boolean {
+  const r = getDb()
+    .query(`UPDATE shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`)
+    .run(Date.now(), id);
+  return r.changes > 0;
+}
+
+/** Record a redemption: bump the counter and stamp "last used" for the owner's Sharing panel. */
+export function touchShare(id: string): void {
+  getDb()
+    .query(`UPDATE shares SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?`)
+    .run(Date.now(), id);
+}
+
+/**
+ * The repo ids a share grants, INNER JOINed against `repos` so a grant for a repo that has since
+ * been removed simply resolves to nothing. That join is why this doesn't need SQLite's foreign_keys
+ * pragma (off by default) to be correct: a dangling grant can never name a live repo, and repo ids
+ * are UUIDs, so an id is never recycled into a different repo.
+ * Meaningless for a scopeAll share — callers must check that first.
+ */
+export function shareRepoIds(shareId: string): string[] {
+  return (
+    getDb()
+      .query(
+        `SELECT sr.repo_id AS repo_id FROM share_repos sr
+         JOIN repos r ON r.id = sr.repo_id
+         WHERE sr.share_id = ?`,
+      )
+      .all(shareId) as Array<{ repo_id: string }>
+  ).map((r) => r.repo_id);
+}
+
+/** Repos a share exposes, as full rows — the scoped substitute for getRepos() on a guest request. */
+export function getSharedRepos(share: Share): RepoView[] {
+  if (share.scopeAll) return getRepos();
+  return (
+    getDb()
+      .query(
+        `SELECT r.* FROM repos r
+         JOIN share_repos sr ON sr.repo_id = r.id
+         WHERE sr.share_id = ?
+         ORDER BY r.sort_order IS NULL, r.sort_order ASC, r.name COLLATE NOCASE ASC`,
+      )
+      .all(share.id) as RepoRow[]
+  ).map(toView);
+}
+
+/** Does this share cover this repo? The scope half of the guest gate. */
+export function shareCoversRepo(share: Share, repoId: string): boolean {
+  if (share.scopeAll) return true;
+  const r = getDb()
+    .query(`SELECT 1 AS hit FROM share_repos WHERE share_id = ? AND repo_id = ?`)
+    .get(share.id, repoId) as { hit: number } | null;
+  return !!r;
+}
+
+// ── audit trail ──────────────────────────────────────────────────────────────────
+
+export interface ShareEvent {
+  id: string;
+  shareId: string;
+  at: number;
+  action: string;
+  repoId: string | null;
+  outcome: "allowed" | "denied";
+}
+
+interface ShareEventRow {
+  id: string;
+  share_id: string;
+  at: number;
+  action: string;
+  repo_id: string | null;
+  outcome: string;
+}
+
+/**
+ * Record what a guest tried. Called for mutations (allowed or denied) — reads are far too chatty
+ * to be worth a row each, and "he looked at the diff" isn't the question this table answers.
+ * The question it answers is "did my brother push this, or did I?", which git history cannot,
+ * because a guest's commits are authored as the owner by design.
+ */
+export function logShareEvent(
+  shareId: string,
+  action: string,
+  repoId: string | null,
+  outcome: "allowed" | "denied",
+): void {
+  getDb()
+    .query(`INSERT INTO share_events (id, share_id, at, action, repo_id, outcome) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(randomUUID(), shareId, Date.now(), action, repoId, outcome);
+}
+
+export function listShareEvents(shareId: string, limit = 100): ShareEvent[] {
+  return (
+    getDb()
+      .query(
+        `SELECT id, share_id, at, action, repo_id, outcome FROM share_events
+         WHERE share_id = ? ORDER BY at DESC LIMIT ?`,
+      )
+      .all(shareId, Math.max(1, Math.min(limit, 500))) as ShareEventRow[]
+  ).map((r) => ({
+    id: r.id,
+    shareId: r.share_id,
+    at: r.at,
+    action: r.action,
+    repoId: r.repo_id,
+    outcome: r.outcome === "allowed" ? "allowed" : "denied",
+  }));
 }

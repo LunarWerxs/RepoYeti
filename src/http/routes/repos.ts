@@ -3,7 +3,9 @@ import { existsSync, statSync } from "node:fs";
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import { pathWithin } from "../../paths.ts";
-import { getRepos } from "../../db.ts";
+import { getRepos, getSharedRepos } from "../../db.ts";
+import { effectiveGuest } from "../../auth.ts";
+import { guestRepoView } from "../../share/redact.ts";
 import { jsonError, statusForCode, type ApiErrorCode } from "../../contract.ts";
 import { parseBody, CloneSchema, ReorderSchema } from "../../schemas.ts";
 import {
@@ -18,7 +20,15 @@ import { repoFromPath, looksLikeGitUrl, deriveCloneName } from "../respond.ts";
 
 export function register(app: Hono, { cfg }: Deps): void {
   // ── repos ────────────────────────────────────────────────────────────────
-  app.get("/api/repos", (c) => c.json({ repos: getRepos() }));
+  // getRepos() is unfiltered by design — it's the owner's dashboard. A share link must instead
+  // see ONLY its own repos, so this is the one read that branches on the principal. (The gate
+  // can't do it: scope enforcement there works by matching a repo id in the path, and this route
+  // has none — the whole list IS the response.)
+  app.get("/api/repos", (c) => {
+    const share = effectiveGuest(c, cfg);
+    if (share) return c.json({ repos: getSharedRepos(share).map(guestRepoView) });
+    return c.json({ repos: getRepos() });
+  });
 
   // "Point to Folder" (register existing) + "Create New" (git init).
   app.post("/api/repos/register", repoFromPath(registerRepo));

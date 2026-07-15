@@ -270,7 +270,7 @@ function onAccount(a: { host: string; login: string } | null): void {
     <!-- identity avatar → dropdown picker (stops row toggle; no Tooltip wrapper —
          stacking two as-child triggers on one element breaks reka's popper anchor, so the
          hover hint is a native :title, gated on the "show tooltips" setting) -->
-    <DropdownMenu>
+    <DropdownMenu v-if="!store.isGuest">
       <DropdownMenuTrigger
         :title="tooltipsEnabled ? ([
           repo.syncAccountLogin ? `Syncs as ${repo.syncAccountLogin}` : null,

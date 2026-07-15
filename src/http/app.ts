@@ -70,6 +70,7 @@ import * as openapi from "./routes/openapi.ts";
 import * as mcp from "./routes/mcp.ts";
 import * as sync from "./routes/sync.ts";
 import * as approvals from "./routes/approvals.ts";
+import * as shares from "./routes/shares.ts";
 
 export interface AppHooks {
   requestShutdown?: () => void;
@@ -151,6 +152,9 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   mcp.register(app, deps);
   sync.register(app, deps);
   approvals.register(app, deps);
+  // Share links: /api/shares/* (owner-gated like everything under /api/*) plus the public
+  // GET /s/:token redemption. Registered before mountWeb so /s/... isn't eaten by the SPA fallback.
+  shares.register(app, deps);
 
   // Static PWA — LAST, so the /* catch-all only catches non-API routes.
   mountWeb(app);

@@ -7,7 +7,7 @@ import {
   type OpenResult,
   type PortableWindowResult,
 } from "../api";
-import type { ActionResult, PendingApproval } from "../types";
+import type { ActionResult, PendingApproval, ShareViewer } from "../types";
 import { useSettingsCloudSync } from "./settings-cloud-sync.ts";
 import { useSettingsNotifications } from "./settings-notifications.ts";
 
@@ -116,6 +116,16 @@ export function useSettings(deps: {
   const authenticated = ref(true);
   const owner = ref<string | null>(null);
   const ownerPicture = ref<string | null>(null);
+  /**
+   * Set when this browser is viewing someone else's RepoYeti through a share link, rather than
+   * being the owner. Null for the owner. Drives the guest banner and `canControl` below.
+   *
+   * This is a UX signal ONLY. Every restriction it implies is independently enforced by the
+   * daemon (src/share/policy.ts), which 403s a guest that calls a route their tier doesn't cover
+   * no matter what the UI renders. Hiding controls is about not offering someone a button that
+   * will only fail — it is not the security boundary, and must never be mistaken for one.
+   */
+  const shareViewer = ref<ShareViewer | null>(null);
   // Access mode + local/remote auth state (see /api/auth/status).
   const ownerClaimed = ref(false);
   const canContinueLocal = ref(true);
@@ -132,6 +142,7 @@ export function useSettings(deps: {
       ownerClaimed.value = s.ownerClaimed;
       canContinueLocal.value = s.canContinueLocal;
       localBypass.value = s.localBypass;
+      shareViewer.value = s.share ?? null;
     } catch {
       // status endpoint unreachable — treat as open so we still try to load
       authEnforced.value = false;
@@ -584,6 +595,7 @@ export function useSettings(deps: {
     ownerClaimed,
     canContinueLocal,
     localBypass,
+    shareViewer,
     loadAuth,
     continueLocal,
     setMode,
