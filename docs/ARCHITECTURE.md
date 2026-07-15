@@ -1199,6 +1199,12 @@ owner login is still the only way to become the **owner**. A share link is a dif
    event allowlist (`src/share/events.ts`) — the raw bus carries `settings_changed`, `daemon_status`,
    `scan_*` and `approval_pending`, none of which is a guest's business. Credentials embedded in a
    remote URL (`https://user:ghp_x@…`) are stripped from everything a guest sees.
+
+   > Measured, not assumed. Owner and guest streams captured over one 12-second window while a scan
+   > ran: the **owner** received 48 `repo_added` (each carrying a repo's absolute path), 51
+   > `repo_state_changed`, `settings_changed`, `scan_started`, `scan_progress`. The **guest**, scoped
+   > to one repo, received 2 `repo_state_changed` — its own — and nothing else. That's the shape of
+   > the leak this filter exists to prevent.
 5. **The audit trail exists because git can't answer.** A guest's commits are authored as the **owner**
    (their machine, their tree, their identity — the owner chose this), so git history genuinely cannot
    distinguish "my brother pushed this" from "I did". `share_events` can, and is written for every
@@ -1230,10 +1236,11 @@ plain commit is additive and recoverable, an amend is neither.
 - Rotating the signing key ("sign out everywhere") also invalidates every guest cookie — but not the
   links themselves, which are rows; the next `/s/<token>` open issues a fresh cookie. Revoke to kill
   a link.
-- **`share_events` is unbounded.** Every guest refusal writes a row, so anyone holding a live link
-  can grow the table by hammering a forbidden route. It's local SQLite and the link-holder is by
-  definition someone the owner chose, so this is noted rather than solved; if it ever matters, cap
-  or age out denied rows (the *allowed* rows are the ones with lasting value).
+- **`share_events` is capped at 500 rows per share**, pruned on write, because the table is written
+  by the guest's own requests — without a bound the link-holder decides how big it gets. Pruned by
+  `rowid`, deliberately: `at` is millisecond-resolution, so a hammering client's rows share one
+  timestamp and an `at`-based prune would delete nothing in exactly the case the cap exists for.
+  The cap is per-share, so a noisy link can't evict a quiet one's history.
 - The daemon's own PWA must not fetch owner-only endpoints as a guest. Not a security rule — an
   audit-legibility one: each such fetch writes a "denied" row and buries the real entries. See the
   `isGuest` branches in the web store's `loadAll` and `AppShell.onMounted`.
