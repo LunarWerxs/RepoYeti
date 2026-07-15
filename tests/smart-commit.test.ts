@@ -265,7 +265,7 @@ test("hunks sharing one coarse label report how many edits they cover, and where
   const hunk = (line: number, n: number) =>
     `@@ -${line},${n} +${line},${n} @@ export class Widget {\n${Array.from({ length: n }, (_, i) => `+    this.v${i} = ${line};`).join("\n")}\n`;
   // two INDEPENDENT edits, both inside the same class → identical labels
-  const chunk = "diff --git a/src/widget.ts b/src/widget.ts\n" + hunk(3, 40) + hunk(80, 40);
+  const chunk = `diff --git a/src/widget.ts b/src/widget.ts\n${hunk(3, 40)}${hunk(80, 40)}`;
   const { diff, condensed } = foldLargeFileDiffs(chunk, 900);
 
   expect(condensed).toBe(1);
