@@ -31,7 +31,7 @@ export function useAi(
     providers: {},
     defaultProvider: null,
     style: "conventional",
-    diffDetail: "balanced",
+    diffDetail: "lean", // mirrors DEFAULT_DIFF_DETAIL (src/config.ts)
     yolo: false,
     commitEnabled: true,
   });

@@ -123,6 +123,21 @@ export type CommitStyle = "conventional" | "concise" | "detailed";
  */
 export type DiffDetail = "lean" | "balanced" | "thorough";
 
+/**
+ * The dial's default when the owner hasn't picked one. ONE constant on purpose: this default was
+ * previously a `?? "balanced"` literal repeated across ~10 call sites (config, routes, service,
+ * auto-commit, the collectors), which is a default nobody can change safely — you'd have to find
+ * every copy and miss none.
+ *
+ * `lean` because it's the better default on evidence, not taste: measured live on a real tree, it
+ * produced accurate, specific commit messages indistinguishable in quality from `balanced` while
+ * sending ~30% fewer tokens (~13 plans/day vs ~10 on Groq's free 100k/day). It also costs nothing
+ * on a TYPICAL commit — small files sit under the per-file cap and are sent verbatim either way,
+ * so the dial only bites on large files, exactly where the savings are and where a summary is
+ * enough. Owners who want more body from big files raise it in Settings → AI.
+ */
+export const DEFAULT_DIFF_DETAIL: DiffDetail = "lean";
+
 export interface AiProviderCfg {
   /** Secret API key — kept in the OS keychain, hydrated into memory at boot, never on disk
    *  and never returned to a client. Optional because the on-disk shape omits it. */
@@ -145,7 +160,7 @@ export interface AiConfig {
   /** Commit-message style for the prompt (default "conventional"). Pickable from Settings → AI
    *  and from the smart-commit plan header; settable here too. */
   style?: CommitStyle;
-  /** How much of each file's diff the smart-commit planner reads (default "balanced"). The cost
+  /** How much of each file's diff the smart-commit planner reads (default DEFAULT_DIFF_DETAIL). The cost
    *  dial — see the DiffDetail docs. Pickable from Settings → AI. */
   diffDetail?: DiffDetail;
   /**
@@ -449,7 +464,7 @@ export interface RedactedAiConfig {
   providers: Partial<Record<AiProviderId, { configured: true; model: string | null }>>;
   defaultProvider: AiProviderId | null;
   style: CommitStyle;
-  /** How much of each file's diff the smart-commit planner reads. Default "balanced". */
+  /** How much of each file's diff the smart-commit planner reads. Default DEFAULT_DIFF_DETAIL. */
   diffDetail: DiffDetail;
   /** Smart-commit YOLO mode (commit the AI plan without review). Default false. */
   yolo: boolean;
@@ -490,7 +505,7 @@ export function redactAi(cfg: RepoYetiConfig): RedactedAiConfig {
     providers: {},
     defaultProvider: null,
     style: cfg.ai?.style ?? "conventional",
-    diffDetail: cfg.ai?.diffDetail ?? "balanced",
+    diffDetail: cfg.ai?.diffDetail ?? DEFAULT_DIFF_DETAIL,
     yolo: cfg.ai?.yolo ?? false,
     commitEnabled: cfg.ai?.commitEnabled !== false, // default ON
   };

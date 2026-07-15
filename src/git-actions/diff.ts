@@ -9,7 +9,7 @@ import { safeGitEnv } from "../git.ts";
 import { readChanges } from "../read/status.ts";
 import { normalizeRelPath } from "../paths.ts";
 import type { CommitPlanInput, PlanInputFile } from "../ai.ts";
-import type { DiffDetail } from "../config.ts";
+import { DEFAULT_DIFF_DETAIL, type DiffDetail } from "../config.ts";
 import { PATCH_CAP } from "../contract.ts";
 
 const STATUS_CAP = 4_000;
@@ -112,7 +112,7 @@ async function statusPlusFoldedDiff(
   return combined;
 }
 
-export async function collectCommitDiff(absPath: string, detail: DiffDetail = "balanced"): Promise<string> {
+export async function collectCommitDiff(absPath: string, detail: DiffDetail = DEFAULT_DIFF_DETAIL): Promise<string> {
   const status = (await boundedGit(absPath, ["status", "--porcelain=v1"], STATUS_CAP)).trim();
   return statusPlusFoldedDiff(absPath, null, status, detail);
 }
@@ -125,7 +125,7 @@ export async function collectCommitDiff(absPath: string, detail: DiffDetail = "b
 export async function collectPathsDiff(
   absPath: string,
   paths: string[],
-  detail: DiffDetail = "balanced",
+  detail: DiffDetail = DEFAULT_DIFF_DETAIL,
 ): Promise<string> {
   if (paths.length === 0) return "";
   const chunks = chunkByBytes(paths);
@@ -334,7 +334,7 @@ export function foldLargeFileDiffs(diff: string, perFileCap: number): { diff: st
 export async function collectCommitPlanInput(
   absPath: string,
   onlyPaths?: string[],
-  detail: DiffDetail = "balanced",
+  detail: DiffDetail = DEFAULT_DIFF_DETAIL,
 ): Promise<CommitPlanInput> {
   const all = await readChanges(absPath, true); // withStats → per-file add/remove counts
   const scope = onlyPaths?.length ? new Set(onlyPaths) : null;

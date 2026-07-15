@@ -106,7 +106,7 @@ describe("AI settings writers", () => {
     providers: {},
     defaultProvider: null,
     style: "conventional",
-    diffDetail: "balanced",
+    diffDetail: "lean",
     yolo: false,
     commitEnabled: true,
     ...over,
@@ -129,10 +129,10 @@ describe("AI settings writers", () => {
   it("setDiffDetail rolls back when the daemon rejects it", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ code: "ERROR", message: "nope" }, false, 500)));
     const store = useStore();
-    expect(store.aiSettings.diffDetail).toBe("balanced"); // default
+    expect(store.aiSettings.diffDetail).toBe("lean"); // DEFAULT_DIFF_DETAIL
 
     await expect(store.setDiffDetail("thorough")).rejects.toThrow();
-    expect(store.aiSettings.diffDetail).toBe("balanced"); // never left lying about the daemon
+    expect(store.aiSettings.diffDetail).toBe("lean"); // never left lying about the daemon
   });
 
   it("setStyle sends the style and rolls back on failure", async () => {

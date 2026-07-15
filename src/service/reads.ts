@@ -12,7 +12,7 @@ import { backendFor } from "../vcs/index.ts";
 import type { VcsBackend } from "../vcs/types.ts";
 import { collectCommitPlanInput } from "../git-actions.ts";
 import type { CommitPlanInput, PlanInputFile } from "../ai.ts";
-import type { DiffDetail } from "../config.ts";
+import { DEFAULT_DIFF_DETAIL, type DiffDetail } from "../config.ts";
 import { readTags, type BranchList, type LogResult, type StashList, type TagList, type CommitDetail, type MergeFilter, type RefScope } from "../read/inspect.ts";
 import { guardRepo } from "./guards.ts";
 
@@ -154,7 +154,7 @@ export interface DiffResult {
  * (so it can't race a fetch/pull/push/commit). Refuses a clean tree — there is nothing
  * to write a message about. Read-only; never mutates the index.
  */
-export async function collectRepoDiff(repoId: string, detail: DiffDetail = "balanced"): Promise<DiffResult> {
+export async function collectRepoDiff(repoId: string, detail: DiffDetail = DEFAULT_DIFF_DETAIL): Promise<DiffResult> {
   const g = guardRepo<"ERROR">(repoId, "ERROR");
   if (g.fail) return g.fail;
   const repo = g.repo;
@@ -179,7 +179,7 @@ export async function collectRepoDiff(repoId: string, detail: DiffDetail = "bala
 export async function collectRepoPathsDiff(
   repoId: string,
   paths: string[],
-  detail: DiffDetail = "balanced",
+  detail: DiffDetail = DEFAULT_DIFF_DETAIL,
 ): Promise<DiffResult> {
   const g = guardRepo<"ERROR">(repoId, "ERROR");
   if (g.fail) return g.fail;
@@ -215,7 +215,7 @@ export interface PlanInputResult {
 export async function planCommitInput(
   repoId: string,
   onlyPaths?: string[],
-  detail: DiffDetail = "balanced",
+  detail: DiffDetail = DEFAULT_DIFF_DETAIL,
 ): Promise<PlanInputResult> {
   const g = guardRepo<"ERROR">(repoId, "ERROR");
   if (g.fail) return g.fail;
@@ -240,7 +240,7 @@ async function planInputFor(
   backend: VcsBackend,
   absPath: string,
   onlyPaths?: string[],
-  detail: DiffDetail = "balanced",
+  detail: DiffDetail = DEFAULT_DIFF_DETAIL,
 ): Promise<CommitPlanInput> {
   if (backend.kind === "git") return collectCommitPlanInput(absPath, onlyPaths, detail);
   const changedAll = await backend.readChanges(absPath, true);

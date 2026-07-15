@@ -23,6 +23,7 @@ import {
   DIFF_DETAIL_CAPS,
 } from "../src/git-actions.ts";
 import { planMaxTokens } from "../src/ai/adapters.ts";
+import { DEFAULT_DIFF_DETAIL } from "../src/config.ts";
 import { smartCommitRepo, planCommitInput, collectRepoPathsDiff } from "../src/service/index.ts";
 import { createApp } from "../src/http/app.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
@@ -269,6 +270,18 @@ test("foldLargeFileDiffs is a no-op below the cap", () => {
   const d = "diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
   expect(foldLargeFileDiffs(d, 2000)).toEqual({ diff: d, folded: 0 });
   expect(foldLargeFileDiffs("", 2000).folded).toBe(0);
+});
+
+// The web can't import from src/config.ts (separate builds), so web/src/store/ai.ts hand-mirrors
+// the default. A mirror nobody checks is a mirror that drifts — and drift here means the UI shows
+// one dial value while the daemon uses another, which stays invisible until a bill looks wrong.
+// Assert the two literals agree.
+test("DEFAULT_DIFF_DETAIL is valid and the web store mirrors it", async () => {
+  expect(DIFF_DETAIL_CAPS[DEFAULT_DIFF_DETAIL]).toBeDefined();
+
+  const webStore = await Bun.file(new URL("../web/src/store/ai.ts", import.meta.url)).text();
+  const mirrored = /diffDetail:\s*"(lean|balanced|thorough)"/.exec(webStore)?.[1];
+  expect(mirrored).toBe(DEFAULT_DIFF_DETAIL);
 });
 
 test("the diff-detail dial is monotonic on BOTH bounds: lean < balanced < thorough", () => {

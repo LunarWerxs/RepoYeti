@@ -9,6 +9,7 @@ import {
   resolveApiKey,
   resolveModel,
   effectiveDefaultProvider,
+  DEFAULT_DIFF_DETAIL,
   type RepoYetiConfig,
   type AiProviderId,
 } from "../../config.ts";
@@ -183,7 +184,7 @@ export function register(app: Hono, { cfg }: Deps): void {
 
     // With `paths`, draft from only those files (smart-commit per-group regenerate); else the
     // whole working tree (the normal "Generate" button). Both honor the owner's diff-detail dial.
-    const msgDetail = cfg.ai?.diffDetail ?? "balanced";
+    const msgDetail = cfg.ai?.diffDetail ?? DEFAULT_DIFF_DETAIL;
     const collected =
       p.data.paths?.length
         ? await collectRepoPathsDiff(id, p.data.paths, msgDetail)
@@ -228,7 +229,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const collected = await planCommitInput(
       id,
       p.data.paths?.length ? p.data.paths : undefined,
-      cfg.ai?.diffDetail ?? "balanced",
+      cfg.ai?.diffDetail ?? DEFAULT_DIFF_DETAIL,
     );
     if (!collected.ok) {
       const status: ContentfulStatusCode =

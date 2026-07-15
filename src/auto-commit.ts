@@ -30,6 +30,7 @@ import {
   effectiveDefaultProvider,
   resolveApiKey,
   resolveModel,
+  DEFAULT_DIFF_DETAIL,
   type RepoYetiConfig,
 } from "./config.ts";
 import { generateCommitPlan, heuristicPlan, type CommitPlan, type CommitPlanGroup } from "./ai.ts";
@@ -183,7 +184,7 @@ type BuiltPlan =
 async function buildPlan(repoId: string): Promise<BuiltPlan> {
   // Honor the owner's diff-detail dial here too — auto-commit runs unattended on a timer, so it's
   // the LAST place that should quietly spend more tokens per commit than they asked for.
-  const collected = await planCommitInput(repoId, undefined, cfgRef?.ai?.diffDetail ?? "balanced");
+  const collected = await planCommitInput(repoId, undefined, cfgRef?.ai?.diffDetail ?? DEFAULT_DIFF_DETAIL);
   if (!collected.ok || !collected.input) return { ok: false, reason: collected.code ?? "ERROR" };
   const input = collected.input;
   const cfg = cfgRef;
