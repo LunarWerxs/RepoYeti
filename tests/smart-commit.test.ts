@@ -193,7 +193,7 @@ test("plan prompts mention the file-level rule and list every path", () => {
 // 40k planner diff (106 other files shared 3%), and every plan reserved 4096 output tokens to
 // produce ~900 — on a 100k/day budget that is ~7 commits/day.
 
-test("foldLargeFileDiffs caps any one file and leaves small ones untouched", () => {
+test("foldLargeFileDiffs condenses a big file and leaves small ones untouched", () => {
   const small = "diff --git a/small.ts b/small.ts\n@@ -1 +1 @@\n-a\n+b\n";
   const huge = `diff --git a/data/blob.json b/data/blob.json\n@@ -1 +1 @@\n${"+x".repeat(5000)}\n`;
   const { diff, folded } = foldLargeFileDiffs(small + huge, 2000);
@@ -202,11 +202,33 @@ test("foldLargeFileDiffs caps any one file and leaves small ones untouched", () 
   expect(diff).toContain("small.ts"); // the small file survives verbatim
   expect(diff).toContain("-a\n+b"); //   ...body intact
   expect(diff).toContain("data/blob.json"); // the big file is still PRESENT (name/header kept)
-  expect(diff).toContain("diff lines folded"); // ...but its body is folded, in-band
-  expect(diff.length).toBeLessThan(small.length + huge.length); // and the payload actually shrank
+  expect(diff).toContain("# condensed:"); // ...but its body became a map
+  // Structureless data degrades to an honest line-range row rather than a wall of "+x".
+  expect(diff).not.toContain("+x+x+x");
+  // The map must be DRASTICALLY smaller than even the truncated head it replaced.
+  expect(diff.length).toBeLessThan(small.length + 400);
 });
 
-test("foldLargeFileDiffs never cuts a diff line in half", () => {
+// The whole point over truncation: a big file reports EVERY symbol it touched, not an
+// arbitrary first-2%. git puts the enclosing declaration in each hunk header for free.
+test("condensed output names every changed symbol with its own counts", () => {
+  const mk = (sym: string, n: number) =>
+    `@@ -1,${n} +1,${n} @@ ${sym}\n${Array.from({ length: n }, (_, i) => `+  line ${i}`).join("\n")}\n`;
+  const chunk =
+    "diff --git a/src/a.ts b/src/a.ts\n" +
+    mk("export function alpha() {", 60) +
+    mk("export function omega() {", 60); // ...far past any head-cut, so truncation would hide it
+  const { diff, folded } = foldLargeFileDiffs(chunk, 900);
+
+  expect(folded).toBe(1);
+  expect(diff).toContain("export function alpha()");
+  expect(diff).toContain("export function omega()"); // <- truncation would have dropped this entirely
+  expect(diff).toContain("+60/-0"); // per-symbol tallies, not a single lump
+  expect(diff.length).toBeLessThan(chunk.length);
+});
+
+test("foldLargeFileDiffs never cuts a diff line in half when it falls back to a head cut", () => {
+  // No hunk headers at all → nothing to condense → the head-cut path still applies.
   const chunk = `diff --git a/a.ts b/a.ts\n${Array.from({ length: 400 }, (_, i) => `+line ${i}`).join("\n")}\n`;
   const { diff } = foldLargeFileDiffs(chunk, 500);
   const body = diff.split("\n").filter((l) => l.startsWith("+line "));

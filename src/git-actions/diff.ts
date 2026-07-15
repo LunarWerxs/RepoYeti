@@ -194,18 +194,73 @@ export function isNoisyPath(path: string): boolean {
 }
 
 /**
- * SIZE-based diff folding — the other half of the idea isNoisyPath() implements by NAME.
+ * CONDENSE one over-sized file chunk into a symbol-level change map.
  *
- * Name folding only catches files we thought to list (lockfiles, *.min.js). It cannot catch the
- * general case: a generated `data/car-embeddings.json` is an ordinary .json by name, and it was
- * measured eating 97% of a real 40k planner diff. Folding by SIZE needs no such list — any file
- * that runs long is cut to its head plus a count of what was dropped.
+ * This replaces truncation, and the difference matters: cutting a 5,000-line file to its first
+ * 50 lines shows the model an ARBITRARY 2% of the change and silently hides the rest. The map
+ * shows 100% of WHAT changed — every symbol touched, with its own +/- counts — for a fraction of
+ * the tokens the truncated head cost.
  *
- * Keeping the HEAD is deliberate: at -U0 the first hunks are what characterize a change, and the
- * always-complete file list still carries each file's true +/- stat, so grouping loses nothing.
- * The marker is left in-band so the model knows it is reading a sample, not the whole file.
+ * It's free, because git already computed it. Every hunk header carries the enclosing
+ * declaration:
  *
- * Pure + unit-testable. Returns the folded diff and how many files were folded.
+ *     @@ -80,4 @@ export function systemPromptFor(style: CommitStyle): string {
+ *
+ * That works for .ts/.vue with no diff driver configured — git's default heuristic takes the last
+ * line at column 0 that looks like a declaration, and JS/TS declarations live at column 0. Where
+ * it yields nothing useful (minified blobs, data files with no structure) the rows degrade to a
+ * line-range, which is still honest and still tiny.
+ *
+ * Pure + unit-testable.
+ */
+function condenseFileChunk(chunk: string): string {
+  const lines = chunk.split("\n");
+  const fileHeader = lines[0] ?? "";
+  // Everything before the first hunk is the git preamble (index/---/+++ or a binary notice).
+  const firstHunk = chunk.search(/^@@ /m);
+  if (firstHunk === -1) return chunk; // no hunks (binary/rename-only) — already tiny, leave it
+
+  const hunks = chunk.slice(firstHunk).split(/(?=^@@ )/m);
+  // symbol → tally. Consecutive hunks inside one function collapse into a single row.
+  const rows = new Map<string, { add: number; del: number; hunks: number }>();
+  for (const h of hunks) {
+    const head = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/m.exec(h);
+    if (!head) continue;
+    const sym = (head[2] ?? "").trim() || `@ line ${head[1]}`;
+    const row = rows.get(sym) ?? { add: 0, del: 0, hunks: 0 };
+    row.hunks++;
+    for (const l of h.split("\n").slice(1)) {
+      if (l.startsWith("+")) row.add++;
+      else if (l.startsWith("-")) row.del++;
+    }
+    rows.set(sym, row);
+  }
+  if (rows.size === 0) return chunk;
+
+  const body = [...rows.entries()]
+    .map(([sym, r]) => `  ${sym.length > 90 ? `${sym.slice(0, 90)}…` : sym}  +${r.add}/-${r.del}`)
+    .join("\n");
+  return (
+    `${fileHeader}\n` +
+    `# condensed: large file — every changed symbol is listed with its own +/- counts ` +
+    `(line bodies omitted)\n${body}\n`
+  );
+}
+
+/**
+ * Shrink the diff so a big file costs a summary instead of the whole budget.
+ *
+ * Two halves, and isNoisyPath() is only the first: it folds by NAME (lockfiles, *.min.js), which
+ * can only catch files someone thought to list. A generated `data/car-embeddings.json` is an
+ * ordinary .json by name — measured at 97% of a real 40k planner diff, with 106 other files
+ * sharing the remaining 3%.
+ *
+ * Under the per-file cap a chunk is sent VERBATIM: small diffs are both cheap and precise, so
+ * there is nothing to gain by touching them. Over it, the chunk is CONDENSED to its symbol map
+ * (see condenseFileChunk) rather than truncated — same reason you'd read a table of contents
+ * instead of the first 3 pages.
+ *
+ * Pure + unit-testable. `folded` counts the files that got condensed.
  */
 export function foldLargeFileDiffs(diff: string, perFileCap: number): { diff: string; folded: number } {
   if (!diff) return { diff, folded: 0 };
@@ -215,6 +270,10 @@ export function foldLargeFileDiffs(diff: string, perFileCap: number): { diff: st
   const out = chunks.map((chunk) => {
     if (chunk.length <= perFileCap) return chunk;
     folded++;
+    const condensed = condenseFileChunk(chunk);
+    // Never let the "summary" cost more than the truncation it replaced — a pathological file
+    // (thousands of one-line hunks) can out-grow its own body. Fall through to the head cut.
+    if (condensed.length <= perFileCap) return condensed;
     // Cut on a line boundary — half a diff line is worse than no line.
     const head = chunk.slice(0, perFileCap);
     const nl = head.lastIndexOf("\n");

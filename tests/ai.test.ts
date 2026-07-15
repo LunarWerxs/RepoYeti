@@ -204,36 +204,59 @@ test("collectCommitDiff captures status + diff and never mutates the index", asy
   expect(staged).toBe("");
 });
 
-test("collectCommitDiff FOLDS one huge file rather than spending the whole payload on it", async () => {
+test("collectCommitDiff CONDENSES one huge file rather than spending the whole payload on it", async () => {
   const dir = await seededRepo();
   writeFileSync(join(dir, "base.txt"), "x\n".repeat(40_000)); // ~80 KB modification
   const out = await collectCommitDiff(dir);
   expect(out.length).toBeLessThan(25_000); // bounded, as it always was...
-  // ...but now bounded by FOLDING rather than by lopping the tail off the payload. This used to
-  // ship ~24k of one file's diff and end in "…[truncated]"; a runaway file now costs only its
-  // per-file slice, which is the whole point (that file was 97% of a real repo's diff).
-  expect(out.length).toBeLessThan(8_000);
-  expect(out).toContain("diff lines folded"); // and it says what it dropped, in-band
+  // ...but now bounded by CONDENSING, not by lopping the tail off the payload. This used to ship
+  // ~24k of one file's diff ending in "…[truncated]". A 40k-line change is now a couple of
+  // hundred bytes — that class of file was 97% of a real repo's diff.
+  expect(out.length).toBeLessThan(1_000);
+  expect(out).toContain("# condensed:"); // says so in-band, so the model knows it's a summary
   expect(out).toContain("base.txt"); // the file is still named + visible to the model
+  expect(out).toContain("+40000/-1"); // and the REAL magnitude survives, unlike a truncated head
 });
 
-test("collectCommitDiff still truncates when even the FOLDED diff overruns the cap", async () => {
+test("collectCommitDiff still truncates when the summed payload overruns the cap", async () => {
   const dir = await seededRepo();
-  // 40 tracked files, each modified well past its fold slice: every file costs ~2k folded, so the
-  // SUM still overruns DIFF_CAP — the payload-level truncation marker must survive folding.
-  for (let i = 0; i < 40; i++) writeFileSync(join(dir, `f${i}.txt`), "seed\n");
+  // Each file stays just UNDER its per-file slice (~1.7k of ~2k), so nothing condenses — but 20
+  // of them sum past msgTotal. That's the backstop this guards: condensing shrinks INDIVIDUAL
+  // files, it does not bound the total, so the payload cap still has to catch the sum.
+  const body = Array.from({ length: 50 }, (_, j) => `pay-${String(j).padStart(4, "0")}-${"x".repeat(20)}`).join("\n");
+  for (let i = 0; i < 20; i++) writeFileSync(join(dir, `f${i}.txt`), "seed\n");
   await $`git -C ${dir} add -A`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m more`.quiet();
-  for (let i = 0; i < 40; i++) writeFileSync(join(dir, `f${i}.txt`), "y\n".repeat(3_000));
+  for (let i = 0; i < 20; i++) writeFileSync(join(dir, `f${i}.txt`), body);
   const out = await collectCommitDiff(dir);
   expect(out.length).toBeLessThan(25_000);
   expect(out.endsWith("…[truncated]")).toBe(true);
 });
 
+// NOTE the dial's meaning shifted with condensing: perFile is now the THRESHOLD at which a file
+// collapses to its symbol map, not how many of its lines get sent. So for a single always-over-cap
+// file every setting yields the same map (correctly — the map is the whole change either way), and
+// the dial shows up across a MIX of file sizes, which is the real-world shape.
 test("the diff-detail dial changes what the message path sends", async () => {
   const dir = await seededRepo();
-  writeFileSync(join(dir, "base.txt"), "x\n".repeat(40_000));
+  // Fixed-width lines (~30 chars incl. the "+" and newline) so the sizes are arithmetic, not luck.
+  // Resulting diff bodies ≈ 300 / 1500 / 3000 chars, which straddle the caps so that:
+  //   lean(1200)     condenses d1 + d2   → smallest
+  //   balanced(2000) condenses d2 only   → middle
+  //   thorough(4000) condenses nothing   → largest
+  const line = (i: number, j: number) => `d${i}-${String(j).padStart(4, "0")}-${"x".repeat(20)}`;
+  const sizes = [10, 50, 100];
+  for (const [i] of sizes.entries()) writeFileSync(join(dir, `d${i}.txt`), "seed\n");
+  await $`git -C ${dir} add -A`.quiet();
+  await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m sizes`.quiet();
+  sizes.forEach((n, i) => {
+    writeFileSync(join(dir, `d${i}.txt`), Array.from({ length: n }, (_, j) => line(i, j)).join("\n"));
+  });
+
   const lean = await collectCommitDiff(dir, "lean");
+  const balanced = await collectCommitDiff(dir, "balanced");
   const thorough = await collectCommitDiff(dir, "thorough");
-  expect(lean.length).toBeLessThan(thorough.length); // ✨ Generate honors the dial, not just Auto
+  // leaner condenses MORE files → strictly less sent. ✨ Generate honors the dial, not just Auto.
+  expect(lean.length).toBeLessThan(balanced.length);
+  expect(balanced.length).toBeLessThan(thorough.length);
 });
