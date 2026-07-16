@@ -811,7 +811,12 @@ rewritten; we add **structured-JSON support** as an optional adapter capability.
     `response_format: { type: "json_object" }`.
   - Gemini: add `generationConfig.responseMimeType: "application/json"`.
   - Anthropic: no native flag needed — prompt-enforced JSON; we parse defensively.
-  Bump `max_tokens` for this call (JSON is wordier → ~4096) and the request timeout (→ ~40s).
+  Bump the request timeout (→ ~40s). `max_tokens` is **not** a flat bump: `planMaxTokens(fileCount,
+  style)` sizes the reservation to the change-set *and* the commit style, capped at 4096. Providers
+  gate on the reservation (Groq answers "Limit 12000, Requested 12994" before generating a token),
+  so an oversized one is rejected outright and degrades to the heuristic plan — while an undersized
+  one starves the bodies, which is how `- generate plane pwa` shipped. The rate is per-FILE because
+  the worst split rule 2 can produce is one commit per file, and each of those still needs a body.
 - **Parsing.** A dedicated parser: strip an accidental ```` ```json ```` fence, `JSON.parse`,
   then **validate with a zod schema**. Do **not** run `cleanCommitMessage` (it would corrupt
   JSON). On parse/validate failure: one retry with a terser "return ONLY JSON" reminder;
@@ -993,8 +998,13 @@ The button shows a small **YOLO** tag when the mode is on.
 
 The planner's diff is **token-trimmed** so more change-sets fit a provider's rate limit (the free
 Groq tier is 6000 tokens/min) and every call is cheaper — without any external dependency or model:
-- **Zero-context diffs** (`git diff -U0`) — just the changed lines, no surrounding context (grouping
-  doesn't need it; *message* generation still uses full context).
+- **Minimal-context diffs** (`git diff -U1 --diff-algorithm=minimal`) — the changed lines plus one
+  line each side (*message* generation still uses git's full 3-line default). This was `-U0`, on the
+  reasoning that grouping doesn't need context. Grouping doesn't; the message this same call writes
+  does. With zero context a file whose only edit was deleting an unused local arrived as a lone
+  deletion under a header naming the enclosing function, and the model reported the *function* as
+  removed in 4 of 6 measured runs — a fair reading of the only evidence it had. One line of context
+  puts the surviving signature back on screen and that drops to 0 of 6.
 - **Noise folding** (`isNoisyPath`) — the diff *bodies* of lockfiles, `*.min.js/.css`, `*.map`,
   `*.snap`, `*.lock` are dropped; the file **list** still carries them (with stat) so grouping a
   lockfile *with its manifest* still works. The model only needs to *know* they changed, not read
@@ -1008,6 +1018,13 @@ model; the only diff-specific tool, claw-compactor, is Python and can't live in 
 
 ### 13. Future (deferred, additive)
 
+- **Per-file summarize→synthesize pipeline** (gptcommit's architecture: one call per file with its
+  full diff, then a synthesis call). Evaluated 2026-07 and deliberately NOT adopted: it is the one
+  design that structurally cannot produce a terse body, but it costs ~4× gated tokens per plan
+  (roughly 11 Smart Commits/day instead of ~40 against a 100k tokens/day free tier), and the
+  cheaper structural fix — `body` as a JSON array with one element per non-trivial file — measured
+  3.5× longer bodies for ~8% more tokens. Revisit only if bodies still read thin after that, or if
+  the owner moves to a paid tier where the 4× stops mattering.
 - **Hunk-level "deep split"** opt-in (would require an explicit decision to relax the
   invariant + a partial-patch apply path with conflict-safe fallback to whole-file).
 - **Per-commit test gate** (`--compose-test-after-each`-style) before each commit.

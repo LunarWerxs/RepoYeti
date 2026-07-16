@@ -104,7 +104,12 @@ async function statusPlusFoldedDiff(
   detail: DiffDetail,
 ): Promise<string> {
   const caps = DIFF_DETAIL_CAPS[detail];
-  const raw = await boundedDiff(absPath, paths, [], MSG_RAW_CAP);
+  // `--diff-algorithm=minimal` is what aicommits, lazycommit and gptcommit all send and it is free:
+  // git's default Myers can emit a larger, noisier edit script than necessary, and every spurious
+  // line is budget spent on a change nobody made. Default 3-line context is deliberate here (unlike
+  // the planner's -U0): this diff is read to WRITE PROSE, and the neighbouring statement is usually
+  // where a one-line edit's meaning lives.
+  const raw = await boundedDiff(absPath, paths, ["--diff-algorithm=minimal"], MSG_RAW_CAP);
   const folded = foldLargeFileDiffs(raw, caps.perFile).diff;
   let combined =
     `# git status --porcelain\n${status || "(clean)"}\n\n# git diff\n${folded || "(no textual diff — new/untracked files only)"}`;
@@ -164,6 +169,29 @@ export const DIFF_DETAIL_CAPS: Record<DiffDetail, { perFile: number; msgTotal: n
   balanced: { perFile: 2_000, msgTotal: 24_000, planTotal: 40_000 },
   thorough: { perFile: 4_000, msgTotal: 40_000, planTotal: 64_000 },
 };
+
+/**
+ * Context lines around each planner hunk.
+ *
+ * Was `-U0` (zero context), which is the cheapest possible diff and reads as a reasonable choice
+ * for a CLASSIFIER: to decide which files belong together you do not need the surrounding lines.
+ * But the same call also writes each commit's message, and zero context makes a deletion
+ * unreadable. Measured, on a file whose only change was deleting an unused local:
+ *
+ *     @@ -2 +1,0 @@ export function parseTag(raw: string): { … } {
+ *     -  const unused = false;
+ *
+ * The one visible line is a deletion and the most prominent identifier is `parseTag`, from the hunk
+ * header — so the model concluded the FUNCTION was removed, in 4 of 6 runs, and said so. That is
+ * not a hallucination in any useful sense; it is a fair reading of the only evidence given. One
+ * line of context on each side shows the function's body still standing and the claim collapses.
+ *
+ * Not a coincidence, either: of seven surveyed commit-message tools none send -U0, and gptcommit
+ * sends `--function-context` (MORE than git's default). One line is the cheap end of that range —
+ * a couple of lines per hunk against a per-file cap, to stop the tool confidently misreporting a
+ * deletion.
+ */
+const PLAN_CONTEXT = "-U1";
 
 /** Raw diff read from git BEFORE folding. Only what survives folding is sent to the provider, so
  *  this is just local memory — read generously so every file's head is available to fold from,
@@ -239,7 +267,27 @@ function looksLikeDeclaration(sym: string): boolean {
   );
 }
 
-function condenseFileChunk(chunk: string): string {
+/**
+ * The smallest excerpt worth appending to a symbol map. Below this a couple of orphaned diff
+ * lines are noise the model has to explain away, so the map alone is the better answer.
+ */
+const MIN_EXCERPT_CHARS = 240;
+
+/** Smallest useful slice of ONE hunk: its `@@` header plus roughly three real lines. Below this a
+ *  hunk excerpt only proves the hunk exists, which the symbol map already said for free. */
+const MIN_HUNK_EXCERPT = 160;
+
+/**
+ * Allowance for the excerpt's caption, reserved before the excerpt is measured — the caption's own
+ * text needs the excerpt's line count, so it cannot be measured first. Deliberately generous
+ * against a ~88-char worst case ("# the first 1234 diff lines, verbatim (56789 more folded — the
+ * rows above cover them):"). Reserving it tight is a real bug and not a small one: overshooting
+ * the cap by a single character makes the fit check below drop the WHOLE excerpt, so the file
+ * silently falls back to a bare map — the exact starvation this excerpt exists to end.
+ */
+const EXCERPT_CAPTION_CHARS = 120;
+
+function condenseFileChunk(chunk: string, perFileCap: number): string {
   const lines = chunk.split("\n");
   const fileHeader = lines[0] ?? "";
   // Everything before the first hunk is the git preamble (index/---/+++ or a binary notice).
@@ -287,12 +335,79 @@ function condenseFileChunk(chunk: string): string {
       return `  ${label}  +${r.add}/-${r.del}${where}`;
     })
     .join("\n");
-  return (
+  // Terse on purpose. This caption is repeated for EVERY folded file, and it competes for the same
+  // per-file budget as the code the model actually needs to read: the three explanatory lines this
+  // used to carry cost ~280 chars a file, which on `balanced`'s 2,000 is a hunk's worth of real
+  // diff traded for prose the rows mostly speak for themselves.
+  const map =
     `${fileHeader}\n` +
-    `# condensed: large file — line bodies omitted. Each row is the ENCLOSING declaration git\n` +
-    `# reports for a change (a class row can cover several of its methods), with that region's\n` +
-    `# +/- counts, how many separate edits it covers, and the line each starts at.\n${body}\n`
-  );
+    `# condensed: each row is the enclosing declaration of a change, its +/- counts, and where.\n` +
+    `${body}\n`;
+
+  // Spend what the cap already allows on REAL lines, SPREAD ACROSS EVERY HUNK.
+  //
+  // The map answers "which files belong in one commit", which is what this fold was built for. It
+  // cannot answer "what changed", and the same call also writes each commit's BODY — so a fully
+  // condensed file left the message-writer with nothing but symbol names and +/- counts. It
+  // answered exactly as well as that allows: "Modified `AI_ADAPTERS` record to accommodate
+  // changes". The budget to fix it was already authorised and going unspent (a condensed file cost
+  // ~670 chars against `balanced`'s 2,000 cap), so the leftover buys verbatim lines.
+  //
+  // Spread, not head-first. Head-first was the obvious choice and it measurably failed: a file's
+  // hunks are scattered through it, so an excerpt off the top covers the first symbol or two and
+  // leaves every later one named-but-unseen. Live, `AI_ADAPTERS` sat at L214 with its edits fully
+  // outside the excerpt, and the model produced that same "to accommodate changes" line — it could
+  // read the symbol's NAME in the map and none of its code. Giving every hunk a slice makes the map
+  // and the excerpt describe the same set of changes, which is the only way a bullet-per-file body
+  // can be written from this input. Depth is what the per-file cap trades away; coverage is not
+  // negotiable, because an unseen hunk is exactly what invented prose gets written about.
+  const room = perFileCap - map.length - EXCERPT_CAPTION_CHARS;
+  if (room < MIN_EXCERPT_CHARS) return map;
+
+  // Rank by how much each hunk actually changed and spend on the biggest first. An equal split is
+  // the obvious move and it self-destructs: a 20-hunk file divides an ~880-char budget into 44-char
+  // shares, which cannot hold even a `@@` header, so every hunk degrades to a header (or the whole
+  // excerpt overflows and the fit check below throws it away). Ranking concentrates the budget
+  // where the substance is and lets the map cover the rest, which is what the map is for.
+  const weigh = (h: string): number =>
+    h.split("\n").filter((l) => l.startsWith("+") || l.startsWith("-")).length;
+  const ranked = hunks.map((h, at) => ({ h, at })).sort((a, b) => weigh(b.h) - weigh(a.h));
+
+  const taken = new Map<number, string>();
+  let budget = room;
+  let elided = 0;
+  for (const { h, at } of ranked) {
+    const lines = h.split("\n").filter((l, i, a) => l !== "" || i !== a.length - 1);
+    const header = lines[0] ?? ""; // "@@ -a,b +c,d @@ enclosing decl" — cheap, highly informative
+    // A hunk excerpt below its header plus a couple of lines says nothing worth the tokens; leave
+    // that hunk to the map rather than spend the budget proving we saw it.
+    if (budget < header.length + MIN_HUNK_EXCERPT) {
+      elided += Math.max(0, lines.length - 1);
+      continue;
+    }
+    const share = Math.min(budget, Math.max(MIN_HUNK_EXCERPT, Math.floor(room / hunks.length)));
+    let text = `${header}\n`;
+    let n = 1;
+    for (; n < lines.length; n++) {
+      const line = lines[n]!;
+      if (text.length + line.length + 1 > share) break;
+      text += `${line}\n`;
+    }
+    elided += Math.max(0, lines.length - n);
+    taken.set(at, text);
+    budget -= text.length;
+  }
+  if (taken.size === 0) return map;
+  // Emit in FILE order, not budget order: a diff read out of order is a diff misread.
+  const excerpt = [...taken.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t).join("");
+  if (excerpt.length < MIN_EXCERPT_CHARS) return map;
+  const shown = excerpt.split("\n").length - 1;
+  const out =
+    `${map}# ${shown} diff lines, verbatim, from the ${taken.size} largest of ${hunks.length} hunks` +
+    `${elided > 0 ? ` (${elided} more lines folded — the rows above cover them)` : ""}:\n${excerpt}`;
+  // Belt-and-braces: the caption estimate is a constant, so prove the result really fits rather
+  // than trusting it. The map alone is always a valid answer.
+  return out.length <= perFileCap ? out : map;
 }
 
 /**
@@ -304,9 +419,10 @@ function condenseFileChunk(chunk: string): string {
  * sharing the remaining 3%.
  *
  * Under the per-file cap a chunk is sent VERBATIM: small diffs are both cheap and precise, so
- * there is nothing to gain by touching them. Over it, the chunk is CONDENSED to its symbol map
- * (see condenseFileChunk) rather than truncated — same reason you'd read a table of contents
- * instead of the first 3 pages.
+ * there is nothing to gain by touching them. Over it, the chunk becomes its symbol map plus as
+ * much verbatim diff as the cap still allows (see condenseFileChunk) — a table of contents AND
+ * the first pages, because the caller needs the map to GROUP the files and real lines to
+ * DESCRIBE them, and the map alone silently starved every commit body it wrote.
  *
  * Pure + unit-testable. `shrunk` counts files that were shrunk AT ALL (condensed OR truncated);
  * `condensed` counts only the ones that got a real symbol map. They differ whenever a file can't
@@ -326,7 +442,7 @@ export function foldLargeFileDiffs(
   const out = chunks.map((chunk) => {
     if (chunk.length <= perFileCap) return chunk;
     folded++;
-    const condensed = condenseFileChunk(chunk);
+    const condensed = condenseFileChunk(chunk, perFileCap);
     // Never let the "summary" cost more than the truncation it replaced — a pathological file
     // (thousands of one-line hunks) can out-grow its own body. Fall through to the head cut.
     // condenseFileChunk also returns the chunk UNCHANGED when it refuses (no hunks, no rows, or
@@ -375,7 +491,7 @@ export async function collectCommitPlanInput(
   // time is first-come-first-served, so a single huge file would consume the budget and hide
   // every file behind it — folding first gives each file a fair slice of what we actually send.
   const raw = diffPaths.length > 0
-    ? await boundedDiff(absPath, diffPaths, ["-U0", "--no-color", "-M"], PLAN_RAW_CAP)
+    ? await boundedDiff(absPath, diffPaths, [PLAN_CONTEXT, "--no-color", "-M", "--diff-algorithm=minimal"], PLAN_RAW_CAP)
     : "";
   const planCaps = DIFF_DETAIL_CAPS[detail];
   let diff = foldLargeFileDiffs(raw, planCaps.perFile).diff;

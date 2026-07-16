@@ -147,6 +147,10 @@ export interface DiffResult {
   code: "OK" | "NOT_FOUND" | "NOTHING_TO_COMMIT" | "ERROR";
   message?: string;
   diff?: string;
+  /** How many files the diff covers — the message prompt's bullet-floor anchor ("this change
+   *  touches N files, account for each"). Both collectors know it for free: the whole-tree path
+   *  from the status it already read, the scoped path from its own argument. */
+  files?: number;
 }
 
 /**
@@ -167,7 +171,7 @@ export async function collectRepoDiff(repoId: string, detail: DiffDetail = DEFAU
     if (st.error) return { ok: false, code: "ERROR" as const, message: st.error };
     if (st.dirty === 0) return { ok: false, code: "NOTHING_TO_COMMIT" as const, message: "nothing to commit" };
     const diff = await backend.collectAiDiff(repo.absPath, undefined, detail);
-    return { ok: true, code: "OK" as const, diff };
+    return { ok: true, code: "OK" as const, diff, files: st.dirty };
   });
 }
 
@@ -188,7 +192,7 @@ export async function collectRepoPathsDiff(
   const backend = backendFor(repo.vcs);
   return enqueue(repoId, async () => {
     const diff = await backend.collectAiDiff(repo.absPath, paths, detail);
-    return { ok: true, code: "OK" as const, diff };
+    return { ok: true, code: "OK" as const, diff, files: paths.length };
   });
 }
 

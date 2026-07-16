@@ -20,7 +20,7 @@ import {
   API_TOKEN,
 } from "./secrets.ts";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.4.0";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
@@ -116,10 +116,17 @@ export type CommitStyle = "conventional" | "concise" | "detailed";
  * How much of EACH changed file the smart-commit planner reads (see foldLargeFileDiffs in
  * git-actions/diff.ts for the mechanism, and DIFF_DETAIL_CAPS for the chars each maps to).
  *
- * It's a cost dial, not a quality switch: the planner always gets the COMPLETE file list with
- * every file's real +/- stat, so grouping is unaffected — this only decides how much of a large
- * file's body it reads before the rest is folded away. Leaner = fewer tokens per commit, which on
- * a rate-limited free tier is directly more commits per day.
+ * It's a cost dial for GROUPING, which is unaffected by it: the planner always gets the COMPLETE
+ * file list with every file's real +/- stat. Leaner = fewer tokens per commit, which on a
+ * rate-limited free tier is directly more commits per day.
+ *
+ * It is NOT free for the commit MESSAGES the same call writes, and reading it as "not a quality
+ * switch" is what let a real bug ship: an over-cap file used to fold down to a symbol map with no
+ * line bodies at all, so the message-writer saw declaration names and +/- counts and nothing else.
+ * It answered accordingly ("Modified `AI_ADAPTERS` record to accommodate changes") and looked
+ * lazy, when it had simply never been shown the code. condenseFileChunk now spends the cap's
+ * leftover room on verbatim lines, so a folded file still says something true — but the dial still
+ * decides HOW MUCH of a large file anything downstream can describe. Raise it if bodies read thin.
  */
 export type DiffDetail = "lean" | "balanced" | "thorough";
 

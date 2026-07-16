@@ -5,8 +5,8 @@
 // split across commits) — see docs/ARCHITECTURE.md §14 (Smart Commit) for why (the safety invariant). The plan
 // is a SUGGESTION: the daemon validates it, the owner edits it, and a separate call commits.
 import type { AiProviderId, CommitStyle } from "../config.ts";
-import { AI_ADAPTERS, planMaxTokens } from "./adapters.ts";
-import { AiError, requestJson, type AiCode, type FetchFn } from "./commit-message.ts";
+import { AI_ADAPTERS, PLAN_SAMPLING, planMaxTokens } from "./adapters.ts";
+import { AiError, BODY_DOCTRINE, requestJson, wrapCommitBody, type AiCode, type FetchFn } from "./commit-message.ts";
 import { normalizeRelPath } from "../paths.ts";
 
 const PLAN_TIMEOUT_MS = 45_000;
@@ -78,11 +78,40 @@ function coerceType(t: unknown): string {
 }
 
 /**
+ * `body` comes back as an ARRAY of bullets, and is rendered to the "- "-prefixed text git stores.
+ *
+ * The array is not cosmetic — it is the fix. This model honours structural contracts (the 72-char
+ * subject, the no-fences rule, this very JSON shape) and ignores prose exhortation: a checklist, a
+ * worked exemplar and a length rule all failed to move it off one vague line, because "- improved
+ * db logic" is a COMPLETE answer to "write a body" and prose has no countable unit to be short OF.
+ * An array does: it must be opened, and each element is a thing the model has to have something to
+ * say about. Asking for one element per non-trivial file turns "be detailed" into arithmetic.
+ *
+ * A plain string is still accepted. The contract asks for an array, but a model that ignores that
+ * and sends prose is right about the content and wrong about the container, and throwing away a
+ * good body over its shape would be the worst possible trade.
+ */
+function normalizeBody(raw: unknown): string {
+  const bullets = Array.isArray(raw) ? raw : null;
+  if (!bullets) return wrapCommitBody(String(raw ?? "").trim());
+  const lines = bullets
+    .map((b) => String(b ?? "").trim().replace(/^[-*]\s*/, "")) // don't double up "- " if it sent one
+    .filter(Boolean);
+  // Wrapping happens HERE, not in the prompt: asking a model to wrap is asking it to count
+  // characters. Same wrapper as the single-message path, so the two paths' bodies match in git.
+  return wrapCommitBody(lines.map((l) => `- ${l}`).join("\n"));
+}
+
+/**
  * Per-commit MESSAGE rules for the plan, derived from the owner's "Commit message style".
  * This exists because the setting used to be accepted and then ignored here — every plan got
  * the same terse "≤72-char summary, body optional" instruction no matter which style was
- * selected, so switching styles only ever changed the messages by model luck. Mirrors
- * systemPromptFor() in commit-message.ts so a plan card and a per-card regenerate agree.
+ * selected, so switching styles only ever changed the messages by model luck.
+ *
+ * The body doctrine itself is IMPORTED from commit-message.ts rather than re-worded here: the two
+ * builders must agree (the owner can regenerate any plan card through the single-message call, and
+ * getting a different voice back is a bug), and a hand-mirrored copy is exactly the thing that
+ * drifts. Only the JSON-shape rules below are local to this path.
  */
 function planMessageRules(style: CommitStyle): string {
   // `subject` is the BARE summary — the editor renders "type(scope): subject" itself, so a
@@ -92,21 +121,45 @@ function planMessageRules(style: CommitStyle): string {
     "`type:`/`scope:` prefix — the `type` and `scope` fields carry that). Use a conventional " +
     "`type` (feat, fix, refactor, test, docs, chore, style, perf, build, ci) and an optional " +
     "lowercase `scope`.\n";
+  // `body` is an ARRAY, and that is the whole point — see normalizeBody() above for why.
+  //
+  // This path deliberately does NOT take BODY_DOCTRINE.exemplar. Its exemplar is the OUTPUT shape
+  // example at the end of planSystemPrompt(), which renders a populated multi-element body: the
+  // one artifact this model imitates hardest, in the channel where imitation actually happens. A
+  // second, prose-rendered example of a BAD message would compete with it — and rendering the very
+  // shape we are trying to stop is a poor way to stop it. The prohibition survives as the last
+  // clause below, stated rather than demonstrated.
+  const asArray =
+    "Write `body` as a JSON ARRAY of strings, one string per bullet, each a complete sentence " +
+    'naming what it is about. Do NOT write `body` as one prose string. A group holding K files ' +
+    "earns roughly K bullets: account for every file whose change is not a trivial mechanical " +
+    "edit, and merge two files into one bullet only where they share a single mechanism (say so " +
+    "when you do). Never emit a one-element body that only re-states the subject.\n";
   switch (style) {
     case "concise":
       return `${subject}8. Omit \`body\` entirely — the subject alone carries the change.\n`;
     case "detailed":
       return (
-        `${subject}8. Give every non-trivial commit a \`body\`: a few sentences, or "- " bullets, ` +
-        "covering what changed, why, and anything a reviewer should be warned about. Never just " +
-        "restate the subject.\n"
+        `${subject}8. Give every non-trivial commit a \`body\` that answers, for the files in ` +
+        "that group:\n" +
+        BODY_DOCTRINE.checklist +
+        "- REVIEWER NOTE — where the diff itself shows something worth flagging (a TODO left " +
+        "behind, a widened type, a removed check, a bumped dependency), add a bullet for it. " +
+        "Only where the diff shows it.\n" +
+        BODY_DOCTRINE.grounding +
+        BODY_DOCTRINE.length +
+        asArray +
+        "Only a genuinely trivial one- or two-line mechanical change may omit `body`.\n"
       );
     default: // conventional — the Conventional Commits shape most tooling (and VS Code) emits
       return (
-        `${subject}8. Give every non-trivial commit a \`body\` explaining WHAT changed and WHY. ` +
-        'Use "- " bullets when there is more than one notable point, one point per bullet. ' +
-        "Describe intent and effect — not a file-by-file restatement of the diff — and never " +
-        "repeat the subject. Only a genuinely trivial one-file change may omit `body`.\n"
+        `${subject}8. Give every non-trivial commit a \`body\` that answers, for the files in ` +
+        "that group:\n" +
+        BODY_DOCTRINE.checklist +
+        BODY_DOCTRINE.grounding +
+        BODY_DOCTRINE.length +
+        asArray +
+        "Only a genuinely trivial one- or two-line mechanical change may omit `body`.\n"
       );
   }
 }
@@ -131,8 +184,16 @@ export function planSystemPrompt(style: CommitStyle): string {
     "dominant change and mention the secondary change in that commit's `body`.\n" +
     planMessageRules(style) +
     "\n" +
+    // The shape example is the most-copied thing in this prompt, so it SHOWS a populated,
+    // multi-element body naming real symbols. The old one said `"body":"optional longer text"` —
+    // a single short string, labelled optional. That is a demonstration of the exact output we
+    // are trying to stop, sitting in the one place the model imitates hardest.
     "OUTPUT: return ONLY a JSON object (no prose, no markdown fences) of this exact shape:\n" +
-    `{"groups":[{"type":"feat","scope":"auth","subject":"add token refresh","body":"optional longer text","files":["src/auth.ts","tests/auth.test.ts"],"rationale":"short why"}],"leftovers":[]}\n` +
+    `{"groups":[{"type":"fix","scope":"auth","subject":"refresh the token before it expires, not after",` +
+    `"body":["\`refreshToken()\` ran on a 401 response, so every session hit one failed request before recovering. It now runs on a timer keyed to \`expires_in\`.",` +
+    `"The retry path in \`fetchWithAuth()\` is gone: nothing calls it now that the token is refreshed ahead of the failure.",` +
+    `"\`auth.test.ts\` pins the timer against a clock stub rather than a real delay, so the suite does not sleep."],` +
+    `"files":["src/auth.ts","src/fetch.ts","tests/auth.test.ts"],"rationale":"short why"}],"leftovers":[]}\n` +
     "Put a file in `leftovers` ONLY if you truly cannot decide where it belongs. " +
     "Every path from the input MUST appear once across all `groups[].files` and `leftovers`. " +
     "Files with status A or U are NEW and have NO diff shown — place them by their path and name; " +
@@ -213,7 +274,7 @@ export function parseCommitPlan(text: string, knownPaths: string[]): CommitPlan 
     if (!subject || files.length === 0) continue;
     for (const p of files) seen.add(p);
     const scope = String(g.scope ?? "").trim();
-    const body = String(g.body ?? "").trim();
+    const body = normalizeBody(g.body);
     const rationale = String(g.rationale ?? "").trim();
     groups.push({
       type: coerceType(g.type),
@@ -291,10 +352,22 @@ export async function generateCommitPlan(
   const knownPaths = input.files.map((f) => f.path);
   // Reserve only what THIS change-set's reply plausibly needs — the reservation is billed against
   // the provider's budget whether the model uses it or not.
-  const maxTokens = planMaxTokens(input.files.length);
-  const build = adapter.jsonBody
-    ? (m: string, s: string, u: string) => adapter.jsonBody!(m, s, u, maxTokens)
-    : adapter.buildBody;
+  const maxTokens = planMaxTokens(input.files.length, style);
+  // A provider without a JSON-mode flag (Anthropic) uses its plain body — the strict-JSON
+  // instruction in the prompt carries it. Either way the reservation is ours to size, not the
+  // provider default's.
+  // No few-shot turns here, deliberately: the plan's precedent is the populated JSON shape
+  // example inside `system`, and this input is the token-tight one.
+  const build = (m: string, s: string, u: string): unknown =>
+    (adapter.jsonBody ?? adapter.buildBody)(
+      m,
+      [
+        { role: "system", content: s },
+        { role: "user", content: u },
+      ],
+      maxTokens,
+      PLAN_SAMPLING,
+    );
 
   const ask = async (user: string): Promise<CommitPlan | null> => {
     const json = await requestJson(

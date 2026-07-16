@@ -201,6 +201,8 @@ export function register(app: Hono, { cfg }: Deps): void {
         model,
         collected.diff!,
         cfg.ai?.style ?? "conventional",
+        undefined,
+        collected.files ?? 0, // anchors the body's bullet floor to the real file count
       );
       return c.json({ ok: true, message, provider, model });
     } catch (e) {

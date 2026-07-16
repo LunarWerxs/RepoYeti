@@ -6,6 +6,68 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Rename and Remove, on every repo card** (overflow menu). Two things the dashboard simply had no
+  button for.
+  - **Rename** sets a display label. Your folder keeps its own name — nothing on disk is moved or
+    renamed — and the label survives a rescan. Clear it to fall back to the folder name.
+  - **Remove from RepoYeti** takes a repo out of the list *only*: the folder, the files and the git
+    history are never touched. It also stops future scans re-adding it (a removal that a rescan
+    silently undid would be no removal at all), and both actions offer Undo. Restore anything you
+    removed from Settings.
+
+### Changed
+
+- Commit identities now stay out of the way until you use them. If you commit as one person — which
+  is nearly everyone — the identity picker, the identity manager and the Identity Firewall are
+  hidden, and the Settings tab reads "Accounts". They come back on their own the moment you save a
+  second identity, pin a Firewall rule, or assign one to a repo; "Using more than one git identity?
+  → Set up" turns them on by hand. GitHub accounts are unaffected and always shown: an account is
+  who you authenticate as, an identity is the name on the commit, and only the second one was
+  asking a question most people never need to answer.
+- Smart Commit asks the model for each commit's body as a *list* of points rather than as one
+  block of prose, and asks for roughly one point per file the commit touches. Prose has no unit to
+  be short of, so "- improved db logic" was a complete answer and the model stopped there; a list
+  of one point per file is not something a single vague line can satisfy.
+- Commit-message style now sizes the AI's token reservation: `concise` reserves far less (it emits
+  no body), `detailed` reserves more. Reduces rejections on rate-limited free tiers, where a
+  provider gates on the reservation rather than what the reply actually uses.
+- The AI's decoding is now set explicitly instead of inheriting each provider's default. Smart
+  Commit decodes greedily, because it must return valid JSON and an unparseable reply costs a retry
+  and then a worse, non-AI split.
+- The message prompt's worked example now rides as a real example exchange (an example diff and its
+  finished message, as prior turns) instead of text inside the instructions. Rendered in the
+  instructions, its content leaked: one live run attributed the example's null-timestamp fix to a
+  function in the actual diff. As a completed exchange it teaches the shape and stays attributed to
+  its own change — zero leaks in six runs after the move.
+- The message prompt tells the model how many files the change touches and asks for roughly one
+  bullet each; a count derived from the tree can't be argued down or padded past.
+- Commit bodies wrap at 72 columns in code, with continuation indent under each bullet. The prompt
+  used to ask the model to wrap, which is asking it to count characters; no tool that cares does it
+  that way.
+
+### Fixed
+
+- Smart Commit no longer reports a deleted line as a deleted function. It read each change with no
+  surrounding lines, so a file whose only edit was dropping an unused local arrived as a lone
+  deletion under a header naming the enclosing function — and the message said the function had
+  been removed, in 4 of 6 measured runs. It now reads one line of context on each side, which shows
+  the function still standing: 0 of 6 in the same test.
+- AI commit messages write a real body instead of restating the subject. A body like
+  `- generate plane pwa` under the subject `chore: generate plane pwa` had several causes and none
+  of them was the model being lazy. The largest: a big file's diff was folded down to a list of
+  symbol names with no code under it, so the message was written by something that had never seen
+  the change — "Modified `AI_ADAPTERS` record to accommodate changes" was the best answer that
+  input allowed. A folded file now carries real diff lines alongside its symbol map, sampled from
+  the hunks that changed the most rather than whatever sat at the top of the file, and within the
+  same per-file budget as before. The prompt also asked for "WHAT changed and WHY", which is
+  satisfied by re-tensing the subject, and the reply's token reservation was sized for one-line
+  bodies. Messages now name the function, file or flag that changed and how, grounded strictly in
+  the diff, since the model has no repo history and inventing one reads worse than being brief.
+- A trivial change still gets a short message: length follows how much the change has to explain,
+  not how many lines it touched.
+
 ## [0.4.0] - 2026-07-13
 
 ### Added

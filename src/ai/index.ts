@@ -29,7 +29,10 @@ export type { AiCode, FetchFn } from "./commit-message.ts";
 export {
   AiError,
   systemPromptFor,
+  userPromptFor,
+  fewShotTurns,
   cleanCommitMessage,
+  wrapCommitBody,
   listModels,
   generateCommitMessage,
   clearRateGate,

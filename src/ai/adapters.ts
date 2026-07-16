@@ -4,35 +4,119 @@
  * factory so adding/renaming a provider is a single localized change instead of edits spread
  * across five parallel switch/if chains.
  */
-import type { AiProviderId } from "../config.ts";
+import type { AiProviderId, CommitStyle } from "../config.ts";
 
 export interface AiModel {
   id: string;
   label: string;
 }
 
-/** Hard ceiling for the commit-plan reply. A plan is a JSON object listing files across groups,
- *  so it needs more room than a one-line message — but NOT too much: a provider counts the full
- *  `max_tokens` RESERVATION against its rate limit, so an oversized reservation gets the whole
- *  request rejected. Even ~100 files is only ~2k tokens of JSON, so this is the cap, not the
- *  default — see planMaxTokens(). */
+/**
+ * Hard ceiling for the commit-plan reply. A plan is a JSON object listing files across groups, so
+ * it needs more room than a one-line message — but NOT too much: a provider gates on the full
+ * `max_tokens` RESERVATION, so an oversized one gets the whole request rejected before a token is
+ * generated (Groq answers "Limit 12000, Requested 12994" instantly — "Requested" is input +
+ * max_tokens). A rejected plan degrades to the heuristic bucket-split, which is strictly worse
+ * than a slightly shorter body, so this stays deliberately conservative.
+ *
+ * Left at 4096 on purpose. Raising it was the obvious move for terse bodies and the wrong one:
+ * measured on the live free tier this targets, `x-ratelimit-limit-tokens` is 12000/min, and the
+ * ceiling only binds at ~35+ files (conventional) — trees whose diffs are already near the
+ * planTotal cap, where input + reservation is what breaks first. It buys little exactly where it
+ * costs most. The per-file RATE below is what actually feeds the bodies; this is just the backstop.
+ */
 const PLAN_MAX_TOKENS = 4096;
+
+/**
+ * Per-FILE token allowance for the plan reply, by the owner's commit-message style.
+ *
+ * The rate is per FILE but the reply's cost is per GROUP, and those are not the same dimension —
+ * that mismatch is why the old flat 60 starved the bodies. planSystemPrompt rule 2 actively tells
+ * the model to PREFER more, smaller commits, so the harder it obeys, the more groups share the
+ * same file-derived budget: a 14-file tree split 7 ways got ~157 tokens/group, and after the JSON
+ * skeleton, subject, `files` array and rationale (~90-110) that left ~45-65 for the body. A body
+ * worth reading does not fit in 45 tokens, so the prompt and the ceiling were fighting each other.
+ *
+ * Sizing rule: G <= N always, so the worst case rule 2 can produce is one commit per file. Setting
+ * the rate at roughly ONE BODY'S WORTH per file keeps that worst case affordable, which makes any
+ * lighter split comfortable by construction. `concise` stays at 60 because it emits no body at all
+ * — there is nothing there to starve.
+ */
+const PLAN_TOKENS_PER_FILE: Record<CommitStyle, number> = {
+  concise: 60,
+  conventional: 110,
+  detailed: 180,
+};
 
 /**
  * Right-size the plan's `max_tokens` to the change-set instead of always reserving the ceiling.
  *
- * This matters because the reservation is BILLED, not just permitted: measured against Groq's
- * free tier, an 11-file plan reserved 4096 tokens to produce a ~900-token reply — ~3.2k tokens
- * per commit charged for nothing, on a 100k/day budget. Sizing it to the file count gives that
- * back to the owner, who commits many times a day.
+ * The reservation is what the provider gates on, so it is not free: measured against Groq's free
+ * tier, an 11-file plan reserved a flat 4096 tokens to produce a ~900-token reply — ~3.2k tokens
+ * per commit gated for nothing, on a 100k/day budget. Sizing it to the change-set gives that back
+ * to the owner, who commits many times a day.
  *
- * ~60 tokens/file covers a path plus its share of type/scope/subject/body, and the 512 floor
- * keeps a tiny change-set from being cut off mid-JSON (an unparseable reply costs a retry, which
- * would cost far more than it saved).
+ * The 512 floor keeps a tiny change-set from being cut off mid-JSON — an unparseable reply costs a
+ * retry (and then a degraded heuristic plan), which would cost far more than the floor saves.
  */
-export function planMaxTokens(fileCount: number): number {
-  return Math.max(512, Math.min(PLAN_MAX_TOKENS, 256 + fileCount * 60));
+export function planMaxTokens(fileCount: number, style: CommitStyle): number {
+  return Math.max(512, Math.min(PLAN_MAX_TOKENS, 256 + fileCount * PLAN_TOKENS_PER_FILE[style]));
 }
+
+/**
+ * Output ceiling for the SINGLE-message path, by style. Same doctrine as planMaxTokens: reserve
+ * what this style plausibly needs, because the reservation is what gets rate-limited.
+ *
+ * `conventional` keeps the 1024 it always had — measured against the real corpus this ceiling was
+ * never the thing binding (the bodies that prompted this work came out at ~12 tokens with ~65
+ * available, and a hand-written commit body averages ~658 tokens), so raising it would buy nothing
+ * and cost reservation on every default-style commit. `detailed` is the style whose whole point is
+ * thoroughness, so it gets real room. `concise` is a subject line and nothing else; it was
+ * reserving 1024 to emit ~20, which is pure waste on a TPM-gated tier.
+ */
+const MESSAGE_MAX_TOKENS: Record<CommitStyle, number> = {
+  concise: 256,
+  conventional: 1024,
+  detailed: 2048,
+};
+
+export const messageMaxTokens = (style: CommitStyle): number => MESSAGE_MAX_TOKENS[style];
+
+/** Decoding controls, passed per call. Shapes differ per provider (Gemini nests them under
+ *  `generationConfig`, Anthropic has no `top_p` by default), so adapters translate. */
+export interface Sampling {
+  temperature?: number;
+  top_p?: number;
+}
+
+/**
+ * One turn of the conversation a generation call sends. Callers build the ARRAY (so the message
+ * path can prime with a worked example as real user/assistant turns — OpenCommit's mechanism, and
+ * the reason this is not a `(system, user)` pair); adapters translate roles to their provider's
+ * spelling (Anthropic hoists `system` to a top-level field, Gemini calls the assistant `model`).
+ */
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/**
+ * The plan call decodes GREEDILY. It is a classifier with a JSON contract, and its worst outcome
+ * by far is an unparseable reply: that costs a retry and then a degraded bucket-split, which is
+ * worse than any wording nit. Sending nothing meant Groq's default of 1.0 — the highest value of
+ * any comparable tool surveyed (OpenCommit runs temperature 0 / top_p 0.1 against Groq for exactly
+ * this call, aicommits 0.4, lazycommit 0.3). Nothing here is a verbosity lever: no tool ties
+ * sampling to output LENGTH, and raising temperature to get longer bodies is folklore.
+ */
+export const PLAN_SAMPLING: Sampling = { temperature: 0, top_p: 0.1 };
+
+/** The message call is prose, not a contract, so it gets a little room — but well under the 1.0
+ *  default it was silently inheriting. Matches lazycommit's Groq-native value. */
+export const MESSAGE_SAMPLING: Sampling = { temperature: 0.3 };
+
+/** Never set frequency/presence penalty: a good commit body REPEATS the symbol it is about
+ *  ("`decodeRow()` …" three times is correct prose), and a positive penalty punishes exactly the
+ *  specificity we are asking for. Every surveyed tool that sets them sets them to 0. */
 
 // ── model-list parsing helpers (PURE) ────────────────────────────────────────────
 
@@ -89,12 +173,16 @@ const bearerHeaders = (apiKey: string): Record<string, string> => ({
   authorization: `Bearer ${apiKey}`,
 });
 
-const chatBody = (model: string, system: string, user: string): unknown => ({
+const chatBody = (
+  model: string,
+  messages: ChatMessage[],
+  maxTokens: number,
+  sampling: Sampling = {},
+): unknown => ({
   model,
-  messages: [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ],
+  messages,
+  max_tokens: maxTokens,
+  ...sampling,
 });
 
 const chatExtract = (json: unknown): string => {
@@ -120,15 +208,18 @@ interface AiAdapter {
   headers: (apiKey: string) => Record<string, string>;
   /** Raw `{ id, label }[]` from the provider's model-list body (pre dedup/sort). */
   models: (json: unknown) => AiModel[];
-  /** The generation request body for this provider's API shape. */
-  buildBody: (model: string, system: string, user: string) => unknown;
+  /** The generation request body for this provider's API shape. `messages` is the full turn
+   *  list (system + any few-shot priming + the real user turn). `maxTokens` is the OUTPUT
+   *  reservation — every provider gates on it, so callers size it (messageMaxTokens /
+   *  planMaxTokens) rather than letting a provider default decide. `sampling` likewise: an unset
+   *  temperature is not "neutral", it is whatever that provider defaults to (1.0 on Groq). */
+  buildBody: (model: string, messages: ChatMessage[], maxTokens: number, sampling?: Sampling) => unknown;
   /**
-   * Request body for STRUCTURED-JSON generation (the commit-plan call): enables the
-   * provider's JSON mode where it has one and raises the token ceiling (JSON is wordier
-   * than a one-line message). Falls back to `buildBody` when a provider has no JSON mode
-   * (Anthropic) — there the strict-JSON instruction in the prompt carries it.
+   * Request body for STRUCTURED-JSON generation (the commit-plan call): enables the provider's
+   * JSON mode where it has one. Omitted by a provider with no JSON-mode flag (Anthropic), where
+   * the strict-JSON instruction in the prompt carries it and `buildBody` is used as-is.
    */
-  jsonBody?: (model: string, system: string, user: string, maxTokens: number) => unknown;
+  jsonBody?: (model: string, messages: ChatMessage[], maxTokens: number, sampling?: Sampling) => unknown;
   /** Pull the generated text out of this provider's response shape. */
   extractCompletion: (json: unknown) => string;
 }
@@ -146,18 +237,33 @@ function openAiCompatible(opts: {
     headers: bearerHeaders,
     models: (json) => openaiModels(json, { keep: opts.keep, label: opts.label }),
     buildBody: chatBody,
-    // JSON mode + a raised token ceiling. `response_format: json_object` makes the four
-    // OpenAI-compatible providers emit a bare JSON object (no fences/preamble) reliably.
-    jsonBody: (model, system, user, maxTokens) => ({
-      ...(chatBody(model, system, user) as Record<string, unknown>),
+    // JSON mode. `response_format: json_object` makes the four OpenAI-compatible providers emit a
+    // bare JSON object (no fences/preamble) reliably.
+    jsonBody: (model, messages, maxTokens, sampling) => ({
+      ...(chatBody(model, messages, maxTokens, sampling) as Record<string, unknown>),
       response_format: { type: "json_object" },
-      max_tokens: maxTokens,
     }),
     extractCompletion: chatExtract,
   };
 }
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/** OpenAI's `top_p` is Gemini's `topP`; both live inside `generationConfig` there. */
+const geminiSampling = (s: Sampling): Record<string, unknown> => ({
+  ...(s.temperature != null ? { temperature: s.temperature } : {}),
+  ...(s.top_p != null ? { topP: s.top_p } : {}),
+});
+
+/** Gemini keeps system text out of `contents`, in `systemInstruction`. */
+const geminiSystem = (messages: ChatMessage[]): string =>
+  messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+
+/** Gemini's `contents` turns: assistant is spelled `model` there. */
+const geminiContents = (messages: ChatMessage[]): Array<Record<string, unknown>> =>
+  messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
 
 export const AI_ADAPTERS: Record<AiProviderId, AiAdapter> = {
   anthropic: {
@@ -170,19 +276,19 @@ export const AI_ADAPTERS: Record<AiProviderId, AiAdapter> = {
     }),
     models: (json) =>
       dataList(json).map((m) => ({ id: String(m.id ?? ""), label: String(m.display_name ?? m.id ?? "") })),
-    buildBody: (model, system, user) => ({
-      model,
-      max_tokens: 1024,
-      system,
-      messages: [{ role: "user", content: user }],
-    }),
-    // Anthropic has no JSON-mode flag; the strict-JSON prompt instruction carries it. We
-    // only raise the token ceiling so a multi-group plan can't be truncated mid-object.
-    jsonBody: (model, system, user, maxTokens) => ({
+    // No `jsonBody`: Anthropic has no JSON-mode flag, so the strict-JSON prompt instruction
+    // carries the plan call and this body serves both paths unchanged.
+    buildBody: (model, messages, maxTokens, sampling = {}) => ({
       model,
       max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: user }],
+      // Anthropic hoists the system turn to a top-level field; user/assistant alternation in
+      // `messages` is its documented few-shot form.
+      system: messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n"),
+      messages: messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({ role: m.role, content: m.content })),
+      // Anthropic takes `temperature` top-level, and documents against setting top_p with it.
+      ...(sampling.temperature != null ? { temperature: sampling.temperature } : {}),
     }),
     extractCompletion: (json) => {
       const content = (json as { content?: unknown })?.content;
@@ -209,17 +315,23 @@ export const AI_ADAPTERS: Record<AiProviderId, AiAdapter> = {
           return { id, label: String(m.displayName ?? id) };
         });
     },
-    buildBody: (_model, system, user) => ({
-      // gemini puts the model in the URL, not the body.
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: "user", parts: [{ text: user }] }],
-      generationConfig: { maxOutputTokens: 1024 },
+    // gemini nests the decoding controls under `generationConfig` (and spells top_p `topP`).
+    buildBody: (_model, messages, maxTokens, sampling = {}) => ({
+      // gemini puts the model in the URL, not the body; system goes in `systemInstruction` and
+      // the assistant role is spelled `model` in `contents`.
+      systemInstruction: { parts: [{ text: geminiSystem(messages) }] },
+      contents: geminiContents(messages),
+      generationConfig: { maxOutputTokens: maxTokens, ...geminiSampling(sampling) },
     }),
-    // `responseMimeType: application/json` is Gemini's JSON mode; raise the output ceiling.
-    jsonBody: (_model, system, user, maxTokens) => ({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: "user", parts: [{ text: user }] }],
-      generationConfig: { maxOutputTokens: maxTokens, responseMimeType: "application/json" },
+    // `responseMimeType: application/json` is Gemini's JSON mode.
+    jsonBody: (_model, messages, maxTokens, sampling = {}) => ({
+      systemInstruction: { parts: [{ text: geminiSystem(messages) }] },
+      contents: geminiContents(messages),
+      generationConfig: {
+        maxOutputTokens: maxTokens,
+        responseMimeType: "application/json",
+        ...geminiSampling(sampling),
+      },
     }),
     extractCompletion: (json) => {
       const parts = (json as { candidates?: Array<{ content?: { parts?: unknown } }> })

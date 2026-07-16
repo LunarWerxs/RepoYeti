@@ -8,6 +8,8 @@ import {
   generateCommitPlan,
   planSystemPrompt,
   planUserPrompt,
+  systemPromptFor,
+  fewShotTurns,
   AiError,
   clearRateGate,
   rateGateRemainingMs,
@@ -228,6 +230,48 @@ test("condensed output names every changed symbol with its own counts", () => {
   expect(diff.length).toBeLessThan(chunk.length);
 });
 
+// The map answers "which files belong together" — the job this fold was built for. It cannot
+// answer "what changed", and the SAME call also writes each commit's body. Measured live: four
+// fully-condensed files, and the model returned "Modified `AI_ADAPTERS` record to accommodate
+// changes" — the best answer its input allowed. The cap already paid for more than the map spends
+// (~670 chars of a 2,000 balanced cap), so the leftover buys real lines.
+test("a condensed file still carries verbatim lines, within the same per-file cap", () => {
+  const mk = (sym: string, n: number) =>
+    `@@ -1,${n} +1,${n} @@ ${sym}\n${Array.from({ length: n }, (_, i) => `+  const answer${i} = ${i};`).join("\n")}\n`;
+  const chunk = `diff --git a/src/a.ts b/src/a.ts\n${mk("export function alpha() {", 60)}${mk("export function omega() {", 60)}`;
+  const cap = 2_000;
+  const { diff, folded, condensed } = foldLargeFileDiffs(chunk, cap);
+
+  expect(folded).toBe(1);
+  expect(condensed).toBe(1); // a real map, not a blind head-cut
+  expect(diff).toContain("# condensed:"); //        ...the map survives, so grouping still works
+  expect(diff).toContain("export function omega()"); // ...naming every symbol, not just the head
+  expect(diff).toContain("verbatim"); //            ...and it says the excerpt is real lines
+  expect(diff).toContain("+  const answer0 = 0;"); // ...which are ACTUALLY THERE — the whole point
+  // The dial's promise is the per-file cap. Spending its leftover must not break it: an over-cap
+  // "summary" gets thrown away for a head-cut, which would lose the map it just paid for.
+  expect(diff.length).toBeLessThanOrEqual(cap);
+});
+
+// A map that nearly fills the cap by itself leaves no room worth spending: a couple of orphaned
+// diff lines are noise the reader has to explain away. The map alone stays a valid answer, and it
+// must still respect the cap.
+test("a file whose map nearly fills the cap returns the map alone, no stub excerpt", () => {
+  const rows = Array.from({ length: 16 }, (_, i) =>
+    `@@ -${i},4 +${i},4 @@ export function symbolNumber${i}(arg: SomeLongTypeName): ReturnType {\n` +
+    Array.from({ length: 4 }, (_, j) => `+  const v${j} = ${j};`).join("\n") + "\n",
+  ).join("");
+  const chunk = `diff --git a/src/many.ts b/src/many.ts\n${rows}`;
+  const cap = 1_800; // map lands ~1622: real, under cap, and with no room left worth spending
+  const { diff, condensed } = foldLargeFileDiffs(chunk, cap);
+
+  expect(condensed).toBe(1);
+  expect(diff).toContain("# condensed:");
+  expect(diff).toContain("symbolNumber15"); // every symbol still named — that is the map's job
+  expect(diff).not.toContain("verbatim"); // no room left, so no half-excerpt
+  expect(diff.length).toBeLessThanOrEqual(cap);
+});
+
 // Caught by a LIVE run, not by reasoning: fed a map of PowerShell `if` blocks (git's default
 // heuristic finds no .ps1 functions), llama-3.3-70b confidently wrote "simplify conditionals for
 // better readability" about what was actually a daemon-identity rewrite. A map is only worth
@@ -344,10 +388,28 @@ test("the diff-detail dial is monotonic on BOTH bounds: lean < balanced < thorou
 });
 
 test("planMaxTokens sizes the reservation to the change-set, with a floor and a cap", () => {
-  expect(planMaxTokens(1)).toBe(512); // floor: never so small the JSON gets cut off
-  expect(planMaxTokens(11)).toBe(916); // a normal commit: ~4x smaller than the old flat 4096
-  expect(planMaxTokens(107)).toBe(4096); // cap: a huge plan still gets the ceiling
-  expect(planMaxTokens(10_000)).toBe(4096); // never above the ceiling
+  expect(planMaxTokens(1, "conventional")).toBe(512); // floor: never so small the JSON gets cut off
+  expect(planMaxTokens(11, "conventional")).toBe(1466); // a normal commit: still well under the ceiling
+  expect(planMaxTokens(107, "conventional")).toBe(4096); // cap: a huge plan still gets the ceiling
+  expect(planMaxTokens(10_000, "conventional")).toBe(4096); // never above the ceiling
+});
+
+// The reservation has to follow the STYLE, because the style decides whether there are bodies to
+// pay for at all. Sizing every style like `concise` is what starved the bodies: a 14-file tree the
+// model split 7 ways (rule 2 tells it to prefer small commits) left ~45-65 tokens per body once
+// the JSON skeleton and `files` arrays were paid for — less than a body worth reading needs.
+test("planMaxTokens reserves per style, since only some styles emit a body", () => {
+  const files = 14; // the real tree behind the terse-body report: 7 groups, 1-4 files each
+  expect(planMaxTokens(files, "concise")).toBeLessThan(planMaxTokens(files, "conventional"));
+  expect(planMaxTokens(files, "conventional")).toBeLessThan(planMaxTokens(files, "detailed"));
+  // G <= N always, so the worst split rule 2 can produce is one commit per file. Each body must
+  // still fit in that case, or the prompt and the ceiling are fighting each other.
+  for (const style of ["conventional", "detailed"] as const) {
+    const perGroup = planMaxTokens(files, style) / files;
+    expect(perGroup).toBeGreaterThan(100); // ~90-110 of JSON overhead, then room for real prose
+  }
+  // `concise` writes no body, so it should NOT pay for one.
+  expect(planMaxTokens(files, "concise")).toBe(1096);
 });
 
 // A 429 means the request was REJECTED — the model never ran, so "the AI couldn't structure this"
@@ -435,10 +497,153 @@ test("planSystemPrompt actually honors the commit-message style", () => {
 
   // concise = subject only; the other two ask for a real body.
   expect(concise).toContain("Omit `body`");
-  expect(conventional).toContain("`body` explaining WHAT changed and WHY");
+  expect(conventional).toContain("MECHANISM");
   expect(detailed).toContain("`body`");
+  // detailed is not just a longer conventional: it asks one extra question.
+  expect(detailed).toContain("REVIEWER NOTE");
+  expect(conventional).not.toContain("REVIEWER NOTE");
   // every style still forbids the type/scope prefix leaking into `subject` (the editor adds it)
   for (const p of [conventional, concise, detailed]) expect(p).toContain("BARE imperative summary");
+});
+
+// The two prompt builders write the SAME artifact, and the owner can regenerate any plan card
+// through the single-message call — so if they drift, the same button answers in two voices. They
+// used to be mirrored by hand ("Mirrors systemPromptFor()" in a comment), which is precisely the
+// arrangement that drifts silently. Now they share the doctrine, and this is what says so.
+test("both prompt paths share one body doctrine, for every style that has a body", () => {
+  for (const style of ["conventional", "detailed"] as const) {
+    const message = systemPromptFor(style);
+    const plan = planSystemPrompt(style);
+    for (const clause of [
+      "MECHANISM", // name the function/file/flag, never a bare verb
+      "REASON", // only where the diff shows it
+      "EFFECT", // hedged inference, never an observed fact
+      "Never claim testing, deployment, live verification or a measured number", // anti-fabrication
+    ]) {
+      expect(message).toContain(clause);
+      expect(plan).toContain(clause);
+    }
+  }
+});
+
+// No SYSTEM prompt renders a worked commit message any more — measured live, a rendered example
+// leaks: the model attributed the example's `decodeRow` null-guard content to a function in the
+// real diff. Each path keeps exactly one demonstration, in the channel where imitation is safe:
+// the message path as a completed few-shot EXCHANGE (the example is visibly the answer to a
+// different diff), the plan path as its populated JSON shape example.
+test("worked examples live in imitation-safe channels, never loose in a system prompt", () => {
+  for (const style of ["conventional", "detailed"] as const) {
+    // System prompts state the ban in prose and render nothing that looks like a commit message.
+    const sys = systemPromptFor(style);
+    expect(sys).toContain("Never write a body that merely re-tenses the subject");
+    expect(sys).not.toContain("decodeRow"); // the example's content stays OUT of the instructions
+    // The message path's example is a real user/assistant exchange, envelope-matched to the live
+    // call (porcelain header and all), with the message in the ASSISTANT turn.
+    const turns = fewShotTurns(style);
+    expect(turns.map((t) => t.role)).toEqual(["user", "assistant"]);
+    expect(turns[0]!.content).toContain("# git status --porcelain");
+    expect(turns[0]!.content).toContain("decodeRow"); // the diff the example answers…
+    expect(turns[1]!.content).toContain("`decodeRow()`"); // …and the answer, attributed to it
+    // The plan path emits JSON, so its example is the JSON shape — carrying a POPULATED body
+    // array. A `"body":"optional longer text"` here would demonstrate the terse failure itself.
+    const plan = planSystemPrompt(style);
+    expect(plan).toContain('"body":["');
+    expect(plan).not.toContain('"body":"optional longer text"');
+  }
+  // The conventional example demonstrates the Conventional subject; detailed stays bare.
+  expect(fewShotTurns("conventional")[1]!.content.startsWith("fix(codec):")).toBe(true);
+  expect(fewShotTurns("detailed")[1]!.content.startsWith("fix(codec):")).toBe(false);
+  // concise writes no body, so there is nothing to demonstrate — and no tokens to spend on it.
+  expect(fewShotTurns("concise")).toEqual([]);
+});
+
+// The whole fix: prose has no countable unit, an array does. A model that answers "write a body"
+// with one vague line is COMPLIANT; a model that must populate an array per non-trivial file has
+// nothing to compress into. If this instruction ever softens back to a string, the terse bodies
+// come back — so the array contract is pinned, not left to the prompt's goodwill.
+test("the plan asks for body as a countable array, not a prose string", () => {
+  for (const style of ["conventional", "detailed"] as const) {
+    const plan = planSystemPrompt(style);
+    expect(plan).toContain("JSON ARRAY of strings");
+    expect(plan).toContain("Do NOT write `body` as one prose string");
+    expect(plan).toContain("earns roughly K bullets"); // the count comes from the file list, not a guess
+  }
+  // ...and concise still opts out of the whole thing.
+  expect(planSystemPrompt("concise")).not.toContain("JSON ARRAY of strings");
+});
+
+// The model will not always honour the array. A body that is right about the content and wrong
+// about the container must survive: dropping a good body over its shape is the worst trade here.
+test("parseCommitPlan renders a body array to bullets, and still accepts a plain string", () => {
+  const known = ["src/a.ts"];
+  const arr = parseCommitPlan(
+    JSON.stringify({
+      groups: [{ type: "fix", subject: "s", body: ["first thing", "- second thing"], files: ["src/a.ts"] }],
+      leftovers: [],
+    }),
+    known,
+  );
+  // "- " is added exactly once, even when the model already prefixed it.
+  expect(arr?.groups[0]?.body).toBe("- first thing\n- second thing");
+
+  const str = parseCommitPlan(
+    JSON.stringify({ groups: [{ type: "fix", subject: "s", body: "just prose", files: ["src/a.ts"] }], leftovers: [] }),
+    known,
+  );
+  expect(str?.groups[0]?.body).toBe("just prose");
+
+  // An empty array is not a body — it must not become a stray "- " or an empty string field.
+  const empty = parseCommitPlan(
+    JSON.stringify({ groups: [{ type: "fix", subject: "s", body: [], files: ["src/a.ts"] }], leftovers: [] }),
+    known,
+  );
+  expect(empty?.groups[0]?.body).toBeUndefined();
+});
+
+// `concise` is a subject line and nothing else. It must not pay prompt tokens for body rules it
+// will never follow, in EITHER path — the doctrine is opt-in, not ambient.
+test("the body doctrine stays out of the concise style", () => {
+  for (const p of [systemPromptFor("concise"), planSystemPrompt("concise")]) {
+    expect(p).not.toContain("MECHANISM");
+    expect(p).not.toContain("FORBIDDEN");
+  }
+});
+
+// A deletion with NO context is unreadable, and the planner used to send exactly that (`-U0`).
+// Measured against the live model: for a file whose only change was deleting an unused local, the
+// hunk it received was
+//
+//     @@ -2 +1,0 @@ export function parseTag(raw: string): { … } {
+//     -  const unused = false;
+//
+// — one deletion, and `parseTag` the most prominent name in it, from the hunk header. The model
+// reported that the FUNCTION had been removed in 4 of 6 runs. It is a fair reading of the only
+// evidence it was given, and one line of context on each side drops it to 0 of 6, because the
+// signature then arrives as a CONTEXT line that is plainly still there. Zero context is a fine
+// diff for classifying files and a trap for describing them, and this call does both.
+test("the planner's diff carries context lines, so a deletion can't read as a removed function", async () => {
+  const dir = mkScratchDir("gm-ctx-");
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+  await $`git -C ${dir} config user.name Seed`.quiet();
+  await $`git -C ${dir} config user.email s@s.io`.quiet();
+  writeFileSync(
+    join(dir, "parse.ts"),
+    "export function parseTag(raw: string): string {\n  const unused = false;\n  return raw.split(':')[0] ?? '';\n}\n",
+  );
+  await $`git -C ${dir} add -A`.quiet();
+  await $`git -C ${dir} commit -q -m init`.quiet();
+  // The ONLY change: drop the unused local. parseTag itself survives.
+  writeFileSync(
+    join(dir, "parse.ts"),
+    "export function parseTag(raw: string): string {\n  return raw.split(':')[0] ?? '';\n}\n",
+  );
+
+  const { diff } = await collectCommitPlanInput(dir, undefined, "balanced");
+  expect(diff).toContain("-  const unused = false;"); // the deletion is there...
+  // ...and so is the surviving signature, as CONTEXT (leading space), not as a deletion. That one
+  // line is the whole difference between "removed a variable" and "removed the function".
+  expect(diff).toContain(" export function parseTag");
+  expect(diff).not.toContain("-export function parseTag");
 });
 
 // ── gitCommitGroups (real repo) ──────────────────────────────────────────────────

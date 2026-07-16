@@ -8,6 +8,7 @@ import {
   parseModels,
   extractCompletion,
   cleanCommitMessage,
+  userPromptFor,
   listModels,
   generateCommitMessage,
   AiError,
@@ -140,6 +141,41 @@ test("cleanCommitMessage forces git's blank line between subject and body", () =
   expect(cleanCommitMessage("feat: add thing   \nbody")).toBe("feat: add thing\n\nbody");
   // blank-line-only tail collapses to a plain subject rather than trailing newlines
   expect(cleanCommitMessage("feat: add thing\n\n   ")).toBe("feat: add thing");
+});
+
+// Wrapping is CODE's job, not the model's: asking a model to wrap is asking it to count
+// characters, and every surveyed tool that cares (aicommits' wrapLine) wraps client-side. The
+// prompt no longer asks; this is what guarantees.
+test("the body wraps at 72 with bullet continuation indent; the subject never wraps", () => {
+  const longBullet =
+    "- `decodeRow()` read a NULL timestamp as epoch 0 rather than skipping the field, so rows with no `updated_at` serialized wrong";
+  const out = cleanCommitMessage(`fix: handle null timestamps\n\n${longBullet}`);
+  const lines = out.split("\n");
+  expect(lines[0]).toBe("fix: handle null timestamps"); // subject untouched
+  for (const l of lines.slice(2)) expect(l.length).toBeLessThanOrEqual(72);
+  expect(lines[2]!.startsWith("- ")).toBe(true);
+  expect(lines[3]!.startsWith("  ")).toBe(true); // continuation stays visually inside the bullet
+  expect(lines[3]!.startsWith("- ")).toBe(false); // and never becomes a fake second bullet
+  // Re-joining (minus the indent) loses no words.
+  const rejoined = lines.slice(2).map((l) => l.replace(/^ {2}/, "")).join(" ");
+  expect(rejoined).toBe(longBullet);
+  // A single over-long token (a path/URL) is left unbroken — a split path is worse.
+  const url = `- see https://example.com/${"a".repeat(90)}`;
+  expect(cleanCommitMessage(`fix: x\n\n${url}`)).toContain("a".repeat(90));
+  // Short bodies pass through byte-identical.
+  expect(cleanCommitMessage("fix: x\n\n- short")).toBe("fix: x\n\n- short");
+});
+
+// The bullet-floor anchor: a number the model can neither argue down (the files really changed)
+// nor pad past (there are only N). Count, never diff size — a size quota forces invention.
+test("userPromptFor anchors the body to the file count, and stays silent when it can't help", () => {
+  expect(userPromptFor("DIFF", 5)).toContain("This change touches 5 files");
+  expect(userPromptFor("DIFF", 5)).toContain("must not come back as a single line");
+  // One file (or unknown): no anchor — "account for each of 1 files" is noise.
+  expect(userPromptFor("DIFF", 1)).not.toContain("This change touches");
+  expect(userPromptFor("DIFF")).not.toContain("This change touches");
+  // The diff always follows, whatever the anchor did.
+  expect(userPromptFor("DIFF", 5).endsWith("DIFF")).toBe(true);
 });
 
 // ── network paths behind an injected fetch (no real provider hit) ────────────────
