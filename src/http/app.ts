@@ -8,7 +8,7 @@
 import { Hono } from "hono";
 import type { RepoYetiConfig } from "../config.ts";
 import { authMiddleware, isRemoteRequest } from "../auth.ts";
-import { loopbackGuard } from "./loopback-guard.ts";
+import { loopbackGuard } from "../loopback-guard.mjs";
 import { mountWeb } from "./web.ts";
 import type { Deps } from "./deps.ts";
 import { setDiffStatsEnabled } from "../read/diffstat.ts";
