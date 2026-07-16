@@ -3,6 +3,7 @@ import { createPinia } from "pinia";
 import { autoAnimatePlugin } from "@formkit/auto-animate/vue";
 import App from "./App.vue";
 import { i18n } from "./i18n";
+import { applyWindowSizeHint } from "./lib/window-size-hint";
 import "./style.css";
 import "vue-sonner/style.css";
 
@@ -38,5 +39,10 @@ window.addEventListener("vite:preloadError", (event) => {
     window.location.reload(),
   );
 });
+
+// A portable (--app) window forwarded into an already-running Chromium instance ignores
+// --window-size and the saved placement; the daemon/tray tag its URL with the size it should
+// be and we correct it here before first paint. No-op in a browser tab or on an un-hinted URL.
+applyWindowSizeHint();
 
 createApp(App).use(createPinia()).use(autoAnimatePlugin).use(i18n).mount("#app");

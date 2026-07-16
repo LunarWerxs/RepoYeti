@@ -10,6 +10,7 @@ import {
   writeShutdownRequest,
 } from "../../instance.ts";
 import { openPortableWindow } from "../../portable-window.mjs";
+import { WINDOW_SIZE_HINT_PARAM, windowSizeHintFor } from "../../window-size.ts";
 import { dirname, join } from "node:path";
 import { diffStatsEnabled, setDiffStatsEnabled } from "../../read/diffstat.ts";
 import {
@@ -429,7 +430,23 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
     // in — so this and the tray launcher (which reads the same runtime.json path) always
     // agree, and REPOYETI_HOME is honoured automatically.
     const profileDir = join(dirname(instanceFilePath()), "portable-profile");
-    const result = await openPortableWindow(url, { profileDir, initialSize: PORTABLE_WINDOW_SIZE });
+    // A forwarded --app launch (a window already open on this profile) ignores --window-size
+    // AND the saved placement, inheriting the running window's geometry — so also tag the URL
+    // with the size this window should have, and the page corrects itself with resizeTo
+    // (web/src/lib/window-size-hint.ts). The query string is not part of Chromium's placement
+    // key, so the hint can't re-key the window; a URL that won't parse just goes out un-hinted.
+    let target = url;
+    try {
+      const hint = windowSizeHintFor(profileDir, url, PORTABLE_WINDOW_SIZE);
+      if (hint) {
+        const u = new URL(url);
+        u.searchParams.set(WINDOW_SIZE_HINT_PARAM, hint);
+        target = u.toString();
+      }
+    } catch {
+      /* unparseable base URL: open it un-hinted rather than fail the route */
+    }
+    const result = await openPortableWindow(target, { profileDir, initialSize: PORTABLE_WINDOW_SIZE });
     return c.json(result);
   });
 }
