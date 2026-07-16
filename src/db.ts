@@ -48,6 +48,8 @@ interface RepoRow {
   id: string;
   abs_path: string;
   name: string;
+  /** Owner-chosen label (Rename), or NULL to use `name`. Never the folder on disk. */
+  display_name: string | null;
   source: RepoSource;
   vcs: string;
   identity_id: string | null;
@@ -67,7 +69,10 @@ interface RepoRow {
 /** The shape the API/UI consumes. */
 export interface RepoView {
   id: string;
+  /** The folder's basename on disk. Always the real thing — a rename never changes it. */
   name: string;
+  /** Owner-chosen label, or null when none is set. The UI shows `displayName ?? name`. */
+  displayName: string | null;
   absPath: string;
   source: RepoSource;
   /** Which VCS backs this repo ("git" | "lore"). Drives backend dispatch in service.ts. */
@@ -253,6 +258,29 @@ export function initDb(): Database {
   } catch {
     /* column already present */
   }
+  // Owner-chosen display label (Rename). NULL = fall back to `name` (the folder basename).
+  // It is a SEPARATE column on purpose: `upsertRepo` overwrites `name` from the basename on every
+  // scan, so a label stored there would silently revert on the next rescan. Renaming NEVER touches
+  // the folder on disk — this is a label, not a move.
+  try {
+    handle.exec("ALTER TABLE repos ADD COLUMN display_name TEXT;");
+  } catch {
+    /* column already present */
+  }
+  // Paths the owner explicitly removed from RepoYeti ("don't show me this again").
+  //
+  // Without this, "Remove" is a lie for any auto-discovered repo: the row is deleted, the next
+  // scan walks the same folder, `upsertRepo` re-inserts it, and it reappears — the exact
+  // "there's no button to do it" complaint, just moved one step later. So removal writes a
+  // tombstone here and `upsertRepo` refuses to re-import a tombstoned path, the same
+  // choke-point shape as the temp-dir guard. Undoable from Settings → Removed repos.
+  handle.exec(`
+    CREATE TABLE IF NOT EXISTS ignored_paths (
+      abs_path   TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      ignored_at INTEGER NOT NULL
+    );
+  `);
   // Repair any temp-path repo rows already sitting in a pre-existing DB (historic test-fixture
   // writes and old whole-machine scans indexed under the OS temp dir, e.g. `%TEMP%\gm-*`, before
   // upsertRepo's hard guard existed). Same prevention-first shape as the identity merge below:
@@ -426,6 +454,10 @@ export function upsertRepo(
   vcs: VcsKind = "git",
 ): string | null {
   if (isUnderTempDir(absPath)) return null;
+  // The owner removed this path — a rescan must not resurrect it. Checked here, at the same
+  // choke point as the temp guard, so EVERY import route (scan, boot discovery, add-root,
+  // "Point to Folder", clone) inherits it rather than each remembering to ask.
+  if (isPathIgnored(absPath)) return null;
   const row = getDb()
     .query(
       `INSERT INTO repos (id, abs_path, name, source, vcs, is_submodule, updated_at)
@@ -458,6 +490,7 @@ function toView(r: RepoRow): RepoView {
   return {
     id: r.id,
     name: r.name,
+    displayName: r.display_name ?? null,
     absPath: r.abs_path,
     source: r.source,
     vcs: (r.vcs as VcsKind) || "git",
@@ -508,6 +541,71 @@ export function setRepoOrder(orderedIds: string[]): void {
 export function getRepo(id: string): RepoView | null {
   const r = getDb().query(`SELECT * FROM repos WHERE id = ?`).get(id) as RepoRow | null;
   return r ? toView(r) : null;
+}
+
+// ── Removal + rename ────────────────────────────────────────────────────────────────────
+//
+// "Remove" here means remove from RepoYeti's index. It NEVER touches the folder or a single byte
+// of git history: RepoYeti's whole promise is "uninstall it and your repos are untouched", so a
+// button that could delete real work would break that contract outright. The row goes; the code
+// stays exactly where it is.
+
+/** True when `absPath` sits on the owner's removed list (see the `ignored_paths` table). */
+export function isPathIgnored(absPath: string): boolean {
+  return (
+    getDb().query(`SELECT 1 FROM ignored_paths WHERE abs_path = ?`).get(absPath) !== null
+  );
+}
+
+/** Every path the owner has removed, newest first — the Settings → Removed repos list. */
+export function listIgnoredPaths(): Array<{ absPath: string; name: string; ignoredAt: number }> {
+  const rows = getDb()
+    .query(`SELECT abs_path, name, ignored_at FROM ignored_paths ORDER BY ignored_at DESC`)
+    .all() as Array<{ abs_path: string; name: string; ignored_at: number }>;
+  return rows.map((r) => ({ absPath: r.abs_path, name: r.name, ignoredAt: r.ignored_at }));
+}
+
+/** Drop a path from the removed list, so the next scan may import it again. Idempotent. */
+export function unignorePath(absPath: string): void {
+  getDb().query(`DELETE FROM ignored_paths WHERE abs_path = ?`).run(absPath);
+}
+
+/**
+ * Remove one repo from the index. `ignore: true` (the default for an owner-initiated removal)
+ * also tombstones the path so a rescan can't bring it straight back; `ignore: false` is the
+ * "just forget the row" variant used when a repo's folder is already gone.
+ *
+ * Returns the removed repo's view, or null if the id was unknown.
+ */
+export function forgetRepo(id: string, ignore = true): RepoView | null {
+  const repo = getRepo(id);
+  if (!repo) return null;
+  const d = getDb();
+  const tx = d.transaction(() => {
+    if (ignore) {
+      d.query(
+        `INSERT INTO ignored_paths (abs_path, name, ignored_at) VALUES (?, ?, ?)
+         ON CONFLICT(abs_path) DO UPDATE SET name = excluded.name, ignored_at = excluded.ignored_at`,
+      ).run(repo.absPath, repo.name, Date.now());
+    }
+    d.query(`DELETE FROM share_repos WHERE repo_id = ?`).run(id);
+    d.query(`DELETE FROM shares WHERE id NOT IN (SELECT share_id FROM share_repos)`).run();
+    d.query(`DELETE FROM repos WHERE id = ?`).run(id);
+  });
+  tx();
+  return repo;
+}
+
+/**
+ * Set (or clear, with null) a repo's display label. Purely cosmetic — the folder is never
+ * renamed. An empty/whitespace-only label clears back to the folder name rather than showing a
+ * blank card.
+ */
+export function setRepoDisplayName(id: string, displayName: string | null): void {
+  const label = displayName?.trim() ? displayName.trim() : null;
+  getDb()
+    .query(`UPDATE repos SET display_name = ?, updated_at = ? WHERE id = ?`)
+    .run(label, Date.now(), id);
 }
 
 /** Delete repos by id (used when a scan root is removed). Path/owner logic lives in the

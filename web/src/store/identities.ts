@@ -20,6 +20,31 @@ export function useIdentities(repos: Ref<Repo[]>) {
     Object.fromEntries(identities.value.map((i) => [i.id, i])),
   );
 
+  // ── is the identity feature worth showing at all? ────────────────────────────
+  //
+  // A commit identity only earns screen space when you actually commit as more than one person
+  // (work vs. personal). With a single git identity — the overwhelmingly common case — every
+  // identity control is a decision the owner can't get wrong and therefore shouldn't be asked:
+  // pure noise on every repo card and a whole Settings tab for a feature doing nothing.
+  //
+  // So the UI hides itself until there's evidence it's needed, and comes back on its own the
+  // moment there is. `identityUiForced` is the manual escape hatch (Settings → "I use more than
+  // one git identity"), which also solves the chicken-and-egg: you can't add a 2nd identity
+  // through a UI that's hidden because you only have 1.
+  const identityUiForced = ref(localStorage.getItem("repoyeti.showIdentities") === "1");
+  function setIdentityUiForced(on: boolean): void {
+    identityUiForced.value = on;
+    if (on) localStorage.setItem("repoyeti.showIdentities", "1");
+    else localStorage.removeItem("repoyeti.showIdentities");
+  }
+  const identitiesRelevant = computed(
+    () =>
+      identityUiForced.value ||
+      identities.value.length >= 2 || // juggling two authors — the case the feature exists for
+      identityRules.value.length > 0 || // a Firewall rule is pinned → the owner opted in
+      repos.value.some((r) => r.identityId), // some repo already commits as a chosen identity
+  );
+
   // ── identity CRUD ───────────────────────────────────────────────────────────
   async function reloadIdentities(): Promise<void> {
     identities.value = await api.listIdentities();
@@ -165,6 +190,9 @@ export function useIdentities(repos: Ref<Repo[]>) {
     detectedIdentitiesLoading,
     detectedIdentitiesReady,
     identityById,
+    identitiesRelevant,
+    identityUiForced,
+    setIdentityUiForced,
     createIdentity,
     updateIdentity,
     removeIdentity,

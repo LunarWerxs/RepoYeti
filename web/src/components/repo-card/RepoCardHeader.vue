@@ -115,6 +115,14 @@ function onIdentity(id: string | null): void {
   void store.assignIdentity(props.repo.id, id);
 }
 
+// What this dropdown actually offers depends on whether identities are in play (see the store's
+// `identitiesRelevant`). With one git identity the menu is GitHub accounts only, so calling the
+// button "Set git identity" would name the one thing it can't do — and it's the only label a
+// screen reader gets.
+const triggerLabel = computed(() =>
+  store.identitiesRelevant ? t("repo.identity.setTitle") : t("repo.syncAccount.setTitle"),
+);
+
 // ── sync account (which GitHub account this repo fetches/pulls/pushes as) ──────
 function onAccount(a: { host: string; login: string } | null): void {
   void store.assignRepoAccount(props.repo.id, a?.host ?? null, a?.login ?? null);
@@ -145,10 +153,15 @@ function onAccount(a: { host: string; login: string } | null): void {
       <GripVertical :size="16" />
     </button>
 
-    <!-- name + branch -->
+    <!-- name + branch. `displayName` is the owner's label (Rename); `name` is the folder on
+         disk and the fallback. The folder name stays reachable as the title so a renamed card
+         never hides where it actually lives. -->
     <div class="flex min-w-0 flex-1 items-center gap-2 px-0.5">
-      <span class="truncate text-[15px] leading-tight font-semibold text-foreground">
-        {{ repo.name }}
+      <span
+        class="truncate text-[15px] leading-tight font-semibold text-foreground"
+        :title="tooltipsEnabled && repo.displayName ? repo.name : undefined"
+      >
+        {{ repo.displayName || repo.name }}
       </span>
       <span
         v-if="st?.branch"
@@ -270,12 +283,12 @@ function onAccount(a: { host: string; login: string } | null): void {
     <!-- identity avatar → dropdown picker (stops row toggle; no Tooltip wrapper —
          stacking two as-child triggers on one element breaks reka's popper anchor, so the
          hover hint is a native :title, gated on the "show tooltips" setting) -->
-    <DropdownMenu v-if="!store.isGuest">
+    <DropdownMenu v-if="!store.isGuest && (store.ghAccounts.length > 0 || store.identitiesRelevant)">
       <DropdownMenuTrigger
         :title="tooltipsEnabled ? ([
           repo.syncAccountLogin ? `Syncs as ${repo.syncAccountLogin}` : null,
           identity ? `${identity.displayName} · ${identity.gitEmail}` : null,
-        ].filter(Boolean).join(' · ') || $t('repo.identity.setTitle')) : undefined"
+        ].filter(Boolean).join(' · ') || triggerLabel) : undefined"
         :class="
           cn(
             'flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50',
@@ -286,7 +299,7 @@ function onAccount(a: { host: string; login: string } | null): void {
                 : 'bg-secondary text-muted-foreground hover:bg-accent',
           )
         "
-        :aria-label="$t('repo.identity.setTitle')"
+        :aria-label="triggerLabel"
         @click.stop
       >
         <span v-if="repo.syncAccountLogin">{{ identityInitials(repo.syncAccountLogin) }}</span>
@@ -318,31 +331,36 @@ function onAccount(a: { host: string; login: string } | null): void {
               class="ml-1 shrink-0 text-primary"
             />
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          <!-- only divides if there's an identity block below it to divide from -->
+          <DropdownMenuSeparator v-if="store.identitiesRelevant" />
         </template>
 
-        <!-- git commit author (the name/email commits are made under) -->
-        <DropdownMenuLabel>{{ $t("repo.identity.dropdownLabel") }}</DropdownMenuLabel>
-        <DropdownMenuItem class="text-muted-foreground" @select="onIdentity(null)">
-          <User :size="15" />
-          <span class="flex-1">{{ $t("repo.identity.noIdentity") }}</span>
-          <Check v-if="!repo.identityId" :size="15" class="text-primary" />
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          v-for="i in store.identities"
-          :key="i.id"
-          @select="onIdentity(i.id)"
-        >
-          <span
-            :class="cn('flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold', identityTint(i.id))"
-            >{{ identityInitials(i.displayName) }}</span
+        <!-- git commit author (the name/email commits are made under). Hidden entirely unless
+             the owner actually juggles more than one — with a single identity there is no
+             choice to make here, only noise on every card. See store's `identitiesRelevant`. -->
+        <template v-if="store.identitiesRelevant">
+          <DropdownMenuLabel>{{ $t("repo.identity.dropdownLabel") }}</DropdownMenuLabel>
+          <DropdownMenuItem class="text-muted-foreground" @select="onIdentity(null)">
+            <User :size="15" />
+            <span class="flex-1">{{ $t("repo.identity.noIdentity") }}</span>
+            <Check v-if="!repo.identityId" :size="15" class="text-primary" />
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            v-for="i in store.identities"
+            :key="i.id"
+            @select="onIdentity(i.id)"
           >
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-[13px]">{{ i.displayName }}</div>
-            <div class="mono truncate text-[11px] text-muted-foreground">{{ i.gitEmail }}</div>
-          </div>
-          <Check v-if="repo.identityId === i.id" :size="15" class="ml-1 shrink-0 text-primary" />
-        </DropdownMenuItem>
+            <span
+              :class="cn('flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold', identityTint(i.id))"
+              >{{ identityInitials(i.displayName) }}</span
+            >
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-[13px]">{{ i.displayName }}</div>
+              <div class="mono truncate text-[11px] text-muted-foreground">{{ i.gitEmail }}</div>
+            </div>
+            <Check v-if="repo.identityId === i.id" :size="15" class="ml-1 shrink-0 text-primary" />
+          </DropdownMenuItem>
+        </template>
       </DropdownMenuContent>
     </DropdownMenu>
 

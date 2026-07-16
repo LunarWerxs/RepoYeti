@@ -115,8 +115,11 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
               {{ a.scopes.join(", ") }}
             </div>
             <!-- commit-identity link: collapsed by default (progressive disclosure); a
-                 compact summary shows the current state, the toggle reveals the picker. -->
-            <div class="mt-1.5 flex items-center gap-1.5">
+                 compact summary shows the current state, the toggle reveals the picker.
+                 Hidden outright when identities aren't in use (store's `identitiesRelevant`) —
+                 its empty state reads "Add an identity above", which would point at a manager
+                 that is itself hidden in that case. -->
+            <div v-if="store.identitiesRelevant" class="mt-1.5 flex items-center gap-1.5">
               <span class="shrink-0 text-[11px] text-muted-foreground">{{ $t("accounts.linkLabel") }}:</span>
               <span class="truncate text-[11px] text-foreground/80">
                 {{ a.identityId ? (store.identityById[a.identityId]?.displayName ?? $t("accounts.linkNotSet")) : $t("accounts.linkNotSet") }}
@@ -139,7 +142,7 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
               </Tooltip>
               <span v-else class="text-[11px] text-muted-foreground/70">· {{ $t("accounts.linkEmpty") }}</span>
             </div>
-            <ExpandTransition :open="!!linkOpen[a.login] && store.identities.length > 0">
+            <ExpandTransition :open="!!linkOpen[a.login] && store.identities.length > 0 && store.identitiesRelevant">
               <div class="pt-1.5">
                 <Select
                   :model-value="a.identityId ?? NONE"

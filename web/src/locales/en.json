@@ -101,7 +101,8 @@
   },
   "common": {
     "cancel": "Cancel",
-    "close": "Close"
+    "close": "Close",
+    "save": "Save"
   },
   "filters": {
     "anyIdentity": "Any identity",
@@ -126,7 +127,7 @@
     "statusCount": "{count} status | {count} statuses"
   },
   "header": {
-    "addRepository": "Add repository",
+    "addRepository": "Add Repository",
     "notifications": "Notifications",
     "notificationsEmpty": "You're all caught up.",
     "notificationsClear": "Clear all",
@@ -255,6 +256,13 @@
       "deleted": "Identity deleted",
       "saveFailed": "Save failed",
       "updated": "Identity updated"
+    },
+    "optIn": {
+      "title": "Using more than one git identity?",
+      "description": "Commit identities let you stamp a different author name/email per repository — for example work vs. personal. Most people only ever need one, so this stays out of the way until you turn it on.",
+      "action": "Set up",
+      "activeNote": "Shown because you turned identities on.",
+      "hide": "Hide these"
     }
   },
   "repo": {
@@ -536,8 +544,25 @@
     },
     "syncAccount": {
       "dropdownLabel": "GitHub account to sync this repo as",
-      "machineDefault": "Active account"
-    }
+      "machineDefault": "Active account",
+      "setTitle": "Choose the GitHub account this repo syncs as"
+    },
+    "rename": {
+      "action": "Rename",
+      "title": "Rename repository",
+      "description": "This changes the label shown in RepoYeti only. The folder on your disk keeps its own name — nothing is moved or renamed. Leave it empty to go back to the folder name."
+    },
+    "remove": {
+      "action": "Remove Repo",
+      "title": "Remove \"{name}\"?",
+      "description": "This removes the repository from RepoYeti's list only. Your folder, your files and your git history are not touched — nothing is deleted from disk. RepoYeti will also stop re-adding it on future scans. You can undo this, or restore it later from Settings.",
+      "confirm": "Remove"
+    },
+    "toastRenamed": "Renamed to \"{name}\"",
+    "toastRenameCleared": "Label cleared — showing the folder name",
+    "toastRenameFailed": "Could not rename that repository",
+    "toastRemoved": "\"{name}\" removed from RepoYeti",
+    "toastRemoveFailed": "Could not remove that repository"
   },
   "remote": {
     "activeLabel": "Your remote link",
@@ -646,7 +671,8 @@
       "general": "General",
       "identities": "Identities",
       "automation": "Automation",
-      "access": "Access"
+      "access": "Access",
+      "accounts": "Accounts"
     },
     "signOutAll": "Sign out everywhere",
     "signOutAllHint": "Invalidate the session on every device. You'll need to sign in again.",
@@ -750,7 +776,7 @@
     "hideTrayIcon": "Hide tray icon",
     "hideTrayIconHint": "Hide the notification-area icon. RepoYeti keeps running in the background — launching the shortcut again reopens the UI, and you can re-enable the icon right here in Settings.",
     "hideTrayIconFailed": "Could not change tray icon visibility",
-    "description": "Identities, appearance, diff behavior, and AI commit messages. Changes apply instantly.",
+    "description": "Accounts, appearance, diff behavior, and AI commit messages. Changes apply instantly.",
     "diffStats": "Diff statistics",
     "diffStatsHint": "Show added/removed line and character counts per file and per repo. Computed from each repo's diff — a small extra cost on every refresh.",
     "diffStatsFailed": "Could not change diff statistics",

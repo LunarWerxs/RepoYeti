@@ -52,7 +52,10 @@ export const VCS_CAPABILITIES: Record<VcsKind, VcsCapabilities> = {
 
 export interface Repo {
   id: string;
+  /** The folder's basename on disk. A rename never changes this. */
   name: string;
+  /** Owner-chosen label, or null. Show `displayName || name` — never the raw `name` alone. */
+  displayName: string | null;
   absPath: string;
   source: RepoSource;
   /** Which VCS backs this repo — drives which controls the card shows. */

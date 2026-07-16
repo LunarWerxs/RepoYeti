@@ -110,6 +110,7 @@ test("checkIdentityPolicy: ok when no rule matches, or the resolved identity sat
   const repoNoMatch: RepoView = {
     id: "r1",
     name: "n",
+    displayName: null,
     absPath: "D:/Elsewhere/repo",
     source: "auto",
     vcs: "git",
@@ -138,6 +139,7 @@ test("checkIdentityPolicy: violation when the resolved identity (or none) doesn'
   const repoWrongIdentity: RepoView = {
     id: "r2",
     name: "n",
+    displayName: null,
     absPath: "D:/Work/repo",
     source: "auto",
     vcs: "git",

@@ -16,12 +16,14 @@ import {
   EyeOff,
   Loader2,
   MoreVertical,
+  Pencil,
   Pin,
   PinOff,
   Star,
   StarOff,
   Timer,
   TimerOff,
+  Trash2,
 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
@@ -41,6 +43,15 @@ import {
   DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { VCS_CAPABILITIES } from "../../types";
 import type { Repo } from "../../types";
 
@@ -147,6 +158,48 @@ async function openRepoWith(editor?: string): Promise<void> {
     toast.success(label ? t("repo.openingIn", { editor: label }) : t("repo.openingEditor"));
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : t("repo.openFailed"));
+  }
+}
+
+// ── rename (display label only — the folder on disk is never touched) ─────────
+const renameOpen = ref(false);
+const renameDraft = ref("");
+function openRename(): void {
+  renameDraft.value = props.repo.displayName ?? props.repo.name;
+  renameOpen.value = true;
+}
+async function saveRename(): Promise<void> {
+  const next = renameDraft.value.trim();
+  // Typing the folder name back in means "no custom label", not "label that happens to match" —
+  // otherwise the label would silently outlive a folder rename it was only ever mirroring.
+  const label = !next || next === props.repo.name ? null : next;
+  const prev = props.repo.displayName ?? null;
+  renameOpen.value = false;
+  if (label === prev) return;
+  try {
+    await store.renameRepo(props.repo.id, label);
+    undoableToast(label ? t("repo.toastRenamed", { name: label }) : t("repo.toastRenameCleared"), () =>
+      store.renameRepo(props.repo.id, prev),
+    );
+  } catch {
+    toast.error(t("repo.toastRenameFailed"));
+  }
+}
+
+// ── remove from RepoYeti (index-only — never deletes the folder) ──────────────
+const removeOpen = ref(false);
+async function confirmRemove(): Promise<void> {
+  removeOpen.value = false;
+  try {
+    const removed = await store.removeRepo(props.repo.id);
+    if (!removed) return;
+    // Undo is a genuine restore (drops the tombstone + re-indexes), not just a re-add — a rescan
+    // would otherwise refuse the path and the repo would vanish again on the next scan.
+    undoableToast(t("repo.toastRemoved", { name: removed.displayName || removed.name }), () =>
+      store.restoreRemovedRepo(removed.absPath),
+    );
+  } catch {
+    toast.error(t("repo.toastRemoveFailed"));
   }
 }
 
@@ -260,9 +313,61 @@ const manageOpen = ref(false);
           <Cloud :size="15" />
           <span>{{ $t("repo.manage.open") }}</span>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem @select="openRename">
+          <Pencil :size="15" />
+          <span>{{ $t("repo.rename.action") }}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" @select="removeOpen = true">
+          <Trash2 :size="15" />
+          <span>{{ $t("repo.remove.action") }}</span>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   </div>
+
+  <!-- rename: a display label only. The folder on disk keeps its own name, so this is safe to
+       undo, safe to clear, and survives a rescan (which would overwrite `name`, not this). -->
+  <Dialog v-model:open="renameOpen">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>{{ $t("repo.rename.title") }}</DialogTitle>
+        <DialogDescription>{{ $t("repo.rename.description") }}</DialogDescription>
+      </DialogHeader>
+      <div class="space-y-2">
+        <Input
+          v-model="renameDraft"
+          :placeholder="repo.name"
+          :aria-label="$t('repo.rename.title')"
+          autofocus
+          @keydown.enter.prevent="saveRename"
+        />
+        <p class="mono truncate text-[11px] text-muted-foreground">{{ repo.absPath }}</p>
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" @click="renameOpen = false">{{ $t("common.cancel") }}</Button>
+        <Button @click="saveRename">{{ $t("common.save") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <!-- remove: index-only. The copy says so in as many words, because "Remove" next to a repo
+       name reads as "delete my code" and that fear is the whole reason to spell it out. -->
+  <Dialog v-model:open="removeOpen">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>{{ $t("repo.remove.title", { name: repo.displayName || repo.name }) }}</DialogTitle>
+        <DialogDescription>{{ $t("repo.remove.description") }}</DialogDescription>
+      </DialogHeader>
+      <div class="rounded-md border border-border bg-secondary/40 p-3">
+        <p class="mono truncate text-[11px] text-muted-foreground">{{ repo.absPath }}</p>
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" @click="removeOpen = false">{{ $t("common.cancel") }}</Button>
+        <Button variant="destructive" @click="confirmRemove">{{ $t("repo.remove.confirm") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 
   <!-- per-repo remote URL + tags management -->
   <RepoManage v-model:open="manageOpen" :repo-id="repo.id" :remote="st?.remote ?? null" />

@@ -53,6 +53,17 @@ export const IdentityUpdateSchema = z.object({
 
 export const AssignIdentitySchema = z.object({ identityId: z.string().trim().nullish() });
 
+// ── repo rename / remove ─────────────────────────────────────────────────────────
+/** A repo's display label. null/"" clears it back to the folder name; capped so a pasted essay
+ *  can't wreck the card layout. Cosmetic only — the folder on disk is never renamed. */
+const MAX_REPO_LABEL = 120;
+export const RenameRepoSchema = z.object({
+  displayName: z.string().trim().max(MAX_REPO_LABEL).nullish(),
+});
+
+/** Un-remove a path from the "Removed repos" list (Settings). */
+export const RestorePathSchema = z.object({ absPath: nonEmpty });
+
 // ── Identity Firewall (rules pinning a required identity to a path glob) ──────────
 const MAX_IDENTITY_RULES = 200;
 export const IdentityRulesSchema = z.object({

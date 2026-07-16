@@ -3,11 +3,11 @@ import { existsSync, statSync } from "node:fs";
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import { pathWithin } from "../../paths.ts";
-import { getRepos, getSharedRepos } from "../../db.ts";
+import { getRepos, getSharedRepos, listIgnoredPaths } from "../../db.ts";
 import { effectiveGuest } from "../../auth.ts";
 import { guestRepoView } from "../../share/redact.ts";
 import { jsonError, statusForCode, type ApiErrorCode } from "../../contract.ts";
-import { parseBody, CloneSchema, ReorderSchema } from "../../schemas.ts";
+import { parseBody, CloneSchema, ReorderSchema, RestorePathSchema } from "../../schemas.ts";
 import {
   registerRepo,
   createRepo,
@@ -15,6 +15,7 @@ import {
   reorderRepos,
   fetchAllRepos,
   cleanupMissingRepos,
+  restoreIgnoredPath,
 } from "../../service/index.ts";
 import { repoFromPath, looksLikeGitUrl, deriveCloneName } from "../respond.ts";
 
@@ -77,4 +78,18 @@ export function register(app: Hono, { cfg }: Deps): void {
 
   // Remove every repo entry (any source) whose local path no longer exists on disk.
   app.post("/api/repos/cleanup-missing", (c) => c.json({ ok: true, removed: cleanupMissingRepos() }));
+
+  // ── removed ("don't show me this again") paths ────────────────────────────────
+  // The undo surface for DELETE /api/repos/:id. Without a way back, a mis-click would be
+  // permanent-feeling: the repo is gone from the list and every rescan deliberately refuses to
+  // re-add it, with nothing on screen explaining why.
+  app.get("/api/repos/ignored", (c) => c.json({ paths: listIgnoredPaths() }));
+
+  app.post("/api/repos/ignored/restore", async (c) => {
+    const p = await parseBody(c, RestorePathSchema);
+    if (!p.ok) return p.res;
+    const result = await restoreIgnoredPath(p.data.absPath);
+    if (!result.ok) return c.json(result, statusForCode(result.code as ApiErrorCode));
+    return c.json(result);
+  });
 }

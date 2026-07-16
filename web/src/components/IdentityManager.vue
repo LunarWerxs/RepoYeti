@@ -17,6 +17,16 @@ const { t } = useI18n();
 
 const store = useStore();
 
+// Is the identity feature carrying its weight on its own — i.e. would `identitiesRelevant` still
+// be true with the manual opt-in switched off? Drives the "Hide these" affordance: offering to
+// hide a panel that would immediately re-appear would just look broken.
+const hasRealIdentityUse = computed(
+  () =>
+    store.identities.length >= 2 ||
+    store.identityRules.length > 0 ||
+    store.repos.some((r) => r.identityId),
+);
+
 // editingId drives the inline accordion panel on an EXISTING row (Y3: expand in place,
 // only one row open at a time). showForm is the separate "add new" panel at the bottom of
 // the list, which stays its own affordance since Y3 only concerns editing existing rows.
@@ -184,6 +194,24 @@ async function remove(id: string): Promise<void> {
   <div class="flex flex-col gap-1.5">
     <SettingsGroup :label="$t('identity.title')" :description="$t('identity.description')">
     <div class="flex flex-col gap-3 px-3.5 py-3">
+        <!-- The way back out. This panel is only forced open by the "Set up" opt-in (see
+             IdentitiesSection.vue); without this, turning it on would be one-way and the owner
+             would be stuck with a feature they don't use. Offered only while it ISN'T earning
+             its place on the real signals (2+ identities, a Firewall rule, an assigned repo) —
+             once it is, `identitiesRelevant` is true regardless and hiding would be a lie. -->
+        <div
+          v-if="store.identityUiForced && !hasRealIdentityUse"
+          class="flex items-center justify-between gap-2 rounded-md bg-secondary/50 px-2.5 py-1.5"
+        >
+          <span class="text-[11px] text-muted-foreground">{{ $t("identity.optIn.activeNote") }}</span>
+          <button
+            type="button"
+            class="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground underline-offset-2 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+            @click="store.setIdentityUiForced(false)"
+          >
+            {{ $t("identity.optIn.hide") }}
+          </button>
+        </div>
         <!-- local machine suggestions -->
         <div class="flex items-center justify-between gap-2">
           <div class="text-[12px] font-medium text-muted-foreground">{{ $t("identity.detected.title") }}</div>

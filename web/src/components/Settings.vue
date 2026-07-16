@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Settings as SettingsIcon } from "@lucide/vue";
+import { useStore } from "../store";
 import type { PushPanelSide } from "@/shell/usePushPanel";
 import SettingsPanel from "@/shell/SettingsPanel.vue";
 import SettingsTabs from "@/shell/SettingsTabs.vue";
@@ -30,14 +31,21 @@ const props = withDefaults(
 );
 
 const { t } = useI18n();
+const store = useStore();
 
 // The panel groups its sections into tabs so the everyday knobs (General) aren't
 // buried under the power-user ones (firewall, agent rail, tunnel, AI providers).
+// The `identities` tab id is kept (deep links + persisted state point at it) even though it
+// reads as "Accounts" until identities are actually in use — GitHub accounts are the part of
+// that tab everyone has, and the part everyone means when they go looking for it.
 type TabId = "general" | "identities" | "automation" | "access";
 const tab = ref<TabId>("general");
 const tabs = computed<{ id: TabId; label: string }[]>(() => [
   { id: "general", label: t("settings.tabs.general") },
-  { id: "identities", label: t("settings.tabs.identities") },
+  {
+    id: "identities",
+    label: store.identitiesRelevant ? t("settings.tabs.identities") : t("settings.tabs.accounts"),
+  },
   { id: "automation", label: t("settings.tabs.automation") },
   { id: "access", label: t("settings.tabs.access") },
 ]);
@@ -89,7 +97,9 @@ watch(
       <!-- Identities: git identities, GitHub accounts, ⭐ Identity Firewall ──── -->
       <div v-show="tab === 'identities'" class="flex flex-col gap-4">
         <IdentitiesSection :open="open" />
-        <IdentityFirewallSection :open="open" />
+        <!-- The Firewall pins a REQUIRED identity per path glob — meaningless (and unbuildable:
+             every rule needs an identity to point at) until identities are in play at all. -->
+        <IdentityFirewallSection v-if="store.identitiesRelevant" :open="open" />
       </div>
 
       <!-- Automation: auto-commit, background sync, ⭐ Agent Safety Rail, AI providers ── -->

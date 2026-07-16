@@ -8,7 +8,16 @@ import { existsSync, lstatSync, mkdirSync } from "node:fs";
 import { resolve, join, basename } from "node:path";
 import { pathWithin } from "../paths.ts";
 import { broadcast } from "../bus.ts";
-import { getRepo, getRepos, getIdentity, upsertRepo, deleteRepos } from "../db.ts";
+import {
+  getRepo,
+  getRepos,
+  getIdentity,
+  upsertRepo,
+  deleteRepos,
+  forgetRepo,
+  setRepoDisplayName,
+  unignorePath,
+} from "../db.ts";
 import { discoverStream } from "../discovery.ts";
 import { gitFor } from "../git.ts";
 import { detectVcs } from "../vcs/index.ts";
@@ -76,6 +85,42 @@ export function cleanupMissingRepos(): number {
   return victims.length;
 }
 
+// ── owner-initiated removal + rename ──────────────────────────────────────────────
+/**
+ * "Remove Repo" — drop one repo from the index and stop watching it. The folder and its
+ * git history are NOT touched (RepoYeti never deletes a user's code; the whole product promise is
+ * that uninstalling it leaves every repo where it was).
+ *
+ * The path is tombstoned by default so the next scan can't re-import it — without that, removing
+ * an auto-discovered repo would just make it blink out and come back, which is indistinguishable
+ * from a broken button. Undo via `restoreIgnoredPath`.
+ */
+export function forgetRepoById(id: string, ignore = true): RepoView | null {
+  const repo = forgetRepo(id, ignore);
+  if (!repo) return null;
+  unwatchOne(id);
+  broadcast("repo_removed", { id });
+  return repo;
+}
+
+/** Un-remove a path: drop the tombstone and re-index it immediately if it's still on disk. */
+export async function restoreIgnoredPath(absPath: string): Promise<RepoMutation> {
+  unignorePath(absPath);
+  if (!existsSync(absPath)) {
+    return { ok: true, code: "OK", message: "path restored (folder is no longer on disk)" };
+  }
+  return await registerRepo(absPath);
+}
+
+/** Set/clear a repo's display label (cosmetic only — the folder on disk keeps its own name). */
+export function renameRepoById(id: string, displayName: string | null): RepoView | null {
+  if (!getRepo(id)) return null;
+  setRepoDisplayName(id, displayName);
+  const repo = getRepo(id);
+  if (repo) broadcast("repo_renamed", { id, displayName: repo.displayName });
+  return repo;
+}
+
 // ── manual targeting: register an existing repo, or create a new one ──────────────
 export interface RepoMutation {
   ok: boolean;
@@ -96,6 +141,10 @@ export async function registerRepo(inputPath: string): Promise<RepoMutation> {
   }
   // Only a git worktree has the `.git`-as-file submodule marker; Lore has no submodule concept.
   const isSubmodule = vcs === "git" && lstatSync(join(p, ".git")).isFile();
+  // Pointing at a folder by hand is an explicit "I want this one" — it outranks any earlier
+  // "Remove" tombstone on the same path, which would otherwise make upsertRepo refuse silently
+  // and leave the owner clicking Add on a repo that never appears.
+  unignorePath(p);
   const id = upsertRepo(p, basename(p) || p, "pinned", isSubmodule, vcs);
   if (!id) {
     return {

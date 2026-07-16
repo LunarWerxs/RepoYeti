@@ -178,6 +178,7 @@ test("guestRepoView drops the owner's credential bookkeeping + private flags", (
   const view = guestRepoView({
     id: "r1",
     name: "n",
+    displayName: null,
     absPath: "/x",
     source: "pinned",
     vcs: "git",

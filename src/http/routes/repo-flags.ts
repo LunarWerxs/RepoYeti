@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import { jsonError } from "../../contract.ts";
-import { parseBody, AssignIdentitySchema } from "../../schemas.ts";
+import { parseBody, AssignIdentitySchema, RenameRepoSchema } from "../../schemas.ts";
 import {
   getRepo,
   getIdentity,
@@ -12,10 +12,36 @@ import {
   setRepoStarred,
   setRepoAutoCommit,
 } from "../../db.ts";
+import { forgetRepoById, renameRepoById } from "../../service/index.ts";
 import { broadcast } from "../../bus.ts";
 import { withRepo } from "../respond.ts";
 
 export function register(app: Hono, _deps: Deps): void {
+  // ── rename a repo (display label only — the folder on disk is untouched) ─────
+  app.patch("/api/repos/:id/name", (c) =>
+    withRepo(c, async (repoId) => {
+      const p = await parseBody(c, RenameRepoSchema);
+      if (!p.ok) return p.res;
+      const repo = renameRepoById(repoId, p.data.displayName ?? null);
+      if (!repo) return jsonError(c, "NOT_FOUND", "repo not found");
+      return c.json({ ok: true, repo });
+    }),
+  );
+
+  // ── remove a repo from RepoYeti's index ─────────────────────────────────────
+  //
+  // Index-only: the folder, its working tree and its git history are never touched. `?keep=1`
+  // skips the don't-re-add tombstone (the "forget the row, but a rescan may find it again"
+  // variant) — the default tombstones, so a removed auto-discovered repo actually stays removed.
+  app.delete("/api/repos/:id", (c) =>
+    withRepo(c, async (repoId) => {
+      const ignore = c.req.query("keep") !== "1";
+      const repo = forgetRepoById(repoId, ignore);
+      if (!repo) return jsonError(c, "NOT_FOUND", "repo not found");
+      return c.json({ ok: true, removed: { id: repo.id, name: repo.name, absPath: repo.absPath }, ignored: ignore });
+    }),
+  );
+
   // ── assign identity to a repo ──────────────────────────────────────────────
   app.post("/api/repos/:id/identity", (c) =>
     withRepo(c, async (repoId) => {

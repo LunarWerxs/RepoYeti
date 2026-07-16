@@ -1,6 +1,7 @@
 // Test-only wrapper around src/db.ts upsertRepo. upsertRepo returns `string | null` now (null =
-// refused because the path is under the OS temp dir; see src/paths.ts isUnderTempDir and the
-// owner directive in src/db.ts's upsertRepo doc comment). Every test in this suite seeds its
+// refused, for one of two reasons: the path is under the OS temp dir — see src/paths.ts
+// isUnderTempDir and the owner directive in src/db.ts's upsertRepo doc comment — or the owner
+// removed it and it's tombstoned in `ignored_paths`). Every test in this suite seeds its
 // scratch repos via tests/helpers/scratch.ts's mkScratchDir, which is deliberately NOT under the
 // OS temp dir (see that file's doc comment), so upsertRepo is expected to always succeed here;
 // this helper asserts that and gives callers back a plain `string`, so the ~90 existing call
@@ -20,8 +21,9 @@ export function mustUpsertRepo(
   const id = upsertRepoImpl(absPath, name, source, isSubmodule, vcs);
   if (!id) {
     throw new Error(
-      `mustUpsertRepo: upsertRepo refused "${absPath}" (treated as under the OS temp dir). ` +
-        `Check that this path was created via tests/helpers/scratch.ts's mkScratchDir, not tmpdir().`,
+      `mustUpsertRepo: upsertRepo refused "${absPath}" — either it's treated as under the OS temp ` +
+        `dir (check it was created via tests/helpers/scratch.ts's mkScratchDir, not tmpdir()), or a ` +
+        `previous forgetRepo() in this test tombstoned it (call unignorePath() first).`,
     );
   }
   return id;

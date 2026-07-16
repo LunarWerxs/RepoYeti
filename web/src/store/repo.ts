@@ -252,6 +252,47 @@ export function useRepoActions(
     await api.assignRepoAccount(repoId, host, login);
   }
 
+  /** Set/clear a repo's display label (optimistic; rolls back on failure). Never touches the
+   *  folder on disk — `repo.name` stays the real basename. */
+  async function renameRepo(repoId: string, displayName: string | null): Promise<void> {
+    const prev = repos.value.find((r) => r.id === repoId)?.displayName ?? null;
+    const next = displayName?.trim() ? displayName.trim() : null;
+    patchRepo(repoId, { displayName: next }); // optimistic
+    try {
+      await api.renameRepo(repoId, next);
+    } catch (e) {
+      patchRepo(repoId, { displayName: prev }); // roll back
+      throw e;
+    }
+  }
+
+  /**
+   * Remove a repo from RepoYeti's index. Index-only: the folder and its git history are never
+   * touched. Drops the card immediately; the daemon's `repo_removed` SSE echo keeps other
+   * devices in step. Returns the removed repo so the caller can offer an Undo.
+   */
+  async function removeRepo(repoId: string): Promise<Repo | null> {
+    const removed = repos.value.find((r) => r.id === repoId) ?? null;
+    repos.value = repos.value.filter((r) => r.id !== repoId); // optimistic
+    try {
+      await api.removeRepo(repoId);
+      return removed;
+    } catch (e) {
+      if (removed) repos.value.push(removed); // roll back
+      throw e;
+    }
+  }
+
+  /** Undo a removal: drop the tombstone and re-index the path if it's still on disk. */
+  async function restoreRemovedRepo(absPath: string): Promise<void> {
+    const r = await api.restoreIgnoredPath(absPath);
+    if (r.repo) {
+      const idx = repos.value.findIndex((x) => x.id === r.repo!.id);
+      if (idx >= 0) repos.value[idx] = r.repo;
+      else repos.value.push(r.repo);
+    }
+  }
+
   /** Hide/unhide a repo from the dashboard (optimistic; rolls back on failure). */
   async function setHidden(repoId: string, hidden: boolean): Promise<void> {
     patchRepo(repoId, { hidden }); // optimistic
@@ -325,6 +366,9 @@ export function useRepoActions(
     commitSelected,
     assignIdentity,
     assignRepoAccount,
+    renameRepo,
+    removeRepo,
+    restoreRemovedRepo,
     setHidden,
     setPinned,
     setStarred,

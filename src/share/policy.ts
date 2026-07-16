@@ -133,13 +133,20 @@ export const OWNER_ONLY: readonly string[] = [
   // access mode / tunnel
   "PUT /api/mode",
   "PUT /api/tunnel",
-  // repo inventory management
+  // repo inventory management — a guest sees a scoped VIEW of the owner's list, so editing that
+  // list (renaming a card, removing one, or reading/undoing what the owner removed) is the
+  // owner's alone. Nothing here is destructive to the repo itself, but all of it is the owner's
+  // organisation of their own dashboard.
   "POST /api/repos/register",
   "POST /api/repos/create",
   "POST /api/repos/clone",
   "POST /api/repos/reorder",
   "POST /api/repos/fetch-all",
   "POST /api/repos/cleanup-missing",
+  "PATCH /api/repos/:id/name",
+  "DELETE /api/repos/:id",
+  "GET /api/repos/ignored",
+  "POST /api/repos/ignored/restore",
   // discovery
   "GET /api/roots",
   "POST /api/roots",

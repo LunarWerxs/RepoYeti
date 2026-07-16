@@ -160,6 +160,9 @@ export const useStore = defineStore("repoyeti", () => {
     commitSelected,
     assignIdentity,
     assignRepoAccount,
+    renameRepo,
+    removeRepo,
+    restoreRemovedRepo,
     setHidden,
     setPinned,
     setStarred,
@@ -245,6 +248,9 @@ export const useStore = defineStore("repoyeti", () => {
     detectedIdentitiesLoading,
     detectedIdentitiesReady,
     identityById,
+    identitiesRelevant,
+    identityUiForced,
+    setIdentityUiForced,
     createIdentity,
     updateIdentity,
     removeIdentity,
@@ -494,6 +500,7 @@ export const useStore = defineStore("repoyeti", () => {
         "repo_state_changed",
         "repo_added",
         "repo_removed",
+        "repo_renamed",
         "repo_identity_changed",
         "identity_rules_changed",
         "repo_account_changed",
@@ -531,8 +538,11 @@ export const useStore = defineStore("repoyeti", () => {
             else repos.value.push(repo);
           }
         } else if (event.value === "repo_removed") {
-          // A scan root was removed → its auto repos are forgotten. Drop the card live.
+          // A scan root was removed, or the owner removed this repo. Drop the card live.
           if (payload.id) repos.value = repos.value.filter((r) => r.id !== payload.id);
+        } else if (event.value === "repo_renamed") {
+          // Renamed on another device — adopt the new label live.
+          patchRepo(payload.id, { displayName: payload.displayName ?? null });
         } else if (event.value === "repo_identity_changed")
           patchRepo(payload.id, { identityId: payload.identityId });
         else if (event.value === "identity_rules_changed") {
@@ -647,6 +657,9 @@ export const useStore = defineStore("repoyeti", () => {
   return {
     repos,
     identities,
+    identitiesRelevant,
+    identityUiForced,
+    setIdentityUiForced,
     detectedIdentities,
     dismissedDetectedIdentities,
     detectedIdentitiesLoading,
@@ -848,6 +861,9 @@ export const useStore = defineStore("repoyeti", () => {
     needsAttentionRepos,
     visibleAttentionRepos,
     dismissAttention,
+    renameRepo,
+    removeRepo,
+    restoreRemovedRepo,
     setHidden,
     setPinned,
     setStarred,

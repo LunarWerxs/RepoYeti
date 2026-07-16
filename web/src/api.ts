@@ -474,6 +474,26 @@ export const api = {
   assignRepoAccount: (repoId: string, host: string | null, login: string | null) =>
     req<{ repo: Repo }>("POST", `/api/repos/${repoId}/account`, { host, login }).then((r) => r.repo),
 
+  /** Set (or clear, with null) a repo's display label. Cosmetic — never renames the folder. */
+  renameRepo: (repoId: string, displayName: string | null) =>
+    req<{ repo: Repo }>("PATCH", `/api/repos/${repoId}/name`, { displayName }).then((r) => r.repo),
+
+  /** Remove a repo from RepoYeti's index. The folder and its git history are NOT touched.
+   *  Tombstones the path by default so a rescan can't re-add it; `keep` skips that. */
+  removeRepo: (repoId: string, opts?: { keep?: boolean }) =>
+    req<{ ok: boolean; removed: { id: string; name: string; absPath: string } }>(
+      "DELETE",
+      `/api/repos/${repoId}${opts?.keep ? "?keep=1" : ""}`,
+    ),
+
+  /** The owner's removed-path list, and the undo for it (Settings → Removed repos). */
+  listIgnoredPaths: () =>
+    req<{ paths: Array<{ absPath: string; name: string; ignoredAt: number }> }>("GET", "/api/repos/ignored").then(
+      (r) => r.paths,
+    ),
+  restoreIgnoredPath: (absPath: string) =>
+    req<{ ok: boolean; repo?: Repo }>("POST", "/api/repos/ignored/restore", { absPath }),
+
   setHidden: (repoId: string, hidden: boolean) =>
     req<{ repo: Repo }>("POST", `/api/repos/${repoId}/hidden`, { hidden }).then((r) => r.repo),
 
