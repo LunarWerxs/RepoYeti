@@ -65,6 +65,25 @@ import { invalidAiKeys } from "../../ai-keycheck.ts";
 import { effectiveGuest } from "../../auth.ts";
 
 /**
+ * First-run outer size of the portable app window (what Chromium's `--window-size` takes).
+ * Only applies to a window the dedicated profile has NEVER seen — the kit's
+ * openPortableWindow probes the profile's saved placement first, so a size the user picked
+ * themselves (or a maximize) wins on every later launch. Without it, a never-seen window
+ * opens at Chromium's default of ~the whole work area (~1905x2092 on a 4K display).
+ *
+ * Measured against the real dashboard, not guessed. Width: the layout hard-caps content at
+ * `--container-max` = 800px (web/src/styles/kit-base.css, applied by
+ * web/src/shell/AppContainer.vue), so 800px container + 15px scrollbar + ~16px frame = 831
+ * outer is the floor below which the design width gets cropped. Height is a density pick,
+ * not a content hug (the repo list scrolls): a 718px viewport fits the ~55px header, the
+ * filter row and ~9 collapsed 58px repo cards — 760 outer (outer = viewport + ~34 title +
+ * ~8 frame height; Chromium draws its title bar inside the client area). The tray's cold
+ * start carries the same numbers (misc/RepoYeti-Tray.ps1 PortableWindowSize) — keep them
+ * in step.
+ */
+export const PORTABLE_WINDOW_SIZE = { width: 840, height: 760 };
+
+/**
  * Resolve `loreServersEnabled`, deriving + persisting a one-time default on first read so
  * existing owners with servers already configured don't see the section suddenly collapse
  * (see RepoYetiConfig.loreServersEnabled).
@@ -410,7 +429,7 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
     // in — so this and the tray launcher (which reads the same runtime.json path) always
     // agree, and REPOYETI_HOME is honoured automatically.
     const profileDir = join(dirname(instanceFilePath()), "portable-profile");
-    const result = await openPortableWindow(url, { profileDir });
+    const result = await openPortableWindow(url, { profileDir, initialSize: PORTABLE_WINDOW_SIZE });
     return c.json(result);
   });
 }
