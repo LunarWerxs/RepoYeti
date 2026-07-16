@@ -21,7 +21,7 @@ import {
   API_TOKEN,
 } from "./secrets.ts";
 
-export const VERSION = "0.6.0";
+export const VERSION = "0.6.1";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
