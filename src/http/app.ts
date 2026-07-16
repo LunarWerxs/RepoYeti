@@ -7,7 +7,8 @@
  */
 import { Hono } from "hono";
 import type { RepoYetiConfig } from "../config.ts";
-import { authMiddleware } from "../auth.ts";
+import { authMiddleware, isRemoteRequest } from "../auth.ts";
+import { loopbackGuard } from "./loopback-guard.ts";
 import { mountWeb } from "./web.ts";
 import type { Deps } from "./deps.ts";
 import { setDiffStatsEnabled } from "../read/diffstat.ts";
@@ -118,6 +119,16 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
 
   const app = new Hono();
 
+  // CSRF / drive-by-RCE guard for the OPEN loopback path. In local mode the /api/* surface is
+  // unauthenticated, so a malicious web page the owner visits could POST /api/repos/:id/remote,
+  // /api/repos/clone, a commit + push, etc. and drive `git` with the owner's credentials — a
+  // drive-by RCE. loopbackGuard rejects browser cross-site requests (Sec-Fetch-Site: cross-site,
+  // non-loopback Origin, non-loopback Host — also catches the simple-request CORS bypass and
+  // DNS-rebinding). It runs ONLY on the local path: a genuine tunnel request (isRemoteRequest)
+  // legitimately carries a non-loopback Host/Origin and is already CSRF-gated by the SameSite
+  // session cookie + authMiddleware, so the loopback guard must skip it. Registered BEFORE the auth
+  // gate so the cheap provenance check fronts it. See src/http/loopback-guard.ts.
+  app.use("/api/*", (c, next) => (isRemoteRequest(c) ? next() : loopbackGuard(c, next)));
   // Auth gate — applies to /api/* only; no-op when OIDC isn't configured (local mode).
   // MUST be registered first so it fronts every /api/* route below.
   app.use("/api/*", authMiddleware(cfg));
