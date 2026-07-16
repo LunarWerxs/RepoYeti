@@ -6,6 +6,8 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-15
+
 ### Added
 
 - **Rename and Remove, on every repo card** (overflow menu). Two things the dashboard simply had no
@@ -49,6 +51,18 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Fixed
 
+- A scripted rebuild (`misc\Restart-Daemon.ps1` + `misc\Wait-Daemon.ps1`) can no longer end with
+  RepoYeti not running at all. The restart killed only the daemon, so the old tray host survived
+  with its auto-restart watchdog armed, and the relaunch raced it with a second tray host — a fight
+  that on 2026-07-15 left zero instances within ~90 seconds. The old tray host is now a first-class
+  kill target (found by its `RepoYeti-Tray.ps1` command line, killed before the daemon so no
+  watchdog interferes), the replacement is launched detached via WMI so closing the terminal that
+  ran the rebuild no longer tears the app down with it, and `Wait-Daemon.ps1` only declares victory
+  after the new daemon stays up — same process, still answering — through a 30-second stability
+  hold instead of one second after boot. Also fixed on the way: under Windows PowerShell 5.1 both
+  scripts died at startup ("empty string" from `Split-Path`), because a `[CmdletBinding()]` script
+  evaluates parameter defaults before `$PSScriptRoot` exists; the root now resolves in the body.
+  (Shared tray-host kit files — the same fix landed in lunarwerx-ui and all four apps.)
 - Smart Commit no longer reports a deleted line as a deleted function. It read each change with no
   surrounding lines, so a file whose only edit was dropping an unused local arrived as a lone
   deletion under a header naming the enclosing function — and the message said the function had
