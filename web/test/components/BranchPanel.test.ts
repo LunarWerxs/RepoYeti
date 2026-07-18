@@ -150,7 +150,7 @@ describe("BranchPanel.vue", () => {
 
     expect(toast.error).toHaveBeenCalledOnce();
     const [message] = vi.mocked(toast.error).mock.calls[0]!;
-    expect(message).toBe("That branch is protected — delete it at your desk.");
+    expect(message).toBe("That branch is protected. Delete it at your desk.");
     expect(message).not.toBe("PROTECTED_BRANCH");
     expect(message).not.toBe("raw");
   });

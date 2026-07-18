@@ -9,7 +9,7 @@ test("dashboard connects to the live-update SSE stream", async ({ page }) => {
 
   // The connection status is a role="status" node whose aria-label flips to this once the
   // EventSource handshake completes (driven by the daemon over the proxied /api SSE endpoint).
-  await expect(page.getByRole("status", { name: "Connected — live updates" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Connected: live updates" })).toBeVisible();
 
   // And the repo list rendered, which only happens after the proxied API + SSE returned data.
   await expect(page.getByText(/\d+ repos?/)).toBeVisible();
