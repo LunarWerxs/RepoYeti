@@ -1,7 +1,14 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
-import { VERSION, accessMode, redactTunnel, saveConfig, type RepoYetiConfig } from "../../config.ts";
-import { getTunnelUrl, tunnelActive } from "../../runtime.ts";
+import {
+  VERSION,
+  accessMode,
+  redactTunnel,
+  redactRelay,
+  saveConfig,
+  type RepoYetiConfig,
+} from "../../config.ts";
+import { getTunnelUrl, tunnelActive, getRelayBase, getRelayStatus } from "../../runtime.ts";
 import { broadcast } from "../../bus.ts";
 import {
   readInstanceInfo,
@@ -150,6 +157,13 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       // Redacted named-tunnel config (hostname + token-presence flags) so the Settings UI can show
       // the stable-address state on first load. NEVER the token bytes — see redactTunnel().
       tunnel: redactTunnel(cfg),
+      // Relay opt-in state, and the permanent forwarding URL it yields once registered. Redacted:
+      // the relay identity's PRIVATE key stays on this machine — see redactRelay(). Owner-only,
+      // deliberately absent from the guest projection above: where the daemon publishes itself is
+      // the owner's configuration, and a guest already has the address they arrived on.
+      relay: redactRelay(cfg),
+      relayUrl: getRelayBase(cfg),
+      relayAnnounced: getRelayStatus().announced,
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
       // Large-file Diff threshold (bytes) — owner setting; the viewer compares file size to it.

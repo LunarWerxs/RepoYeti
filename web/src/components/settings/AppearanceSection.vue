@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { changesViewSize } from "@/lib/changes-view";
+import { historyFilesView } from "@/lib/history-view";
 import { useTheme } from "@/lib/theme";
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
@@ -122,6 +123,18 @@ async function onHideTrayIcon(enabled: boolean): Promise<void> {
         <Switch v-model="tooltipsEnabled" :aria-label="$t('settings.showTooltips')" />
       </template>
     </SettingsRow>
+    <!-- History detail: changed files as a nested folder tree (default) or a flat path list.
+         Client-side view preference (localStorage) — see @/lib/history-view. -->
+    <SettingsRow :label="$t('settings.historyFilesTree')">
+      <template #info><InfoHint :text="$t('settings.historyFilesTreeHint')" /></template>
+      <template #control>
+        <Switch
+          :model-value="historyFilesView === 'tree'"
+          :aria-label="$t('settings.historyFilesTree')"
+          @update:model-value="(v: boolean) => (historyFilesView = v ? 'tree' : 'list')"
+        />
+      </template>
+    </SettingsRow>
     <SettingsRow :label="$t('settings.portableWindow')">
       <template #info><InfoHint :text="$t('settings.portableWindowHint')" /></template>
       <template #control>
@@ -155,10 +168,8 @@ async function onHideTrayIcon(enabled: boolean): Promise<void> {
         </Select>
       </template>
     </SettingsRow>
-  </SettingsGroup>
-
-  <!-- Diffs ─────────────────────────────────────────────────────── -->
-  <SettingsGroup :label="$t('settings.cardDiffs')">
+    <!-- Diff display rows live in this same group — they're every bit "how things look",
+         and a separate two-row "Diffs" header was one lone-header section too many. -->
     <SettingsRow :label="$t('settings.diffStats')">
       <template #info><InfoHint :text="$t('settings.diffStatsHint')" /></template>
       <template #control>
@@ -199,3 +210,4 @@ async function onHideTrayIcon(enabled: boolean): Promise<void> {
     </ExpandTransition>
   </SettingsGroup>
 </template>
+

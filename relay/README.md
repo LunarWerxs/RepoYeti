@@ -86,7 +86,12 @@ wrangler deploy
 
 ## Point RepoYeti at it
 
-In the daemon's `~/.repoyeti/config.json`:
+**Settings → Remote access → Permanent link.** Turning it on adopts the deployed instance above,
+mints this daemon's keypair, announces immediately, and shows the permanent URL to copy. Share
+links minted from then on use that address. If you deployed your own, put it under *Use a different
+relay* in the same panel.
+
+Equivalently, in `~/.repoyeti/config.json`:
 
 ```json
 {
@@ -98,6 +103,8 @@ In the daemon's `~/.repoyeti/config.json`:
 ```
 
 Leave `identity` alone — the daemon mints its own keypair on first announce and writes it there.
+Deleting it registers a NEW id next time, which breaks every link already handed out; turning the
+relay off in Settings deliberately keeps it for that reason.
 
 **Off by default, deliberately.** A self-hosted tool should not phone anywhere unless asked. When
 enabled, the only thing that ever leaves the machine is `(id, origin, timestamp, signature)`: no

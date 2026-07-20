@@ -23,6 +23,7 @@ import { gitFor } from "../git.ts";
 import { detectVcs } from "../vcs/index.ts";
 import { loreClone } from "../vcs/lore.ts";
 import { gitClone } from "../git-actions.ts";
+import { authForCloneUrl } from "../gh-account.ts";
 import type { RepoView } from "../db.ts";
 import { refreshRepo } from "./core.ts";
 import { watchOne, unwatchOne } from "./watch.ts";
@@ -171,7 +172,10 @@ export async function cloneRepo(
   identityId: string | null,
 ): Promise<RepoMutation> {
   const identity = identityId ? getIdentity(identityId) : null;
-  const res = await gitClone(parentAbs, url, name, identity);
+  // Clone the same way a sync authenticates: as the account that owns the URL, when that account
+  // is one of ours. Best-effort — an org/third-party URL resolves to nothing and clones as before.
+  const auth = await authForCloneUrl(url).catch(() => null);
+  const res = await gitClone(parentAbs, url, name, identity, auth);
   if (!res.ok) return { ok: false, code: res.code, message: res.message };
   const dest = join(parentAbs, name);
   const id = upsertRepo(dest, name, "created", false);

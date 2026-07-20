@@ -13,7 +13,9 @@
  *      helper keep serving the OLD account's token, so the switch silently doesn't "stick". Only for
  *      https accounts — ssh auth never consults the credential helper.
  *
- * We never pass `--show-token`, so no token material ever crosses this boundary.
+ * TOKEN MATERIAL. `accountsSnapshot`/`switchGhAccount` never pass `--show-token`, so no token
+ * crosses that path. `ghTokenFor` below is the deliberate, narrow exception — see its comment for
+ * why per-repo sync could not be built without it, and what is done to keep the blast radius small.
  */
 
 interface RunResult {
@@ -119,15 +121,78 @@ export async function readGitCommitIdentity(): Promise<{ name: string; email: st
   return { name: name.stdout, email: email.stdout };
 }
 
+/**
+ * Short-lived memo of the account snapshot. Contains NO secrets — logins, hosts, scope names and
+ * the global git author, all of which `gh auth status` prints to a terminal — so unlike a token it
+ * is safe to hold (see ghTokenFor's note on why the token deliberately is not).
+ *
+ * It exists because this is now on the path of every network op: "Fetch all" across 50 repos would
+ * otherwise run `gh auth status` plus two `git config` reads 50 times over. The window is small
+ * enough that an account added in another terminal shows up promptly, and any switch made through
+ * RepoYeti invalidates it outright.
+ */
+const SNAPSHOT_TTL_MS = 10_000;
+let snapshotMemo: { at: number; value: AccountsSnapshot } | null = null;
+
+/** Drop the memo — call after anything that changes gh's account state. */
+export function invalidateAccountsSnapshot(): void {
+  snapshotMemo = null;
+}
+
 /** Read the current account snapshot (gh accounts + which is active + the global git author). */
 export async function accountsSnapshot(): Promise<AccountsSnapshot> {
+  const memo = snapshotMemo;
+  if (memo && Date.now() - memo.at < SNAPSHOT_TTL_MS) return memo.value;
   const [status, commitIdentity] = await Promise.all([
     run(["gh", "auth", "status", "--json", "hosts"], 6000),
     readGitCommitIdentity(),
   ]);
   // gh prints the JSON to stdout on success; fall back to stderr defensively.
   const accounts = parseGhAccounts(status.stdout || status.stderr);
-  return { ghAvailable: status.spawned, accounts, commitIdentity };
+  const value = { ghAvailable: status.spawned, accounts, commitIdentity };
+  snapshotMemo = { at: Date.now(), value };
+  return value;
+}
+
+/**
+ * A GitHub login as `gh` reports it. Restricted to GitHub's own alphabet because this value is
+ * interpolated into a `-c credential.helper=...` shell snippet (see credentialConfigArgs in git.ts);
+ * anything outside this set is refused rather than escaped.
+ */
+const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+
+export function isValidLogin(login: string): boolean {
+  return LOGIN_RE.test(login);
+}
+
+/**
+ * The token for ONE account, active or not.
+ *
+ * WHY THIS EXISTS: `gh auth git-credential` only ever serves gh's ACTIVE account. Asked for any
+ * other login it declines — even when gh holds a perfectly good token for it — which is exactly
+ * why a repo pinned to a non-active account failed to sync with "could not read Password". The
+ * only alternatives were to flip the machine's active account around every network op (a global
+ * side effect, racy across concurrent ops, and visible to every other tool on the machine) or to
+ * fetch the one token we need and hand it to that single git invocation. This is the latter.
+ *
+ * BLAST RADIUS: the value is returned to callers that put it in a CHILD PROCESS ENV and nowhere
+ * else — never argv (world-readable in a process list), never disk, never a log line, never an
+ * HTTP response. It is already obtainable by anything running as this user (`gh auth token`), so
+ * holding it for the duration of one fetch does not lower the bar for an attacker already inside
+ * that boundary.
+ *
+ * DELIBERATELY NOT CACHED. Caching would be the obvious optimisation, and ARCHITECTURE.md's Secrets
+ * section rules it out for exactly this class of value: a git credential is "resolved into a process
+ * env var immediately before the git subprocess call, never assigned to a module-level variable".
+ * A cache is a module-level variable holding a live credential, so the token is re-read per
+ * operation. The cost that motivated caching is paid off elsewhere instead — accountsSnapshot()
+ * memoises the account LIST, which holds no secrets and was the heavier of the two calls.
+ */
+export async function ghTokenFor(host: string, login: string): Promise<string | null> {
+  if (!isValidLogin(login)) return null;
+  const res = await run(["gh", "auth", "token", "--hostname", host, "--user", login], 5000);
+  // gh prints the token on stdout; a failure prints guidance on stderr, which we never surface.
+  return (res.ok && res.stdout.trim()) || null;
 }
 
 export type SwitchResult =
@@ -154,6 +219,7 @@ export async function switchGhAccount(
   login: string,
   applyAuthor?: { name: string; email: string } | null,
 ): Promise<SwitchResult> {
+  invalidateAccountsSnapshot(); // decide against live state, not a memo from a moment ago
   const before = await accountsSnapshot();
   if (!before.ghAvailable) {
     return { ok: false, code: "NOT_CONFIGURED", message: "GitHub CLI (gh) is not installed or not on PATH" };
@@ -172,6 +238,7 @@ export async function switchGhAccount(
   }
 
   const switched = await run(["gh", "auth", "switch", "--hostname", host, "--user", login], 8000);
+  invalidateAccountsSnapshot(); // the active flag just moved; never serve the pre-switch view
   if (!switched.ok) {
     return { ok: false, code: "ERROR", message: switched.stderr || switched.stdout || "gh auth switch failed" };
   }

@@ -192,7 +192,9 @@ async function remove(id: string): Promise<void> {
 
 <template>
   <div class="flex flex-col gap-1.5">
-    <SettingsGroup :label="$t('identity.title')" :description="$t('identity.description')">
+    <!-- Plural key: this is the multi-identity MANAGER (identitiesRelevant), while the singular
+         `identity.title` heads the one-row opt-in group in IdentitiesSection. -->
+    <SettingsGroup :label="$t('identity.titlePlural')" :description="$t('identity.description')">
     <div class="flex flex-col gap-3 px-3.5 py-3">
         <!-- The way back out. This panel is only forced open by the "Set up" opt-in (see
              IdentitiesSection.vue); without this, turning it on would be one-way and the owner
@@ -235,15 +237,17 @@ async function remove(id: string): Promise<void> {
             </button>
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  :aria-label="$t('identity.detected.refresh')"
-                  :disabled="store.detectedIdentitiesLoading"
-                  @click="store.loadDetectedIdentities()"
-                >
-                  <RefreshCw :class="store.detectedIdentitiesLoading && 'animate-spin'" />
-                </Button>
+                <span class="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    :aria-label="$t('identity.detected.refresh')"
+                    :disabled="store.detectedIdentitiesLoading"
+                    @click="store.loadDetectedIdentities()"
+                  >
+                    <RefreshCw :class="store.detectedIdentitiesLoading && 'animate-spin'" />
+                  </Button>
+                </span>
               </TooltipTrigger>
               <TooltipContent>{{ $t("identity.detected.refresh") }}</TooltipContent>
             </Tooltip>

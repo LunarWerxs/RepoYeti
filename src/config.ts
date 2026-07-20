@@ -649,6 +649,38 @@ export function redactTunnel(cfg: RepoYetiConfig): RedactedTunnelConfig {
 }
 
 /**
+ * The relay the Settings toggle points at unless the owner names their own.
+ *
+ * A relay is only useful if one is actually reachable, and asking someone to deploy a Cloudflare
+ * Worker before they can keep a share link alive is the same as not shipping the feature. This is
+ * the instance documented in relay/README.md; the field stays editable for anyone self-hosting.
+ */
+export const DEFAULT_RELAY_URL = "https://repoyeti-relay.lunawerx.workers.dev";
+
+/** Key-free projection of the relay config, safe to send to the owner's UI. NEVER the private key —
+ *  that half is what proves only this machine may move its own forwarding address. */
+export interface RedactedRelayConfig {
+  /** Owner opted in. */
+  enabled: boolean;
+  /** Base URL of the relay in use, or null when none is configured. */
+  url: string | null;
+  /** This daemon's public relay id — it appears in every relay share URL, so it is not a secret. */
+  id: string | null;
+  /** What the URL field offers when the owner has not named their own relay. */
+  defaultUrl: string;
+}
+
+/** Redact the relay config for the API: opt-in flag, base URL and public id — never the keypair. */
+export function redactRelay(cfg: RepoYetiConfig): RedactedRelayConfig {
+  return {
+    enabled: cfg.relay?.enabled === true,
+    url: cfg.relay?.url?.trim() || null,
+    id: cfg.relay?.identity?.id ?? null,
+    defaultUrl: DEFAULT_RELAY_URL,
+  };
+}
+
+/**
  * One-time migration of pre-rename state (back when RepoYeti was "GitMob"): move
  * ~/.gitmob → ~/.repoyeti and rename the gitmob.db files inside. Only runs for the
  * DEFAULT home — an explicit REPOYETI_HOME (tests / relocation) opts out. Best-effort:

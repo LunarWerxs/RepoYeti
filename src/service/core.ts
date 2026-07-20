@@ -10,7 +10,8 @@ import { broadcast } from "../bus.ts";
 import { getRepo, setRepoStatus, setRepoOrder } from "../db.ts";
 import { resolveRepoIdentity, enforceIdentityPolicy } from "../identity.ts";
 import { backendFor } from "../vcs/index.ts";
-import { switchGhAccount } from "../gh-cli.ts";
+import { authForRepo } from "../gh-account.ts";
+import type { GitHubAuth } from "../git.ts";
 import type { VcsBackend } from "../vcs/types.ts";
 import type { ActionResult } from "../git-actions.ts";
 import type { Identity, RepoView } from "../db.ts";
@@ -37,20 +38,33 @@ export interface ActionOutcome extends ActionResult {
   repoId: string;
 }
 
-type VcsAction = (backend: VcsBackend, absPath: string, identity: Identity | null) => Promise<ActionResult>;
+type VcsAction = (
+  backend: VcsBackend,
+  absPath: string,
+  identity: Identity | null,
+  auth: GitHubAuth | null,
+) => Promise<ActionResult>;
 
 /**
- * Before a repo's NETWORK op, make the machine's active GitHub account match the repo's pinned
- * "sync account" (if it has one) so push/pull/fetch authenticate as the right account. Best-effort:
- * a no-op when unpinned or already active, and a failed switch (gh missing, account gone) does NOT
- * block the op — the git action just proceeds under whatever account is active and surfaces its own
- * error. Switching is global (gh has one active account), so the last-synced repo's account stays
- * active until the next repo op flips it — exactly what "each repo syncs as its own account,
- * automatically" needs.
+ * The GitHub credential a repo's NETWORK op should run under, or null to leave it alone.
+ *
+ * This used to flip the machine's ACTIVE gh account before the op (and never put it back), which
+ * was wrong in three ways worth remembering, because they are why it is done differently now:
+ *
+ *   - It never restored, so the last repo synced left its account active for every other tool on
+ *     the machine — terminals, agents, editors — until something else flipped it.
+ *   - It raced. netGate lets several network ops run at once and opqueue only serialises PER repo,
+ *     so two repos with different accounts could interleave and op B would authenticate as A.
+ *   - It only fired for an EXPLICIT pin, so the common case — a repo whose own git config already
+ *     names its account — got nothing, and failed with "could not read Password" while the account
+ *     it wanted sat right there in `gh auth status`.
+ *
+ * Resolving a token and injecting it into the single git child process fixes all three: no global
+ * state is touched, concurrent ops can each use a different account, and the answer can come from
+ * the repo itself rather than only from an explicit pin (see gh-account.ts).
  */
-export async function ensureRepoAccount(repo: RepoView): Promise<void> {
-  if (!repo.syncAccountLogin) return;
-  await switchGhAccount(repo.syncAccountHost || "github.com", repo.syncAccountLogin).catch(() => {});
+export async function accountAuthFor(repo: RepoView): Promise<GitHubAuth | null> {
+  return authForRepo(repo).catch(() => null);
 }
 
 export async function runAction(
@@ -65,14 +79,14 @@ export async function runAction(
     return { ok: false, code: "SUBMODULE_NOT_ACTIONABLE", message: "submodule worktree is not actionable", repoId };
   }
   // ⭐ Identity Firewall: block before any network/commit op if this repo violates a pinned
-  // identity rule. Checked BEFORE ensureRepoAccount so a policy violation never even switches
-  // the machine's active gh account for a blocked repo.
+  // identity rule. Checked BEFORE any credential is resolved, so a blocked repo never causes a
+  // token to be read for it at all.
   const violation = enforceIdentityPolicy(repo);
   if (violation) return { ...violation, repoId };
-  if (syncAccount) await ensureRepoAccount(repo);
+  const auth = syncAccount ? await accountAuthFor(repo) : null;
   const identity = resolveRepoIdentity(repo);
   const backend = backendFor(repo.vcs);
-  const result = await enqueue(repoId, () => action(backend, repo.absPath, identity));
+  const result = await enqueue(repoId, () => action(backend, repo.absPath, identity, auth));
   // Reflect the new reality (ahead/behind/dirty) to all clients.
   await refreshRepo(repoId, repo.absPath, markFetched && result.ok);
   return { ...result, repoId };

@@ -12,12 +12,14 @@ import { History, ChevronDown, Loader2, RefreshCw, GitMerge, Copy, CornerDownRig
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
 import { api, ApiError } from "../api";
-import { fromNow } from "@/lib/util";
+import { fromNow, buildChangeTree } from "@/lib/util";
 import { cn } from "@/lib/utils";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 import { computeGraph, type GraphCommit, type GraphLink } from "@/lib/git-graph";
 import { statusColor } from "@/lib/git-status-colors";
 import { openFile, isViewing } from "@/lib/file-viewer";
+import { historyFilesView } from "@/lib/history-view";
+import CommitFilesTree from "./CommitFilesTree.vue";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ContextMenu,
@@ -26,7 +28,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
-import type { ChangedFile, CommitDetail, LogEntry } from "../types";
+import type { ChangedFile, CommitDetail, LogEntry, TreeNode } from "../types";
 
 const props = defineProps<{ repoId: string }>();
 const store = useStore();
@@ -330,6 +332,21 @@ const detailFiles = computed<DetailFile[]>(() => {
   if (!d?.ok) return [];
   return d.files.map((f) => ({ status: f.status, path: f.path, from: f.from, adds: f.adds, dels: f.dels }));
 });
+
+/** The same files as a compressed folder tree (Appearance → "History files as folder tree").
+ *  Reuses the Changes panel's builder so folder compression + dirs-first sorting match; the
+ *  numstat counts ride in as a lines-only DiffStat. Built lazily — list view never pays for it. */
+const detailTree = computed<TreeNode[]>(() =>
+  historyFilesView.value === "tree"
+    ? buildChangeTree(detailFiles.value.map((f) => ({
+        path: f.path,
+        status: f.status,
+        staged: false,
+        from: f.from,
+        stat: { addedLines: f.adds, removedLines: f.dels, addedChars: 0, removedChars: 0 },
+      })))
+    : [],
+);
 
 /** Open a changed file in the shared Monaco viewer, showing its diff AT this commit. */
 function openCommitFile(f: DetailFile): void {
@@ -830,8 +847,19 @@ watch(
                       </button>
                     </template>
                   </div>
-                  <!-- changed files — click one to open it in the shared Monaco viewer (diff at this commit) -->
-                  <div v-if="detailFiles.length" class="overflow-hidden rounded-md border border-border">
+                  <!-- changed files — folder tree or flat list (Appearance → "History files as
+                       folder tree"); either way a click opens the shared Monaco viewer with the
+                       file's diff AT this commit. -->
+                  <div v-if="detailFiles.length && historyFilesView === 'tree'" class="overflow-hidden rounded-md border border-border py-0.5">
+                    <CommitFilesTree
+                      :nodes="detailTree"
+                      @open="(n) => openCommitFile({ status: n.status ?? 'M', path: n.path, adds: 0, dels: 0 })"
+                      @editor="editFile"
+                      @reveal="revealFile"
+                      @copy-path="copyFilePath"
+                    />
+                  </div>
+                  <div v-else-if="detailFiles.length" class="overflow-hidden rounded-md border border-border">
                     <ContextMenu v-for="f in detailFiles" :key="f.path">
                       <ContextMenuTrigger as-child>
                         <button

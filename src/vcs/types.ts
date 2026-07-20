@@ -13,6 +13,7 @@
  * later stays mechanical rather than a rewrite.
  */
 import type { Identity, RepoStatus } from "../db.ts";
+import type { GitHubAuth } from "../git.ts";
 import type { ChangedFile } from "../read/status.ts";
 import type { ActionResult, CommitGroupSpec, CommitGroupsResult } from "../contract.ts";
 import type { BranchList, LogResult, StashList, CommitDetail, MergeFilter, RefScope } from "../read/inspect.ts";
@@ -67,9 +68,13 @@ export interface VcsBackend {
   readChanges(absPath: string, withStats?: boolean): Promise<ChangedFile[]>;
 
   // ── safe remote/commit actions (identity injected per-op) ──
-  fetch(absPath: string, identity: Identity | null): Promise<ActionResult>;
-  pull(absPath: string, identity: Identity | null): Promise<ActionResult>;
-  push(absPath: string, identity: Identity | null): Promise<ActionResult>;
+  // `auth` is the GitHub account this repo syncs as, injected per-op as a credential helper for
+  // https remotes (see git.ts credentialConfigArgs). Null = run under whatever credential helper the
+  // machine already has, which is the pre-existing behaviour. Backends whose VCS has its own auth
+  // model (Lore) ignore it.
+  fetch(absPath: string, identity: Identity | null, auth?: GitHubAuth | null): Promise<ActionResult>;
+  pull(absPath: string, identity: Identity | null, auth?: GitHubAuth | null): Promise<ActionResult>;
+  push(absPath: string, identity: Identity | null, auth?: GitHubAuth | null): Promise<ActionResult>;
   commitAll(
     absPath: string,
     identity: Identity | null,

@@ -4,7 +4,7 @@
 // the status-pill morph (see statusChip/statusWord below); RepoCard still owns `expanded` and the
 // toggle() side effects (loading branches/changes/stashes on open) — this component just emits
 // `toggle` for the row/keyboard/chevron interactions.
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   GitBranch,
@@ -24,6 +24,8 @@ import {
   ShieldAlert,
 } from "@lucide/vue";
 import { useStore } from "../../store";
+import { api } from "../../api";
+import type { ResolvedRepoAccount } from "../../types";
 import { cn } from "@/lib/utils";
 import { fromNow } from "@/lib/util";
 import { identityInitials, identityTint } from "@/lib/identity-display";
@@ -150,6 +152,29 @@ const triggerLabel = computed(() =>
 function onAccount(a: { host: string; login: string } | null): void {
   void store.assignRepoAccount(props.repo.id, a?.host ?? null, a?.login ?? null);
 }
+
+// What the repo will sync as when nothing is pinned. A repo usually answers this itself — via its
+// own credential username, or a remote it owns — and the menu has to say so: ticking "Active
+// account" while the sync authenticates as somebody else is the exact confusion that made the
+// original "could not read Password" failure unreadable. Fetched on open (it shells out to git on
+// the daemon), and only when it would actually be shown.
+const resolvedAccount = ref<ResolvedRepoAccount | null>(null);
+function onMenuToggle(open: boolean): void {
+  if (!open || props.repo.syncAccountLogin) return;
+  void api.repoAccountResolution(props.repo.id).then(
+    (r) => (resolvedAccount.value = r),
+    () => (resolvedAccount.value = null), // best-effort: the menu just shows nothing extra
+  );
+}
+/** The auto-detected account, only while no explicit pin overrides it. */
+const detected = computed(() =>
+  props.repo.syncAccountLogin ? null : resolvedAccount.value,
+);
+const detectedReason = computed(() =>
+  detected.value?.source === "remote"
+    ? t("repo.syncAccount.fromRemote")
+    : t("repo.syncAccount.fromGitConfig"),
+);
 </script>
 
 <template>
@@ -341,7 +366,10 @@ function onAccount(a: { host: string; login: string } | null): void {
     <!-- identity avatar → dropdown picker (stops row toggle; no Tooltip wrapper —
          stacking two as-child triggers on one element breaks reka's popper anchor, so the
          hover hint is a native :title, gated on the "show tooltips" setting) -->
-    <DropdownMenu v-if="!selecting && !store.isGuest && (store.ghAccounts.length > 0 || store.identitiesRelevant)">
+    <DropdownMenu
+      v-if="!selecting && !store.isGuest && (store.ghAccounts.length > 0 || store.identitiesRelevant)"
+      @update:open="onMenuToggle"
+    >
       <DropdownMenuTrigger
         :title="tooltipsEnabled ? ([
           repo.syncAccountLogin ? `Syncs as ${repo.syncAccountLogin}` : null,
@@ -370,8 +398,15 @@ function onAccount(a: { host: string; login: string } | null): void {
           <DropdownMenuLabel>{{ $t("repo.syncAccount.dropdownLabel") }}</DropdownMenuLabel>
           <DropdownMenuItem class="text-muted-foreground" @select="onAccount(null)">
             <AtSign :size="15" />
-            <span class="flex-1">{{ $t("repo.syncAccount.machineDefault") }}</span>
-            <Check v-if="!repo.syncAccountLogin" :size="15" class="text-primary" />
+            <div class="min-w-0 flex-1">
+              <div class="truncate">{{ $t("repo.syncAccount.machineDefault") }}</div>
+              <!-- Not pinned, but not a free-for-all either: name the account this repo resolves
+                   to on its own, and why, so the tick above isn't read as "syncs as whoever". -->
+              <div v-if="detected" class="truncate text-[11px] text-muted-foreground/80">
+                {{ $t("repo.syncAccount.detected", { login: detected.login }) }} · {{ detectedReason }}
+              </div>
+            </div>
+            <Check v-if="!repo.syncAccountLogin" :size="15" class="shrink-0 text-primary" />
           </DropdownMenuItem>
           <DropdownMenuItem
             v-for="a in store.ghAccounts"

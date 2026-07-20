@@ -62,15 +62,17 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
       <div class="flex items-center justify-end">
         <Tooltip>
           <TooltipTrigger as-child>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              :aria-label="$t('accounts.refresh')"
-              :disabled="store.accountsLoading"
-              @click="store.loadAccounts()"
-            >
-              <RefreshCw :class="store.accountsLoading && 'animate-spin'" />
-            </Button>
+            <span class="inline-flex">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="$t('accounts.refresh')"
+                :disabled="store.accountsLoading"
+                @click="store.loadAccounts()"
+              >
+                <RefreshCw :class="store.accountsLoading && 'animate-spin'" />
+              </Button>
+            </span>
           </TooltipTrigger>
           <TooltipContent>{{ $t("accounts.refresh") }}</TooltipContent>
         </Tooltip>
@@ -181,20 +183,9 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
         {{ $t("accounts.empty") }}
       </div>
 
-      <!-- commit identity context (switching auth doesn't change authorship) -->
-      <div class="rounded-lg border border-border/60 bg-background/40 px-3 py-2.5">
-        <div class="text-[12px]">
-          <span class="text-muted-foreground">{{ $t("accounts.commitIdentityLabel") }}:</span>
-          <span
-            v-if="store.gitCommitIdentity.name || store.gitCommitIdentity.email"
-            class="mono ml-1 text-foreground/80"
-          >
-            {{ store.gitCommitIdentity.name }} · {{ store.gitCommitIdentity.email }}
-          </span>
-          <span v-else class="ml-1 text-muted-foreground/70">{{ $t("accounts.commitIdentityNone") }}</span>
-        </div>
-        <p class="mt-1 text-[11px] text-muted-foreground/70">{{ $t("accounts.commitIdentityNote") }}</p>
-      </div>
+      <!-- (The old "Commits authored as …" footer is gone: the active chip above already says
+           which account is live, and the auth-vs-authorship distinction now lives in this
+           section's ⓘ description so it's said exactly once.) -->
     </div>
     </SettingsGroup>
   </div>

@@ -6,6 +6,39 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **A permanent share link, without needing a domain.** Remote access → **Permanent link** turns on
+  a relay that gives this RepoYeti one address that never changes and forwards to wherever it
+  currently lives. Without it, a zero-config tunnel is handed a fresh hostname on every restart, so
+  every link you already sent quietly stops resolving and the recipient sees what looks like a
+  broken link. Off until you turn it on, and only your current address is ever published — never a
+  repository name, a path, or the link itself. Share tokens ride in the URL fragment, which browsers
+  do not transmit, so the relay cannot see or redeem the link it forwards. Owners with a stable
+  named tunnel are told they don't need it.
+
+- **Cloning a private repo works for any account you're signed in to,** not just the active one —
+  the same fix as below, applied to the clone URL.
+- **Repos sync as the right GitHub account on their own.** If a repo's own git config names an
+  account, or its remote is one you're signed in to, RepoYeti now authenticates as that account
+  without being told to. Previously this was the cause of a baffling failure: `git` would refuse
+  with *"could not read Password for 'https://someone@github.com'"* naming an account that
+  `gh auth status` listed as signed in on the very next line — because the GitHub CLI's credential
+  helper only ever serves whichever account is *active*, and declines for every other one.
+
+### Changed
+
+- **Switching a repo's GitHub account no longer changes your machine's active account.** The
+  credential is handed to that one git command instead. Previously syncing a repo flipped the
+  active account for every other tool on the machine — terminals, editors, agents — and left it
+  flipped; with several repos syncing at once they could also interleave and authenticate as each
+  other. Both are gone.
+- **A failed sync says which account it needed.** The raw git error is replaced with a plain one
+  naming the account and how to fix it.
+- **"Address has changed" is now measured against the address links are actually handed out on.**
+  With the relay on, a tunnel restart no longer flags every healthy link as stale — while links
+  minted before the relay was switched on are still flagged, because those really are dead.
+
 ## [0.9.0] - 2026-07-18
 
 ### Added

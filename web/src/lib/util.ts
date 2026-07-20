@@ -5,8 +5,9 @@ import { formatAgo } from "@/lib/relativeTime";
 /**
  * Build a folder tree from a flat changed-file list, compressing single-child folder
  * chains into one row (e.g. `docs/todo/jacob-do-me`) — the VS Code / GitHub look.
+ * `from` (rename source) rides along when the caller has one (history commit trees).
  */
-export function buildChangeTree(files: ChangedFile[]): TreeNode[] {
+export function buildChangeTree(files: Array<ChangedFile & { from?: string }>): TreeNode[] {
   const root: TreeNode = { name: "", path: "", type: "dir", children: [] };
 
   // Per-directory `name → child` index so each path-segment lookup is O(1). The old
@@ -33,7 +34,7 @@ export function buildChangeTree(files: ChangedFile[]): TreeNode[] {
       let child = idx.get(key);
       if (!child) {
         child = isFile
-          ? { name: part, path: f.path, type: "file", status: f.status, staged: f.staged, stat: f.stat }
+          ? { name: part, path: f.path, type: "file", status: f.status, staged: f.staged, from: f.from, stat: f.stat }
           : { name: part, path: parts.slice(0, i + 1).join("/"), type: "dir", children: [] };
         node.children.push(child);
         idx.set(key, child);

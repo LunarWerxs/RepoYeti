@@ -5,7 +5,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
-import { hotkeysEnabled, powerShortcuts, SHORTCUTS } from "@/lib/hotkeys";
+import { hotkeysEnabled, SHORTCUTS } from "@/lib/hotkeys";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import SettingsRow from "@/shell/SettingsRow.vue";
 import InfoHint from "@/shell/InfoHint.vue";
@@ -44,7 +44,9 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
 </script>
 
 <template>
-  <!-- App updates ─────────────────────────────────────────────────── -->
+  <!-- App updates + keyboard shortcuts, ONE group: both are two-row "how the app behaves"
+       knobs, and each carrying its own header was exactly the sea-of-lone-headers the
+       General tab consolidation removed. -->
   <SettingsGroup :label="$t('settings.cardUpdates')">
     <SettingsRow :label="$t('settings.updateNotify')">
       <template #info><InfoHint :text="$t('settings.updateNotifyHint')" /></template>
@@ -66,10 +68,6 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
         />
       </template>
     </SettingsRow>
-  </SettingsGroup>
-
-  <!-- Keyboard shortcuts ───────────────────────────────────────── -->
-  <SettingsGroup :label="$t('settings.cardHotkeys')">
     <SettingsRow :label="$t('settings.hotkeysEnable')">
       <template #info><InfoHint :text="$t('settings.hotkeysEnableHint')" /></template>
       <template #control>
@@ -77,37 +75,27 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
       </template>
     </SettingsRow>
 
-    <!-- Power-user row + the shortcut reference only matter while shortcuts are on → HIDE them
-         (not dim) while off. Within the list, power-only shortcuts hide until power mode is on. -->
+    <!-- The reference list only matters while shortcuts are on → HIDE it (not dim) while off.
+         Every documented accelerator is a default now; the old "power user" opt-in tier is gone. -->
     <ExpandTransition :open="hotkeysEnabled">
-      <div class="flex flex-col">
-        <SettingsRow :label="$t('settings.hotkeysPower')">
-          <template #info><InfoHint :text="$t('settings.hotkeysPowerHint')" /></template>
-          <template #control>
-            <Switch v-model="powerShortcuts" :aria-label="$t('settings.hotkeysPower')" />
-          </template>
-        </SettingsRow>
-
-        <div class="flex flex-col gap-2 px-3.5 py-3">
-          <span class="text-[12px] text-muted-foreground">{{ $t("settings.hotkeysListLabel") }}</span>
-          <ul class="flex flex-col gap-1.5">
-            <li
-              v-for="s in SHORTCUTS"
-              v-show="!s.power || powerShortcuts"
-              :key="s.id"
-              class="flex items-center justify-between gap-3"
-            >
-              <span class="text-[12.5px] text-foreground">{{ shortcutDesc[s.id] }}</span>
-              <span class="flex shrink-0 items-center gap-1">
-                <kbd
-                  v-for="k in s.keys"
-                  :key="k"
-                  class="mono rounded border border-border bg-secondary px-1.5 py-0.5 text-[10.5px] leading-none text-muted-foreground"
-                >{{ k }}</kbd>
-              </span>
-            </li>
-          </ul>
-        </div>
+      <div class="flex flex-col gap-2 px-3.5 py-3">
+        <span class="text-[12px] text-muted-foreground">{{ $t("settings.hotkeysListLabel") }}</span>
+        <ul class="flex flex-col gap-1.5">
+          <li
+            v-for="s in SHORTCUTS"
+            :key="s.id"
+            class="flex items-center justify-between gap-3"
+          >
+            <span class="text-[12.5px] text-foreground">{{ shortcutDesc[s.id] }}</span>
+            <span class="flex shrink-0 items-center gap-1">
+              <kbd
+                v-for="k in s.keys"
+                :key="k"
+                class="mono rounded border border-border bg-secondary px-1.5 py-0.5 text-[10.5px] leading-none text-muted-foreground"
+              >{{ k }}</kbd>
+            </span>
+          </li>
+        </ul>
       </div>
     </ExpandTransition>
   </SettingsGroup>

@@ -12,8 +12,9 @@
  */
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
+import type { RepoYetiConfig } from "../../config.ts";
 import { jsonError } from "../../contract.ts";
-import { getTunnelUrl } from "../../runtime.ts";
+import { publicShareOrigin, shareLinkFor } from "../../runtime.ts";
 import { parseBody, ShareCreateSchema, ShareUpdateSchema } from "../../schemas.ts";
 import {
   createShare,
@@ -61,12 +62,17 @@ interface ShareDto {
    * the recipient now gets a DNS failure. Computed here rather than in the client so there is
    * one definition of "stale", and only when we actually know our current origin (with no tunnel
    * up we cannot tell the difference between "moved" and "not published yet").
+   *
+   * Compared against publicShareOrigin(), NOT the raw tunnel URL: with the relay on, links are
+   * handed out on a permanent address that a tunnel restart does not move, so measuring them
+   * against the rotating hostname would flag every healthy link as broken. Links minted before
+   * the relay was switched on still compare unequal — and those genuinely are dead.
    */
   stale: boolean;
 }
 
-function toDto(s: Share): ShareDto {
-  const liveOrigin = getTunnelUrl();
+function toDto(cfg: RepoYetiConfig, s: Share): ShareDto {
+  const liveOrigin = publicShareOrigin(cfg);
   return {
     id: s.id,
     label: s.label,
@@ -95,9 +101,9 @@ function deadLinkPage(): string {
 </div></body>`;
 }
 
-export function register(app: Hono, _deps: Deps): void {
+export function register(app: Hono, { cfg }: Deps): void {
   // ── owner: list / create / revoke ────────────────────────────────────────────
-  app.get("/api/shares", (c) => c.json({ shares: listShares().map(toDto) }));
+  app.get("/api/shares", (c) => c.json({ shares: listShares().map((s) => toDto(cfg, s)) }));
 
   app.post("/api/shares", async (c) => {
     const p = await parseBody(c, ShareCreateSchema);
@@ -122,10 +128,19 @@ export function register(app: Hono, _deps: Deps): void {
       repoIds,
       expiresAt: expiryFor(duration),
       // Remember where this link will be handed out, so we can tell later that the address moved.
-      origin: getTunnelUrl(),
+      origin: publicShareOrigin(cfg),
     });
     // The ONLY response that ever carries the token. Everything else returns the DTO.
-    return c.json({ ok: true, share: toDto(share), token });
+    //
+    // `url` is assembled server-side because the relay form puts the token in the URL fragment
+    // rather than the path (see shareLinkFor) — a distinction the browser should not have to
+    // re-derive, since getting it wrong would send the secret to the relay.
+    return c.json({
+      ok: true,
+      share: toDto(cfg, share),
+      token,
+      url: shareLinkFor(cfg, token, new URL(c.req.url).origin),
+    });
   });
 
   // Edit a live grant WITHOUT touching its secret: the link already in someone's inbox keeps
@@ -162,7 +177,7 @@ export function register(app: Hono, _deps: Deps): void {
       ...(duration === undefined ? {} : { expiresAt: expiryFor(duration) }),
     });
     if (!updated) return jsonError(c, "NOT_FOUND", "no such share link");
-    return c.json({ ok: true, share: toDto(updated) });
+    return c.json({ ok: true, share: toDto(cfg, updated) });
   });
 
   // Mint a NEW secret for an existing grant. The plaintext link is unrecoverable by design, so
@@ -172,10 +187,15 @@ export function register(app: Hono, _deps: Deps): void {
     const id = c.req.param("id");
     if (!id) return jsonError(c, "NOT_FOUND", "no such share link");
     const token = mintToken();
-    const share = rotateShareToken(id, hashToken(token), getTunnelUrl());
+    const share = rotateShareToken(id, hashToken(token), publicShareOrigin(cfg));
     if (!share) return jsonError(c, "NOT_FOUND", "no such share link");
     // Carries a token, like the mint response and for the same one-time reason.
-    return c.json({ ok: true, share: toDto(share), token });
+    return c.json({
+      ok: true,
+      share: toDto(cfg, share),
+      token,
+      url: shareLinkFor(cfg, token, new URL(c.req.url).origin),
+    });
   });
 
   app.delete("/api/shares/:id", (c) => {

@@ -25,6 +25,7 @@ import type {
   PendingApproval,
   Repo,
   Share,
+  ResolvedRepoAccount,
   ShareCreated,
   ShareDuration,
   ShareEvent,
@@ -72,6 +73,30 @@ export interface TunnelResult {
   tunnelUrl: string | null;
 }
 
+/** Redacted relay config (mirrors src/config.ts redactRelay) — never carries the private key. */
+export interface RelayStatus {
+  /** The owner opted in to publishing this daemon's address to a relay. */
+  enabled: boolean;
+  /** Base URL of the relay in use, or null when none is configured. */
+  url: string | null;
+  /** This daemon's public relay id (it appears in every relay share URL — not a secret). */
+  id: string | null;
+  /** What the URL field offers when the owner hasn't named their own relay. */
+  defaultUrl: string;
+}
+
+/** Result of PUT /api/relay — the redacted config plus whether the announce actually landed. */
+export interface RelayResult {
+  ok: boolean;
+  relay: RelayStatus;
+  /** The permanent forwarding URL (`<relay>/r/<id>`), or null when the relay is off. */
+  relayUrl: string | null;
+  /** The relay accepted our current address — i.e. the permanent link resolves right now. */
+  announced: boolean;
+  /** Why the last announce failed, or null. */
+  error: string | null;
+}
+
 export interface AuthStatus {
   authEnforced: boolean;
   mode: AccessMode;
@@ -105,6 +130,13 @@ export interface RuntimeStatus {
   tunnelUrl: string | null;
   /** Redacted named-tunnel config (stable hostname + token-presence flags; never the token). */
   tunnel: TunnelStatus;
+  /** Redacted relay config (opt-in flag, base URL, public id; never the keypair). Owner-only —
+   *  absent from the guest projection, like the rest of the owner's remote-access settings. */
+  relay: RelayStatus;
+  /** The permanent forwarding URL the relay yields, or null when the relay is off. */
+  relayUrl: string | null;
+  /** The relay has accepted this daemon's current address, so the permanent link resolves. */
+  relayAnnounced: boolean;
   /** Whether per-file/per-repo diff statistics are enabled (owner setting). */
   diffStats: boolean;
   /** Min query length before "search content" greps — server-owned, so the UI can't drift. */
@@ -343,6 +375,11 @@ export const api = {
    *  restarts the tunnel so the new stable host takes effect immediately. */
   setTunnel: (input: { hostname?: string; token?: string }) =>
     req<TunnelResult>("PUT", "/api/tunnel", input),
+  /** Turn the share-link relay on/off and pick which relay to use. Enabling with no URL falls back
+   *  to the daemon's documented default; the daemon mints its signing identity and announces
+   *  immediately, so the returned `relayUrl` is usable as soon as `announced` is true. */
+  setRelay: (input: { enabled?: boolean; url?: string }) =>
+    req<RelayResult>("PUT", "/api/relay", input),
   /** Toggle per-file/per-repo diff statistics (owner setting; persisted in config). */
   setDiffStats: (enabled: boolean) =>
     req<{ ok: boolean; diffStats: boolean }>("PUT", "/api/settings", { diffStats: enabled }),
@@ -507,6 +544,12 @@ export const api = {
   /** Pin (or clear, with null login) the GitHub account a repo authenticates as for fetch/pull/push. */
   assignRepoAccount: (repoId: string, host: string | null, login: string | null) =>
     req<{ repo: Repo }>("POST", `/api/repos/${repoId}/account`, { host, login }).then((r) => r.repo),
+
+  /** Which account this repo will ACTUALLY sync as — the explicit pin when set, otherwise whatever
+   *  the repo's own git config or remote implies. Null when nothing resolves and the machine's
+   *  ambient credential helper decides. Resolved on demand: it shells out to git. */
+  repoAccountResolution: (repoId: string) =>
+    req<{ resolved: ResolvedRepoAccount | null }>("GET", `/api/repos/${repoId}/account`).then((r) => r.resolved),
 
   /** Set (or clear, with null) a repo's display label. Cosmetic — never renames the folder. */
   renameRepo: (repoId: string, displayName: string | null) =>

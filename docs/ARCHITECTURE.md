@@ -133,7 +133,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | Diff viewer · merge-conflict UI · rebase · `reset --hard` · `push --force` | **never** | Out of scope by design. Daemon surfaces "resolve at your desk" and stops. |
 | SVN / Mercurial · cloud-synced accounts · auto-updater · native installers | post-v1 | Not on the path. |
 | WebSockets | **never** | SSE is strictly sufficient; enforce this against drift. |
-| Self-hosted frp/bore/chisel relay | **never** | Converts "self-contained tool" into "infra operator" — contradicts the whole point. |
+| Self-hosted frp/bore/chisel relay | **never** | Converts "self-contained tool" into "infra operator" — contradicts the whole point. Note the opt-in share-link relay (`relay/`) is deliberately NOT this: it stores one id→origin row and answers with a redirect, so no repository traffic passes through it and whoever runs it never becomes custodian of anyone's source. |
 
 ---
 
@@ -410,6 +410,19 @@ part of this section, not as a feature note.
   to `ssh -i <path>`. Losing the DB does not leak keys.
 - **Git PATs:** OS keychain by handle; resolved into a process env var **immediately before** the git
   subprocess call, never assigned to a module-level variable, logged, or serialized.
+- **GitHub account tokens (per-repo sync)** follow that same PAT rule, and are the one place RepoYeti
+  reads a token it does not own. `gh auth git-credential` serves **only gh's active account**, so a
+  repo that syncs as any other account cannot authenticate through it — the failure is a confusing
+  `could not read Password for 'https://<login>@github.com'` naming an account `gh auth status`
+  lists as signed in. The alternative (flipping the machine's active account around every network
+  op) mutates global state every other tool shares, races across concurrent ops, and never restores.
+  So `gh-cli.ts ghTokenFor` reads that one account's token and `git.ts credentialConfigArgs` hands
+  it to a single git child: **env var only, never argv** (a `-c` flag is world-readable in a process
+  listing), never disk, never a log, never an HTTP response, and **never cached** — per the bullet
+  above, a cache would be exactly the module-level variable that rule forbids. The helper is keyed
+  to `credential.https://<host>.helper`, not the bare `credential.helper`, so it is structurally
+  incapable of answering for a host the account does not belong to. See `src/gh-account.ts` for how
+  the account is resolved and why a host mismatch refuses rather than falls back.
 - **`keytar` fallback:** if keytar fails to load (common on Windows without build tools), encrypt the
   daemon-side secrets to an **AES-256-GCM** file in the config dir, key =
   `HKDF-SHA256(machineUUID ‖ username ‖ 'repoyeti-v1')`, perms `0600`, with a **loud, specific terminal

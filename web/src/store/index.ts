@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, reactive, computed, watch } from "vue";
 import { useEventSource } from "@vueuse/core";
-import { api, ApiError, type AccessMode, type TunnelStatus } from "../api";
+import { api, ApiError, type AccessMode, type TunnelStatus, type RelayStatus } from "../api";
 import type {
   ActionName,
   ActionResult,
@@ -52,6 +52,17 @@ export const useStore = defineStore("repoyeti", () => {
     tokenFromEnv: false,
     named: false,
   });
+  // Redacted relay config (opt-in flag, base URL, public id; never the keypair) plus the permanent
+  // forwarding URL it yields and whether the daemon's address is actually registered there. Drives
+  // the Settings "Permanent link" row. Same sourcing as tunnelConfig: /api/status, then SSE.
+  const relayConfig = ref<RelayStatus>({
+    enabled: false,
+    url: null,
+    id: null,
+    defaultUrl: "",
+  });
+  const relayUrl = ref<string | null>(null);
+  const relayAnnounced = ref(false);
   // Access mode + local/remote auth state (see /api/auth/status).
   const mode = ref<AccessMode>("local");
 
@@ -296,6 +307,7 @@ export const useStore = defineStore("repoyeti", () => {
     continueLocal,
     setMode,
     setTunnel,
+    setRelay,
     logout,
     setDiffStats,
     setRemoteEditing,
@@ -373,6 +385,9 @@ export const useStore = defineStore("repoyeti", () => {
     tunnelActive,
     tunnelUrl,
     tunnelConfig,
+    relayConfig,
+    relayUrl,
+    relayAnnounced,
     diffStatsEnabled,
     remoteEditing,
     diffPatchBytes,
@@ -473,6 +488,9 @@ export const useStore = defineStore("repoyeti", () => {
       tunnelActive.value = s.tunnelActive;
       tunnelUrl.value = s.tunnelUrl;
       if (s.tunnel) tunnelConfig.value = s.tunnel;
+      if (s.relay) relayConfig.value = s.relay;
+      relayUrl.value = s.relayUrl ?? null;
+      relayAnnounced.value = s.relayAnnounced === true;
       diffStatsEnabled.value = s.diffStats;
       remoteEditing.value = s.remoteEditing;
       diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
@@ -605,6 +623,10 @@ export const useStore = defineStore("repoyeti", () => {
         } else if (event.value === "daemon_status") {
           tunnelUrl.value = typeof payload.tunnelUrl === "string" ? payload.tunnelUrl : null;
           if (typeof payload.tunnelActive === "boolean") tunnelActive.value = payload.tunnelActive;
+          // A tunnel that came up or went away re-announces (or invalidates) the permanent link,
+          // so the relay's registered state rides the same event rather than needing a poll.
+          if (payload.relayUrl !== undefined) relayUrl.value = (payload.relayUrl as string | null) ?? null;
+          if (typeof payload.relayAnnounced === "boolean") relayAnnounced.value = payload.relayAnnounced;
         } else if (event.value === "settings_changed") {
           if (typeof payload.diffStats === "boolean") diffStatsEnabled.value = payload.diffStats;
           if (typeof payload.remoteEditing === "boolean") remoteEditing.value = payload.remoteEditing;
@@ -646,6 +668,7 @@ export const useStore = defineStore("repoyeti", () => {
             if (editorsLoaded.value) void loadEditors(true);
           }
           if (payload.tunnel) tunnelConfig.value = payload.tunnel as TunnelStatus;
+          if (payload.relay) relayConfig.value = payload.relay as RelayStatus;
           // The daemon applied a pulled cloud-sync doc (possibly from another device) — re-fetch
           // status and re-apply the synced appearance (loadSyncStatus applies it internally).
           if (payload.cloudSync) void loadSyncStatus();
@@ -792,10 +815,14 @@ export const useStore = defineStore("repoyeti", () => {
     continueLocal,
     setMode,
     setTunnel,
+    setRelay,
     identityById,
     tunnelUrl,
     tunnelActive,
     tunnelConfig,
+    relayConfig,
+    relayUrl,
+    relayAnnounced,
     diffStatsEnabled,
     contentSearchMin,
     setDiffStats,

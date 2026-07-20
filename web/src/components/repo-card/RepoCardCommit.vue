@@ -211,10 +211,11 @@ async function doCommitSelected(): Promise<void> {
   }
 }
 
-// Power-user shortcut: Ctrl/⌘+Enter commits from the message box (plain Enter is a
-// newline). Gated by Settings → Keyboard shortcuts (master + power-user toggles).
+// Ctrl/⌘+Enter commits from the message box (plain Enter is a newline). Gated by the
+// keyboard-shortcuts master switch (Settings → Updates & shortcuts); scoped to this
+// Textarea's own keydown, so it can never fire globally.
 function onCommitKey(e: KeyboardEvent): void {
-  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && shortcutsActive(true)) {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && shortcutsActive()) {
     e.preventDefault();
     void doCommit("commit");
   }
@@ -335,17 +336,19 @@ defineExpose({ loadRecentMsgs, recentMsgs });
       <div v-if="aiHere && st && st.dirty > 0" class="flex">
         <Tooltip>
           <TooltipTrigger as-child>
-            <Button
-              variant="outline"
-              class="gemini-auto h-9 rounded-r-none"
-              :disabled="smartBusy || committing"
-              :aria-label="$t('repo.smartCommit.button')"
-              @click="runSmart()"
-            >
-              <Loader2 v-if="smartBusy" class="animate-spin" />
-              <Sparkles v-else />
-              <span>{{ $t("repo.smartCommit.button") }}</span>
-            </Button>
+            <span class="inline-flex">
+              <Button
+                variant="outline"
+                class="gemini-auto h-9 rounded-r-none"
+                :disabled="smartBusy || committing"
+                :aria-label="$t('repo.smartCommit.button')"
+                @click="runSmart()"
+              >
+                <Loader2 v-if="smartBusy" class="animate-spin" />
+                <Sparkles v-else />
+                <span>{{ $t("repo.smartCommit.button") }}</span>
+              </Button>
+            </span>
           </TooltipTrigger>
           <TooltipContent>{{ store.aiSettings.yolo ? $t('repo.smartCommit.buttonTitleYolo') : $t('repo.smartCommit.buttonTitle') }}</TooltipContent>
         </Tooltip>

@@ -11,6 +11,7 @@
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { AlertTriangle, Check, Copy, Link2, Loader2, RefreshCw, Trash2, Pencil } from "@lucide/vue";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
@@ -28,6 +29,17 @@ const { t } = useI18n();
 const shares = ref<Share[]>([]);
 const loading = ref(false);
 const creating = ref(false);
+/**
+ * Whether a link handed out right now would be minted against an address that moves on restart.
+ *
+ * Two things fix that, and the warning has to respect BOTH or it contradicts the feature that just
+ * solved the problem: a named tunnel (a stable hostname of your own), or the relay (a permanent
+ * forwarding URL). The relay only counts once it is REGISTERED — enabled-but-unannounced means
+ * links still carry the rotating address, which is exactly when this warning is still true.
+ */
+const addressRotates = computed(
+  () => !store.tunnelConfig.named && !(store.relayConfig.enabled && store.relayAnnounced),
+);
 /** Which link's revoke button is armed (inline two-step confirm, as elsewhere in Settings). */
 const confirmRevoke = ref<string | null>(null);
 /** The freshly-minted link. The ONLY moment its token exists client-side — once this clears, it's
@@ -115,10 +127,11 @@ async function create(): Promise<void> {
       scopeAll: scopeAll.value,
       repoIds: scopeAll.value ? [] : [...picked.value],
     });
-    // Build the URL against the tunnel origin when we know it: the owner is very likely reading
-    // this on localhost, and a localhost link is useless to the person they're sending it to.
-    const origin = store.tunnelUrl ?? window.location.origin;
-    minted.value = { url: `${origin.replace(/\/$/, "")}/s/${res.token}`, label: res.share.label };
+    // The daemon builds the URL: with the relay on it is a permanent forwarding link that carries
+    // the token in the FRAGMENT (so the relay never receives the secret), and only the daemon knows
+    // which form applies. It also resolves the localhost problem the client used to handle here —
+    // the owner is very likely reading this on 127.0.0.1, and that link is useless to a recipient.
+    minted.value = { url: res.url, label: res.share.label };
     copied.value = false;
     resetForm();
     showForm.value = false; // the link is made; fold the form back down behind its button
@@ -231,8 +244,7 @@ async function rotate(s: Share): Promise<void> {
   confirmRotate.value = null;
   try {
     const res = await api.rotateShare(s.id);
-    const origin = store.tunnelUrl ?? window.location.origin;
-    minted.value = { url: `${origin.replace(/\/$/, "")}/s/${res.token}`, label: res.share.label };
+    minted.value = { url: res.url, label: res.share.label };
     copied.value = false;
     armDismiss();
     await load();
@@ -316,7 +328,7 @@ watch(
            address moved". Say it up front, and point at the fix (a named tunnel is a stable
            hostname that survives restarts). -->
       <div
-        v-if="!store.tunnelConfig.named"
+        v-if="addressRotates"
         class="mx-3.5 mt-3 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3"
       >
         <AlertTriangle :size="14" class="mt-px shrink-0 text-warning" />
@@ -376,31 +388,63 @@ watch(
             <span class="truncate">{{ $t("share.staleLink") }}</span>
           </div>
         </div>
-        <div class="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="sm" :disabled="!s.live" @click="startEdit(s)">
-            <Pencil />
-            {{ $t("share.edit") }}
-          </Button>
+        <!-- Icon-only actions with hover tooltips — three labelled buttons per row crowded the
+             link list. The two-step confirms keep their teeth: arming flips the icon button to
+             destructive AND swaps the tooltip to the explicit confirm wording, so the second
+             click is still an informed one. aria-labels mirror the tooltip for screen readers. -->
+        <div class="flex shrink-0 items-center gap-0.5">
+          <!-- Edit + Regenerate can be disabled (dead link) — a native-disabled button is
+               pointer-events:none, which would swallow the very tooltip that now carries the
+               button's only label. The span is the hover proxy: IT stays hoverable, so the
+               tooltip explains a greyed icon too. -->
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span class="inline-flex">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :disabled="!s.live"
+                  :aria-label="$t('share.edit')"
+                  @click="startEdit(s)"
+                >
+                  <Pencil />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{{ $t("share.edit") }}</TooltipContent>
+          </Tooltip>
           <!-- Two-step, like revoke: this kills whatever URL is already out there. -->
-          <Button
-            :variant="confirmRotate === s.id ? 'destructive' : 'ghost'"
-            size="sm"
-            :disabled="!s.live"
-            @click="rotate(s)"
-            @blur="confirmRotate = null"
-          >
-            <RefreshCw />
-            {{ confirmRotate === s.id ? $t("share.rotateConfirm") : $t("share.rotate") }}
-          </Button>
-          <Button
-            :variant="confirmRevoke === s.id ? 'destructive' : 'ghost'"
-            size="sm"
-            @click="revoke(s.id)"
-            @blur="confirmRevoke = null"
-          >
-            <Trash2 />
-            {{ confirmRevoke === s.id ? $t("share.revokeConfirm") : $t("share.revoke") }}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span class="inline-flex">
+                <Button
+                  :variant="confirmRotate === s.id ? 'destructive' : 'ghost'"
+                  size="icon-sm"
+                  :disabled="!s.live"
+                  :aria-label="confirmRotate === s.id ? $t('share.rotateConfirm') : $t('share.rotate')"
+                  @click="rotate(s)"
+                  @blur="confirmRotate = null"
+                >
+                  <RefreshCw />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{{ confirmRotate === s.id ? $t("share.rotateConfirm") : $t("share.rotate") }}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                :variant="confirmRevoke === s.id ? 'destructive' : 'ghost'"
+                size="icon-sm"
+                :aria-label="confirmRevoke === s.id ? $t('share.revokeConfirm') : $t('share.revoke')"
+                @click="revoke(s.id)"
+                @blur="confirmRevoke = null"
+              >
+                <Trash2 />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ confirmRevoke === s.id ? $t("share.revokeConfirm") : $t("share.revoke") }}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

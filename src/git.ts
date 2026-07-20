@@ -36,15 +36,81 @@ export function safeGitEnv(): Record<string, string> {
   return env;
 }
 
-export function gitFor(absPath: string, blockMs = 30_000): SimpleGit {
+export function gitFor(absPath: string, blockMs = 30_000, extraEnv?: Record<string, string>): SimpleGit {
+  // simple-git also gates `-c credential.helper` behind an opt-in. Enable it ONLY for the
+  // invocations actually carrying a token (credentialEnv put it here), so a stray
+  // `credential.helper` argument on any other git call is still refused rather than blanket-allowed.
+  const withCredential = extraEnv?.[GH_TOKEN_ENV] !== undefined;
   return simpleGit({
     baseDir: absPath,
     timeout: { block: blockMs },
     // We intentionally inject the identity's SSH key via `-c core.sshCommand`
     // (identityConfigArgs). simple-git blocks that by default; the value is derived
     // from the owner's own stored key path — trusted input — so we opt in here.
-    unsafe: { allowUnsafeSshCommand: true },
-  }).env(safeGitEnv());
+    unsafe: {
+      allowUnsafeSshCommand: true,
+      ...(withCredential ? { allowUnsafeCredentialHelper: true } : {}),
+    },
+  }).env({ ...safeGitEnv(), ...extraEnv });
+}
+
+/**
+ * The env var a per-op GitHub token rides in.
+ *
+ * It is referenced BY NAME inside the credential-helper snippet, so the token itself never appears
+ * in argv — where any process on the machine could read it out of a process listing. It exists only
+ * in the environment of the single git child process that needs it.
+ */
+export const GH_TOKEN_ENV = "REPOYETI_GH_TOKEN";
+
+/** A GitHub account's credential for one https git operation, bound to the host it is valid for. */
+export interface GitHubAuth {
+  /** The host this credential may be sent to, and ONLY this host. */
+  host: string;
+  login: string;
+  token: string;
+  /** Keep the token out of any accidental log line, error dump, or SSE payload. */
+  toJSON?: () => string;
+}
+
+/** Wrap a host+login+token so that stringifying it can never spill the token. */
+export function gitHubAuth(host: string, login: string, token: string): GitHubAuth {
+  return { host, login, token, toJSON: () => `[GitHubAuth ${login}@${host}]` };
+}
+
+/**
+ * Per-operation GitHub credential injection as `-c` flags — the https sibling of
+ * identityConfigArgs (which covers SSH).
+ *
+ * Two flags, and both the order and the SCOPING matter.
+ *
+ * The empty `credential.helper=` RESETS the inherited helper chain, so the machine's
+ * `gh auth git-credential` helper never gets a say — without it git would consult gh first and we
+ * would be back to "gh only serves the active account", which is the bug this fixes.
+ *
+ * The second is deliberately keyed to `credential.https://<host>.helper`, NOT the bare
+ * `credential.helper`. A bare helper answers every credential request the invocation makes,
+ * whatever host it is for — so a single git op that touched a non-GitHub remote would be handed a
+ * real GitHub token as its password, sending it to a third party. Scoping to the host makes that
+ * structurally impossible rather than merely unlikely: git consults this helper only for URLs on
+ * `host`, and for anything else finds no helper at all and fails closed.
+ *
+ * The token is read from the environment (GH_TOKEN_ENV) rather than interpolated, so it stays out
+ * of argv. `login` IS interpolated, which is why gh-cli.ts refuses any login outside GitHub's
+ * alphabet before we get here — that check is what makes this snippet injection-proof. The body is
+ * an `if` rather than `test … &&` so the helper still exits 0 for the `store`/`erase` verbs git
+ * invokes after a successful auth, instead of reporting a failing helper.
+ */
+export function credentialConfigArgs(auth: GitHubAuth | null): string[] {
+  if (!auth) return [];
+  const helper =
+    `!f() { if test "$1" = get; then printf 'username=${auth.login}\\npassword=%s\\n' "$${GH_TOKEN_ENV}"; fi; }; f`;
+  return ["-c", "credential.helper=", "-c", `credential.https://${auth.host}.helper=${helper}`];
+}
+
+/** The child env carrying the token for this one operation, or nothing when unauthenticated. */
+export function credentialEnv(auth: GitHubAuth | null): Record<string, string> {
+  return auth ? { [GH_TOKEN_ENV]: auth.token } : {};
 }
 
 /**

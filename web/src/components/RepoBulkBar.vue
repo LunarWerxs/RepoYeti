@@ -233,80 +233,90 @@ async function bulkRemove(): Promise<void> {
 
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button
-            variant="secondary"
-            size="sm"
-            class="h-7"
-            :disabled="busy || !selectionCount"
-            @click="bulkPin"
-          >
-            <Loader2 v-if="busy" class="animate-spin" />
-            <Pin v-else />
-            <span class="hidden sm:inline">{{ $t("repo.pin") }}</span>
-          </Button>
+          <span class="inline-flex">
+            <Button
+              variant="secondary"
+              size="sm"
+              class="h-7"
+              :disabled="busy || !selectionCount"
+              @click="bulkPin"
+            >
+              <Loader2 v-if="busy" class="animate-spin" />
+              <Pin v-else />
+              <span class="hidden sm:inline">{{ $t("repo.pin") }}</span>
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>{{ $t("bulk.pinTooltip") }}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button
-            variant="secondary"
-            size="sm"
-            class="h-7"
-            :disabled="busy || !selectionCount"
-            @click="bulkStar"
-          >
-            <Star />
-            <span class="hidden sm:inline">{{ $t("repo.star") }}</span>
-          </Button>
+          <span class="inline-flex">
+            <Button
+              variant="secondary"
+              size="sm"
+              class="h-7"
+              :disabled="busy || !selectionCount"
+              @click="bulkStar"
+            >
+              <Star />
+              <span class="hidden sm:inline">{{ $t("repo.star") }}</span>
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>{{ $t("bulk.starTooltip") }}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button
-            variant="secondary"
-            size="sm"
-            class="h-7"
-            :disabled="busy || !selectionCount"
-            @click="bulkHide"
-          >
-            <EyeOff />
-            <span class="hidden sm:inline">{{ $t("repo.hide") }}</span>
-          </Button>
+          <span class="inline-flex">
+            <Button
+              variant="secondary"
+              size="sm"
+              class="h-7"
+              :disabled="busy || !selectionCount"
+              @click="bulkHide"
+            >
+              <EyeOff />
+              <span class="hidden sm:inline">{{ $t("repo.hide") }}</span>
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>{{ $t("bulk.hideTooltip") }}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button
-            variant="destructive"
-            size="sm"
-            class="h-7"
-            :disabled="busy || !selectionCount"
-            @click="removeOpen = true"
-          >
-            <Trash2 />
-            <span class="hidden sm:inline">{{ $t("repo.remove.action") }}</span>
-          </Button>
+          <span class="inline-flex">
+            <Button
+              variant="destructive"
+              size="sm"
+              class="h-7"
+              :disabled="busy || !selectionCount"
+              @click="removeOpen = true"
+            >
+              <Trash2 />
+              <span class="hidden sm:inline">{{ $t("repo.remove.action") }}</span>
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>{{ $t("bulk.removeTooltip") }}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            :aria-label="$t('bulk.exit')"
-            :disabled="busy"
-            @click="stopSelecting"
-          >
-            <X />
-          </Button>
+          <span class="inline-flex">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="$t('bulk.exit')"
+              :disabled="busy"
+              @click="stopSelecting"
+            >
+              <X />
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>{{ $t("bulk.exit") }}</TooltipContent>
       </Tooltip>

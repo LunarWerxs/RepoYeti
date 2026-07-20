@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Check, Trash2, LogOut, Loader2, Cloud, ExternalLink } from "@lucide/vue";
+import { Check, Trash2, LogOut, Loader2, Cloud, ExternalLink, Link2, Copy } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { ApiError } from "../../api";
@@ -80,6 +80,61 @@ async function forgetTunnel(): Promise<void> {
   }
 }
 
+// ── permanent link (relay) ────────────────────────────────────────────────────
+// A quick tunnel is handed a NEW hostname every restart, so share links already sent stop
+// resolving. The relay gives this daemon one address that never moves and forwards to wherever it
+// currently lives. Off until asked: turning it on is what permits the daemon to publish its address
+// anywhere at all, so the toggle is the consent, not a convenience.
+const relayOn = computed(() => store.relayConfig.enabled);
+const savingRelay = ref(false);
+const relayUrlField = ref("");
+const relayAdvanced = ref(false);
+const copiedRelay = ref(false);
+/** A named tunnel already gives a permanent address, so the relay would add a hop for nothing. */
+const relayRedundant = computed(() => store.tunnelConfig.named);
+
+async function setRelayEnabled(on: boolean): Promise<void> {
+  if (savingRelay.value) return;
+  savingRelay.value = true;
+  try {
+    // Carry a typed relay address only when switching ON: "type your own relay, then flip it on"
+    // should work without a separate Save. Turning OFF must send the flag ALONE — sweeping up
+    // unsaved text there would silently repoint the relay to a host the owner was still
+    // considering (and never confirmed), which then gets announced the next time they enable it.
+    const typed = relayUrlField.value.trim();
+    await store.setRelay(on && typed ? { enabled: on, url: typed } : { enabled: on });
+    if (on && !store.relayAnnounced) toast.warning(t("settings.relayPending"));
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t("settings.relaySaveFailed"));
+  } finally {
+    savingRelay.value = false;
+  }
+}
+
+async function saveRelayUrl(): Promise<void> {
+  if (savingRelay.value) return;
+  savingRelay.value = true;
+  try {
+    await store.setRelay({ url: relayUrlField.value.trim() });
+    toast.success(t("settings.relaySaved"));
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t("settings.relaySaveFailed"));
+  } finally {
+    savingRelay.value = false;
+  }
+}
+
+async function copyRelayUrl(): Promise<void> {
+  if (!store.relayUrl) return;
+  try {
+    await navigator.clipboard.writeText(store.relayUrl);
+    copiedRelay.value = true;
+    setTimeout(() => (copiedRelay.value = false), 2000);
+  } catch {
+    toast.error(t("share.copyFailed"));
+  }
+}
+
 // ── sign out everywhere (rotates the daemon signing key) ──────────────────────
 const confirmSignOutAll = ref(false);
 async function signOutAll(): Promise<void> {
@@ -111,6 +166,14 @@ watch(
   (isOpen) => {
     if (isOpen) {
       tunnelHost.value = store.tunnelConfig.hostname ?? "";
+      // Blank when the daemon is on its default relay: showing the default URL as if the owner had
+      // chosen it invites edits to a field that didn't need one. The placeholder names it instead.
+      relayUrlField.value =
+        store.relayConfig.url && store.relayConfig.url !== store.relayConfig.defaultUrl
+          ? store.relayConfig.url
+          : "";
+      relayAdvanced.value = false;
+      copiedRelay.value = false;
       confirmForgetTunnel.value = false;
       needsOwner.value = false;
     }
@@ -215,6 +278,72 @@ watch(
             {{ confirmForgetTunnel ? $t("settings.tunnelForgetConfirm") : $t("settings.tunnelForget") }}
           </Button>
         </div>
+      </div>
+
+      <!-- permanent link (relay) — one address that survives the tunnel rotating underneath it -->
+      <div class="flex flex-col gap-2.5 px-3.5 py-3">
+        <div class="flex items-center justify-between gap-3">
+          <span class="flex items-center gap-1.5">
+            <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.relayLabel") }}</span>
+            <InfoHint :text="$t('settings.relayHint')" />
+          </span>
+          <Switch
+            :model-value="relayOn"
+            :disabled="savingRelay"
+            :aria-label="$t('settings.relayLabel')"
+            @update:model-value="(v: boolean) => setRelayEnabled(v)"
+          />
+        </div>
+
+        <!-- A stable named tunnel already gives a permanent address that also resolves on networks
+             blocking trycloudflare, which the relay cannot do. Say so rather than let someone turn
+             on a redirect they have no use for. -->
+        <p v-if="relayRedundant && !relayOn" class="text-[11.5px] leading-snug text-muted-foreground">
+          {{ $t("settings.relayRedundant") }}
+        </p>
+
+        <template v-if="relayOn">
+          <!-- The payoff, shown as soon as it exists: the URL share links are now handed out on. -->
+          <div v-if="store.relayUrl" class="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-2.5 py-2">
+            <Link2 :size="13" class="shrink-0 text-muted-foreground" />
+            <span class="mono min-w-0 flex-1 truncate text-[12px] text-foreground/90">{{ store.relayUrl }}</span>
+            <Button variant="ghost" size="sm" class="shrink-0" @click="copyRelayUrl">
+              <Check v-if="copiedRelay" />
+              <Copy v-else />
+              {{ copiedRelay ? $t("share.copied") : $t("share.copy") }}
+            </Button>
+          </div>
+          <p v-if="store.relayAnnounced" class="flex items-center gap-1.5 text-[12px] text-success">
+            <Check :size="13" class="shrink-0" />
+            <span class="min-w-0">{{ $t("settings.relayRegistered") }}</span>
+          </p>
+          <!-- "On but not registered" is a real state (no tunnel up yet, or the relay is down), and
+               it means links minted right now still carry the rotating address. Don't hide it. -->
+          <p v-else class="text-[11.5px] leading-snug text-warning">{{ $t("settings.relayPending") }}</p>
+
+          <!-- Which relay to use is a self-hosting detail; the default works, so keep it folded. -->
+          <button
+            type="button"
+            class="self-start text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
+            @click="relayAdvanced = !relayAdvanced"
+          >
+            {{ relayAdvanced ? $t("settings.relayHideAdvanced") : $t("settings.relayShowAdvanced") }}
+          </button>
+          <div v-if="relayAdvanced" class="flex flex-col gap-2">
+            <Input
+              v-model="relayUrlField"
+              class="mono text-[12.5px]"
+              :placeholder="store.relayConfig.defaultUrl"
+              :aria-label="$t('settings.relayUrlLabel')"
+            />
+            <p class="text-[11.5px] leading-snug text-muted-foreground">{{ $t("settings.relayUrlHint") }}</p>
+            <Button size="sm" class="self-start" :disabled="savingRelay" @click="saveRelayUrl">
+              <Loader2 v-if="savingRelay" class="animate-spin" />
+              <Check v-else />
+              {{ $t("settings.relaySave") }}
+            </Button>
+          </div>
+        </template>
       </div>
 
       <!-- sign out everywhere (rotates the signing key → invalidates all devices) -->

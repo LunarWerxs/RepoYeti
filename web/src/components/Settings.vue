@@ -19,6 +19,7 @@ import BackgroundSyncSection from "./settings/BackgroundSyncSection.vue";
 import AgentSafetySection from "./settings/AgentSafetySection.vue";
 import IdentityFirewallSection from "./settings/IdentityFirewallSection.vue";
 import AiProvidersSection from "./settings/AiProvidersSection.vue";
+import LoreServersSection from "./settings/LoreServersSection.vue";
 
 const open = defineModel<boolean>("open", { required: true });
 const props = withDefaults(
@@ -34,24 +35,24 @@ const { t } = useI18n();
 const store = useStore();
 
 // The panel groups its sections into tabs so the everyday knobs (General) aren't
-// buried under the power-user ones (firewall, agent rail, tunnel, AI providers).
-// The `identities` tab id is kept (deep links + persisted state point at it) even though it
-// reads as "Accounts" until identities are actually in use — GitHub accounts are the part of
-// that tab everyone has, and the part everyone means when they go looking for it.
-type TabId = "general" | "identities" | "automation" | "access";
+// buried under the power-user ones — which now live on their own Advanced tab (firewall,
+// agent rail, Lore servers). Accounts and Access merged into one tab: GitHub accounts,
+// git identities, the Connections account, remote access, and sharing are all "who am I
+// and who gets in", and splitting them made each half look incomplete.
+type TabId = "general" | "access" | "automation" | "advanced";
 const tab = ref<TabId>("general");
 const tabs = computed<{ id: TabId; label: string }[]>(() => [
   { id: "general", label: t("settings.tabs.general") },
-  {
-    id: "identities",
-    label: store.identitiesRelevant ? t("settings.tabs.identities") : t("settings.tabs.accounts"),
-  },
+  { id: "access", label: t("settings.tabs.accountsAccess") },
   { id: "automation", label: t("settings.tabs.automation") },
-  { id: "access", label: t("settings.tabs.access") },
+  { id: "advanced", label: t("settings.tabs.advanced") },
 ]);
-const TAB_IDS: readonly TabId[] = ["general", "identities", "automation", "access"];
-const asTab = (v: string | null | undefined): TabId | null =>
-  v && (TAB_IDS as readonly string[]).includes(v) ? (v as TabId) : null;
+const TAB_IDS: readonly TabId[] = ["general", "access", "automation", "advanced"];
+const asTab = (v: string | null | undefined): TabId | null => {
+  // Pre-merge deep links: `identities` was its own tab before it merged into Accounts & access.
+  if (v === "identities") return "access";
+  return v && (TAB_IDS as readonly string[]).includes(v) ? (v as TabId) : null;
+};
 // Each open lands on the deep-link target if one was requested (e.g. the AI-key notification →
 // Automation), else back on General — the tab most visits need.
 watch(open, (isOpen) => {
@@ -86,7 +87,7 @@ watch(
            `open` watcher that fires when the panel opens, which would never run for a section
            first mounted by a later tab click. -->
 
-      <!-- General: appearance, folders to scan, editor, updates + hotkeys ────── -->
+      <!-- General: appearance + diffs, folders to scan, editor, updates + shortcuts ────── -->
       <div v-show="tab === 'general'" class="flex flex-col gap-4">
         <AppearanceSection />
         <DiscoverySection :open="open" />
@@ -94,27 +95,30 @@ watch(
         <UpdatesHotkeysSection />
       </div>
 
-      <!-- Identities: git identities, GitHub accounts, ⭐ Identity Firewall ──── -->
-      <div v-show="tab === 'identities'" class="flex flex-col gap-4">
-        <IdentitiesSection :open="open" />
-        <!-- The Firewall pins a REQUIRED identity per path glob — meaningless (and unbuildable:
-             every rule needs an identity to point at) until identities are in play at all. -->
-        <IdentityFirewallSection v-if="store.identitiesRelevant" :open="open" />
-      </div>
-
-      <!-- Automation: auto-commit, background sync, ⭐ Agent Safety Rail, AI providers ── -->
-      <div v-show="tab === 'automation'" class="flex flex-col gap-4">
-        <AutoCommitSection />
-        <BackgroundSyncSection />
-        <AgentSafetySection />
-        <AiProvidersSection :open="open" />
-      </div>
-
-      <!-- Access: Connections account, remote access + tunnel, share links, cloud sync ───── -->
+      <!-- Accounts & access: GitHub accounts, git identities, Connections account,
+           remote access + tunnel, share links, cloud sync ──────────────────────── -->
       <div v-show="tab === 'access'" class="flex flex-col gap-4">
+        <IdentitiesSection :open="open" />
         <AccessSection :open="open" />
         <SharingSection :open="open" />
         <CloudSyncSection />
+      </div>
+
+      <!-- Automation: auto-commit, background sync, AI providers ── -->
+      <div v-show="tab === 'automation'" class="flex flex-col gap-4">
+        <AutoCommitSection />
+        <BackgroundSyncSection />
+        <AiProvidersSection :open="open" />
+      </div>
+
+      <!-- Advanced: the sharp, rarely-touched tools — ⭐ Agent Safety Rail, ⭐ Identity
+           Firewall, Lore servers ──────────────────────────────────────────────── -->
+      <div v-show="tab === 'advanced'" class="flex flex-col gap-4">
+        <AgentSafetySection />
+        <!-- The Firewall pins a REQUIRED identity per path glob — meaningless (and unbuildable:
+             every rule needs an identity to point at) until identities are in play at all. -->
+        <IdentityFirewallSection v-if="store.identitiesRelevant" :open="open" />
+        <LoreServersSection :open="open" />
       </div>
     </div>
   </SettingsPanel>

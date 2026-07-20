@@ -3,6 +3,7 @@ import {
   api,
   type AccessMode,
   type TunnelStatus,
+  type RelayStatus,
   type EditorInfo,
   type OpenResult,
   type PortableWindowResult,
@@ -57,6 +58,9 @@ export function useSettings(deps: {
   tunnelActive: Ref<boolean>;
   tunnelUrl: Ref<string | null>;
   tunnelConfig: Ref<TunnelStatus>;
+  relayConfig: Ref<RelayStatus>;
+  relayUrl: Ref<string | null>;
+  relayAnnounced: Ref<boolean>;
   diffStatsEnabled: Ref<boolean>;
   remoteEditing: Ref<boolean>;
   diffPatchBytes: Ref<number>;
@@ -90,6 +94,9 @@ export function useSettings(deps: {
     tunnelActive,
     tunnelUrl,
     tunnelConfig,
+    relayConfig,
+    relayUrl,
+    relayAnnounced,
     diffStatsEnabled,
     remoteEditing,
     diffPatchBytes,
@@ -181,6 +188,15 @@ export function useSettings(deps: {
     tunnelConfig.value = r.tunnel;
     tunnelActive.value = r.tunnelActive;
     tunnelUrl.value = r.tunnelUrl;
+  }
+  /** Turn the share-link relay on/off, or point it at a different relay. The daemon mints its
+   *  identity and announces before replying, so `relayAnnounced` is already truthful on return —
+   *  which is what lets the panel say "registered" instead of "saved, check back later". */
+  async function setRelay(input: { enabled?: boolean; url?: string }): Promise<void> {
+    const r = await api.setRelay(input);
+    relayConfig.value = r.relay;
+    relayUrl.value = r.relayUrl;
+    relayAnnounced.value = r.announced;
   }
   async function logout(): Promise<void> {
     await api.logout();
@@ -635,6 +651,7 @@ export function useSettings(deps: {
     continueLocal,
     setMode,
     setTunnel,
+    setRelay,
     logout,
     setDiffStats,
     setRemoteEditing,

@@ -121,6 +121,19 @@ export interface DetectedIdentity {
   missing: Array<keyof DetectedIdentitySuggestion>;
 }
 
+/**
+ * Which GitHub account a repo will actually sync as (mirrors src/gh-account.ts ResolvedAccount).
+ * `source` says WHY, so the picker can explain a choice the owner never made explicitly:
+ *   pinned    — the owner chose it on this repo
+ *   gitconfig — the repo's own `credential.https://<host>.username`
+ *   remote    — the remote is github.com/<login>/… and we hold that account
+ */
+export interface ResolvedRepoAccount {
+  host: string;
+  login: string;
+  source: "pinned" | "gitconfig" | "remote";
+}
+
 /** One authenticated GitHub (gh) account on the machine (mirrors src/gh-cli.ts GhAccount). */
 export interface GhAccount {
   host: string;
@@ -159,6 +172,8 @@ export interface TreeNode {
   type: "dir" | "file";
   status?: string;
   staged?: boolean;
+  /** File nodes only: rename/copy source path (history commit trees; worktree lists never carry one). */
+  from?: string;
   /** File nodes only: per-file line/char delta (when the diff-stats setting is on). */
   stat?: DiffStat;
   children?: TreeNode[];
@@ -373,6 +388,7 @@ export type ApiErrorCode =
   | "NO_UPSTREAM"
   | "NO_REMOTE"
   | "NOTHING_TO_COMMIT"
+  | "GH_ACCOUNT_NOT_AUTHORIZED"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
   | "NOT_FOUND"
@@ -625,6 +641,11 @@ export interface ShareCreated {
   ok: boolean;
   share: Share;
   token: string;
+  /** The full URL to hand out, assembled by the daemon. Use this rather than pasting the token
+   *  onto an origin: with the relay on, the token belongs in the URL FRAGMENT (so the relay can
+   *  forward a visitor without ever receiving the secret), and only the daemon knows which form
+   *  applies. See shareLinkFor() in src/runtime.ts. */
+  url: string;
 }
 
 /** One entry in a link's audit trail (GET /api/shares/:id/events). */

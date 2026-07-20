@@ -18,14 +18,14 @@ import {
   type CommitGroupResult,
 } from "../git-actions.ts";
 import type { ActionResult } from "../contract.ts";
-import { runAction, refreshRepo, ensureRepoAccount, type ActionOutcome } from "./core.ts";
+import { runAction, refreshRepo, accountAuthFor, type ActionOutcome } from "./core.ts";
 import { guardRepo } from "./guards.ts";
 import { resolveRepoPath } from "./files.ts";
 import { normalizeRelPath } from "../paths.ts";
 
-export const fetchRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.fetch(p, idn), true, true);
-export const pullRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.pull(p, idn), true, true);
-export const pushRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn) => b.push(p, idn), false, true);
+export const fetchRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.fetch(p, idn, auth), true, true);
+export const pullRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.pull(p, idn, auth), true, true);
+export const pushRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.push(p, idn, auth), false, true);
 export const commitRepo = (
   id: string,
   message: string,
@@ -348,9 +348,10 @@ export async function smartCommitRepo(
     };
     if (!res.ok || !sync) return base;
 
-    // Match the machine's active GitHub account to this repo's pinned sync account before the
-    // network round-trip (no-op when unpinned).
-    await ensureRepoAccount(repo);
+    // Resolve the GitHub credential this repo syncs as, for the network round-trip below. Injected
+    // into each git child rather than switching the machine's active account (see core.ts
+    // accountAuthFor); null when the repo needs nothing special.
+    const auth = await accountAuthFor(repo);
 
     // Post-commit sync (mirrors the UI's "commit & sync"): pull --ff-only, THEN push, but only if
     // the pull actually succeeded. Pushing after a failed pull would publish the just-made local
@@ -358,9 +359,9 @@ export async function smartCommitRepo(
     // NON_FAST_FORWARD race the pull-first order exists to avoid). The ff-only pull leaves any
     // leftover unassigned files untouched and succeeds unless the incoming update would overwrite
     // them; a genuine failure short-circuits and skips the push, so the commits stay safe locally.
-    const pull = await backend.pull(repo.absPath, identity);
+    const pull = await backend.pull(repo.absPath, identity, auth);
     if (!pull.ok) return { ...base, synced: false, syncCode: pull.code, syncMessage: pull.message };
-    const push = await backend.push(repo.absPath, identity);
+    const push = await backend.push(repo.absPath, identity, auth);
     if (push.ok) return { ...base, synced: true };
     return { ...base, synced: false, syncCode: push.code, syncMessage: push.message || pull.message };
   });

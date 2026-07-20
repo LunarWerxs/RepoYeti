@@ -560,15 +560,17 @@ async function execute(sync: boolean): Promise<void> {
         <div class="flex items-center gap-2">
           <Tooltip>
             <TooltipTrigger as-child>
-              <Button
-                variant="secondary"
-                size="sm"
-                :disabled="loading || committing"
-                :aria-label="$t('repo.smartCommit.regeneratePlan')"
-                @click="requestRegenerate"
-              >
-                <RefreshCw :size="15" :class="cn(loading && 'animate-spin')" />
-              </Button>
+              <span class="inline-flex">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  :disabled="loading || committing"
+                  :aria-label="$t('repo.smartCommit.regeneratePlan')"
+                  @click="requestRegenerate"
+                >
+                  <RefreshCw :size="15" :class="cn(loading && 'animate-spin')" />
+                </Button>
+              </span>
             </TooltipTrigger>
             <TooltipContent>{{ $t("repo.smartCommit.regeneratePlan") }}</TooltipContent>
           </Tooltip>

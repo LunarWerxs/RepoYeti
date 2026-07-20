@@ -44,16 +44,18 @@ async function stashDrop(index: number): Promise<void> {
 <template>
   <Tooltip v-if="canStash && dirty > 0">
     <TooltipTrigger as-child>
-      <Button
-        variant="outline"
-        size="sm"
-        :disabled="!!gitBusy"
-        @click="stashSave"
-      >
-        <Loader2 v-if="gitBusy === 'stash'" class="animate-spin" />
-        <Archive v-else />
-        {{ $t("repo.stash.stash") }}
-      </Button>
+      <span class="inline-flex">
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="!!gitBusy"
+          @click="stashSave"
+        >
+          <Loader2 v-if="gitBusy === 'stash'" class="animate-spin" />
+          <Archive v-else />
+          {{ $t("repo.stash.stash") }}
+        </Button>
+      </span>
     </TooltipTrigger>
     <TooltipContent>{{ $t("repo.stash.stashTooltip") }}</TooltipContent>
   </Tooltip>

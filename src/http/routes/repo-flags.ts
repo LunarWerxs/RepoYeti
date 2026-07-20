@@ -1,6 +1,8 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import { jsonError } from "../../contract.ts";
+import { accountsSnapshot } from "../../gh-cli.ts";
+import { resolveRepoAccount } from "../../gh-account.ts";
 import { parseBody, AssignIdentitySchema, RenameRepoSchema } from "../../schemas.ts";
 import {
   getRepo,
@@ -68,6 +70,23 @@ export function register(app: Hono, _deps: Deps): void {
         syncAccountLogin: login,
       });
       return c.json({ ok: true, repo: getRepo(repoId) });
+    }),
+  );
+
+  // ── which account this repo will ACTUALLY sync as, pin or no pin ─────────────
+  //
+  // With no pin, a repo still usually answers the question itself — via its own credential
+  // username or its remote's owner (see gh-account.ts). The picker has to be able to say so:
+  // showing "Active account" ticked while the sync silently authenticates as somebody else is
+  // precisely the confusion that made the original failure so hard to read. Resolved on demand
+  // (it shells out to git) rather than carried on every repo in the list.
+  app.get("/api/repos/:id/account", (c) =>
+    withRepo(c, async (repoId) => {
+      const repo = getRepo(repoId);
+      if (!repo) return jsonError(c, "NOT_FOUND", "repo not found");
+      const accounts = (await accountsSnapshot().catch(() => null))?.accounts ?? [];
+      const resolved = await resolveRepoAccount(repo, accounts).catch(() => null);
+      return c.json({ ok: true, resolved });
     }),
   );
 

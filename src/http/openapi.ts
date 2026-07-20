@@ -40,6 +40,7 @@ import {
   AccountSwitchSchema,
   AccountIdentitySchema,
   TunnelSettingsSchema,
+  RelaySettingsSchema,
   ConnectSchema,
   AiSettingsSchema,
   ProviderUpdateSchema,
@@ -94,6 +95,7 @@ export const META: Record<string, RouteMeta> = {
   // ── access mode / tunnel ────────────────────────────────────────────────────────
   "PUT /api/mode": { summary: "Flip local ↔ remote access (manages the Cloudflare tunnel).", tags: ["system"] },
   "PUT /api/tunnel": { summary: "Configure the stable named tunnel (hostname + connector token).", body: TunnelSettingsSchema, tags: ["system"] },
+  "PUT /api/relay": { summary: "Turn the share-link relay on/off and choose which relay to use.", body: RelaySettingsSchema, tags: ["system"] },
 
   // ── repos ─────────────────────────────────────────────────────────────────────
   "GET /api/repos": { summary: "List all known repositories.", tags: ["repos"] },

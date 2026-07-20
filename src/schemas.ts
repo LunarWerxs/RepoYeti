@@ -167,6 +167,27 @@ export const TunnelSettingsSchema = z.object({
   token: z.string().optional(),
 });
 
+// ── relay (a permanent forwarding URL for a rotating quick tunnel) ────────────────
+// `url` must be an https ORIGIN — no path, no http. https is not politeness here: the announce
+// carries a signature over our current address, and letting it go out in clear would hand anyone
+// on the path both the address and the chance to strip the response. "" clears the field.
+export const RelaySettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  url: z
+    .string()
+    .trim()
+    .refine((s) => {
+      if (s === "") return true;
+      try {
+        const u = new URL(s);
+        return u.protocol === "https:" && u.pathname === "/" && !u.search && !u.hash;
+      } catch {
+        return false;
+      }
+    }, "must be an https origin, e.g. https://go.example.com")
+    .optional(),
+});
+
 // ── AI ──────────────────────────────────────────────────────────────────────────
 export const ConnectSchema = z.object({ apiKey: z.string().optional() }); // NO_KEY stays in handler
 

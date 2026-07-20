@@ -26,6 +26,7 @@ export type ApiErrorCode =
   | "NO_UPSTREAM"
   | "NO_REMOTE"
   | "NOTHING_TO_COMMIT"
+  | "GH_ACCOUNT_NOT_AUTHORIZED"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
   // ── repo / service ──
@@ -180,6 +181,7 @@ export function statusForCode(code: ApiCode): ContentfulStatusCode {
       return 409;
     // 502 — an upstream (git remote / AI provider) failed.
     case "SSH_AUTH_FAILED":
+    case "GH_ACCOUNT_NOT_AUTHORIZED":
     case "AI_ERROR":
       return 502;
     // 504 — an upstream hung past our timeout.

@@ -1,6 +1,6 @@
 {
   "name": "repoyeti",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "System-wide remote git manager — a background daemon with a mobile dashboard.",
   "type": "module",
   "license": "MIT",
@@ -41,10 +41,11 @@
     "check:codes": "bun run scripts/check-error-codes.ts",
     "check:boundaries": "bun run scripts/check-boundaries.ts",
     "check:libtypes": "bun run scripts/check-lib-types.mjs",
+    "check:bytes": "bun run scripts/check-source-bytes.ts",
     "check:kit": "node ../lunarwerx-ui/sync.mjs --check --app repoyeti",
     "lint": "biome lint .",
     "format": "biome format --write .",
-    "check": "bun run check:codes && bun run check:boundaries && bun run check:libtypes && bun run lint",
+    "check": "bun run check:codes && bun run check:boundaries && bun run check:libtypes && bun run check:bytes && bun run lint",
     "build": "bun run scripts/build.ts"
   },
   "dependencies": {

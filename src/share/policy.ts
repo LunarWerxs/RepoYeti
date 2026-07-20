@@ -134,9 +134,12 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/shares/:id/rotate",
   "DELETE /api/shares/:id",
   "GET /api/shares/:id/events",
-  // access mode / tunnel
+  // access mode / tunnel / relay
   "PUT /api/mode",
   "PUT /api/tunnel",
+  // The relay publishes where this daemon lives; a guest repointing it would aim every share link
+  // already handed out at a server of their choosing. Owner-only, emphatically.
+  "PUT /api/relay",
   // repo inventory management — a guest sees a scoped VIEW of the owner's list, so editing that
   // list (renaming a card, removing one, or reading/undoing what the owner removed) is the
   // owner's alone. Nothing here is destructive to the repo itself, but all of it is the owner's
@@ -179,6 +182,7 @@ export const OWNER_ONLY: readonly string[] = [
   // per-repo owner state
   "POST /api/repos/:id/identity",
   "POST /api/repos/:id/account",
+  "GET /api/repos/:id/account",
   "POST /api/repos/:id/hidden",
   "POST /api/repos/:id/pinned",
   "POST /api/repos/:id/starred",

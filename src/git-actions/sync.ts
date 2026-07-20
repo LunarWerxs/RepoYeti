@@ -5,7 +5,13 @@
  * Auth + author identity are injected per operation (`-c core.sshCommand` + `-c user.*`)
  * via git.ts — global/repo config is never mutated.
  */
-import { gitFor, identityConfigArgs } from "../git.ts";
+import {
+  gitFor,
+  identityConfigArgs,
+  credentialConfigArgs,
+  credentialEnv,
+  type GitHubAuth,
+} from "../git.ts";
 import { readStatus } from "../read/status.ts";
 import { netGate } from "../gitgate.ts";
 import type { Identity } from "../db.ts";
@@ -38,6 +44,22 @@ export function classify(err: unknown): ActionResult {
   if (low.includes("has no upstream branch") || low.includes("no upstream configured")) {
     return fail("NO_UPSTREAM", "branch has no upstream — set one at your desk");
   }
+  // git asked a credential helper for a password and got nothing. On a headless daemon
+  // (GIT_TERMINAL_PROMPT=0) there is no prompt to fall back to, so this is terminal — and the
+  // stock message ("could not read Password for 'https://someone@github.com'") reads as if that
+  // account is signed out, when the real cause is almost always that it is signed in but not
+  // ACTIVE, and `gh auth git-credential` only ever serves the active account. Name the account git
+  // actually asked for, so the message points at the right thing.
+  if (low.includes("could not read password") || low.includes("terminal prompts disabled")) {
+    const who = /could not read password for '([^']+)'/i.exec(raw)?.[1] ?? "";
+    const login = /^https?:\/\/([^@]+)@/i.exec(who)?.[1] ?? "";
+    return fail(
+      "GH_ACCOUNT_NOT_AUTHORIZED",
+      login
+        ? `git needs credentials for the GitHub account "${login}" and none were available`
+        : "git needs GitHub credentials and none were available",
+    );
+  }
   if (
     low.includes("permission denied") ||
     low.includes("could not read from remote repository") ||
@@ -64,10 +86,16 @@ export function classify(err: unknown): ActionResult {
   return fail("ERROR", raw.split("\n")[0]?.slice(0, 300) ?? "git error");
 }
 
-export async function gitFetch(absPath: string, identity: Identity | null): Promise<ActionResult> {
+export async function gitFetch(
+  absPath: string,
+  identity: Identity | null,
+  auth?: GitHubAuth | null,
+): Promise<ActionResult> {
   try {
-    const git = gitFor(absPath);
-    await netGate.run(() => git.raw([...identityConfigArgs(identity), "fetch", "--prune"]));
+    const git = gitFor(absPath, undefined, credentialEnv(auth ?? null));
+    await netGate.run(() =>
+      git.raw([...identityConfigArgs(identity), ...credentialConfigArgs(auth ?? null), "fetch", "--prune"]),
+    );
     return ok("fetched");
   } catch (err) {
     return classify(err);
@@ -77,6 +105,7 @@ export async function gitFetch(absPath: string, identity: Identity | null): Prom
 export async function gitPullFfOnly(
   absPath: string,
   identity: Identity | null,
+  auth?: GitHubAuth | null,
 ): Promise<ActionResult> {
   // Preflight only for the one state a fast-forward genuinely can't handle: a detached HEAD has
   // no branch to advance. A dirty working tree is deliberately NOT preflighted. `git pull
@@ -90,24 +119,32 @@ export async function gitPullFfOnly(
     return fail("DETACHED_HEAD", "detached HEAD — resolve at your desk");
   }
   try {
-    const git = gitFor(absPath);
-    await netGate.run(() => git.raw([...identityConfigArgs(identity), "pull", "--ff-only"]));
+    const git = gitFor(absPath, undefined, credentialEnv(auth ?? null));
+    await netGate.run(() =>
+      git.raw([...identityConfigArgs(identity), ...credentialConfigArgs(auth ?? null), "pull", "--ff-only"]),
+    );
     return ok("pulled (fast-forward)");
   } catch (err) {
     return classify(err);
   }
 }
 
-export async function gitPush(absPath: string, identity: Identity | null): Promise<ActionResult> {
+export async function gitPush(
+  absPath: string,
+  identity: Identity | null,
+  auth?: GitHubAuth | null,
+): Promise<ActionResult> {
   const pre = await readStatus(absPath);
   if (pre.error) return fail("ERROR", pre.error);
   if (pre.detached || !pre.branch) {
     return fail("DETACHED_HEAD", "detached HEAD — cannot push");
   }
   try {
-    const git = gitFor(absPath);
+    const git = gitFor(absPath, undefined, credentialEnv(auth ?? null));
     // Plain push of the current branch to its upstream. No `--force`, ever.
-    await netGate.run(() => git.raw([...identityConfigArgs(identity), "push"]));
+    await netGate.run(() =>
+      git.raw([...identityConfigArgs(identity), ...credentialConfigArgs(auth ?? null), "push"]),
+    );
     return ok("pushed");
   } catch (err) {
     return classify(err);
@@ -132,10 +169,18 @@ export async function gitClone(
   url: string,
   name: string,
   identity: Identity | null,
+  auth?: GitHubAuth | null,
 ): Promise<ActionResult> {
   try {
     await netGate.run(() =>
-      gitFor(parentDir, CLONE_TIMEOUT_MS).raw([...identityConfigArgs(identity), "clone", "--", url, name]),
+      gitFor(parentDir, CLONE_TIMEOUT_MS, credentialEnv(auth ?? null)).raw([
+        ...identityConfigArgs(identity),
+        ...credentialConfigArgs(auth ?? null),
+        "clone",
+        "--",
+        url,
+        name,
+      ]),
     );
     return ok("cloned");
   } catch (err) {

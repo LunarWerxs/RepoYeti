@@ -69,16 +69,18 @@ async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
   <div class="flex flex-wrap items-center gap-2">
     <Tooltip v-if="caps.fetch && store.canControl">
       <TooltipTrigger as-child>
-        <Button
-          variant="secondary"
-          size="sm"
-          :disabled="!hasRemote || anyBusy"
-          @click="run('fetch')"
-        >
-          <Loader2 v-if="busyAction === 'fetch'" class="animate-spin" />
-          <DownloadCloud v-else />
-          {{ $t("repo.actions.fetch") }}
-        </Button>
+        <span class="inline-flex">
+          <Button
+            variant="secondary"
+            size="sm"
+            :disabled="!hasRemote || anyBusy"
+            @click="run('fetch')"
+          >
+            <Loader2 v-if="busyAction === 'fetch'" class="animate-spin" />
+            <DownloadCloud v-else />
+            {{ $t("repo.actions.fetch") }}
+          </Button>
+        </span>
       </TooltipTrigger>
       <TooltipContent>{{ $t("repo.actions.fetchTooltip") }}</TooltipContent>
     </Tooltip>
@@ -87,17 +89,19 @@ async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
     <div v-if="store.canControl" class="flex items-center">
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button
-            :variant="pullVariant"
-            size="sm"
-            :class="hasPullCaret ? 'rounded-r-none' : ''"
-            :disabled="!hasUpstream || anyBusy"
-            @click="run('pull')"
-          >
-            <Loader2 v-if="busyAction === 'pull'" class="animate-spin" />
-            <ArrowDownToLine v-else />
-            {{ pullLabel }}
-          </Button>
+          <span class="inline-flex">
+            <Button
+              :variant="pullVariant"
+              size="sm"
+              :class="hasPullCaret ? 'rounded-r-none' : ''"
+              :disabled="!hasUpstream || anyBusy"
+              @click="run('pull')"
+            >
+              <Loader2 v-if="busyAction === 'pull'" class="animate-spin" />
+              <ArrowDownToLine v-else />
+              {{ pullLabel }}
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>{{ pullTooltip }}</TooltipContent>
       </Tooltip>

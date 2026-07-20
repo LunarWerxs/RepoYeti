@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Trash2, Plus, Loader2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
@@ -19,8 +19,10 @@ const { t } = useI18n();
 // ── scan roots (discovery folders) ─────────────────────────────────────────────
 // Most owners scan on-demand (whole-computer / a folder) rather than keeping watched roots, so the
 // roots config is collapsed behind a toggle (default off). Purely a display preference — persisted
-// per-browser in localStorage, no daemon setting. A count rides the label so a configured owner
-// isn't surprised their roots are "hidden" while collapsed.
+// per-browser in localStorage, no daemon setting. The switch never DISABLES watching (roots stay
+// active regardless), so when roots exist the section auto-discloses below rather than sitting
+// collapsed with an off-looking switch — the old collapsed "(1)" badge read as "disabled, yet
+// somehow counting", which was exactly wrong.
 const SCAN_FOLDERS_KEY = "repoyeti.showScanFolders";
 const showScanFolders = ref(
   (() => {
@@ -38,8 +40,17 @@ watch(showScanFolders, (v) => {
     /* private mode / storage disabled — the in-memory ref still drives this session */
   }
 });
-const scanFoldersLabel = computed(() =>
-  store.roots.length ? `${t("settings.scanFoldersEnable")} (${store.roots.length})` : t("settings.scanFoldersEnable"),
+// Configured roots mean folder-watching IS active — force the section open so the state is
+// visible instead of hinted at by a count. A deliberate collapse THIS session is respected
+// (userTouched); the next settings open re-discloses, which is the honest default while
+// watching continues underneath.
+const userTouchedScanFolders = ref(false);
+watch(
+  () => store.roots.length,
+  (n) => {
+    if (n > 0 && !userTouchedScanFolders.value && !showScanFolders.value) showScanFolders.value = true;
+  },
+  { immediate: true },
 );
 const newRoot = ref("");
 const addingRoot = ref(false);
@@ -50,10 +61,7 @@ const confirmRemoveRoot = ref<string | null>(null);
 watch(
   () => props.open,
   (isOpen) => {
-    if (isOpen) {
-      void store.loadRoots();
-      void store.loadServers();
-    }
+    if (isOpen) void store.loadRoots();
   },
   // Required: the Settings sheet is a Reka DialogRoot, so this component mounts only once the
   // sheet is already open — `open` is true on creation and a plain watcher never sees a
@@ -88,48 +96,8 @@ async function removeRoot(path: string): Promise<void> {
   }
 }
 
-// ── lore servers (registry RepoYeti can clone from) ─────────────────────────────
-const newServerName = ref("");
-const newServerUrl = ref("");
-const addingServer = ref(false);
-const confirmRemoveServer = ref<string | null>(null);
-async function addServer(): Promise<void> {
-  const url = newServerUrl.value.trim();
-  if (!url || addingServer.value) return;
-  addingServer.value = true;
-  try {
-    await store.addServer(url, newServerName.value.trim() || undefined);
-    toast.success(t("settings.serversAdded"));
-    newServerName.value = "";
-    newServerUrl.value = "";
-  } catch {
-    toast.error(t("settings.serversAddFailed"));
-  } finally {
-    addingServer.value = false;
-  }
-}
-async function removeServer(id: string): Promise<void> {
-  if (confirmRemoveServer.value !== id) {
-    confirmRemoveServer.value = id; // first click arms the confirm
-    return;
-  }
-  confirmRemoveServer.value = null;
-  try {
-    await store.removeServer(id);
-    toast.success(t("settings.serversRemoved"));
-  } catch {
-    toast.error(t("settings.serversRemoveFailed"));
-  }
-}
-// Master switch: collapses the whole section down to just its header when off (Y5),
-// same pattern as AutoCommitSection's master switch + ExpandTransition body.
-async function onLoreServersEnabled(enabled: boolean): Promise<void> {
-  try {
-    await store.setLoreServersEnabled(enabled);
-  } catch {
-    toast.error(t("settings.loreServersEnableFailed"));
-  }
-}
+// (Lore servers moved to LoreServersSection.vue under the Advanced tab — this section is
+// scan-folders only now.)
 </script>
 
 <template>
@@ -137,12 +105,12 @@ async function onLoreServersEnabled(enabled: boolean): Promise<void> {
   <!-- Collapsed behind a toggle (default off): most owners scan on demand and never keep watched
        roots, so the list/input is hidden until they opt in. -->
   <SettingsGroup :label="$t('settings.cardRoots')" :description="$t('settings.rootsHint')">
-    <SettingsRow :label="scanFoldersLabel">
+    <SettingsRow :label="$t('settings.scanFoldersEnable')">
       <template #control>
         <Switch
           :model-value="showScanFolders"
           :aria-label="$t('settings.scanFoldersEnable')"
-          @update:model-value="(v: boolean) => (showScanFolders = v)"
+          @update:model-value="(v: boolean) => { userTouchedScanFolders = true; showScanFolders = v; }"
         />
       </template>
     </SettingsRow>
@@ -181,72 +149,6 @@ async function onLoreServersEnabled(enabled: boolean): Promise<void> {
             <Plus v-else />
             {{ $t("settings.rootsAdd") }}
           </Button>
-        </form>
-      </div>
-    </ExpandTransition>
-  </SettingsGroup>
-
-  <!-- Lore servers (clone-from-server registry) ─────────────────────────── -->
-  <SettingsGroup :label="$t('settings.cardServers')">
-    <!-- Both the section blurb and the IP tip live behind the one info icon. -->
-    <template #description>{{ $t("settings.serversHint") }} {{ $t("settings.serversIpHint") }}</template>
-    <!-- master switch: collapses the whole section to just this row when off, since owners
-         who never use Lore shouldn't pay rent on an always-open add-server form. -->
-    <SettingsRow :label="$t('settings.loreServersEnable')">
-      <template #control>
-        <Switch
-          :model-value="store.loreServersEnabled"
-          :aria-label="$t('settings.loreServersEnable')"
-          @update:model-value="(v: boolean) => onLoreServersEnabled(v)"
-        />
-      </template>
-    </SettingsRow>
-    <ExpandTransition :open="store.loreServersEnabled">
-      <div class="flex flex-col gap-2.5 px-3.5 py-3">
-        <p v-if="!store.servers.length" class="text-[12.5px] text-muted-foreground">
-          {{ $t("settings.serversEmpty") }}
-        </p>
-        <div
-          v-for="s in store.servers"
-          :key="s.id"
-          class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5"
-        >
-          <span class="flex min-w-0 flex-1 flex-col">
-            <span class="truncate text-[12.5px] font-medium text-foreground">{{ s.name }}</span>
-            <code class="mono truncate text-[11.5px] text-muted-foreground" :title="s.url">{{ s.url }}</code>
-          </span>
-          <Button
-            :variant="confirmRemoveServer === s.id ? 'destructive' : 'ghost'"
-            size="sm"
-            class="shrink-0"
-            :aria-label="$t('settings.serversRemove')"
-            @click="removeServer(s.id)"
-            @blur="confirmRemoveServer = null"
-          >
-            <Trash2 />
-            <span v-if="confirmRemoveServer === s.id">{{ $t("settings.serversRemove") }}</span>
-          </Button>
-        </div>
-        <form class="flex flex-col gap-2 pt-0.5" @submit.prevent="addServer">
-          <Input
-            v-model="newServerName"
-            class="text-[12.5px]"
-            :placeholder="$t('settings.serversPlaceholderName')"
-            :aria-label="$t('settings.serversLabelName')"
-          />
-          <div class="flex items-center gap-2">
-            <Input
-              v-model="newServerUrl"
-              class="mono min-w-0 flex-1 text-[12.5px]"
-              :placeholder="$t('settings.serversPlaceholderUrl')"
-              :aria-label="$t('settings.serversLabelUrl')"
-            />
-            <Button type="submit" size="sm" class="shrink-0" :disabled="!newServerUrl.trim() || addingServer">
-              <Loader2 v-if="addingServer" class="animate-spin" />
-              <Plus v-else />
-              {{ $t("settings.serversAdd") }}
-            </Button>
-          </div>
         </form>
       </div>
     </ExpandTransition>
