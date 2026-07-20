@@ -13,7 +13,7 @@ Out of the box, RepoYeti registers with a small hosted relay and gets one URL pe
 never changes:
 
 ```
-https://repoyeti-relay.lunawerx.workers.dev/r/<your-daemon-id>
+https://go.repoyeti.com/r/<your-daemon-id>
 ```
 
 That URL forwards visitors to wherever your daemon currently lives. It is **not a proxy**: no
@@ -60,7 +60,7 @@ forwarding address. Note that links minted on your domain die when the domain st
 | | Built-in (default) | Custom domain |
 | --- | --- | --- |
 | Setup | none | ~5 minutes, needs a Cloudflare domain |
-| Link looks like | `…workers.dev/r/<id>` | `app.your-domain.com` |
+| Link looks like | `go.repoyeti.com/r/<id>` | `app.your-domain.com` |
 | Survives restarts | yes | yes |
 | Works where trycloudflare is blocked | no (the destination is still a quick tunnel) | yes |
 | Third party involved | the relay (sees only your current address) | none beyond Cloudflare itself |

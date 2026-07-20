@@ -54,10 +54,14 @@ the case where an attacker signs correctly with their *own* key and offers a rep
 
 ## Deployed instance
 
-`https://repoyeti-relay.lunawerx.workers.dev` — LunarWerx account, `workers.dev`, free tier.
+`https://go.repoyeti.com` — LunarWerx account, free tier. Served by a Workers **custom domain** on
+the `repoyeti.com` zone; the original `https://repoyeti-relay.lunawerx.workers.dev` address stays
+live on the same Worker + KV, so links minted on it never broke when the pretty name was added.
 
-No custom domain is needed: a `workers.dev` hostname is already stable, which is the only property
-this service requires. Point it at a domain later by uncommenting `route` in `wrangler.toml`.
+Self-hosting on your own domain? Change the `routes` entry in `wrangler.toml` to your hostname
+(the zone must be on your account) and `wrangler deploy` — Cloudflare provisions the DNS record and
+cert. A bare `workers.dev` hostname works too (`workers_dev = true`, no custom domain) — it's
+already stable, which is the only property this service requires.
 
 **If you own a domain, you probably don't want this at all.** Put the daemon on a NAMED TUNNEL
 instead (`tunnel.hostname` + a connector token in the daemon config): your address is then stable

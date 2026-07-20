@@ -8,7 +8,7 @@ import { useStore } from "@/store";
 import { api } from "@/api";
 import type { RelayResult, RelayStatus } from "@/api";
 
-const DEFAULT_URL = "https://repoyeti-relay.lunawerx.workers.dev";
+const DEFAULT_URL = "https://go.repoyeti.com";
 
 function relayStatus(overrides: Partial<RelayStatus> = {}): RelayStatus {
   return { enabled: true, url: DEFAULT_URL, id: "a".repeat(32), defaultUrl: DEFAULT_URL, ...overrides };

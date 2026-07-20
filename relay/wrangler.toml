@@ -8,10 +8,17 @@ account_id = "36d7c731fd0352ef08ea7e46d2d20793"
 name = "repoyeti-relay"
 main = "worker.js"
 compatibility_date = "2026-01-01"
+# workers.dev stays on so already-registered daemons and links minted on the old
+# repoyeti-relay.lunawerx.workers.dev URL keep resolving — same Worker, same KV.
 workers_dev = true
 
-# The hostname share links point at. Must be a zone on your Cloudflare account.
-# route = { pattern = "go.example.com/*", zone_name = "example.com" }
+# The public stable address. A Workers CUSTOM DOMAIN (not a route): Cloudflare creates the proxied
+# DNS record + edge cert automatically, so the hostname routes straight to this Worker. The zone
+# (repoyeti.com) must be on the account above — it is. Self-hosting on your own domain? Change this
+# to your hostname + zone and `wrangler deploy`.
+routes = [
+  { pattern = "go.repoyeti.com", custom_domain = true }
+]
 
 # id -> { publicKey, origin, updatedAt }. One write per daemon restart, one read per link opened,
 # so the free tier is not a constraint here.

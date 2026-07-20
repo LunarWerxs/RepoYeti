@@ -654,8 +654,12 @@ export function redactTunnel(cfg: RepoYetiConfig): RedactedTunnelConfig {
  * A relay is only useful if one is actually reachable, and asking someone to deploy a Cloudflare
  * Worker before they can keep a share link alive is the same as not shipping the feature. This is
  * the instance documented in relay/README.md; the field stays editable for anyone self-hosting.
+ *
+ * `go.repoyeti.com` is a Workers custom domain on the SAME worker + KV as the old
+ * `repoyeti-relay.lunawerx.workers.dev` address, so links minted on either resolve identically —
+ * this rename made new links prettier without stranding a single already-registered daemon.
  */
-export const DEFAULT_RELAY_URL = "https://repoyeti-relay.lunawerx.workers.dev";
+export const DEFAULT_RELAY_URL = "https://go.repoyeti.com";
 
 /**
  * The relay's EFFECTIVE opt state — the stable address is the default, not a feature you find.

@@ -18,7 +18,7 @@ vi.mock("vue-sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() },
 }));
 
-const RELAY_DEFAULT = "https://repoyeti-relay.lunawerx.workers.dev";
+const RELAY_DEFAULT = "https://go.repoyeti.com";
 
 function mountAccess() {
   return mount(AccessSection, {
