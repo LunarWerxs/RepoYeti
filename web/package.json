@@ -1,7 +1,7 @@
 {
   "name": "repoyeti-web",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.10.0",
   "license": "MIT",
   "type": "module",
   "//test": "Web tests run under VITEST via `bun run test` — NOT `bun test`. Bun's native runner has no Vue SFC compiler, so `.vue` imports resolve to a string path and @vue/test-utils crashes (WeakMap key error). Same reason CI uses `bun run test`.",

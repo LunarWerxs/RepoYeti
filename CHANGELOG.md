@@ -6,7 +6,15 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-20
+
 ### Added
+
+- **History shows changed files as a folder tree.** Expanding a commit lists its changed files as a
+  collapsible folder tree — the same look as the Changes panel — toggleable in Settings → Appearance
+  (a flat path list is still available). A commit touching more than a few hundred files opens with
+  its folders collapsed, so a pathological commit is a scannable directory overview rather than a
+  wall of rows. Rename provenance and per-file line counts show on every row.
 
 - **A permanent share link, without needing a domain.** Remote access → **Permanent link** turns on
   a relay that gives this RepoYeti one address that never changes and forwards to wherever it
@@ -38,6 +46,11 @@ All notable changes to RepoYeti are documented here. The format is based on
 - **"Address has changed" is now measured against the address links are actually handed out on.**
   With the relay on, a tunnel restart no longer flags every healthy link as stale — while links
   minted before the relay was switched on are still flagged, because those really are dead.
+- **Settings is reorganized.** A new Advanced tab holds the rarely-touched tools (agent rail,
+  identity firewall, Lore servers); Accounts and Access merged into one tab; the General tab
+  consolidated its lone sections; and Ctrl/⌘+Enter to commit is now on by default instead of behind
+  a power-user toggle. Sharing's row actions are icon buttons with tooltips, and a tooltip on a
+  disabled button now actually shows.
 
 ## [0.9.0] - 2026-07-18
 
