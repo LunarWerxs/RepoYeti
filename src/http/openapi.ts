@@ -47,6 +47,9 @@ import {
   CommitMessageSchema,
   CommitPlanSchema,
   ShareCreateSchema,
+  CollaborationInspectSchema,
+  CollaborationJoinSchema,
+  CollaborationCommitSyncSchema,
 } from "../schemas.ts";
 
 /** One curated entry per route, keyed by `"<METHOD> <hono-path>"` exactly as Hono registers it. */
@@ -221,6 +224,7 @@ export const META: Record<string, RouteMeta> = {
 
   // ── AI (bring-your-own-key) ───────────────────────────────────────────────────────
   "GET /api/ai/catalog": { summary: "Static provider catalog (display metadata; no secrets).", tags: ["ai"] },
+  "GET /api/ai/availability": { summary: "Guest-safe AI availability (no provider, model, or key details).", tags: ["ai"] },
   "GET /api/ai/settings": { summary: "Redacted AI settings (never includes a key).", tags: ["ai"] },
   "PUT /api/ai/settings": { summary: "Update commit style / default provider.", body: AiSettingsSchema, tags: ["ai"] },
   "POST /api/ai/providers/:provider/connect": { summary: "Connect a provider (validates the key, then saves it).", body: ConnectSchema, tags: ["ai"] },
@@ -245,6 +249,50 @@ export const META: Record<string, RouteMeta> = {
   },
   "DELETE /api/shares/:id": { summary: "Revoke a share link — effective on the guest's next request.", tags: ["shares"] },
   "GET /api/shares/:id/events": { summary: "Audit trail: what this link's holder did.", tags: ["shares"] },
+  "GET /api/collaborations": {
+    summary: "List fresh, end-to-end encrypted peer working-tree snapshots.",
+    tags: ["collaboration"],
+  },
+  "POST /api/collaborations/inspect": {
+    summary: "Inspect a collaborative invitation and list its scoped repositories.",
+    body: CollaborationInspectSchema,
+    tags: ["collaboration"],
+  },
+  "POST /api/collaborations": {
+    summary: "Join a collaboration by mapping a local checkout to one shared repository.",
+    body: CollaborationJoinSchema,
+    tags: ["collaboration"],
+  },
+  "GET /api/collaboration-links": {
+    summary: "List this installation's outbound collaboration mappings (without secrets).",
+    tags: ["collaboration"],
+  },
+  "GET /api/repos/:id/collaboration-fingerprint": {
+    summary: "Opaque changed-content fingerprint for collaboration inactivity checks.",
+    tags: ["collaboration"],
+  },
+  "GET /api/collaboration-links/:id/status": {
+    summary: "Read the mapped sharer's dirty state through an accepted collaboration.",
+    tags: ["collaboration"],
+  },
+  "GET /api/collaboration-links/:id/diff": {
+    summary: "Read one changed-file diff through an accepted collaboration.",
+    query: [{ name: "path", description: "Repo-relative changed path.", required: true }],
+    tags: ["collaboration"],
+  },
+  "POST /api/collaboration-links/:id/commit-sync": {
+    summary: "Commit and sync a control-tier remote collaboration after ten unchanged minutes.",
+    body: CollaborationCommitSyncSchema,
+    tags: ["collaboration"],
+  },
+  "POST /api/collaborations/publish": {
+    summary: "Publish all configured collaboration snapshots immediately.",
+    tags: ["collaboration"],
+  },
+  "DELETE /api/collaborations/:id": {
+    summary: "Stop publishing one collaboration mapping.",
+    tags: ["collaboration"],
+  },
   // GET /s/:token (redemption) is intentionally absent: buildOpenApiDoc only walks /api/* and
   // /oauth/*, so an entry here would never be emitted. It's documented in routes/shares.ts.
 

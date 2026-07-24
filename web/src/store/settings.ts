@@ -202,6 +202,19 @@ export function useSettings(deps: {
     await api.logout();
     location.reload();
   }
+  /**
+   * End a share-link guest session and land on an explicit completion screen.
+   *
+   * This is intentionally separate from owner logout. Reloading `/` after clearing the guest
+   * cookie merely showed the remote sign-in gate, which made Leave look like a no-op. `replace`
+   * also keeps Back from silently returning to a now-invalid dashboard entry.
+   */
+  async function leaveShare(): Promise<void> {
+    await api.logout();
+    shareViewer.value = null;
+    authenticated.value = false;
+    window.location.replace("/?leftShare=1");
+  }
 
   /** Toggle the diff-stats setting (optimistic; rolls back on failure). */
   async function setDiffStats(enabled: boolean): Promise<void> {
@@ -653,6 +666,7 @@ export function useSettings(deps: {
     setTunnel,
     setRelay,
     logout,
+    leaveShare,
     setDiffStats,
     setRemoteEditing,
     setDiffPatchBytes,

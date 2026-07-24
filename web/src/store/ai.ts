@@ -36,10 +36,13 @@ export function useAi(
     commitEnabled: true,
   });
   const aiReady = ref(false);
+  /** Guest-only readiness supplied by the sharer's daemon without disclosing provider details. */
+  const remoteAiUsable = ref<boolean | null>(null);
   /** Provider catalog from GET /api/ai/catalog — safe display metadata, no secrets. */
   const aiCatalog = ref<AiCatalogEntry[]>([]);
   /** A usable provider is connected (a default provider with a model) — AI can actually run. */
   const aiUsable = computed(() => {
+    if (remoteAiUsable.value !== null) return remoteAiUsable.value;
     const dp = aiSettings.value.defaultProvider;
     return !!(dp && aiSettings.value.providers[dp]?.model);
   });
@@ -59,9 +62,26 @@ export function useAi(
   }
   async function loadAiSettings(): Promise<void> {
     try {
+      remoteAiUsable.value = null;
       aiSettings.value = await api.ai.settings();
     } catch {
       /* leave defaults — AI is optional */
+    } finally {
+      aiReady.value = true;
+    }
+  }
+  /** Load only the two AI capability bits a share-link guest needs. Provider/key metadata stays
+   *  owner-only; generation itself is still performed by the sharer's daemon. */
+  async function loadAiAvailability(): Promise<void> {
+    try {
+      const availability = await api.ai.availability();
+      remoteAiUsable.value = availability.usable;
+      aiSettings.value = {
+        ...aiSettings.value,
+        commitEnabled: availability.commitEnabled,
+      };
+    } catch {
+      remoteAiUsable.value = false;
     } finally {
       aiReady.value = true;
     }
@@ -168,6 +188,7 @@ export function useAi(
     aiUsable,
     aiCommitEnabled,
     loadAiSettings,
+    loadAiAvailability,
     loadAiCatalog,
     connectProvider,
     listProviderModels,

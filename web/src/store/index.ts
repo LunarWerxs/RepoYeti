@@ -8,6 +8,7 @@ import type {
   Identity,
   PendingApproval,
   Repo,
+  CollaborationSnapshot,
   UpdateApplyResult,
   UpdateStatus,
 } from "../types";
@@ -32,6 +33,9 @@ let appOpenedPulsed = false;
 
 export const useStore = defineStore("repoyeti", () => {
   const repos = ref<Repo[]>([]);
+  /** Peer working-tree presence, decrypted by the daemon. */
+  const collaborationSnapshots = ref<CollaborationSnapshot[]>([]);
+  let collaborationTimer: number | null = null;
   const loading = ref(true);
   const connected = ref(false);
   const { updateStatus, updateChecking, updateApplying, checkForUpdate, applyUpdate } =
@@ -194,6 +198,7 @@ export const useStore = defineStore("repoyeti", () => {
     aiUsable,
     aiCommitEnabled,
     loadAiSettings,
+    loadAiAvailability,
     loadAiCatalog,
     connectProvider,
     listProviderModels,
@@ -310,6 +315,7 @@ export const useStore = defineStore("repoyeti", () => {
     setTunnel,
     setRelay,
     logout,
+    leaveShare,
     setDiffStats,
     setRemoteEditing,
     setDiffPatchBytes,
@@ -435,6 +441,18 @@ export const useStore = defineStore("repoyeti", () => {
    */
   const canControl = computed(() => shareViewer.value === null || shareViewer.value.perm === "control");
 
+  async function loadCollaborations(): Promise<void> {
+    if (isGuest.value) {
+      collaborationSnapshots.value = [];
+      return;
+    }
+    try {
+      collaborationSnapshots.value = (await api.collaborationSnapshots()).snapshots;
+    } catch {
+      /* the relay is optional presence infrastructure; keep the last good snapshot */
+    }
+  }
+
   /**
    * Hydrate the dashboard.
    *
@@ -453,7 +471,7 @@ export const useStore = defineStore("repoyeti", () => {
       const [r, i] = await Promise.all([
         api.listRepos(),
         guest ? Promise.resolve([] as Identity[]) : api.listIdentities(),
-        guest ? Promise.resolve() : loadAiSettings(),
+        guest ? loadAiAvailability() : loadAiSettings(),
         guest ? Promise.resolve() : loadAiCatalog(),
         loadStatus(),
         guest ? Promise.resolve() : loadAccounts(), // best-effort — populates the header account switcher on boot
@@ -530,6 +548,10 @@ export const useStore = defineStore("repoyeti", () => {
 
   // ── live updates (SSE) ──────────────────────────────────────────────────────
   function connect(): void {
+    void loadCollaborations();
+    if (collaborationTimer === null) {
+      collaborationTimer = window.setInterval(() => void loadCollaborations(), 2500);
+    }
     const { status, event, data } = useEventSource(
       "/api/events",
       [
@@ -718,6 +740,8 @@ export const useStore = defineStore("repoyeti", () => {
 
   return {
     repos,
+    collaborationSnapshots,
+    loadCollaborations,
     identities,
     identitiesRelevant,
     identityUiForced,
@@ -795,6 +819,7 @@ export const useStore = defineStore("repoyeti", () => {
     aiUsable,
     aiCommitEnabled,
     loadAiSettings,
+    loadAiAvailability,
     loadAiCatalog,
     connectProvider,
     listProviderModels,
@@ -947,6 +972,7 @@ export const useStore = defineStore("repoyeti", () => {
     setStarred,
     loadAuth,
     logout,
+    leaveShare,
     loadAll,
     connect,
     doAction,

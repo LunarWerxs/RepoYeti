@@ -14,13 +14,18 @@ The relay gives each daemon one URL that never changes and forwards to wherever 
 
 ## What it is not
 
-**Not a tunnel, and not a proxy.** No repository data passes through it. It stores one row per
-daemon — an id, a public key, and the current origin — and answers with a redirect. Traffic still
-goes directly from the visitor to that daemon's own tunnel.
+**Not a tunnel, and not a proxy.** Dashboard and Git traffic still goes directly from the visitor
+to the daemon's own tunnel. The stable-address path stores one row per daemon—an id, a public key,
+and the current origin—and answers with a redirect.
 
 This distinction is the whole design. Proxying everyone's traffic would make whoever runs this
 Worker the custodian of other people's source code, which is the opposite of what RepoYeti promises
 on its front page.
+
+Optional collaboration presence does not use KV. The collaborator resolves the invitation once,
+then sends authenticated AES-256-GCM snapshots straight to the owner's tunnel. If a quick tunnel
+moves, `/resolve/:id` supplies its new origin. This keeps realtime updates out of the relay's
+storage and request budget.
 
 ## Why the relay never sees a share token
 
@@ -54,9 +59,11 @@ the case where an attacker signs correctly with their *own* key and offers a rep
 
 ## Deployed instance
 
-`https://go.repoyeti.com` — LunarWerx account, free tier. Served by a Workers **custom domain** on
-the `repoyeti.com` zone. The Worker (named `repoyeti`) also answers on its free
-`repoyeti.lunawerx.workers.dev` hostname — same Worker, same KV, so both resolve identically.
+`https://app.repoyeti.com` — LunarWerx account, free tier. Served by a Worker route on its proxied
+DNS record in the `repoyeti.com` zone. The Worker-managed custom domain
+`https://go.repoyeti.com` remains an alias for links issued by older RepoYeti versions. The Worker
+(named `repoyeti`) also answers on its free
+`repoyeti.lunawerx.workers.dev` hostname—same Worker and KV.
 
 Self-hosting on your own domain? Change the `routes` entry in `wrangler.toml` to your hostname
 (the zone must be on your account) and `wrangler deploy` — Cloudflare provisions the DNS record and
@@ -90,10 +97,8 @@ wrangler deploy
 
 ## Point RepoYeti at it
 
-**Settings → Remote access → Permanent link.** Turning it on adopts the deployed instance above,
-mints this daemon's keypair, announces immediately, and shows the permanent URL to copy. Share
-links minted from then on use that address. If you deployed your own, put it under *Use a different
-relay* in the same panel.
+**Settings → Accounts → Access → RepoYeti address.** Selecting it adopts the deployed instance
+above, mints this daemon's keypair, announces immediately, and shows the permanent URL to copy.
 
 Equivalently, in `~/.repoyeti/config.json`:
 

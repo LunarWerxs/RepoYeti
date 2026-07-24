@@ -181,6 +181,7 @@ export function initDb(): Database {
       token_hash    TEXT NOT NULL UNIQUE,     -- sha256(secret) hex — never the secret itself
       label         TEXT NOT NULL,            -- owner's name for the link ("Brother — nights")
       perm          TEXT NOT NULL,            -- 'view' | 'control'
+      collaborative INTEGER NOT NULL DEFAULT 0, -- holder may pair a second RepoYeti working tree
       scope_all     INTEGER NOT NULL DEFAULT 0, -- 1 = every repo, including ones added later
       created_at    INTEGER NOT NULL,         -- ms
       expires_at    INTEGER,                  -- ms; NULL = never expires
@@ -214,6 +215,25 @@ export function initDb(): Database {
       outcome    TEXT NOT NULL                -- 'allowed' | 'denied'
     );
     CREATE INDEX IF NOT EXISTS share_events_share ON share_events (share_id, at DESC);
+    -- Outbound peer mappings. A collaborator pastes an invitation into THEIR RepoYeti and maps
+    -- one local repo to one repo named by the share. The share token is retained here for the same
+    -- reason it is retained on the owner's share row: it is the end-to-end encryption key and the
+    -- invitation credential. This table never syncs through Connections.
+    CREATE TABLE IF NOT EXISTS collaboration_links (
+      id              TEXT PRIMARY KEY,
+      invite_url      TEXT NOT NULL,
+      token           TEXT NOT NULL,
+      relay_url       TEXT NOT NULL,
+      channel_id      TEXT NOT NULL,
+      remote_origin   TEXT NOT NULL,
+      daemon_id       TEXT,
+      participant_id  TEXT NOT NULL,
+      local_repo_id   TEXT NOT NULL,
+      remote_repo_id  TEXT NOT NULL,
+      label           TEXT NOT NULL,
+      created_at      INTEGER NOT NULL,
+      enabled         INTEGER NOT NULL DEFAULT 1
+    );
   `);
   // Migrations: add columns to pre-existing databases. Each throws "duplicate column
   // name" on DBs that already have it (incl. fresh ones) — ignore.
@@ -229,6 +249,28 @@ export function initDb(): Database {
     // minted earlier rather than only in the one-shot panel at creation. See the `token` field on
     // Share for what this costs and why it is nonetheless the owner's call.
     handle.exec("ALTER TABLE shares ADD COLUMN token TEXT;");
+  } catch {
+    /* column already present */
+  }
+  try {
+    // Existing links stay ordinary links. New links opt into peer working-tree synchronization
+    // explicitly (the UI defaults the new control on, but migration never widens an old grant).
+    handle.exec("ALTER TABLE shares ADD COLUMN collaborative INTEGER NOT NULL DEFAULT 0;");
+  } catch {
+    /* column already present */
+  }
+  try {
+    // Collaboration originally prototyped the hosted relay as a high-frequency mailbox. Presence
+    // now goes straight to the owner's daemon; retain the resolved origin so publishes avoid a
+    // relay request unless the quick tunnel has actually moved.
+    handle.exec("ALTER TABLE collaboration_links ADD COLUMN remote_origin TEXT NOT NULL DEFAULT '';");
+  } catch {
+    /* column already present */
+  }
+  try {
+    // Present only for invitations using app.repoyeti.com/r/:id. It lets a failed direct publish
+    // re-resolve the owner's new quick-tunnel origin.
+    handle.exec("ALTER TABLE collaboration_links ADD COLUMN daemon_id TEXT;");
   } catch {
     /* column already present */
   }
@@ -876,6 +918,8 @@ export interface Share {
   id: string;
   label: string;
   perm: "view" | "control";
+  /** Whether the holder may pair another RepoYeti and publish an encrypted working-tree view. */
+  collaborative: boolean;
   /** Every repo, including ones discovered after the link was made. */
   scopeAll: boolean;
   createdAt: number;
@@ -917,6 +961,7 @@ interface ShareRow {
   id: string;
   label: string;
   perm: string;
+  collaborative: number;
   scope_all: number;
   created_at: number;
   expires_at: number | null;
@@ -928,13 +973,14 @@ interface ShareRow {
 }
 
 const SHARE_COLS =
-  "id, label, perm, scope_all, created_at, expires_at, revoked_at, last_used_at, use_count, origin, token";
+  "id, label, perm, collaborative, scope_all, created_at, expires_at, revoked_at, last_used_at, use_count, origin, token";
 
 function toShare(r: ShareRow): Share {
   return {
     id: r.id,
     label: r.label,
     perm: r.perm === "control" ? "control" : "view", // unknown value degrades to the LESSER tier
+    collaborative: r.collaborative === 1,
     scopeAll: r.scope_all === 1,
     createdAt: r.created_at,
     expiresAt: r.expires_at,
@@ -949,6 +995,7 @@ function toShare(r: ShareRow): Share {
 export interface ShareInput {
   label: string;
   perm: "view" | "control";
+  collaborative?: boolean;
   scopeAll: boolean;
   /** Ignored when scopeAll — the grant is "everything", so a repo list would be a lie. */
   repoIds: string[];
@@ -972,14 +1019,15 @@ export function createShare(tokenHash: string, input: ShareInput): Share {
   const db2 = getDb();
   db2
     .query(
-      `INSERT INTO shares (id, token_hash, label, perm, scope_all, created_at, expires_at, revoked_at, last_used_at, use_count, origin, token)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)`,
+      `INSERT INTO shares (id, token_hash, label, perm, collaborative, scope_all, created_at, expires_at, revoked_at, last_used_at, use_count, origin, token)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)`,
     )
     .run(
       id,
       tokenHash,
       input.label,
       input.perm,
+      input.collaborative ? 1 : 0,
       input.scopeAll ? 1 : 0,
       now,
       input.expiresAt,
@@ -994,6 +1042,7 @@ export function createShare(tokenHash: string, input: ShareInput): Share {
     id,
     label: input.label,
     perm: input.perm,
+    collaborative: input.collaborative === true,
     scopeAll: input.scopeAll,
     createdAt: now,
     expiresAt: input.expiresAt,
@@ -1048,6 +1097,7 @@ export function getShareByTokenHash(tokenHash: string): Share | null {
 export interface ShareUpdate {
   label?: string;
   perm?: "view" | "control";
+  collaborative?: boolean;
   scopeAll?: boolean;
   repoIds?: string[];
   expiresAt?: number | null;
@@ -1060,12 +1110,13 @@ export function updateShare(id: string, patch: ShareUpdate): Share | null {
 
   const label = patch.label ?? current.label;
   const perm = patch.perm ?? current.perm;
+  const collaborative = patch.collaborative ?? current.collaborative;
   const scopeAll = patch.scopeAll ?? current.scopeAll;
   const expiresAt = patch.expiresAt === undefined ? current.expiresAt : patch.expiresAt;
 
   db2
-    .query(`UPDATE shares SET label = ?, perm = ?, scope_all = ?, expires_at = ? WHERE id = ?`)
-    .run(label, perm, scopeAll ? 1 : 0, expiresAt, id);
+    .query(`UPDATE shares SET label = ?, perm = ?, collaborative = ?, scope_all = ?, expires_at = ? WHERE id = ?`)
+    .run(label, perm, collaborative ? 1 : 0, scopeAll ? 1 : 0, expiresAt, id);
 
   // Rewrite the scope only when this call actually says something about it. Replacing the set
   // wholesale (delete-then-insert) rather than diffing keeps "the grant is exactly this list"
@@ -1197,6 +1248,125 @@ export function shareCoversRepo(share: Share, repoId: string): boolean {
     .query(`SELECT 1 AS hit FROM share_repos WHERE share_id = ? AND repo_id = ?`)
     .get(share.id, repoId) as { hit: number } | null;
   return !!r;
+}
+
+// ── peer collaboration links ────────────────────────────────────────────────────
+
+export interface CollaborationLink {
+  id: string;
+  inviteUrl: string;
+  /** Bearer-sensitive share token; also the end-to-end snapshot encryption secret. */
+  token: string;
+  relayUrl: string;
+  channelId: string;
+  remoteOrigin: string;
+  daemonId: string | null;
+  participantId: string;
+  localRepoId: string;
+  remoteRepoId: string;
+  label: string;
+  createdAt: number;
+  enabled: boolean;
+}
+
+interface CollaborationLinkRow {
+  id: string;
+  invite_url: string;
+  token: string;
+  relay_url: string;
+  channel_id: string;
+  remote_origin: string;
+  daemon_id: string | null;
+  participant_id: string;
+  local_repo_id: string;
+  remote_repo_id: string;
+  label: string;
+  created_at: number;
+  enabled: number;
+}
+
+function toCollaborationLink(r: CollaborationLinkRow): CollaborationLink {
+  return {
+    id: r.id,
+    inviteUrl: r.invite_url,
+    token: r.token,
+    relayUrl: r.relay_url,
+    channelId: r.channel_id,
+    remoteOrigin: r.remote_origin,
+    daemonId: r.daemon_id ?? null,
+    participantId: r.participant_id,
+    localRepoId: r.local_repo_id,
+    remoteRepoId: r.remote_repo_id,
+    label: r.label,
+    createdAt: r.created_at,
+    enabled: r.enabled === 1,
+  };
+}
+
+export interface CollaborationLinkInput {
+  inviteUrl: string;
+  token: string;
+  relayUrl: string;
+  channelId: string;
+  remoteOrigin: string;
+  daemonId: string | null;
+  participantId: string;
+  localRepoId: string;
+  remoteRepoId: string;
+  label: string;
+}
+
+/** Persist one outbound repo mapping. Rejoining the same invitation/repo pair replaces it. */
+export function createCollaborationLink(input: CollaborationLinkInput): CollaborationLink {
+  const id = randomUUID();
+  const createdAt = Date.now();
+  const d = getDb();
+  // A local repo can map to a given remote repo only once. Re-pairing intentionally replaces the
+  // old participant id/token so a rotated invitation does not leave a dead publisher beside it.
+  d.query(`DELETE FROM collaboration_links WHERE local_repo_id = ? AND remote_repo_id = ?`).run(
+    input.localRepoId,
+    input.remoteRepoId,
+  );
+  d.query(
+    `INSERT INTO collaboration_links
+       (id, invite_url, token, relay_url, channel_id, remote_origin, daemon_id, participant_id, local_repo_id, remote_repo_id, label, created_at, enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+  ).run(
+    id,
+    input.inviteUrl,
+    input.token,
+    input.relayUrl,
+    input.channelId,
+    input.remoteOrigin,
+    input.daemonId,
+    input.participantId,
+    input.localRepoId,
+    input.remoteRepoId,
+    input.label,
+    createdAt,
+  );
+  return {
+    id,
+    ...input,
+    createdAt,
+    enabled: true,
+  };
+}
+
+export function listCollaborationLinks(): CollaborationLink[] {
+  return (
+    getDb()
+      .query(`SELECT * FROM collaboration_links ORDER BY created_at DESC`)
+      .all() as CollaborationLinkRow[]
+  ).map(toCollaborationLink);
+}
+
+export function deleteCollaborationLink(id: string): boolean {
+  return getDb().query(`DELETE FROM collaboration_links WHERE id = ?`).run(id).changes > 0;
+}
+
+export function updateCollaborationOrigin(id: string, origin: string): void {
+  getDb().query(`UPDATE collaboration_links SET remote_origin = ? WHERE id = ?`).run(origin, id);
 }
 
 // ── audit trail ──────────────────────────────────────────────────────────────────

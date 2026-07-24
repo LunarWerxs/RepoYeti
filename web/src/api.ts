@@ -27,6 +27,9 @@ import type {
   Share,
   ResolvedRepoAccount,
   ShareCreated,
+  CollaborationInvitePreview,
+  CollaborationLink,
+  CollaborationSnapshot,
   ShareDuration,
   ShareEvent,
   SharePerm,
@@ -287,6 +290,7 @@ export const api = {
   createShare: (input: {
     label: string;
     perm: SharePerm;
+    collaborative: boolean;
     duration: ShareDuration;
     scopeAll: boolean;
     repoIds: string[];
@@ -299,6 +303,7 @@ export const api = {
     patch: {
       label?: string;
       perm?: SharePerm;
+      collaborative?: boolean;
       duration?: ShareDuration;
       scopeAll?: boolean;
       repoIds?: string[];
@@ -314,6 +319,23 @@ export const api = {
    *  are authored as the owner, so git history can't. */
   shareEvents: (id: string) =>
     req<{ events: ShareEvent[] }>("GET", `/api/shares/${encodeURIComponent(id)}/events`),
+
+  // ── peer working-tree collaboration (owner-only on this installation) ────────
+  inspectCollaboration: (inviteUrl: string) =>
+    req<{ invite: CollaborationInvitePreview }>("POST", "/api/collaborations/inspect", {
+      inviteUrl,
+    }).then((r) => r.invite),
+  joinCollaboration: (input: {
+    inviteUrl: string;
+    localRepoId: string;
+    remoteRepoId: string;
+  }) => req<{ ok: boolean; link: CollaborationLink }>("POST", "/api/collaborations", input),
+  collaborationLinks: () =>
+    req<{ links: CollaborationLink[] }>("GET", "/api/collaboration-links"),
+  leaveCollaboration: (id: string) =>
+    req<{ ok: boolean }>("DELETE", `/api/collaborations/${encodeURIComponent(id)}`),
+  collaborationSnapshots: () =>
+    req<{ snapshots: CollaborationSnapshot[] }>("GET", "/api/collaborations"),
 
   // ── "Sync my settings with Connections" (opt-in cloud sync of theme/appearance) ─────
   /** Current sync status: enabled/connected/last-synced/appearance. */
@@ -717,6 +739,9 @@ export const api = {
     /** Static provider catalog — safe display metadata (no secrets). */
     catalog: () =>
       req<{ catalog: AiCatalogEntry[] }>("GET", "/api/ai/catalog").then((r) => r.catalog),
+    /** Guest-safe owner-daemon capability projection. Never names a provider, model, or key. */
+    availability: () =>
+      req<{ usable: boolean; commitEnabled: boolean }>("GET", "/api/ai/availability"),
     settings: () => req<AiSettings>("GET", "/api/ai/settings"),
     /** Toggle smart-commit YOLO mode (commit the AI plan without the review editor). */
     setYolo: (yolo: boolean) => req<AiSettings>("PUT", "/api/ai/settings", { yolo }),

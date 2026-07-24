@@ -6,6 +6,41 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Live collaboration between RepoYeti installations.** A share can allow collaboration
+  independently of View or Commit access. The recipient pastes the invitation into their own
+  RepoYeti, maps a local checkout to one of the shared repositories, and appears live on the
+  owner's card. The owner can switch between Mine, Theirs, and Combined changed-file views and
+  expand a bounded unified diff for tracked peer edits. Working-tree snapshots contain
+  repo-relative paths, Git state, line/character totals, and that encrypted diff—never credentials
+  or absolute paths—and are authenticated with the share secret before going directly to the
+  owner's tunnel. Revoking or rotating the share cuts off future updates. A Connections identity
+  supplies the collaborator label; their own remote access can remain off.
+- **Accepted collaborations are available to MCP agents.** New read-only tools list both
+  directions of collaboration, inspect a sharer's dirty paths/status, and fetch an individual
+  remote diff. A separate mutating tool can commit, fast-forward pull, and push the sharer's
+  checkout only when the share is still collaborative and control-tier, the local MCP Safety
+  Rail approves it, and an opaque owner-computed fingerprint proves the dirty state has remained
+  unchanged under observation for at least ten minutes. It never amends.
+
+### Changed
+
+- **Remote addresses are now three explicit choices.** `https://app.repoyeti.com` is the
+  zero-input default. The Access panel can instead expose Cloudflare's generated quick-tunnel
+  address directly, or use a named tunnel on a domain the owner controls. The older
+  `go.repoyeti.com` address remains routed so previously issued links keep working.
+
+### Fixed
+
+- **Leaving a shared dashboard now visibly leaves it.** The button clears the guest cookie and
+  replaces the dashboard with an explicit completion screen instead of reloading into a state
+  that looked unchanged or like an unrelated owner sign-in.
+- **Share-link guests can use the sharer's AI provider for commit messages.** Provider calls were
+  already daemon-side, but the guest UI skipped the owner's redacted AI settings and incorrectly
+  stopped at a local “no API key” check. Guests now receive only two capability booleans; the
+  provider, model, and key remain on the sharer's daemon, which returns only the generated result.
+
 ## [0.12.0] - 2026-07-23
 
 ### Added

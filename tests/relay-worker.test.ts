@@ -127,6 +127,16 @@ test("a path after the id is a plain redirect", async () => {
   expect(res.headers.get("location")).toBe("https://one.trycloudflare.com/dashboard");
 });
 
+test("another RepoYeti can resolve a relay invitation without executing the forwarding page", async () => {
+  const { identity } = await register();
+  const res = await worker.fetch(new Request(`https://relay.example/resolve/${identity.id}`), env);
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({
+    ok: true,
+    origin: "https://one.trycloudflare.com",
+  });
+});
+
 test("an unknown id gets a dead-end page, not a redirect", async () => {
   const res = await worker.fetch(new Request("https://relay.example/r/0123456789abcdef"), env);
   expect(res.status).toBe(404);

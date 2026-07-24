@@ -30,6 +30,7 @@ function liveRoutes(): string[] {
     if (r.path === "/*" || r.path === "*") continue; // static PWA catch-all
     if (r.path.startsWith("/oauth/")) continue; // the sign-in dance; never guest-reachable
     if (r.path.startsWith("/s/")) continue; // share redemption itself — public by design
+    if (r.path.startsWith("/c/")) continue; // encrypted peer presence — share-token authenticated
     seen.add(`${r.method} ${r.path}`);
   }
   return [...seen].sort();
@@ -124,5 +125,7 @@ test("permSatisfies: control ⊃ view, view ⊅ control", () => {
 test("the guest surface stays small and deliberate", () => {
   // Not a real invariant — a tripwire. If this number climbs, someone widened what a share link
   // can reach, and that should be a conscious diff-time conversation, not a silent drift.
-  expect(Object.keys(GUEST_ROUTES).length).toBeLessThanOrEqual(24);
+  // The last two additions are deliberately tiny projections: AI availability is exactly two
+  // booleans, and collaboration-fingerprint is one opaque digest plus a completeness bit.
+  expect(Object.keys(GUEST_ROUTES).length).toBeLessThanOrEqual(26);
 });

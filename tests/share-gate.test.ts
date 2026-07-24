@@ -140,6 +140,43 @@ test("view guest CANNOT commit — that's the whole difference between the tiers
   expect(res.status).toBe(403);
 });
 
+test("Leave clears the share cookie instead of attempting an owner logout", async () => {
+  const app = createApp(enforcedCfg());
+  const share = mkShare("view");
+  const res = await app.request("/api/auth/logout", {
+    method: "POST",
+    headers: { ...REMOTE, cookie: guestCookie(share) },
+  });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true });
+  const cleared = res.headers.get("set-cookie") ?? "";
+  expect(cleared).toContain(`${GUEST_COOKIE}=`);
+  expect(cleared.toLowerCase()).toMatch(/max-age=0|expires=/);
+});
+
+test("a guest can read only whether the owner's daemon can generate AI text", async () => {
+  const app = createApp(
+    enforcedCfg({
+      ai: {
+        providers: {
+          openai: { apiKey: "owner-secret-key", model: "gpt-test" },
+        },
+        defaultProvider: "openai",
+        commitEnabled: true,
+      },
+    }),
+  );
+  const res = await app.request("/api/ai/availability", {
+    headers: { ...REMOTE, cookie: guestCookie(mkShare("view")) },
+  });
+  expect(res.status).toBe(200);
+  const raw = await res.text();
+  expect(JSON.parse(raw)).toEqual({ usable: true, commitEnabled: true });
+  expect(raw).not.toContain("openai");
+  expect(raw).not.toContain("gpt-test");
+  expect(raw).not.toContain("owner-secret-key");
+});
+
 test("a view guest's /api/repos carries the owner's pinned/starred grouping, not the owner's secrets", async () => {
   // guestRepoView() used to flatten pinned/starred to false, which meant a guest's dashboard rendered
   // one flat unlabelled list while the owner's showed Pinned / Starred / everything-else sections —

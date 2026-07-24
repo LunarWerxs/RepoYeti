@@ -122,6 +122,36 @@ export function httpBackend(): McpBackend {
       const { repos } = await get<{ repos: RepoView[] }>("/api/repos");
       return buildTriageBriefing(repos);
     },
+
+    async listCollaborations() {
+      const [accepted, incoming] = await Promise.all([
+        get<{ links: unknown[] }>("/api/collaboration-links"),
+        get<{ snapshots: unknown[] }>("/api/collaborations"),
+      ]);
+      return {
+        sharedWithMe: accepted.links,
+        collaboratingWithMe: incoming.snapshots,
+      };
+    },
+
+    async collaborationStatus(idOrName) {
+      return get(
+        `/api/collaboration-links/${encodeURIComponent(idOrName)}/status`,
+      );
+    },
+
+    async collaborationDiff(idOrName, path) {
+      return get(
+        `/api/collaboration-links/${encodeURIComponent(idOrName)}/diff?path=${encodeURIComponent(path)}`,
+      );
+    },
+
+    async collaborationCommitSync(idOrName, message) {
+      return post(
+        `/api/collaboration-links/${encodeURIComponent(idOrName)}/commit-sync`,
+        { message },
+      );
+    },
   };
 }
 

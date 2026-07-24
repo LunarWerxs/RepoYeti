@@ -46,7 +46,17 @@ test("tools/list returns the catalog including the key tools", async () => {
     result: { tools: Array<{ name: string; description: string; inputSchema: object }> };
   };
   const names = res.result.tools.map((t) => t.name);
-  for (const expected of ["list_repos", "git_log", "git_commit", "list_branches", "drift"]) {
+  for (const expected of [
+    "list_repos",
+    "git_log",
+    "git_commit",
+    "list_branches",
+    "drift",
+    "list_collaborations",
+    "collaboration_status",
+    "collaboration_diff",
+    "collaboration_commit_sync",
+  ]) {
     expect(names).toContain(expected);
   }
   // Every advertised tool carries a description + a JSON-Schema inputSchema.
@@ -55,6 +65,13 @@ test("tools/list returns the catalog including the key tools", async () => {
     expect((t.inputSchema as { type: string }).type).toBe("object");
   }
   expect(res.result.tools.length).toBe(TOOLS.length);
+});
+
+test("collaboration MCP reads are read-only, while remote commit+sync uses the approval rail", () => {
+  expect(TOOLS.find((tool) => tool.name === "list_collaborations")?.readOnly).toBe(true);
+  expect(TOOLS.find((tool) => tool.name === "collaboration_status")?.readOnly).toBe(true);
+  expect(TOOLS.find((tool) => tool.name === "collaboration_diff")?.readOnly).toBe(true);
+  expect(TOOLS.find((tool) => tool.name === "collaboration_commit_sync")?.readOnly).toBe(false);
 });
 
 // ── protocol: tools/call (service backend against a seeded repo) ───────────────────────

@@ -38,7 +38,14 @@ export function register(app: Hono, { cfg }: Deps): void {
       ownerClaimed: ownerConfigured(cfg),
       canContinueLocal: local && !share,
       localBypass: local && hasLocalBypass(c),
-      share: share ? { label: share.label, perm: share.perm, expiresAt: share.expiresAt } : null,
+      share: share
+        ? {
+            label: share.label,
+            perm: share.perm,
+            expiresAt: share.expiresAt,
+            collaborative: share.collaborative,
+          }
+        : null,
     });
   });
   app.get("/api/auth/me", (c) => {

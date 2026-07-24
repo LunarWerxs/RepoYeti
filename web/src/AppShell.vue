@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, computed, watch } from "vue";
-import { Plus, Loader2 } from "@lucide/vue";
+import { Plus, Loader2, LogOut } from "@lucide/vue";
 import { useStore } from "./store";
 import { Button } from "@/components/ui/button";
 import AppHeader from "./components/AppHeader.vue";
@@ -25,6 +25,7 @@ import AppContainer from "@/shell/AppContainer.vue";
 import AppFooter from "@/shell/AppFooter.vue";
 
 const store = useStore();
+const leftSharedWorkspace = new URLSearchParams(window.location.search).get("leftShare") === "1";
 const showAdd = ref(false);
 const showSettings = ref(false);
 const showRemote = ref(false);
@@ -115,6 +116,16 @@ onBeforeUnmount(() => window.removeEventListener("focus", onWindowFocus));
 <template>
   <div v-if="!store.authReady" class="grid min-h-dvh place-items-center">
     <Loader2 :size="30" class="animate-spin text-muted-foreground" />
+  </div>
+
+  <div v-else-if="leftSharedWorkspace" class="grid min-h-dvh place-items-center px-5">
+    <div class="flex max-w-md flex-col items-center gap-3 text-center">
+      <div class="grid size-11 place-items-center rounded-full bg-primary/10 text-primary">
+        <LogOut :size="20" />
+      </div>
+      <h1 class="text-lg font-semibold text-foreground">{{ $t("share.leftTitle") }}</h1>
+      <p class="text-[13px] leading-relaxed text-muted-foreground">{{ $t("share.leftHint") }}</p>
+    </div>
   </div>
 
   <SignIn v-else-if="needsSignIn" />

@@ -56,6 +56,18 @@ const repoOnlySchema = (): JsonSchema => ({
   additionalProperties: false,
 });
 
+const collaborationOnlySchema = (): JsonSchema => ({
+  type: "object",
+  properties: {
+    collaboration: {
+      type: "string",
+      description: "Accepted collaboration id or mapped local repository name.",
+    },
+  },
+  required: ["collaboration"],
+  additionalProperties: false,
+});
+
 export const TOOLS: McpTool[] = [
   {
     name: "list_repos",
@@ -156,6 +168,71 @@ export const TOOLS: McpTool[] = [
     readOnly: true,
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: (b) => b.triageBriefing(),
+  },
+  {
+    name: "list_collaborations",
+    description:
+      "List accepted repositories shared with this RepoYeti and live peer working trees " +
+      "currently collaborating with this RepoYeti.",
+    readOnly: true,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: (b) => b.listCollaborations(),
+  },
+  {
+    name: "collaboration_status",
+    description:
+      "Read the sharer's current repo status and changed paths through an accepted collaboration. " +
+      "Also reports how long the exact dirty state has remained unchanged under observation.",
+    readOnly: true,
+    inputSchema: collaborationOnlySchema(),
+    run: (b, a) => b.collaborationStatus(reqString(a, "collaboration")),
+  },
+  {
+    name: "collaboration_diff",
+    description: "Read one changed-file diff from the sharer's checkout through an accepted collaboration.",
+    readOnly: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        collaboration: {
+          type: "string",
+          description: "Accepted collaboration id or mapped local repository name.",
+        },
+        path: { type: "string", description: "Repo-relative changed path." },
+      },
+      required: ["collaboration", "path"],
+      additionalProperties: false,
+    },
+    run: (b, a) =>
+      b.collaborationDiff(
+        reqString(a, "collaboration"),
+        reqString(a, "path"),
+      ),
+  },
+  {
+    name: "collaboration_commit_sync",
+    description:
+      "MUTATES REMOTE: commit, fast-forward pull, and push the sharer's dirty checkout. " +
+      "Requires a collaborative control-tier share, explicit MCP approval, and the exact remote " +
+      "state to have remained unchanged under observation for at least 10 minutes. Never amends.",
+    readOnly: false,
+    inputSchema: {
+      type: "object",
+      properties: {
+        collaboration: {
+          type: "string",
+          description: "Accepted collaboration id or mapped local repository name.",
+        },
+        message: { type: "string", description: "Commit message." },
+      },
+      required: ["collaboration", "message"],
+      additionalProperties: false,
+    },
+    run: (b, a) =>
+      b.collaborationCommitSync(
+        reqString(a, "collaboration"),
+        reqString(a, "message"),
+      ),
   },
   {
     name: "git_commit",

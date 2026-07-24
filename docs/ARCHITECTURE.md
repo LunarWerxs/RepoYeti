@@ -1310,3 +1310,54 @@ plain commit is additive and recoverable, an amend is neither.
 - The daemon's own PWA must not fetch owner-only endpoints as a guest. Not a security rule — an
   audit-legibility one: each such fetch writes a "denied" row and buries the real entries. See the
   `isGuest` branches in the web store's `loadAll` and `AppShell.onMounted`.
+
+## 18. Live collaboration — peer working-tree presence
+
+A share's `collaborative` flag is independent of its `view` / `control` permission. The permission
+still governs what the guest may do to the owner's checkout; collaboration lets the guest map a
+checkout managed by their own RepoYeti to one repository covered by the invitation.
+
+The collaborator's daemon checks every 2.5 seconds. A snapshot contains the remote repo id,
+participant label, local repo display name, redacted Git status, repo-relative changed paths,
+line/character totals, and a bounded unified diff for tracked edits. It excludes absolute paths,
+remotes, credentials, and commit identities; untracked files contribute only their path and
+totals. Unchanged state sends a ten-second heartbeat and reuses the cached diff. The owner
+dashboard polls every 2.5 seconds and offers Mine, Theirs, and Combined views on the mapped card.
+
+The transport is end-to-end encrypted:
+
+1. The 256-bit share token derives a domain-separated AES-256-GCM key and a separate SHA-256
+   channel id.
+2. The collaborator encrypts the full snapshot locally and POSTs it straight to the owner's
+   tunnel under the channel + a random participant id. The share token travels in an Authorization
+   header rather than the repeated request URL.
+3. For a hosted invitation, the address Worker is consulted only when the saved quick-tunnel
+   origin fails; `/resolve/:id` supplies its replacement. Presence never enters Worker KV.
+4. The owner derives the same key from the retained share token, rejects invalid GCM tags,
+   rechecks the share's current repo scope, and keeps the snapshot in memory for 30 seconds.
+
+Rotating or revoking a share removes it from the owner's decryption set immediately. A collaborator
+may still send meaningless ciphertext until they remove their local mapping, but it is no longer
+visible. The collaborator uses their Connections owner identity as the peer label; publishing is
+outbound, so their own remote-access tunnel does not need to be enabled.
+
+Accepted mappings also extend the local MCP catalog without exposing their retained invitation
+tokens. `list_collaborations` reports mappings shared with this installation and fresh peers
+publishing into it; `collaboration_status` and `collaboration_diff` read the sharer's checkout
+through the invitation's ordinary guest scope. Local repositories remain available through the
+existing `list_repos` / `repo_status` / `git_*` tools.
+
+`collaboration_commit_sync` is intentionally narrower than general remote control. It exists only
+for an accepted mapping whose link is still collaborative and `control`; it always goes through
+the invoking installation's MCP approval queue, never amends, and refuses until the exact remote
+dirty state has remained unchanged under observation for ten minutes. The sharer's daemon
+computes an opaque activity fingerprint (content hashes for bounded normal-sized changed files)
+so the observing MCP receives no additional source. If the fingerprint is incomplete, the branch
+is behind/conflicted/mid-operation/detached, or no remote exists, the operation refuses before
+committing. Once admitted it commits, fast-forward pulls, then pushes through the sharer's normal
+share-policy routes.
+
+Guest AI generation follows the same owner-daemon rule as owner generation. The guest UI may read
+only `/api/ai/availability` (`usable` and `commitEnabled`); provider, model, and key configuration
+remain owner-only. `commit-message` and `commit-plan` execute on the sharer's daemon with its
+keychain-backed key and return only their generated result.

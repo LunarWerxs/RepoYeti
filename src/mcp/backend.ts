@@ -56,6 +56,14 @@ export interface McpBackend {
   /** One compact "what needs attention across all repos" snapshot: conflicted/mid-op repos,
    *  ahead/behind repos, repos the auto-commit timer would currently skip, and dirty repos. */
   triageBriefing(): Promise<unknown>;
+  /** Accepted remote mappings plus peers currently publishing into this RepoYeti. */
+  listCollaborations(): Promise<unknown>;
+  /** The sharer's current status + changed paths through one accepted collaboration. */
+  collaborationStatus(idOrName: string): Promise<unknown>;
+  /** One remote changed-file diff through an accepted collaboration. */
+  collaborationDiff(idOrName: string, path: string): Promise<unknown>;
+  /** MUTATES: commit/pull/push the remote checkout after all collaboration safety rails pass. */
+  collaborationCommitSync(idOrName: string, message: string): Promise<unknown>;
 }
 
 /** The minimal repo shape triageBriefing needs — a subset both adapters' repo lists satisfy

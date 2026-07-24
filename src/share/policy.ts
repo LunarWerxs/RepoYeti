@@ -66,6 +66,8 @@ export const GUEST_ROUTES: Record<string, RoutePolicy> = {
   // Projected in the handler down to the display knobs the dashboard needs to render — never the
   // owner's tunnel/MCP/auto-commit/editor settings (routes/health.ts guestRuntimeStatus).
   "GET /api/status": { need: "view", scoped: false },
+  // Only {usable, commitEnabled}; provider/model/key metadata stays owner-only.
+  "GET /api/ai/availability": { need: "view", scoped: false },
   // Scope-filtered in the handler (a guest sees only their repos), not by the path matcher.
   "GET /api/repos": { need: "view", scoped: false },
   "POST /api/repos/:id/refresh": { need: "view", scoped: true }, // a POST, but it only re-reads status
@@ -80,6 +82,8 @@ export const GUEST_ROUTES: Record<string, RoutePolicy> = {
   "GET /api/repos/:id/commit/:hash/file": { need: "view", scoped: true },
   "GET /api/repos/:id/stashes": { need: "view", scoped: true },
   "GET /api/repos/:id/tags": { need: "view", scoped: true },
+  // Opaque content/activity digest used only to prove a remote tree stayed unchanged.
+  "GET /api/repos/:id/collaboration-fingerprint": { need: "view", scoped: true },
   // ── live updates ─────────────────────────────────────────────────────────────
   // Filtered per-connection against the share's scope AND an event allowlist (routes/events.ts).
   "GET /api/events": { need: "view", scoped: false },
@@ -134,6 +138,17 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/shares/:id/rotate",
   "DELETE /api/shares/:id",
   "GET /api/shares/:id/events",
+  // peer working-tree collaboration. Pairing stores another link's bearer token and publishes
+  // local repo state, so every route is owner-plane even though the snapshots contain no content.
+  "GET /api/collaborations",
+  "POST /api/collaborations/inspect",
+  "POST /api/collaborations",
+  "GET /api/collaboration-links",
+  "GET /api/collaboration-links/:id/status",
+  "GET /api/collaboration-links/:id/diff",
+  "POST /api/collaboration-links/:id/commit-sync",
+  "POST /api/collaborations/publish",
+  "DELETE /api/collaborations/:id",
   // access mode / tunnel / relay
   "PUT /api/mode",
   "PUT /api/tunnel",

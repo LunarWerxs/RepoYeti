@@ -1,14 +1,11 @@
-// Regression cover for the stable-address panel in AccessSection.vue.
+// Regression coverage for the explicit address chooser in AccessSection.vue.
 //
-// The relay's on/off Switch is gone — the stable address is DEFAULT-ON daemon-side (see
-// config.ts relayEffective) and the only toggle left is "Custom address". What must not
-// regress now:
-//   · the default (relay) address renders with its registered/pending truth-telling,
-//   · saving a self-hosted relay sends {url} and nothing else,
-//   · the Custom-address switch never removes a configured domain without the inline confirm.
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+// The address is no longer an advanced relay URL plus a separate custom-domain switch. Remote
+// access offers exactly three user-facing choices: RepoYeti's hosted app address, the generated
+// Cloudflare quick-tunnel address, or a named custom domain.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
-import { setActivePinia, createPinia } from "pinia";
+import { createPinia, setActivePinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useStore } from "@/store";
 import AccessSection from "@/components/settings/AccessSection.vue";
@@ -18,7 +15,7 @@ vi.mock("vue-sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() },
 }));
 
-const RELAY_DEFAULT = "https://go.repoyeti.com";
+const RELAY_DEFAULT = "https://app.repoyeti.com";
 
 function mountAccess() {
   return mount(AccessSection, {
@@ -31,77 +28,116 @@ function mountAccess() {
   });
 }
 
-/** The Custom-address Switch, found by the aria-label the panel gives it. */
-function customSwitch(wrapper: ReturnType<typeof mountAccess>) {
+function choice(wrapper: ReturnType<typeof mountAccess>, key: "hosted" | "cloudflare" | "custom") {
   return wrapper
-    .findAll('[role="switch"]')
-    .find((s) => s.attributes("aria-label") === i18n.global.t("settings.customAddress"));
+    .findAll("button")
+    .find((button) => button.text().includes(i18n.global.t(`settings.address.${key}`)))!;
 }
 
-describe("AccessSection — stable address panel", () => {
+describe("AccessSection — address choices", () => {
   beforeEach(() => setActivePinia(createPinia()));
   afterEach(() => vi.restoreAllMocks());
 
-  it("shows the default relay address + registered state, with no relay on/off switch", async () => {
+  it("shows app.repoyeti.com as the zero-input default", () => {
     const store = useStore();
     store.mode = "remote";
-    store.relayConfig = { enabled: true, url: RELAY_DEFAULT, id: "a".repeat(32), defaultUrl: RELAY_DEFAULT };
+    store.relayConfig = {
+      enabled: true,
+      url: RELAY_DEFAULT,
+      id: "a".repeat(32),
+      defaultUrl: RELAY_DEFAULT,
+    };
     store.relayUrl = `${RELAY_DEFAULT}/r/${"a".repeat(32)}`;
     store.relayAnnounced = true;
 
     const wrapper = mountAccess();
     expect(wrapper.text()).toContain(`${RELAY_DEFAULT}/r/${"a".repeat(32)}`);
     expect(wrapper.text()).toContain(i18n.global.t("settings.relayRegistered"));
-    // The old consent switch is gone — the only switches left are access mode + custom address.
-    const labels = wrapper.findAll('[role="switch"]').map((s) => s.attributes("aria-label"));
-    expect(labels).toContain(i18n.global.t("settings.customAddress"));
-    expect(labels).not.toContain("Permanent link");
+    expect(choice(wrapper, "hosted").attributes("class")).toContain("border-primary");
+    expect(choice(wrapper, "cloudflare").exists()).toBe(true);
+    expect(choice(wrapper, "custom").exists()).toBe(true);
+    expect(wrapper.find(`input[aria-label="${i18n.global.t("settings.tunnelHostLabel")}"]`).exists()).toBe(
+      false,
+    );
   });
 
-  it("saving a self-hosted relay sends {url} alone", async () => {
+  it("selecting Cloudflare uses the generated quick-tunnel address", async () => {
     const store = useStore();
     store.mode = "remote";
-    store.relayConfig = { enabled: true, url: RELAY_DEFAULT, id: "a".repeat(32), defaultUrl: RELAY_DEFAULT };
-    store.relayUrl = `${RELAY_DEFAULT}/r/${"a".repeat(32)}`;
-    store.relayAnnounced = true;
-    const spy = vi.spyOn(store, "setRelay").mockResolvedValue(undefined);
+    store.tunnelUrl = "https://snowy-yeti.trycloudflare.com";
+    store.relayConfig = {
+      enabled: true,
+      url: RELAY_DEFAULT,
+      id: "a".repeat(32),
+      defaultUrl: RELAY_DEFAULT,
+    };
+    const relaySpy = vi.spyOn(store, "setRelay").mockImplementation(async (patch) => {
+      store.relayConfig.enabled = patch.enabled ?? store.relayConfig.enabled;
+      store.relayUrl = null;
+    });
 
     const wrapper = mountAccess();
-    const advanced = wrapper
-      .findAll("button")
-      .find((b) => b.text() === i18n.global.t("settings.relayShowAdvanced"))!;
-    await advanced.trigger("click");
-    // Switching relays is only "easy" if you can find out how to run one — the guide link is here.
-    const docLink = wrapper.findAll("a").find((a) => a.text() === i18n.global.t("settings.relaySelfHostDocs"));
-    expect(docLink?.attributes("href")).toContain("relay/README.md");
-    const input = wrapper.find(`input[aria-label="${i18n.global.t("settings.relayUrlLabel")}"]`);
-    await input.setValue("https://relay.example");
-    const save = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes(i18n.global.t("settings.relaySave")))!;
-    await save.trigger("click");
+    await choice(wrapper, "cloudflare").trigger("click");
 
-    expect(spy).toHaveBeenCalledWith({ url: "https://relay.example" });
+    expect(relaySpy).toHaveBeenCalledWith({ enabled: false, url: "" });
+    expect(wrapper.text()).toContain("https://snowy-yeti.trycloudflare.com");
+    expect(wrapper.text()).toContain(i18n.global.t("settings.address.cloudflareNotice"));
   });
 
-  it("switching Custom address off with a configured domain arms a confirm instead of removing it", async () => {
+  it("a custom domain is explicit and saves through the named-tunnel settings", async () => {
     const store = useStore();
     store.mode = "remote";
-    store.tunnelConfig = { named: true, hostname: "app.example.com", hasToken: true, tokenFromEnv: false };
+    store.relayConfig = {
+      enabled: true,
+      url: RELAY_DEFAULT,
+      id: "a".repeat(32),
+      defaultUrl: RELAY_DEFAULT,
+    };
     const spy = vi.spyOn(store, "setTunnel").mockResolvedValue(undefined);
 
     const wrapper = mountAccess();
-    const sw = customSwitch(wrapper)!;
-    expect(sw.attributes("aria-checked")).toBe("true"); // reflects the configured domain
-    await sw.trigger("click"); // attempt to turn OFF
-    // Nothing destroyed yet — the inline confirm is showing instead.
-    expect(spy).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain(i18n.global.t("settings.customAddressRemove"));
-    // Confirming actually removes it (hostname + token cleared in one call).
-    const remove = wrapper
+    await choice(wrapper, "custom").trigger("click");
+    await wrapper
+      .find(`input[aria-label="${i18n.global.t("settings.tunnelHostLabel")}"]`)
+      .setValue("work.example.com");
+    await wrapper
+      .find(`input[aria-label="${i18n.global.t("settings.tunnelTokenLabel")}"]`)
+      .setValue("cloudflare-token");
+    await wrapper
       .findAll("button")
-      .find((b) => b.text().includes(i18n.global.t("settings.customAddressRemove")))!;
-    await remove.trigger("click");
-    expect(spy).toHaveBeenCalledWith({ hostname: "", token: "" });
+      .find((button) => button.text().includes(i18n.global.t("settings.tunnelSave")))!
+      .trigger("click");
+
+    expect(spy).toHaveBeenCalledWith({
+      hostname: "work.example.com",
+      token: "cloudflare-token",
+    });
+  });
+
+  it("leaving a named custom domain clears it before selecting the hosted default", async () => {
+    const store = useStore();
+    store.mode = "remote";
+    store.tunnelConfig = {
+      named: true,
+      hostname: "work.example.com",
+      hasToken: true,
+      tokenFromEnv: false,
+    };
+    store.relayConfig = {
+      enabled: false,
+      url: RELAY_DEFAULT,
+      id: "a".repeat(32),
+      defaultUrl: RELAY_DEFAULT,
+    };
+    const tunnelSpy = vi.spyOn(store, "setTunnel").mockImplementation(async () => {
+      store.tunnelConfig = { named: false, hostname: null, hasToken: false, tokenFromEnv: false };
+    });
+    const relaySpy = vi.spyOn(store, "setRelay").mockResolvedValue(undefined);
+
+    const wrapper = mountAccess();
+    await choice(wrapper, "hosted").trigger("click");
+
+    expect(tunnelSpy).toHaveBeenCalledWith({ hostname: "", token: "" });
+    expect(relaySpy).toHaveBeenCalledWith({ enabled: true, url: "" });
   });
 });

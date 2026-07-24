@@ -10,12 +10,18 @@
  */
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { AlertTriangle, Check, Copy, Link2, Loader2, RefreshCw, Trash2, Pencil } from "@lucide/vue";
+import { AlertTriangle, Check, Copy, Link2, Loader2, RefreshCw, Trash2, Pencil, Users } from "@lucide/vue";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
-import type { Share, ShareDuration, SharePerm } from "../../types";
+import type {
+  CollaborationInvitePreview,
+  CollaborationLink,
+  Share,
+  ShareDuration,
+  SharePerm,
+} from "../../types";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import InfoHint from "@/shell/InfoHint.vue";
 import { Button } from "@/components/ui/button";
@@ -56,6 +62,7 @@ const showForm = ref(false);
 // ── the create form ────────────────────────────────────────────────────────────
 const label = ref("");
 const perm = ref<SharePerm>("view");
+const collaborative = ref(true);
 const duration = ref<ShareDuration>("week");
 const scopeAll = ref(false);
 const picked = ref<Set<string>>(new Set());
@@ -89,6 +96,7 @@ function durationLabel(d: ShareDuration): string {
 function resetForm(): void {
   label.value = "";
   perm.value = "view";
+  collaborative.value = true;
   duration.value = "week";
   scopeAll.value = false;
   picked.value = new Set();
@@ -125,6 +133,7 @@ async function create(): Promise<void> {
     const res = await api.createShare({
       label: label.value.trim(),
       perm: perm.value,
+      collaborative: collaborative.value,
       duration: duration.value,
       scopeAll: scopeAll.value,
       repoIds: scopeAll.value ? [] : [...picked.value],
@@ -201,6 +210,7 @@ function armDismiss(): void {
 const editing = ref<Share | null>(null);
 const editLabel = ref("");
 const editPerm = ref<SharePerm>("view");
+const editCollaborative = ref(false);
 const editDuration = ref<ShareDuration | "keep">("keep");
 const editScopeAll = ref(false);
 const editPicked = ref<Set<string>>(new Set());
@@ -219,6 +229,7 @@ function startEdit(s: Share): void {
   editing.value = s;
   editLabel.value = s.label;
   editPerm.value = s.perm;
+  editCollaborative.value = s.collaborative;
   // "keep" rather than the original duration: the share stores an absolute expiry, not the
   // duration it was minted with, so there is nothing faithful to preselect. Leaving it alone is
   // the honest default.
@@ -246,6 +257,7 @@ async function saveEdit(): Promise<void> {
     await api.updateShare(target.id, {
       label: editLabel.value.trim(),
       perm: editPerm.value,
+      collaborative: editCollaborative.value,
       scopeAll: editScopeAll.value,
       repoIds: editScopeAll.value ? [] : [...editPicked.value],
       ...(editDuration.value === "keep" ? {} : { duration: editDuration.value }),
@@ -314,6 +326,70 @@ function repoLabel(s: Share): string {
   return t("share.nRepos", { n: s.repoIds.length });
 }
 
+// ── join another RepoYeti collaboration ───────────────────────────────────────
+const collaborationLinks = ref<CollaborationLink[]>([]);
+const inviteUrl = ref("");
+const invitePreview = ref<CollaborationInvitePreview | null>(null);
+const localRepoId = ref("");
+const remoteRepoId = ref("");
+const inspectingInvite = ref(false);
+const joiningInvite = ref(false);
+
+async function loadCollaborationLinks(): Promise<void> {
+  try {
+    collaborationLinks.value = (await api.collaborationLinks()).links;
+  } catch {
+    collaborationLinks.value = [];
+  }
+}
+
+async function inspectInvite(): Promise<void> {
+  if (!inviteUrl.value.trim() || inspectingInvite.value) return;
+  inspectingInvite.value = true;
+  invitePreview.value = null;
+  try {
+    invitePreview.value = await api.inspectCollaboration(inviteUrl.value.trim());
+    localRepoId.value ||= store.repos[0]?.id ?? "";
+    remoteRepoId.value ||= invitePreview.value.repos[0]?.id ?? "";
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t("collaboration.inspectFailed"));
+  } finally {
+    inspectingInvite.value = false;
+  }
+}
+
+async function joinInvite(): Promise<void> {
+  if (!invitePreview.value || !localRepoId.value || !remoteRepoId.value || joiningInvite.value) return;
+  joiningInvite.value = true;
+  try {
+    await api.joinCollaboration({
+      inviteUrl: inviteUrl.value.trim(),
+      localRepoId: localRepoId.value,
+      remoteRepoId: remoteRepoId.value,
+    });
+    inviteUrl.value = "";
+    invitePreview.value = null;
+    localRepoId.value = "";
+    remoteRepoId.value = "";
+    await loadCollaborationLinks();
+    toast.success(t("collaboration.joined"));
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t("collaboration.joinFailed"));
+  } finally {
+    joiningInvite.value = false;
+  }
+}
+
+async function leaveCollaboration(id: string): Promise<void> {
+  try {
+    await api.leaveCollaboration(id);
+    await loadCollaborationLinks();
+    toast.success(t("collaboration.left"));
+  } catch {
+    toast.error(t("collaboration.leaveFailed"));
+  }
+}
+
 // `immediate: true` is load-bearing, not a habit. The Settings sheet is a Reka DialogRoot, which
 // only MOUNTS its content when it opens — so by the time this component exists, `open` is already
 // true and a plain watcher never sees a false→true edge. Without `immediate`, load() never runs and
@@ -331,6 +407,7 @@ watch(
       }
       resetForm();
       void load();
+      void loadCollaborationLinks();
     }
   },
   { immediate: true },
@@ -400,6 +477,9 @@ watch(
               :class="s.perm === 'control' ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground'"
             >
               {{ s.perm === "control" ? $t("share.tierControl") : $t("share.tierView") }}
+            </span>
+            <span v-if="s.collaborative" class="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-info">
+              {{ $t("collaboration.live") }}
             </span>
           </div>
           <div class="mt-0.5 truncate text-[11px] text-muted-foreground">
@@ -502,6 +582,14 @@ watch(
           <span class="text-[12.5px] font-medium text-foreground">{{ $t("share.editTitle", { label: editing.label }) }}</span>
           <Button variant="ghost" size="sm" class="ml-auto" @click="cancelEdit">{{ $t("common.cancel") }}</Button>
         </div>
+
+        <label class="flex items-center justify-between gap-3">
+          <span class="flex items-center gap-1.5">
+            <span class="text-[12.5px] text-foreground">{{ $t("collaboration.allow") }}</span>
+            <InfoHint :text="$t('collaboration.allowHint')" />
+          </span>
+          <Switch v-model="editCollaborative" :aria-label="$t('collaboration.allow')" />
+        </label>
         <p class="text-[11.5px] leading-snug text-muted-foreground">{{ $t("share.editHint") }}</p>
 
         <Input v-model="editLabel" :placeholder="$t('share.labelPlaceholder')" class="h-8 text-[12.5px]" />
@@ -625,6 +713,18 @@ watch(
           </button>
         </div>
 
+        <div class="flex items-center justify-between gap-3 pt-0.5">
+          <span class="flex items-center gap-1.5">
+            <span class="text-[12px] text-foreground">{{ $t("collaboration.allow") }}</span>
+            <InfoHint :text="$t('collaboration.allowHint')" />
+          </span>
+          <Switch
+            :model-value="collaborative"
+            :aria-label="$t('collaboration.allow')"
+            @update:model-value="(v: boolean) => (collaborative = v)"
+          />
+        </div>
+
         <!-- Scope -->
         <div class="flex items-center justify-between gap-3 pt-0.5">
           <span class="flex items-center gap-1.5">
@@ -660,5 +760,89 @@ watch(
         </Button>
       </div>
     </template>
+  </SettingsGroup>
+
+  <SettingsGroup :label="$t('collaboration.card')" :description="$t('collaboration.cardHint')">
+    <div v-if="collaborationLinks.length" class="flex flex-col">
+      <div
+        v-for="link in collaborationLinks"
+        :key="link.id"
+        class="flex items-center justify-between gap-3 border-b border-border/40 px-3.5 py-2.5"
+      >
+        <div class="min-w-0">
+          <p class="truncate text-[12.5px] font-medium text-foreground">{{ link.label }}</p>
+          <p class="truncate text-[11px] text-muted-foreground">
+            {{ link.localRepoName }} · {{ $t("collaboration.publishing") }}
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          :aria-label="$t('collaboration.leave')"
+          @click="leaveCollaboration(link.id)"
+        >
+          <Trash2 />
+        </Button>
+      </div>
+    </div>
+
+    <div class="flex flex-col gap-2.5 px-3.5 py-3">
+      <div class="flex items-center gap-1.5">
+        <Users :size="14" class="text-info" />
+        <span class="text-[12.5px] font-medium text-foreground">{{ $t("collaboration.joinTitle") }}</span>
+      </div>
+      <p class="text-[11.5px] leading-snug text-muted-foreground">{{ $t("collaboration.joinHint") }}</p>
+      <div class="flex gap-2">
+        <Input
+          v-model="inviteUrl"
+          class="mono min-w-0 flex-1 text-[11.5px]"
+          :placeholder="$t('collaboration.invitePlaceholder')"
+          :aria-label="$t('collaboration.inviteLabel')"
+          @input="invitePreview = null"
+        />
+        <Button size="sm" :disabled="!inviteUrl.trim() || inspectingInvite" @click="inspectInvite">
+          <Loader2 v-if="inspectingInvite" class="animate-spin" />
+          <Link2 v-else />
+          {{ $t("collaboration.inspect") }}
+        </Button>
+      </div>
+
+      <div v-if="invitePreview" class="flex flex-col gap-2 rounded-lg border border-info/25 bg-info/5 p-2.5">
+        <p class="text-[11.5px] text-foreground/90">
+          {{ $t("collaboration.inviteFrom", { label: invitePreview.share.label }) }}
+        </p>
+        <p v-if="!invitePreview.share.collaborative" class="text-[11.5px] text-warning">
+          {{ $t("collaboration.notAllowed") }}
+        </p>
+        <template v-else>
+          <label class="flex flex-col gap-1">
+            <span class="text-[11px] text-muted-foreground">{{ $t("collaboration.theirRepo") }}</span>
+            <select v-model="remoteRepoId" class="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground">
+              <option v-for="repo in invitePreview.repos" :key="repo.id" :value="repo.id">
+                {{ repo.displayName ?? repo.name }}
+              </option>
+            </select>
+          </label>
+          <label class="flex flex-col gap-1">
+            <span class="text-[11px] text-muted-foreground">{{ $t("collaboration.myRepo") }}</span>
+            <select v-model="localRepoId" class="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground">
+              <option v-for="repo in store.repos" :key="repo.id" :value="repo.id">
+                {{ repo.displayName ?? repo.name }}
+              </option>
+            </select>
+          </label>
+          <Button
+            size="sm"
+            class="self-start"
+            :disabled="!localRepoId || !remoteRepoId || joiningInvite"
+            @click="joinInvite"
+          >
+            <Loader2 v-if="joiningInvite" class="animate-spin" />
+            <Users v-else />
+            {{ $t("collaboration.join") }}
+          </Button>
+        </template>
+      </div>
+    </div>
   </SettingsGroup>
 </template>

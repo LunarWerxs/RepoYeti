@@ -619,6 +619,8 @@ export interface Share {
   id: string;
   label: string;
   perm: SharePerm;
+  /** Holder may pair another RepoYeti and publish an encrypted working-tree snapshot. */
+  collaborative: boolean;
   /** Every repo, including ones discovered later. When true, `repoIds` is empty and meaningless. */
   scopeAll: boolean;
   repoIds: string[];
@@ -670,4 +672,37 @@ export interface ShareViewer {
   label: string;
   perm: SharePerm;
   expiresAt: number | null;
+  collaborative: boolean;
+}
+
+// ── peer collaboration ────────────────────────────────────────────────────────
+export interface CollaborationSnapshot {
+  version: 1;
+  participantId: string;
+  label: string;
+  repoId: string;
+  localRepoName: string;
+  status: RepoStatus | null;
+  changes: ChangedFile[];
+  diff: string | null;
+  updatedAt: number;
+}
+
+export interface CollaborationLink {
+  id: string;
+  localRepoId: string;
+  localRepoName: string;
+  remoteRepoId: string;
+  label: string;
+  createdAt: number;
+  enabled: boolean;
+}
+
+export interface CollaborationInvitePreview {
+  share: {
+    label: string;
+    perm: SharePerm;
+    collaborative: boolean;
+  };
+  repos: Array<{ id: string; name: string; displayName: string | null }>;
 }

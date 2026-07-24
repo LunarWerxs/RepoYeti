@@ -655,25 +655,38 @@ export function redactTunnel(cfg: RepoYetiConfig): RedactedTunnelConfig {
  * Worker before they can keep a share link alive is the same as not shipping the feature. This is
  * the instance documented in relay/README.md; the field stays editable for anyone self-hosting.
  *
- * `go.repoyeti.com` is a Workers custom domain on the `repoyeti` worker (KV-backed); its free
- * fallback hostname is `repoyeti.lunawerx.workers.dev`, the same worker + KV, so both resolve
- * identically. Self-hosting? Point this at your own relay under "Use a different relay" in
- * Settings, or fork relay/ per its README.
+ * `app.repoyeti.com` is the primary Worker route on the `repoyeti` worker (KV-backed);
+ * the `go.repoyeti.com` custom domain remains an alias so links minted by earlier releases keep
+ * resolving. The free fallback hostname is `repoyeti.lunawerx.workers.dev`, the same worker + KV.
  */
-export const DEFAULT_RELAY_URL = "https://go.repoyeti.com";
+export const DEFAULT_RELAY_URL = "https://app.repoyeti.com";
+const LEGACY_RELAY_URL = "https://go.repoyeti.com";
+
+function configuredRelayUrl(cfg: RepoYetiConfig): string {
+  const configured = cfg.relay?.url?.trim();
+  // v0.11/v0.12 persisted the then-default hostname as though it were a custom choice. Treat that
+  // one known value as the hosted default so existing installations move to app.repoyeti.com
+  // automatically; genuinely self-hosted URLs remain untouched.
+  return !configured || configured.toLowerCase() === LEGACY_RELAY_URL
+    ? DEFAULT_RELAY_URL
+    : configured;
+}
 
 /**
  * The relay's EFFECTIVE opt state — the stable address is the default, not a feature you find.
  *
- * ON unless (a) the owner explicitly said no, or (b) a named tunnel is configured: a custom
- * domain IS a permanent address, so routing its links through the relay would add a hop that
- * buys nothing. `enabled: true` stored explicitly still wins over (b) for anyone who wants both.
- * The url falls back to the hosted default so a fresh daemon needs zero configuration.
+ * ON unless (a) the owner selects the generated Cloudflare quick-tunnel address or (b) a named
+ * tunnel is configured: a custom domain IS a permanent address, so routing its links through the
+ * relay would add a hop that buys nothing. The URL falls back to the hosted default so a fresh
+ * daemon needs zero configuration.
  */
 export function relayEffective(cfg: RepoYetiConfig): { enabled: boolean; url: string } {
   const explicit = cfg.relay?.enabled;
-  const enabled = explicit === true || (explicit === undefined && !namedTunnel(cfg));
-  return { enabled, url: cfg.relay?.url?.trim() || DEFAULT_RELAY_URL };
+  // A named tunnel is the custom-address mode and never takes the extra relay hop. Otherwise the
+  // hosted RepoYeti address is the zero-config default; `enabled:false` selects Cloudflare's
+  // generated quick-tunnel address directly.
+  const enabled = !namedTunnel(cfg) && explicit !== false;
+  return { enabled, url: configuredRelayUrl(cfg) };
 }
 
 /** Key-free projection of the relay config, safe to send to the owner's UI. NEVER the private key —
@@ -694,7 +707,7 @@ export interface RedactedRelayConfig {
 export function redactRelay(cfg: RepoYetiConfig): RedactedRelayConfig {
   return {
     enabled: relayEffective(cfg).enabled,
-    url: cfg.relay?.url?.trim() || null,
+    url: cfg.relay?.url ? configuredRelayUrl(cfg) : null,
     id: cfg.relay?.identity?.id ?? null,
     defaultUrl: DEFAULT_RELAY_URL,
   };

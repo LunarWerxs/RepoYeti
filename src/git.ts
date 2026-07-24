@@ -28,6 +28,16 @@ export function safeGitEnv(): Record<string, string> {
   delete env.GIT_SEQUENCE_EDITOR;
   delete env.GIT_PAGER;
   delete env.PAGER;
+  // Per-process config injection (`git -c` expressed through the environment). Besides being
+  // rejected by simple-git's safety guard, inheriting it would let whoever launches the daemon
+  // silently rewrite Git behavior for every RepoYeti operation (author, hooks, credential helper,
+  // safe.directory, and more). RepoYeti supplies its own deliberate per-operation `-c` options;
+  // ambient COUNT/KEY/VALUE tuples and GIT_CONFIG_PARAMETERS do not cross this boundary.
+  delete env.GIT_CONFIG_COUNT;
+  delete env.GIT_CONFIG_PARAMETERS;
+  for (const key of Object.keys(env)) {
+    if (/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(key)) delete env[key];
+  }
   // We inject SSH auth via `-c core.sshCommand` per operation (see identityConfigArgs),
   // not via this env var — simple-git refuses to run with GIT_SSH_COMMAND in the env.
   delete env.GIT_SSH_COMMAND;

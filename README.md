@@ -81,7 +81,7 @@ Cloud sign-in and settings sync are entirely optional and off by default; core g
 
 ## More
 
-- **AI agents (MCP):** `repoyeti mcp` exposes the read and write git toolset over the same daemon; the full HTTP surface is at `GET /api/openapi.json`.
+- **AI agents (MCP):** `repoyeti mcp` exposes local repos plus accepted collaboration status/diffs and guarded remote commit+sync; the full HTTP surface is at `GET /api/openapi.json`.
 - **Architecture, remote access, config:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **Contributing & tests:** [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 

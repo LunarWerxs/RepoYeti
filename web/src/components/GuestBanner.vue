@@ -17,8 +17,7 @@ import { Button } from "@/components/ui/button";
 const store = useStore();
 
 async function leave(): Promise<void> {
-  await store.logout(); // clears the guest cookie server-side (routes/auth.ts)
-  window.location.reload();
+  await store.leaveShare(); // clears the guest cookie, then shows an explicit "left" screen
 }
 </script>
 

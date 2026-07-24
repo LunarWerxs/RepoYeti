@@ -148,6 +148,20 @@ export default {
       return json({ ok: true, url: `${url.origin}/r/${id}` });
     }
 
+    // ── resolve a daemon for another RepoYeti installation ─────────────────────
+    // The normal /r/:id page necessarily reveals this origin to the visitor's browser. This JSON
+    // form exposes nothing additional; it lets a peer daemon redeem the same invitation without
+    // executing the fragment-forwarding page.
+    if (url.pathname.startsWith("/resolve/") && request.method === "GET") {
+      const id = url.pathname.split("/")[2] ?? "";
+      if (!ID_RE.test(id)) return json({ ok: false, error: "not found" }, 404);
+      const raw = await env.RELAY.get(`d:${id}`);
+      if (!raw) return json({ ok: false, error: "not found" }, 404);
+      const target = safeOrigin(JSON.parse(raw).origin);
+      if (!target) return json({ ok: false, error: "not found" }, 404);
+      return json({ ok: true, origin: target });
+    }
+
     // ── someone opens a link ──────────────────────────────────────────────────
     if (url.pathname.startsWith("/r/")) {
       const [, , id, ...rest] = url.pathname.split("/");

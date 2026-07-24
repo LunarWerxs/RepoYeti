@@ -29,6 +29,7 @@ import { startRemoteSync, stopRemoteSync } from "../remote-sync.ts";
 import { startAutoCommit, stopAutoCommit } from "../auto-commit.ts";
 import { startAutoUpdate, stopAutoUpdate, setAutoUpdateHooks } from "../auto-update.ts";
 import { checkAiKeys } from "../ai-keycheck.ts";
+import { startCollaborationSync, stopCollaborationSync } from "../collaboration.ts";
 import { broadcast } from "../bus.ts";
 import { setServerPort, startManagedTunnel, stopManagedTunnel } from "../runtime.ts";
 import {
@@ -187,6 +188,7 @@ export async function start(rest: string[]): Promise<void> {
     stopRemoteSync();
     stopAutoCommit();
     stopAutoUpdate();
+    stopCollaborationSync();
     stopWatching();
     clearInstanceInfo();
     server?.stop(true);
@@ -290,7 +292,11 @@ export async function start(rest: string[]): Promise<void> {
   });
   startAutoUpdate();
 
-  // 6e) best-effort AI key liveness check (owner-keyed providers only). A key that went dead
+  // 6e) outbound collaboration presence. Joined workspaces publish only compact encrypted
+  // status/path snapshots; the timer is inert when this daemon has not joined any.
+  startCollaborationSync();
+
+  // 6f) best-effort AI key liveness check (owner-keyed providers only). A key that went dead
   //     between runs surfaces as a dashboard notification now, instead of a cryptic failure at the
   //     owner's next "Generate". Fire-and-forget — it runs after the server is already up (above),
   //     never blocks boot, and only a confirmed auth failure raises a notification.

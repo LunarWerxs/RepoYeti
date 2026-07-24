@@ -252,6 +252,8 @@ export const CommitSelectedSchema = z.object({
 export const ShareCreateSchema = z.object({
   label: z.string().trim().min(1).max(80),
   perm: z.enum(["view", "control"]),
+  /** Permit the holder to pair a second RepoYeti and publish an encrypted working-tree view. */
+  collaborative: z.boolean().default(true),
   duration: z.enum(["hour", "day", "week", "month", "year", "never"]),
   /** Every repo, including ones discovered later. Mutually exclusive with a repoIds list. */
   scopeAll: z.boolean().default(false),
@@ -268,7 +270,23 @@ export const ShareCreateSchema = z.object({
 export const ShareUpdateSchema = z.object({
   label: z.string().trim().min(1).max(80).optional(),
   perm: z.enum(["view", "control"]).optional(),
+  collaborative: z.boolean().optional(),
   duration: z.enum(["hour", "day", "week", "month", "year", "never"]).optional(),
   scopeAll: z.boolean().optional(),
   repoIds: z.array(nonEmpty).optional(),
+});
+
+// ── peer collaboration ─────────────────────────────────────────────────────────
+export const CollaborationInspectSchema = z.object({
+  inviteUrl: z.string().url(),
+});
+
+export const CollaborationJoinSchema = z.object({
+  inviteUrl: z.string().url(),
+  localRepoId: nonEmpty,
+  remoteRepoId: nonEmpty,
+});
+
+export const CollaborationCommitSyncSchema = z.object({
+  message: z.string().trim().min(1).max(10_000),
 });

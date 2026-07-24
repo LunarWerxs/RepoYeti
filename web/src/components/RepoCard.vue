@@ -10,6 +10,7 @@ import RepoCardHeader from "./repo-card/RepoCardHeader.vue";
 import RepoCardChanges from "./repo-card/RepoCardChanges.vue";
 import RepoCardCommit from "./repo-card/RepoCardCommit.vue";
 import RepoCardActions from "./repo-card/RepoCardActions.vue";
+import RepoCollaboration from "./repo-card/RepoCollaboration.vue";
 import LogPanel from "./LogPanel.vue";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 
@@ -54,6 +55,13 @@ onBeforeUnmount(keepAlive.release);
 const commitMsg = ref("");
 const treeQuery = ref("");
 const contentMode = ref(false);
+const collaborationMode = ref<"mine" | "theirs" | "combined">("mine");
+const hasCollaborators = computed(() =>
+  store.collaborationSnapshots.some((snapshot) => snapshot.repoId === props.repo.id),
+);
+watch(hasCollaborators, (present) => {
+  if (!present) collaborationMode.value = "mine";
+});
 
 // Per-file selection (the checkboxes in ChangesTree) → drives the "Commit selected (N)" bar in
 // RepoCardCommit. Shared with the recursive tree via provide/inject, persisted per repo (see
@@ -124,10 +132,21 @@ watch(
     <CollapsibleContent>
       <div class="flex flex-col gap-3 border-t border-border/60 px-3 pt-3 pb-3.5">
         <!-- path/branch/error + changed-files tree — see repo-card/RepoCardChanges.vue -->
-        <RepoCardChanges :repo="repo" v-model:tree-query="treeQuery" v-model:content-mode="contentMode" />
+        <RepoCollaboration
+          v-if="hasCollaborators"
+          :repo="repo"
+          v-model:mode="collaborationMode"
+        />
+        <RepoCardChanges
+          v-if="collaborationMode === 'mine'"
+          :repo="repo"
+          v-model:tree-query="treeQuery"
+          v-model:content-mode="contentMode"
+        />
 
         <!-- commit message box + smart-commit — see repo-card/RepoCardCommit.vue -->
         <RepoCardCommit
+          v-if="collaborationMode === 'mine'"
           ref="commitRef"
           :repo="repo"
           :tree-selection="treeSelection"

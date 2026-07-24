@@ -35,6 +35,7 @@ function share(patch: Partial<Share> = {}): Share {
     id: "s1",
     label: "share",
     perm: "view",
+    collaborative: true,
     scopeAll: true,
     repoIds: [],
     createdAt: 0,
@@ -103,6 +104,7 @@ describe("SharingSection.vue — per-row Copy link button", () => {
 
   beforeEach(() => {
     setActivePinia(createPinia());
+    vi.spyOn(api, "collaborationLinks").mockResolvedValue({ links: [] });
     // Stubbed fresh each test: happy-dom has no real clipboard, and SharingSection calls
     // navigator.clipboard.writeText directly (see copyRowLink in the component).
     Object.defineProperty(navigator, "clipboard", {

@@ -24,6 +24,13 @@ import {
   createBranchRepo,
 } from "../service/index.ts";
 import { buildTriageBriefing, type McpBackend, type LogOptions } from "./backend.ts";
+import {
+  commitAndSyncAcceptedCollaboration,
+  listAcceptedCollaborations,
+  readAcceptedCollaborationDiff,
+  readAcceptedCollaborationStatus,
+  readCollaborationSnapshots,
+} from "../collaboration.ts";
 
 /**
  * Resolve a user-supplied repo identifier to its RepoView, in process. Matching order mirrors
@@ -141,6 +148,25 @@ export function serviceBackend(): McpBackend {
 
     async triageBriefing() {
       return buildTriageBriefing(getRepos());
+    },
+
+    async listCollaborations() {
+      return {
+        sharedWithMe: listAcceptedCollaborations(),
+        collaboratingWithMe: readCollaborationSnapshots(),
+      };
+    },
+
+    async collaborationStatus(idOrName) {
+      return readAcceptedCollaborationStatus(idOrName);
+    },
+
+    async collaborationDiff(idOrName, path) {
+      return readAcceptedCollaborationDiff(idOrName, path);
+    },
+
+    async collaborationCommitSync(idOrName, message) {
+      return commitAndSyncAcceptedCollaboration(idOrName, message);
     },
   };
 }

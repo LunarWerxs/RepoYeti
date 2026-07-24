@@ -145,6 +145,7 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
           label: share.label,
           perm: share.perm,
           expiresAt: share.expiresAt,
+          collaborative: share.collaborative,
         },
       });
     }

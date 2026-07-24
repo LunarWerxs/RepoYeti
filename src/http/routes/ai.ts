@@ -62,6 +62,17 @@ export function register(app: Hono, { cfg }: Deps): void {
   // Separate endpoint so the UI can cache it independently of per-user settings.
   app.get("/api/ai/catalog", (c) => c.json({ catalog: AI_CATALOG }));
 
+  // Minimal capability projection for share-link guests. It answers only whether the owner's
+  // daemon can generate and whether the feature is enabled; provider/model/key identity remains
+  // owner-only. The actual provider call below already happens here, never in the guest browser.
+  app.get("/api/ai/availability", (c) => {
+    const provider = effectiveDefaultProvider(cfg);
+    return c.json({
+      usable: !!(provider && resolveApiKey(cfg, provider) && resolveModel(cfg, provider)),
+      commitEnabled: cfg.ai?.commitEnabled !== false,
+    });
+  });
+
   // Redacted settings — NEVER includes any apiKey.
   app.get("/api/ai/settings", (c) => c.json(redactAi(cfg)));
 

@@ -26,12 +26,12 @@ test("a named tunnel suppresses the default — a custom domain IS the stable ad
   expect(relayEffective(cfg).enabled).toBe(false);
 });
 
-test("explicit ON wins even alongside a named tunnel", () => {
+test("a named tunnel always selects the custom-domain address, even with stale relay config", () => {
   const cfg = base({
     tunnel: { provider: "named", hostname: "app.example.com", token: "tok" },
     relay: { enabled: true },
   });
-  expect(relayEffective(cfg).enabled).toBe(true);
+  expect(relayEffective(cfg).enabled).toBe(false);
 });
 
 test("a custom relay url rides along regardless of how enabled was decided", () => {
@@ -39,4 +39,13 @@ test("a custom relay url rides along regardless of how enabled was decided", () 
   const eff = relayEffective(cfg);
   expect(eff.enabled).toBe(true);
   expect(eff.url).toBe("https://relay.example");
+});
+
+test("the old hosted hostname migrates to app.repoyeti.com without changing self-hosted URLs", () => {
+  expect(relayEffective(base({ relay: { enabled: true, url: "https://go.repoyeti.com" } })).url).toBe(
+    DEFAULT_RELAY_URL,
+  );
+  expect(relayEffective(base({ relay: { enabled: true, url: "https://relay.example" } })).url).toBe(
+    "https://relay.example",
+  );
 });

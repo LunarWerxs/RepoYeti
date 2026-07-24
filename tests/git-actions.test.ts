@@ -116,6 +116,30 @@ test("git environment strips ambient pager settings", () => {
   }
 });
 
+test("git environment strips ambient per-process config injection", () => {
+  const names = [
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_PARAMETERS",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, process.env[name]]));
+  process.env.GIT_CONFIG_COUNT = "1";
+  process.env.GIT_CONFIG_KEY_0 = "user.name";
+  process.env.GIT_CONFIG_VALUE_0 = "Injected";
+  process.env.GIT_CONFIG_PARAMETERS = "'user.email=injected@example.com'";
+  try {
+    const env = safeGitEnv();
+    for (const name of names) expect(env[name]).toBeUndefined();
+  } finally {
+    for (const name of names) {
+      const value = previous.get(name);
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 test("sshCommandFor validates and quotes identity key paths", () => {
   const dir = mkdtempSync(join(tmpdir(), "gm-key-"));
   const key = join(dir, "id key");

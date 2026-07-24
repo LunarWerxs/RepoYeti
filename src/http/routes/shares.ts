@@ -52,6 +52,8 @@ interface ShareDto {
   id: string;
   label: string;
   perm: "view" | "control";
+  /** The holder may pair another RepoYeti and publish an encrypted peer working-tree view. */
+  collaborative: boolean;
   scopeAll: boolean;
   repoIds: string[];
   createdAt: number;
@@ -92,6 +94,7 @@ function toDto(cfg: RepoYetiConfig, s: Share, fallbackOrigin: string): ShareDto 
     id: s.id,
     label: s.label,
     perm: s.perm,
+    collaborative: s.collaborative,
     scopeAll: s.scopeAll,
     repoIds: s.scopeAll ? [] : shareRepoIds(s.id),
     createdAt: s.createdAt,
@@ -130,7 +133,7 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.post("/api/shares", async (c) => {
     const p = await parseBody(c, ShareCreateSchema);
     if (!p.ok) return p.res;
-    const { label, perm, duration, scopeAll, repoIds } = p.data;
+    const { label, perm, collaborative, duration, scopeAll, repoIds } = p.data;
 
     // A scoped link naming no repos would grant nothing and read as broken; refuse it loudly
     // rather than mint a dead link. (scopeAll is the way to say "everything".)
@@ -146,6 +149,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const share = createShare(hashToken(token), {
       label,
       perm,
+      collaborative,
       scopeAll,
       repoIds,
       expiresAt: expiryFor(duration),
@@ -174,7 +178,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (!id) return jsonError(c, "NOT_FOUND", "no such share link");
     const p = await parseBody(c, ShareUpdateSchema);
     if (!p.ok) return p.res;
-    const { label, perm, duration, scopeAll, repoIds } = p.data;
+    const { label, perm, collaborative, duration, scopeAll, repoIds } = p.data;
 
     const current = getShare(id);
     if (!current || current.revokedAt !== null) {
@@ -194,6 +198,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const updated = updateShare(id, {
       ...(label === undefined ? {} : { label }),
       ...(perm === undefined ? {} : { perm }),
+      ...(collaborative === undefined ? {} : { collaborative }),
       scopeAll: nextScopeAll,
       repoIds: nextRepoIds,
       // Only re-base the expiry when the caller actually said something about duration.

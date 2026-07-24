@@ -81,6 +81,12 @@ test("an edit changes the grant and leaves the secret alone", () => {
   expect(getShareByTokenHash(hashToken(token))?.id).toBe(share.id);
 });
 
+test("live collaboration is an independent, editable share capability", () => {
+  const { share } = mint({ collaborative: true });
+  expect(share.collaborative).toBe(true);
+  expect(updateShare(share.id, { collaborative: false })?.collaborative).toBe(false);
+});
+
 test("editing the repo scope replaces the list rather than appending to it", () => {
   const { share } = mint();
   expect(shareRepoIds(share.id)).toEqual([repoA]);

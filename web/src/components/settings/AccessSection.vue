@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Check, Trash2, LogOut, Loader2, Cloud, ExternalLink, Link2, Copy } from "@lucide/vue";
+import { Check, Copy, Cloud, ExternalLink, Link2, Loader2, LogOut } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { ApiError } from "../../api";
@@ -12,17 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
-/** Whether the parent Settings sheet is open — drives the on-open reset/seed below. */
 const props = defineProps<{ open: boolean }>();
 const store = useStore();
 const { t } = useI18n();
 
-// ── access mode (local ↔ remote) ──────────────────────────────────────────────
+// ── local ↔ remote ────────────────────────────────────────────────────────────
 const isRemote = computed(() => store.mode === "remote");
 const switchingMode = ref(false);
-// Set when enabling remote is refused because no Connections owner has claimed this
-// daemon yet. Discloses the inline sign-in prompt below the toggle instead of
-// bouncing the whole page to OAuth mid-toggle.
 const needsOwner = ref(false);
 async function setAccessMode(toRemote: boolean): Promise<void> {
   switchingMode.value = true;
@@ -40,30 +36,67 @@ async function setAccessMode(toRemote: boolean): Promise<void> {
   }
 }
 
-// ── stable address (named Cloudflare tunnel) ──────────────────────────────────
-// By default the remote URL rotates each restart; a named tunnel (stable hostname + connector
-// token) gives a permanent address. The token is write-only — the daemon never echoes it back,
-// so the field stays blank and an empty submit keeps the saved one.
+// ── address choice ────────────────────────────────────────────────────────────
+type AddressChoice = "hosted" | "cloudflare" | "custom";
+const addressChoice = ref<AddressChoice>("hosted");
+const switchingAddress = ref(false);
 const tunnelHost = ref("");
 const tunnelToken = ref("");
 const savingTunnel = ref(false);
-/** Self-hosted-relay disclosure (only relevant while on the default address). */
-const relaySelfHostOpen = ref(false);
-/** Setup guide for a custom domain (linked from the editor — a "hostname + connector token"
- *  pair is not guessable without it). */
-const STABLE_ADDRESS_DOCS = "https://github.com/LunarWerxs/RepoYeti/blob/main/docs/STABLE_ADDRESS.md";
-/** Guide for running your own relay Worker (the "Use a different relay" path). */
-const RELAY_SELFHOST_DOCS = "https://github.com/LunarWerxs/RepoYeti/blob/main/relay/README.md";
-async function saveTunnel(): Promise<void> {
+const copiedAddress = ref(false);
+const STABLE_ADDRESS_DOCS =
+  "https://github.com/LunarWerxs/RepoYeti/blob/main/docs/STABLE_ADDRESS.md";
+
+function liveChoice(): AddressChoice {
+  if (store.tunnelConfig.named) return "custom";
+  return store.relayConfig.enabled ? "hosted" : "cloudflare";
+}
+
+function addressTitle(choice: AddressChoice): string {
+  if (choice === "hosted") return t("settings.address.hosted");
+  if (choice === "cloudflare") return t("settings.address.cloudflare");
+  return t("settings.address.custom");
+}
+
+function addressHint(choice: AddressChoice): string {
+  if (choice === "hosted") return t("settings.address.hostedHint");
+  if (choice === "cloudflare") return t("settings.address.cloudflareHint");
+  return t("settings.address.customHint");
+}
+
+async function selectAddress(choice: AddressChoice): Promise<void> {
+  addressChoice.value = choice;
+  if (choice === "custom") return;
+  switchingAddress.value = true;
+  try {
+    // Leaving a named tunnel must clear both halves of its write-only configuration. The selected
+    // built-in mode then decides whether the quick tunnel is reached through RepoYeti's stable
+    // hosted front door or exposed directly at its generated trycloudflare.com address.
+    if (store.tunnelConfig.hostname || store.tunnelConfig.hasToken) {
+      await store.setTunnel({ hostname: "", token: "" });
+      tunnelHost.value = "";
+      tunnelToken.value = "";
+    }
+    await store.setRelay({ enabled: choice === "hosted", url: "" });
+    toast.success(t("settings.addressSaved"));
+  } catch (e) {
+    addressChoice.value = liveChoice();
+    toast.error(e instanceof ApiError ? e.message : t("settings.addressSaveFailed"));
+  } finally {
+    switchingAddress.value = false;
+  }
+}
+
+async function saveCustomAddress(): Promise<void> {
   if (savingTunnel.value) return;
   savingTunnel.value = true;
   try {
     const input: { hostname?: string; token?: string } = { hostname: tunnelHost.value.trim() };
-    const tok = tunnelToken.value.trim();
-    if (tok) input.token = tok; // omit when blank → keep the saved token
+    const token = tunnelToken.value.trim();
+    if (token) input.token = token;
     await store.setTunnel(input);
     tunnelToken.value = "";
-    customOpen.value = false; // the status line above now shows the saved domain
+    addressChoice.value = "custom";
     toast.success(t("settings.tunnelSaved"));
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : t("settings.tunnelSaveFailed"));
@@ -71,151 +104,85 @@ async function saveTunnel(): Promise<void> {
     savingTunnel.value = false;
   }
 }
-// (Removal of a configured custom address goes through the Custom-address switch's inline
-// confirm — see removeCustomAddress below. One removal path, not two.)
 
-// ── the stable address (relay-backed by default, custom domain when configured) ──────
-// A quick tunnel is handed a NEW hostname every restart, so share links already sent stop
-// resolving. The DEFAULT stable address is the hosted relay: one link per daemon that never
-// moves and forwards to wherever it currently lives (the daemon side defaults it on — see
-// config.ts relayEffective). "Custom address" swaps it for the owner's own domain (a named
-// Cloudflare tunnel), at which point the relay steps aside automatically.
-const savingRelay = ref(false);
-const relayUrlField = ref("");
-const copiedRelay = ref(false);
+const displayedAddress = computed(() => {
+  if (addressChoice.value === "custom" && store.tunnelConfig.hostname) {
+    return `https://${store.tunnelConfig.hostname}`;
+  }
+  if (addressChoice.value === "hosted") return store.relayUrl;
+  return store.tunnelUrl;
+});
 
-// The Custom-address editor: disclosed by its Switch. Turning the switch OFF while a custom
-// address is configured is destructive (it removes the domain and falls back to the default
-// address), so it arms an inline confirm instead of firing immediately.
-const customOpen = ref(false);
-const pendingDisable = ref(false);
-const customOn = computed(() => store.tunnelConfig.named || customOpen.value);
-function onCustomToggle(v: boolean): void {
-  if (v) {
-    customOpen.value = true;
-    pendingDisable.value = false;
-    return;
-  }
-  if (store.tunnelConfig.named) {
-    customOpen.value = true; // keep the editor visible under the confirm
-    pendingDisable.value = true;
-    return;
-  }
-  customOpen.value = false;
-  pendingDisable.value = false;
-}
-async function removeCustomAddress(): Promise<void> {
+async function copyAddress(): Promise<void> {
+  if (!displayedAddress.value) return;
   try {
-    await store.setTunnel({ hostname: "", token: "" });
-    tunnelHost.value = "";
-    tunnelToken.value = "";
-    customOpen.value = false;
-    pendingDisable.value = false;
-    toast.success(t("settings.tunnelForgot"));
-  } catch {
-    toast.error(t("settings.tunnelSaveFailed"));
-  }
-}
-
-async function saveRelayUrl(): Promise<void> {
-  if (savingRelay.value) return;
-  savingRelay.value = true;
-  try {
-    await store.setRelay({ url: relayUrlField.value.trim() });
-    toast.success(t("settings.relaySaved"));
-  } catch (e) {
-    toast.error(e instanceof ApiError ? e.message : t("settings.relaySaveFailed"));
-  } finally {
-    savingRelay.value = false;
-  }
-}
-
-async function copyRelayUrl(): Promise<void> {
-  if (!store.relayUrl) return;
-  try {
-    await navigator.clipboard.writeText(store.relayUrl);
-    copiedRelay.value = true;
-    setTimeout(() => (copiedRelay.value = false), 2000);
+    await navigator.clipboard.writeText(displayedAddress.value);
+    copiedAddress.value = true;
+    setTimeout(() => (copiedAddress.value = false), 2000);
   } catch {
     toast.error(t("share.copyFailed"));
   }
 }
 
-// ── sign out everywhere (rotates the daemon signing key) ──────────────────────
+// ── sign out everywhere ──────────────────────────────────────────────────────
 const confirmSignOutAll = ref(false);
 async function signOutAll(): Promise<void> {
   if (!confirmSignOutAll.value) {
-    confirmSignOutAll.value = true; // inline two-step confirm
+    confirmSignOutAll.value = true;
     return;
   }
   confirmSignOutAll.value = false;
   try {
     await store.logoutAll();
     toast.success(t("settings.signOutAllDone"));
-    // The current device's cookie is now void too — reload so the auth gate re-evaluates.
     window.location.reload();
   } catch {
     toast.error(t("settings.signOutAllFailed"));
   }
 }
 
-// Seed the stable-address field from the live config whenever the sheet opens (the token
-// stays blank — it's write-only) and reset the transient disclosure/confirm states.
-//
-// `immediate: true` is required, not cosmetic: the Settings sheet is a Reka DialogRoot, so this
-// component isn't MOUNTED until the sheet opens — meaning `open` is already true on creation and a
-// plain watcher never sees a false→true edge, so this body never ran. The visible symptom was the
-// "Stable address" input rendering EMPTY even with a hostname configured (tunnelHost is a local
-// ref that nothing else seeds), which reads as "not set" and invites re-typing it.
 watch(
   () => props.open,
-  (isOpen) => {
-    if (isOpen) {
-      tunnelHost.value = store.tunnelConfig.hostname ?? "";
-      // Blank when the daemon is on its default relay: showing the default URL as if the owner had
-      // chosen it invites edits to a field that didn't need one. The placeholder names it instead.
-      relayUrlField.value =
-        store.relayConfig.url && store.relayConfig.url !== store.relayConfig.defaultUrl
-          ? store.relayConfig.url
-          : "";
-      relaySelfHostOpen.value = false;
-      copiedRelay.value = false;
-      customOpen.value = false;
-      pendingDisable.value = false;
-      needsOwner.value = false;
-    }
+  (open) => {
+    if (!open) return;
+    addressChoice.value = liveChoice();
+    tunnelHost.value = store.tunnelConfig.hostname ?? "";
+    tunnelToken.value = "";
+    copiedAddress.value = false;
+    confirmSignOutAll.value = false;
+    needsOwner.value = false;
   },
   { immediate: true },
 );
 </script>
 
 <template>
-  <!-- (The signed-in Connections account row lives in CloudSyncSection now — one account, one
-       place. This section only discloses an inline sign-in prompt when the remote toggle
-       actually needs an owner, below.) -->
-
-  <!-- Access (local ↔ remote) ───────────────────────────────────── -->
   <SettingsGroup :label="$t('settings.cardAccess')">
     <SettingsRow :label="$t('settings.accessMode')">
-      <template #info><InfoHint :text="isRemote ? $t('remote.modeOnHint') : $t('remote.modeOffHint')" /></template>
+      <template #info>
+        <InfoHint :text="isRemote ? $t('remote.modeOnHint') : $t('remote.modeOffHint')" />
+      </template>
       <template #control>
         <Switch
           :model-value="isRemote"
           :disabled="switchingMode"
           :aria-label="$t('settings.accessMode')"
-          @update:model-value="(v: boolean) => setAccessMode(v)"
+          @update:model-value="(value: boolean) => setAccessMode(value)"
         />
       </template>
     </SettingsRow>
 
-    <!-- Turning remote on needs a claimed Connections owner: disclose the sign-in step
-         inline instead of redirecting out from under the toggle. -->
     <div v-if="needsOwner && !isRemote" class="px-3.5 pb-3">
       <div class="flex flex-col gap-2.5 rounded-lg border border-info/30 bg-info/10 p-3">
         <p class="text-[12.5px] leading-snug text-foreground/90">{{ $t("remote.needsOwner") }}</p>
-        <!-- New tab, same reasoning as the remote-access modal: signing in navigates away to the
-             provider, and doing that in place discards the Settings panel you were in. -->
-        <Button as="a" href="/oauth/login" target="_blank" rel="noopener noreferrer" size="sm" class="self-start">
+        <Button
+          as="a"
+          href="/oauth/login"
+          target="_blank"
+          rel="noopener noreferrer"
+          size="sm"
+          class="self-start"
+        >
           <Cloud />
           {{ $t("remote.connectCta") }}
           <ExternalLink :size="13" class="opacity-70" />
@@ -223,120 +190,70 @@ watch(
       </div>
     </div>
 
-    <!-- The rows below only mean anything while remote access is on: the tunnel names the
-         remote URL, and "sign out everywhere" revokes remote sessions. Hidden otherwise. -->
     <template v-if="isRemote">
-      <!-- THE stable address: relay-backed by default (zero config), the owner's own domain when
-           Custom address is on. One status area — never a wall of pre-filled inputs. -->
-      <div class="flex flex-col gap-2.5 px-3.5 py-3">
+      <div class="flex flex-col gap-3 px-3.5 py-3">
         <div class="flex items-center gap-1.5">
-          <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.tunnelLabel") }}</span>
-          <InfoHint :text="$t('settings.stableAddressHint')" />
+          <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.addressTitle") }}</span>
+          <InfoHint :text="$t('settings.addressHint')" />
         </div>
-        <!-- custom domain active -->
-        <p
-          v-if="store.tunnelConfig.named"
-          class="flex items-center gap-1.5 text-[12px] text-success"
-        >
-          <Check :size="13" class="shrink-0" />
-          <span class="min-w-0 break-all">{{ $t("settings.tunnelActive", { host: store.tunnelConfig.hostname }) }}</span>
-        </p>
-        <!-- default (hosted relay) address -->
-        <template v-else-if="store.relayConfig.enabled">
-          <div v-if="store.relayUrl" class="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-2.5 py-2">
-            <Link2 :size="13" class="shrink-0 text-muted-foreground" />
-            <span class="mono min-w-0 flex-1 truncate text-[12px] text-foreground/90">{{ store.relayUrl }}</span>
-            <Button variant="ghost" size="sm" class="shrink-0" @click="copyRelayUrl">
-              <Check v-if="copiedRelay" />
-              <Copy v-else />
-              {{ copiedRelay ? $t("share.copied") : $t("share.copy") }}
-            </Button>
-          </div>
-          <p v-if="store.relayAnnounced" class="flex items-center gap-1.5 text-[12px] text-success">
-            <Check :size="13" class="shrink-0" />
-            <span class="min-w-0">{{ $t("settings.relayRegistered") }}</span>
-          </p>
-          <!-- "On but not registered" is a real state (no tunnel up yet, or the relay is down), and
-               it means links minted right now still carry the rotating address. Don't hide it. -->
-          <p v-else class="text-[11.5px] leading-snug text-warning">{{ $t("settings.relayPending") }}</p>
 
-          <!-- Which relay forwards for you is a self-hosting detail; the default works, keep it folded. -->
+        <div class="grid gap-2 sm:grid-cols-3">
           <button
+            v-for="choice in (['hosted', 'cloudflare', 'custom'] as AddressChoice[])"
+            :key="choice"
             type="button"
-            class="self-start text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
-            @click="relaySelfHostOpen = !relaySelfHostOpen"
+            class="rounded-lg border p-2.5 text-left transition-colors"
+            :class="
+              addressChoice === choice
+                ? 'border-primary/60 bg-primary/10'
+                : 'border-border/60 hover:bg-muted/40'
+            "
+            :disabled="switchingAddress"
+            @click="selectAddress(choice)"
           >
-            {{ relaySelfHostOpen ? $t("settings.relayHideAdvanced") : $t("settings.relayShowAdvanced") }}
+            <p class="text-[12px] font-medium text-foreground">{{ addressTitle(choice) }}</p>
+            <p class="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
+              {{ addressHint(choice) }}
+            </p>
           </button>
-          <div v-if="relaySelfHostOpen" class="flex flex-col gap-2">
-            <Input
-              v-model="relayUrlField"
-              class="mono text-[12.5px]"
-              :placeholder="store.relayConfig.defaultUrl"
-              :aria-label="$t('settings.relayUrlLabel')"
-            />
-            <p class="text-[11.5px] leading-snug text-muted-foreground">{{ $t("settings.relayUrlHint") }}</p>
-            <Button size="sm" class="self-start" :disabled="savingRelay" @click="saveRelayUrl">
-              <Loader2 v-if="savingRelay" class="animate-spin" />
-              <Check v-else />
-              {{ $t("settings.relaySave") }}
-            </Button>
-            <!-- The one thing that makes "point at your own" real: how to stand one up. It's a single
-                 Cloudflare Worker; the guide is a few paragraphs, not a project. -->
-            <a
-              :href="RELAY_SELFHOST_DOCS"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="flex items-center gap-1 self-start text-[11.5px] text-info underline-offset-2 hover:underline"
-            >
-              {{ $t("settings.relaySelfHostDocs") }}
-              <ExternalLink :size="11" class="opacity-70" />
-            </a>
-          </div>
-        </template>
-        <!-- relay explicitly disabled in config, no custom domain -->
-        <p v-else class="text-[11.5px] leading-snug text-warning">{{ $t("settings.stableAddressOff") }}</p>
-      </div>
-
-      <!-- Custom address: your own domain instead of the built-in forwarding address -->
-      <div class="flex flex-col gap-2.5 px-3.5 py-3">
-        <div class="flex items-center justify-between gap-3">
-          <span class="flex items-center gap-1.5">
-            <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.customAddress") }}</span>
-            <InfoHint :text="$t('settings.customAddressHint')" />
-          </span>
-          <Switch
-            :model-value="customOn"
-            :aria-label="$t('settings.customAddress')"
-            @update:model-value="(v: boolean) => onCustomToggle(v)"
-          />
         </div>
 
-        <!-- Turning it off removes the configured domain — confirm, don't just do it. -->
-        <div v-if="pendingDisable" class="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
-          <p class="text-[12px] leading-snug text-foreground/90">
-            {{ $t("settings.customAddressDisableWarn", { host: store.tunnelConfig.hostname }) }}
-          </p>
-          <div class="flex items-center gap-2">
-            <Button variant="destructive" size="sm" @click="removeCustomAddress">
-              <Trash2 />
-              {{ $t("settings.customAddressRemove") }}
-            </Button>
-            <Button variant="ghost" size="sm" @click="pendingDisable = false">{{ $t("common.cancel") }}</Button>
-          </div>
-        </div>
-
-        <!-- Configured + editor closed: the domain shows in the status above; offer the editor. -->
-        <button
-          v-if="store.tunnelConfig.named && !customOpen"
-          type="button"
-          class="self-start text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
-          @click="customOpen = true"
+        <div
+          v-if="displayedAddress"
+          class="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-2.5 py-2"
         >
-          {{ $t("settings.tunnelEditChange") }}
-        </button>
+          <Link2 :size="13" class="shrink-0 text-muted-foreground" />
+          <span class="mono min-w-0 flex-1 truncate text-[12px] text-foreground/90">
+            {{ displayedAddress }}
+          </span>
+          <Button variant="ghost" size="sm" class="shrink-0" @click="copyAddress">
+            <Check v-if="copiedAddress" />
+            <Copy v-else />
+            {{ copiedAddress ? $t("share.copied") : $t("share.copy") }}
+          </Button>
+        </div>
 
-        <template v-if="customOpen && !pendingDisable">
+        <p
+          v-if="addressChoice === 'hosted' && !store.relayAnnounced"
+          class="text-[11.5px] leading-snug text-warning"
+        >
+          {{ $t("settings.relayPending") }}
+        </p>
+        <p
+          v-else-if="addressChoice === 'hosted'"
+          class="flex items-center gap-1.5 text-[11.5px] text-success"
+        >
+          <Check :size="13" />
+          {{ $t("settings.relayRegistered") }}
+        </p>
+        <p
+          v-else-if="addressChoice === 'cloudflare'"
+          class="text-[11.5px] leading-snug text-muted-foreground"
+        >
+          {{ $t("settings.address.cloudflareNotice") }}
+        </p>
+
+        <div v-if="addressChoice === 'custom'" class="flex flex-col gap-2 rounded-lg border border-border/60 p-2.5">
           <Input
             v-model="tunnelHost"
             class="mono text-[12.5px]"
@@ -348,29 +265,33 @@ watch(
             v-model="tunnelToken"
             type="password"
             class="text-[12.5px]"
-            :placeholder="store.tunnelConfig.hasToken ? $t('settings.tunnelTokenSaved') : $t('settings.tunnelTokenPlaceholder')"
+            :placeholder="
+              store.tunnelConfig.hasToken
+                ? $t('settings.tunnelTokenSaved')
+                : $t('settings.tunnelTokenPlaceholder')
+            "
             :aria-label="$t('settings.tunnelTokenLabel')"
           />
           <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
-          <Button size="sm" class="self-start" :disabled="savingTunnel" @click="saveTunnel">
-            <Loader2 v-if="savingTunnel" class="animate-spin" />
-            <Check v-else />
-            {{ $t("settings.tunnelSave") }}
-          </Button>
-          <!-- The part nobody can guess: what a "hostname and connector token" even are. -->
-          <a
-            :href="STABLE_ADDRESS_DOCS"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="flex items-center gap-1 self-start text-[11.5px] text-info underline-offset-2 hover:underline"
-          >
-            {{ $t("settings.stableAddressDocs") }}
-            <ExternalLink :size="11" class="opacity-70" />
-          </a>
-        </template>
+          <div class="flex flex-wrap items-center gap-2">
+            <Button size="sm" :disabled="savingTunnel || !tunnelHost.trim()" @click="saveCustomAddress">
+              <Loader2 v-if="savingTunnel" class="animate-spin" />
+              <Check v-else />
+              {{ $t("settings.tunnelSave") }}
+            </Button>
+            <a
+              :href="STABLE_ADDRESS_DOCS"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="flex items-center gap-1 text-[11.5px] text-info underline-offset-2 hover:underline"
+            >
+              {{ $t("settings.stableAddressDocs") }}
+              <ExternalLink :size="11" class="opacity-70" />
+            </a>
+          </div>
+        </div>
       </div>
 
-      <!-- sign out everywhere (rotates the signing key → invalidates all devices) -->
       <div v-if="store.authEnforced" class="flex items-center justify-between gap-3 px-3.5 py-3">
         <span class="flex items-center gap-1.5">
           <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.signOutAll") }}</span>

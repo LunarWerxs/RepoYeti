@@ -27,7 +27,7 @@ const SERVER_INFO = { name: "repoyeti", version: VERSION };
 /** Pull a best-effort repo label out of a tool's arguments for the approval card (never resolved
  *  against the backend — just what the caller passed). */
 function repoArg(args: Record<string, unknown>): string | null {
-  const r = args.repo;
+  const r = args.repo ?? args.collaboration;
   return typeof r === "string" && r.trim() !== "" ? r.trim() : null;
 }
 

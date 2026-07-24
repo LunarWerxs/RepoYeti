@@ -11,19 +11,21 @@ name = "repoyeti"
 main = "worker.js"
 compatibility_date = "2026-01-01"
 # workers.dev on → the free fallback hostname repoyeti.lunawerx.workers.dev, same Worker + KV as
-# the go.repoyeti.com custom domain, so both resolve identically.
+# the app.repoyeti.com and legacy go.repoyeti.com custom domains.
 workers_dev = true
 
-# The public stable address. A Workers CUSTOM DOMAIN (not a route): Cloudflare creates the proxied
-# DNS record + edge cert automatically, so the hostname routes straight to this Worker. The zone
-# (repoyeti.com) must be on the account above — it is. Self-hosting on your own domain? Change this
-# to your hostname + zone and `wrangler deploy`.
+# The public stable address. app.repoyeti.com already has a proxied DNS record, so the Worker runs
+# as its origin route. go.repoyeti.com remains the Worker-managed custom domain for old links.
+# The zone (repoyeti.com) is on the account above. Self-hosting? Use either model Cloudflare
+# documents for your hostname, then `wrangler deploy`.
 routes = [
+  { pattern = "app.repoyeti.com/*", zone_name = "repoyeti.com" },
+  # Keep already-issued v0.11/v0.12 links alive while app.repoyeti.com becomes the default.
   { pattern = "go.repoyeti.com", custom_domain = true }
 ]
 
-# id -> { publicKey, origin, updatedAt }. One write per daemon restart, one read per link opened,
-# so the free tier is not a constraint here.
+# id -> { publicKey, origin, updatedAt }. Collaboration presence travels directly between the two
+# RepoYeti daemons, so it does not consume KV writes here.
 #   wrangler kv namespace create RELAY
 [[kv_namespaces]]
 binding = "RELAY"
