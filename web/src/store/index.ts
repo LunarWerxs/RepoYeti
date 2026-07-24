@@ -61,10 +61,13 @@ export const useStore = defineStore("repoyeti", () => {
   // forwarding URL it yields and whether the daemon's address is actually registered there. Drives
   // the Settings "Permanent link" row. Same sourcing as tunnelConfig: /api/status, then SSE.
   const relayConfig = ref<RelayStatus>({
-    enabled: false,
+    // Match the daemon's effective default before /api/status finishes loading. Starting this at
+    // false made the Settings panel briefly—and sometimes permanently—select the temporary
+    // Cloudflare address when it mounted during startup, even though the daemon was hosted-relay on.
+    enabled: true,
     url: null,
     id: null,
-    defaultUrl: "",
+    defaultUrl: "https://app.repoyeti.com",
   });
   const relayUrl = ref<string | null>(null);
   const relayAnnounced = ref(false);

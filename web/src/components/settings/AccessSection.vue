@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Check, Copy, Cloud, ExternalLink, Link2, Loader2, LogOut } from "@lucide/vue";
+import { Check, ChevronDown, Copy, Cloud, ExternalLink, Link2, Loader2, LogOut } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { ApiError } from "../../api";
@@ -39,6 +39,7 @@ async function setAccessMode(toRemote: boolean): Promise<void> {
 // ── address choice ────────────────────────────────────────────────────────────
 type AddressChoice = "hosted" | "cloudflare" | "custom";
 const addressChoice = ref<AddressChoice>("hosted");
+const addressOptionsOpen = ref(false);
 const switchingAddress = ref(false);
 const tunnelHost = ref("");
 const tunnelToken = ref("");
@@ -78,6 +79,7 @@ async function selectAddress(choice: AddressChoice): Promise<void> {
       tunnelToken.value = "";
     }
     await store.setRelay({ enabled: choice === "hosted", url: "" });
+    addressOptionsOpen.value = false;
     toast.success(t("settings.addressSaved"));
   } catch (e) {
     addressChoice.value = liveChoice();
@@ -142,8 +144,12 @@ async function signOutAll(): Promise<void> {
 }
 
 watch(
-  () => props.open,
-  (open) => {
+  [
+    () => props.open,
+    () => store.tunnelConfig.named,
+    () => store.relayConfig.enabled,
+  ],
+  ([open]) => {
     if (!open) return;
     addressChoice.value = liveChoice();
     tunnelHost.value = store.tunnelConfig.hostname ?? "";
@@ -151,6 +157,7 @@ watch(
     copiedAddress.value = false;
     confirmSignOutAll.value = false;
     needsOwner.value = false;
+    addressOptionsOpen.value = false;
   },
   { immediate: true },
 );
@@ -192,30 +199,42 @@ watch(
 
     <template v-if="isRemote">
       <div class="flex flex-col gap-3 px-3.5 py-3">
-        <div class="flex items-center gap-1.5">
-          <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.addressTitle") }}</span>
-          <InfoHint :text="$t('settings.addressHint')" />
-        </div>
-
-        <div class="grid gap-2 sm:grid-cols-3">
-          <button
-            v-for="choice in (['hosted', 'cloudflare', 'custom'] as AddressChoice[])"
-            :key="choice"
-            type="button"
-            class="rounded-lg border p-2.5 text-left transition-colors"
-            :class="
-              addressChoice === choice
-                ? 'border-primary/60 bg-primary/10'
-                : 'border-border/60 hover:bg-muted/40'
-            "
-            :disabled="switchingAddress"
-            @click="selectAddress(choice)"
-          >
-            <p class="text-[12px] font-medium text-foreground">{{ addressTitle(choice) }}</p>
-            <p class="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
-              {{ addressHint(choice) }}
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.addressTitle") }}</span>
+              <InfoHint :text="$t('settings.addressHint')" />
+            </div>
+            <p class="mt-1 text-[12px] font-medium text-foreground/90">{{ addressTitle(addressChoice) }}</p>
+            <p
+              class="text-[11px] leading-snug"
+              :class="
+                addressChoice === 'hosted' && store.relayAnnounced
+                  ? 'text-success'
+                  : 'text-muted-foreground'
+              "
+            >
+              {{
+                addressChoice === "hosted" && store.relayAnnounced
+                  ? $t("settings.relayRegistered")
+                  : addressHint(addressChoice)
+              }}
             </p>
-          </button>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            :aria-expanded="addressOptionsOpen"
+            @click="addressOptionsOpen = !addressOptionsOpen"
+          >
+            {{ addressOptionsOpen ? $t("settings.addressDone") : $t("settings.addressChange") }}
+            <ChevronDown
+              :size="13"
+              class="transition-transform"
+              :class="addressOptionsOpen && 'rotate-180'"
+            />
+          </Button>
         </div>
 
         <div
@@ -240,54 +259,73 @@ watch(
           {{ $t("settings.relayPending") }}
         </p>
         <p
-          v-else-if="addressChoice === 'hosted'"
-          class="flex items-center gap-1.5 text-[11.5px] text-success"
-        >
-          <Check :size="13" />
-          {{ $t("settings.relayRegistered") }}
-        </p>
-        <p
           v-else-if="addressChoice === 'cloudflare'"
           class="text-[11.5px] leading-snug text-muted-foreground"
         >
           {{ $t("settings.address.cloudflareNotice") }}
         </p>
 
-        <div v-if="addressChoice === 'custom'" class="flex flex-col gap-2 rounded-lg border border-border/60 p-2.5">
-          <Input
-            v-model="tunnelHost"
-            class="mono text-[12.5px]"
-            :placeholder="$t('settings.tunnelHostPlaceholder')"
-            :aria-label="$t('settings.tunnelHostLabel')"
-          />
-          <Input
-            v-if="!store.tunnelConfig.tokenFromEnv"
-            v-model="tunnelToken"
-            type="password"
-            class="text-[12.5px]"
-            :placeholder="
-              store.tunnelConfig.hasToken
-                ? $t('settings.tunnelTokenSaved')
-                : $t('settings.tunnelTokenPlaceholder')
-            "
-            :aria-label="$t('settings.tunnelTokenLabel')"
-          />
-          <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
-          <div class="flex flex-wrap items-center gap-2">
-            <Button size="sm" :disabled="savingTunnel || !tunnelHost.trim()" @click="saveCustomAddress">
-              <Loader2 v-if="savingTunnel" class="animate-spin" />
-              <Check v-else />
-              {{ $t("settings.tunnelSave") }}
-            </Button>
-            <a
-              :href="STABLE_ADDRESS_DOCS"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="flex items-center gap-1 text-[11.5px] text-info underline-offset-2 hover:underline"
+        <div v-if="addressOptionsOpen" class="flex flex-col gap-2.5 border-t border-border/50 pt-3">
+          <div class="grid gap-2 sm:grid-cols-3">
+            <button
+              v-for="choice in (['hosted', 'cloudflare', 'custom'] as AddressChoice[])"
+              :key="choice"
+              type="button"
+              class="rounded-lg border p-2.5 text-left transition-colors"
+              :class="
+                addressChoice === choice
+                  ? 'border-primary/60 bg-primary/10'
+                  : 'border-border/60 hover:bg-muted/40'
+              "
+              :disabled="switchingAddress"
+              @click="selectAddress(choice)"
             >
-              {{ $t("settings.stableAddressDocs") }}
-              <ExternalLink :size="11" class="opacity-70" />
-            </a>
+              <p class="text-[12px] font-medium text-foreground">{{ addressTitle(choice) }}</p>
+              <p class="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
+                {{ addressHint(choice) }}
+              </p>
+            </button>
+          </div>
+
+          <div
+            v-if="addressChoice === 'custom'"
+            class="flex flex-col gap-2 rounded-lg border border-border/60 p-2.5"
+          >
+            <Input
+              v-model="tunnelHost"
+              class="mono text-[12.5px]"
+              :placeholder="$t('settings.tunnelHostPlaceholder')"
+              :aria-label="$t('settings.tunnelHostLabel')"
+            />
+            <Input
+              v-if="!store.tunnelConfig.tokenFromEnv"
+              v-model="tunnelToken"
+              type="password"
+              class="text-[12.5px]"
+              :placeholder="
+                store.tunnelConfig.hasToken
+                  ? $t('settings.tunnelTokenSaved')
+                  : $t('settings.tunnelTokenPlaceholder')
+              "
+              :aria-label="$t('settings.tunnelTokenLabel')"
+            />
+            <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
+            <div class="flex flex-wrap items-center gap-2">
+              <Button size="sm" :disabled="savingTunnel || !tunnelHost.trim()" @click="saveCustomAddress">
+                <Loader2 v-if="savingTunnel" class="animate-spin" />
+                <Check v-else />
+                {{ $t("settings.tunnelSave") }}
+              </Button>
+              <a
+                :href="STABLE_ADDRESS_DOCS"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="flex items-center gap-1 text-[11.5px] text-info underline-offset-2 hover:underline"
+              >
+                {{ $t("settings.stableAddressDocs") }}
+                <ExternalLink :size="11" class="opacity-70" />
+              </a>
+            </div>
           </div>
         </div>
       </div>

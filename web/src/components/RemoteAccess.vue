@@ -4,7 +4,8 @@ import { useI18n } from "vue-i18n";
 import { Cloud, CloudOff, Copy, Check, ExternalLink, Loader2, Laptop, QrCode, Share2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
-import { ApiError } from "../api";
+import { api, ApiError } from "../api";
+import type { Share } from "../types";
 import {
   Dialog,
   DialogContent,
@@ -24,9 +25,23 @@ const isRemote = computed(() => store.mode === "remote");
 const switching = ref(false);
 const qrSvg = ref("");
 const copied = ref(false);
+const copiedShare = ref(false);
+const shares = ref<Share[]>([]);
+const sharesLoading = ref(false);
 // The QR starts hidden and is revealed by the button next to the URL. Reset on every open so it
 // doesn't reappear expanded from a previous session.
 const showQr = ref(false);
+/** Prefer the stable hosted address once it is live; the quick-tunnel URL remains the honest
+ *  fallback while the relay is still registering or when the owner explicitly selected it. */
+const remoteUrl = computed(() =>
+  store.relayConfig.enabled && store.relayAnnounced && store.relayUrl
+    ? store.relayUrl
+    : store.tunnelUrl,
+);
+const activeShares = computed(() => shares.value.filter((share) => share.live));
+const primaryShare = computed(
+  () => activeShares.value.find((share) => share.url) ?? activeShares.value[0] ?? null,
+);
 
 const emit = defineEmits<{ shareLinks: [] }>();
 /** Hand off to Settings → Access, where share links are actually created. */
@@ -46,7 +61,7 @@ async function loadQrcode(): Promise<typeof import("qrcode")> {
 // (Re)render the QR whenever the dialog opens or the tunnel URL changes. Forced
 // dark-on-white so it scans regardless of the app theme.
 watch(
-  [open, () => store.tunnelUrl],
+  [open, remoteUrl],
   async ([isOpen, url]) => {
     if (!isOpen || !url) {
       qrSvg.value = "";
@@ -71,12 +86,31 @@ watch(
 // daemon yet. Discloses the inline sign-in prompt under the toggle instead of
 // redirecting the page out from under the dialog.
 const needsOwner = ref(false);
-watch(open, (isOpen) => {
-  if (isOpen) {
-    needsOwner.value = false;
-    showQr.value = false;
+watch(
+  open,
+  (isOpen) => {
+    if (isOpen) {
+      needsOwner.value = false;
+      showQr.value = false;
+      copied.value = false;
+      copiedShare.value = false;
+      void loadShares();
+    }
+  },
+  { immediate: true },
+);
+
+async function loadShares(): Promise<void> {
+  if (store.isGuest) return;
+  sharesLoading.value = true;
+  try {
+    shares.value = (await api.listShares()).shares;
+  } catch {
+    shares.value = [];
+  } finally {
+    sharesLoading.value = false;
   }
-});
+}
 
 async function setMode(toRemote: boolean): Promise<void> {
   switching.value = true;
@@ -103,9 +137,9 @@ async function setRemoteEditing(v: boolean): Promise<void> {
 }
 
 async function copyLink(): Promise<void> {
-  if (!store.tunnelUrl) return;
+  if (!remoteUrl.value) return;
   try {
-    await navigator.clipboard.writeText(store.tunnelUrl);
+    await navigator.clipboard.writeText(remoteUrl.value);
     copied.value = true;
     toast.success(t("remote.copied"));
     setTimeout(() => (copied.value = false), 1500);
@@ -113,11 +147,22 @@ async function copyLink(): Promise<void> {
     toast.error(t("remote.copyFailed"));
   }
 }
+
+async function copyExistingShare(): Promise<void> {
+  if (!primaryShare.value?.url) return;
+  try {
+    await navigator.clipboard.writeText(primaryShare.value.url);
+    copiedShare.value = true;
+    setTimeout(() => (copiedShare.value = false), 1500);
+  } catch {
+    toast.error(t("share.copyFailed"));
+  }
+}
 </script>
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-sm">
+    <DialogContent class="min-w-0 overflow-x-hidden sm:max-w-sm">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <Cloud v-if="isRemote" :size="17" class="text-info" />
@@ -131,7 +176,7 @@ async function copyLink(): Promise<void> {
       <label
         class="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-secondary/30 px-3 py-2.5"
       >
-        <span class="flex flex-col gap-0.5">
+        <span class="flex min-w-0 flex-col gap-0.5">
           <span class="text-[13px] font-medium text-foreground">{{ $t("remote.modeLabel") }}</span>
           <span class="text-[12px] text-muted-foreground">
             {{ isRemote ? $t("remote.modeOnHint") : $t("remote.modeOffHint") }}
@@ -140,6 +185,7 @@ async function copyLink(): Promise<void> {
         <Loader2 v-if="switching" :size="16" class="animate-spin text-muted-foreground" />
         <Switch
           v-else
+          class="shrink-0"
           :model-value="isRemote"
           :aria-label="$t('remote.modeLabel')"
           @update:model-value="(v: boolean) => setMode(v)"
@@ -169,11 +215,12 @@ async function copyLink(): Promise<void> {
         v-if="isRemote"
         class="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-secondary/30 px-3 py-2.5"
       >
-        <span class="flex flex-col gap-0.5">
+        <span class="flex min-w-0 flex-col gap-0.5">
           <span class="text-[13px] font-medium text-foreground">{{ $t("remote.editLabel") }}</span>
           <span class="text-[12px] text-muted-foreground">{{ $t("remote.editHint") }}</span>
         </span>
         <Switch
+          class="shrink-0"
           :model-value="store.remoteEditing"
           :aria-label="$t('remote.editLabel')"
           @update:model-value="(v: boolean) => setRemoteEditing(v)"
@@ -185,7 +232,7 @@ async function copyLink(): Promise<void> {
         <!-- The QR is for one specific moment (pointing a phone at the screen) and was taking the
              top third of the dialog every other time. It's behind the QR button beside the URL now,
              and reveals with the same grid-rows animation the repo sections use. -->
-        <div v-if="store.tunnelUrl" class="qr-reveal" :class="!showQr && 'is-hidden'">
+        <div v-if="remoteUrl" class="qr-reveal" :class="!showQr && 'is-hidden'">
           <div class="min-h-0 overflow-hidden">
             <div class="flex flex-col items-center gap-2.5 pb-1">
               <!-- eslint-disable-next-line vue/no-v-html -- QR SVG generated locally from our own URL -->
@@ -195,7 +242,7 @@ async function copyLink(): Promise<void> {
           </div>
         </div>
         <div
-          v-if="!store.tunnelUrl"
+          v-if="!remoteUrl"
           class="flex items-center justify-center gap-2 rounded-md border border-border bg-secondary/30 py-4 text-[13px] text-muted-foreground"
         >
           <Loader2 :size="15" class="animate-spin" /> {{ $t("remote.starting") }}
@@ -205,7 +252,7 @@ async function copyLink(): Promise<void> {
              default min-width:auto would otherwise let the auto column grow to the URL's
              max-content and push the copy button off the dialog. min-w-0 lets the column
              shrink so the <code> below can truncate. -->
-        <div v-if="store.tunnelUrl" class="flex min-w-0 flex-col gap-1.5">
+        <div v-if="remoteUrl" class="flex min-w-0 flex-col gap-1.5">
           <span class="text-[12px] text-muted-foreground">{{ $t("remote.activeLabel") }}</span>
           <div class="flex items-center gap-2">
             <!-- Copy lives INSIDE the URL box, surfacing on hover/focus. It was a permanent
@@ -215,7 +262,7 @@ async function copyLink(): Promise<void> {
             <div class="group relative min-w-0 flex-1">
               <code
                 class="mono block min-w-0 truncate rounded-md border border-border bg-secondary/40 py-2 pr-9 pl-2.5 text-[12px]"
-              >{{ store.tunnelUrl }}</code>
+              >{{ remoteUrl }}</code>
               <Tooltip>
                 <TooltipTrigger as-child>
                   <Button
@@ -249,7 +296,7 @@ async function copyLink(): Promise<void> {
             </Tooltip>
           </div>
           <a
-            :href="store.tunnelUrl"
+            :href="remoteUrl ?? undefined"
             target="_blank"
             rel="noopener noreferrer"
             class="mt-1 inline-flex items-center justify-center gap-1.5 text-[12.5px] text-primary underline-offset-2 transition-colors hover:underline"
@@ -258,23 +305,73 @@ async function copyLink(): Promise<void> {
           </a>
         </div>
 
-        <p class="text-center text-[12px] text-muted-foreground">
-          {{ store.authenticated ? $t("remote.signedInAs", { name: store.owner }) : $t("remote.localBypassActive") }}
+        <p v-if="store.authenticated" class="text-center text-[12px] text-muted-foreground">
+          {{ $t("remote.signedInAs", { name: store.owner }) }}
         </p>
       </template>
 
-      <!-- The tunnel URL gives someone your whole dashboard; a share link gives them a scoped,
-           expiring, revocable view of chosen repos. That lives in Settings → Access, which is
-           unfindable from here — so say it exists, and go there. -->
+      <!-- Share links are managed in Settings, but the common "what link did I already make?"
+           question belongs here too. Show the first live retained URL and keep creation/editing
+           one click away; the full list remains in Settings. -->
       <div
         v-if="!store.isGuest"
-        class="flex flex-col gap-2 rounded-md border border-border bg-secondary/25 p-3"
+        class="flex min-w-0 flex-col gap-2.5 rounded-md border border-border bg-secondary/25 p-3"
       >
-        <p class="text-[12.5px] leading-snug text-muted-foreground">{{ $t("remote.shareHint") }}</p>
-        <Button variant="secondary" size="sm" class="self-start" @click="openShareLinks">
-          <Share2 />
-          {{ $t("remote.shareCta") }}
-        </Button>
+        <template v-if="primaryShare">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[12.5px] font-medium text-foreground">{{ $t("remote.shareExisting") }}</p>
+              <p class="truncate text-[11px] text-muted-foreground">
+                {{ primaryShare.label }}
+                <template v-if="activeShares.length > 1">
+                  · {{ $t("remote.shareMore", { count: activeShares.length - 1 }) }}
+                </template>
+              </p>
+            </div>
+            <Share2 :size="15" class="shrink-0 text-muted-foreground" />
+          </div>
+          <div
+            v-if="primaryShare.url"
+            class="group relative min-w-0"
+          >
+            <code
+              class="mono block min-w-0 truncate rounded-md border border-border bg-background/45 py-2 pr-9 pl-2.5 text-[11.5px]"
+            >{{ primaryShare.url }}</code>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              class="absolute top-1/2 right-1 -translate-y-1/2"
+              :aria-label="$t('share.copyLink')"
+              @click="copyExistingShare"
+            >
+              <Check v-if="copiedShare" class="text-success" />
+              <Copy v-else />
+            </Button>
+          </div>
+          <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("remote.shareUnavailable") }}</p>
+          <Button variant="secondary" size="sm" class="self-start" @click="openShareLinks">
+            {{ $t("remote.shareManage") }}
+          </Button>
+        </template>
+        <template v-else>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-[12.5px] font-medium text-foreground">{{ $t("remote.shareNewTitle") }}</p>
+              <p class="text-[11px] text-muted-foreground">{{ $t("remote.shareNewHint") }}</p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              class="shrink-0"
+              :disabled="sharesLoading"
+              @click="openShareLinks"
+            >
+              <Loader2 v-if="sharesLoading" class="animate-spin" />
+              <Share2 v-else />
+              {{ $t("remote.shareCta") }}
+            </Button>
+          </div>
+        </template>
       </div>
 
       <!-- local only -->

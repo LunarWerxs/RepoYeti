@@ -46,6 +46,9 @@ const creating = ref(false);
 const addressRotates = computed(
   () => !store.tunnelConfig.named && !(store.relayConfig.enabled && store.relayAnnounced),
 );
+const hostedAddressPending = computed(
+  () => !store.tunnelConfig.named && store.relayConfig.enabled && !store.relayAnnounced,
+);
 /** Which link's revoke button is armed (inline two-step confirm, as elsewhere in Settings). */
 const confirmRevoke = ref<string | null>(null);
 /** The freshly-minted link shown prominently once. Dismissing it is safe: the daemon retains the
@@ -434,7 +437,13 @@ watch(
         class="mx-3.5 mt-3 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3"
       >
         <AlertTriangle :size="14" class="mt-px shrink-0 text-warning" />
-        <p class="text-[11.5px] leading-snug text-muted-foreground">{{ $t("share.ephemeralHost") }}</p>
+        <p class="text-[11.5px] leading-snug text-muted-foreground">
+          {{
+            hostedAddressPending
+              ? $t("share.hostedAddressPending")
+              : $t("share.ephemeralHost")
+          }}
+        </p>
       </div>
 
       <!-- The immediate mint confirmation. The row remains copyable after this banner closes. -->

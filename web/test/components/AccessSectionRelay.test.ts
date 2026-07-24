@@ -34,11 +34,18 @@ function choice(wrapper: ReturnType<typeof mountAccess>, key: "hosted" | "cloudf
     .find((button) => button.text().includes(i18n.global.t(`settings.address.${key}`)))!;
 }
 
+async function revealChoices(wrapper: ReturnType<typeof mountAccess>) {
+  const button = wrapper
+    .findAll("button")
+    .find((candidate) => candidate.text().includes(i18n.global.t("settings.addressChange")))!;
+  await button.trigger("click");
+}
+
 describe("AccessSection — address choices", () => {
   beforeEach(() => setActivePinia(createPinia()));
   afterEach(() => vi.restoreAllMocks());
 
-  it("shows app.repoyeti.com as the zero-input default", () => {
+  it("shows app.repoyeti.com as the zero-input default behind progressive disclosure", async () => {
     const store = useStore();
     store.mode = "remote";
     store.relayConfig = {
@@ -53,6 +60,10 @@ describe("AccessSection — address choices", () => {
     const wrapper = mountAccess();
     expect(wrapper.text()).toContain(`${RELAY_DEFAULT}/r/${"a".repeat(32)}`);
     expect(wrapper.text()).toContain(i18n.global.t("settings.relayRegistered"));
+    expect(choice(wrapper, "cloudflare")).toBeUndefined();
+    expect(choice(wrapper, "custom")).toBeUndefined();
+
+    await revealChoices(wrapper);
     expect(choice(wrapper, "hosted").attributes("class")).toContain("border-primary");
     expect(choice(wrapper, "cloudflare").exists()).toBe(true);
     expect(choice(wrapper, "custom").exists()).toBe(true);
@@ -77,6 +88,7 @@ describe("AccessSection — address choices", () => {
     });
 
     const wrapper = mountAccess();
+    await revealChoices(wrapper);
     await choice(wrapper, "cloudflare").trigger("click");
 
     expect(relaySpy).toHaveBeenCalledWith({ enabled: false, url: "" });
@@ -96,6 +108,7 @@ describe("AccessSection — address choices", () => {
     const spy = vi.spyOn(store, "setTunnel").mockResolvedValue(undefined);
 
     const wrapper = mountAccess();
+    await revealChoices(wrapper);
     await choice(wrapper, "custom").trigger("click");
     await wrapper
       .find(`input[aria-label="${i18n.global.t("settings.tunnelHostLabel")}"]`)
@@ -135,9 +148,38 @@ describe("AccessSection — address choices", () => {
     const relaySpy = vi.spyOn(store, "setRelay").mockResolvedValue(undefined);
 
     const wrapper = mountAccess();
+    await revealChoices(wrapper);
     await choice(wrapper, "hosted").trigger("click");
 
     expect(tunnelSpy).toHaveBeenCalledWith({ hostname: "", token: "" });
     expect(relaySpy).toHaveBeenCalledWith({ enabled: true, url: "" });
+  });
+
+  it("updates a panel that mounted before relay status finished loading", async () => {
+    const store = useStore();
+    store.mode = "remote";
+    store.tunnelUrl = "https://temporary.trycloudflare.com";
+    store.relayConfig = {
+      enabled: false,
+      url: null,
+      id: null,
+      defaultUrl: RELAY_DEFAULT,
+    };
+    const wrapper = mountAccess();
+    expect(wrapper.text()).toContain(i18n.global.t("settings.address.cloudflareNotice"));
+
+    store.relayConfig = {
+      enabled: true,
+      url: RELAY_DEFAULT,
+      id: "b".repeat(32),
+      defaultUrl: RELAY_DEFAULT,
+    };
+    store.relayUrl = `${RELAY_DEFAULT}/r/${"b".repeat(32)}`;
+    store.relayAnnounced = true;
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain(i18n.global.t("settings.address.hosted"));
+    expect(wrapper.text()).toContain(`${RELAY_DEFAULT}/r/${"b".repeat(32)}`);
+    expect(wrapper.text()).not.toContain(i18n.global.t("settings.address.cloudflareNotice"));
   });
 });

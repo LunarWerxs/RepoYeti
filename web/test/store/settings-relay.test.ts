@@ -29,9 +29,10 @@ describe("settings store — relay toggle", () => {
   beforeEach(() => setActivePinia(createPinia()));
   afterEach(() => vi.restoreAllMocks());
 
-  it("starts off, with no permanent URL", () => {
+  it("starts on the hosted default while waiting for daemon status", () => {
     const store = useStore();
-    expect(store.relayConfig.enabled).toBe(false);
+    expect(store.relayConfig.enabled).toBe(true);
+    expect(store.relayConfig.defaultUrl).toBe(DEFAULT_URL);
     expect(store.relayUrl).toBeNull();
     expect(store.relayAnnounced).toBe(false);
   });
