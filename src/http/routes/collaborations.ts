@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { Deps } from "../deps.ts";
 import { jsonError } from "../../contract.ts";
 import {
@@ -42,34 +43,37 @@ export function register(app: Hono, { cfg }: Deps): void {
    * authenticated by the live collaborative share token, while every /api/collaborations route
    * below remains owner-only. No repo mutation is reachable from this endpoint.
    */
-  app.post("/c/:channel/:participant", async (c) => {
-    const declared = Number(c.req.header("content-length") ?? "0");
-    if (Number.isFinite(declared) && declared > 360_000) {
-      return c.json({ ok: false }, 413);
-    }
-    let data = "";
-    try {
-      const raw = await c.req.text();
-      if (raw.length > 360_000) return c.json({ ok: false }, 413);
-      const body = JSON.parse(raw) as { data?: unknown };
-      data = typeof body.data === "string" ? body.data : "";
-    } catch {
-      return c.json({ ok: false }, 400);
-    }
-    const authorization = c.req.header("authorization") ?? "";
-    const token = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
-    if (
-      !receiveCollaborationSnapshot(
-        token,
-        c.req.param("channel"),
-        c.req.param("participant"),
-        data,
-      )
-    ) {
-      return c.json({ ok: false }, 403);
-    }
-    return c.json({ ok: true });
-  });
+  app.post(
+    "/c/:channel/:participant",
+    bodyLimit({
+      maxSize: 360_000,
+      onError: (c) => c.json({ ok: false }, 413),
+    }),
+    async (c) => {
+      let data = "";
+      try {
+        const raw = await c.req.text();
+        if (raw.length > 360_000) return c.json({ ok: false }, 413);
+        const body = JSON.parse(raw) as { data?: unknown };
+        data = typeof body.data === "string" ? body.data : "";
+      } catch {
+        return c.json({ ok: false }, 400);
+      }
+      const authorization = c.req.header("authorization") ?? "";
+      const token = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+      if (
+        !receiveCollaborationSnapshot(
+          token,
+          c.req.param("channel"),
+          c.req.param("participant"),
+          data,
+        )
+      ) {
+        return c.json({ ok: false }, 403);
+      }
+      return c.json({ ok: true });
+    },
+  );
 
   /** Live peer snapshots for the owner's dashboard. The relay failure mode is an empty list. */
   app.get("/api/collaborations", (c) => {

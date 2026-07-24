@@ -252,6 +252,10 @@ export function initDb(): Database {
   } catch {
     /* column already present */
   }
+  // Early collaboration builds persisted the full invitation URL even though every durable
+  // operation uses the separately stored token/origin fields. The URL embeds the same bearer
+  // secret, so retaining it only duplicated the credential in database backups.
+  handle.exec("UPDATE collaboration_links SET invite_url = '' WHERE invite_url <> '';");
   try {
     // Existing links stay ordinary links. New links opt into peer working-tree synchronization
     // explicitly (the UI defaults the new control on, but migration never widens an old grant).
@@ -1254,7 +1258,6 @@ export function shareCoversRepo(share: Share, repoId: string): boolean {
 
 export interface CollaborationLink {
   id: string;
-  inviteUrl: string;
   /** Bearer-sensitive share token; also the end-to-end snapshot encryption secret. */
   token: string;
   relayUrl: string;
@@ -1271,7 +1274,6 @@ export interface CollaborationLink {
 
 interface CollaborationLinkRow {
   id: string;
-  invite_url: string;
   token: string;
   relay_url: string;
   channel_id: string;
@@ -1288,7 +1290,6 @@ interface CollaborationLinkRow {
 function toCollaborationLink(r: CollaborationLinkRow): CollaborationLink {
   return {
     id: r.id,
-    inviteUrl: r.invite_url,
     token: r.token,
     relayUrl: r.relay_url,
     channelId: r.channel_id,
@@ -1304,7 +1305,6 @@ function toCollaborationLink(r: CollaborationLinkRow): CollaborationLink {
 }
 
 export interface CollaborationLinkInput {
-  inviteUrl: string;
   token: string;
   relayUrl: string;
   channelId: string;
@@ -1333,7 +1333,7 @@ export function createCollaborationLink(input: CollaborationLinkInput): Collabor
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
   ).run(
     id,
-    input.inviteUrl,
+    "",
     input.token,
     input.relayUrl,
     input.channelId,

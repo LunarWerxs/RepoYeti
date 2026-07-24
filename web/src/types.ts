@@ -420,6 +420,7 @@ export type ApiErrorCode =
   | "AI_AUTH_FAILED"
   | "AI_UNREACHABLE"
   | "AI_BAD_REQUEST"
+  | "AI_RATE_LIMITED"
   | "AI_ERROR"
   | "BAD_PROVIDER"
   | "NO_KEY"

@@ -22,7 +22,7 @@ import {
   randomBytes,
   randomUUID,
 } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   createCollaborationLink,
@@ -112,6 +112,8 @@ export interface AcceptedCollaborationStatus {
    *  Status remains useful, but remote commit is refused because ten quiet minutes cannot be
    *  proven safely. */
   observationComplete: boolean;
+  /** Exact owner-side fingerprint currently under observation; never exposed to share guests. */
+  fingerprint: string;
   observedAt: number;
   unchangedSince: number;
   stableForMs: number;
@@ -134,6 +136,7 @@ export async function collaborationFingerprint(repoId: string): Promise<{
 }> {
   const repo = getRepo(repoId);
   if (!repo) throw new Error("unknown repository");
+  const realRepoRoot = await realpath(repo.absPath);
   const changes = (await readChanges(repo.absPath, true)).slice(0, 2_000);
   let remaining = FINGERPRINT_TOTAL_MAX_BYTES;
   let complete = changes.length < 2_000;
@@ -152,7 +155,12 @@ export async function collaborationFingerprint(repoId: string): Promise<{
       continue;
     }
     try {
-      const info = await stat(absolute);
+      const realFile = await realpath(absolute);
+      if (!pathWithin(realRepoRoot, realFile)) {
+        complete = false;
+        continue;
+      }
+      const info = await stat(realFile);
       if (!info.isFile()) {
         files.push({
           path: change.path,
@@ -167,7 +175,7 @@ export async function collaborationFingerprint(repoId: string): Promise<{
       }
       let content: string | null = null;
       if (info.size <= FINGERPRINT_FILE_MAX_BYTES && info.size <= remaining) {
-        const bytes = await readFile(absolute);
+        const bytes = await readFile(realFile);
         remaining -= bytes.byteLength;
         content = createHash("sha256").update(bytes).digest("base64url");
       } else {
@@ -595,6 +603,7 @@ export async function readAcceptedCollaborationStatus(
     },
     changes,
     observationComplete,
+    fingerprint,
     observedAt: now,
     unchangedSince,
     stableForMs: Math.max(0, now - unchangedSince),
@@ -670,7 +679,11 @@ export async function commitAndSyncAcceptedCollaboration(
   const repoPath = `/api/repos/${encodeURIComponent(link.remoteRepoId)}`;
   const commit = await remoteJson(session, `${repoPath}/commit`, {
     method: "POST",
-    body: JSON.stringify({ message: cleanMessage, amend: false }),
+    body: JSON.stringify({
+      message: cleanMessage,
+      amend: false,
+      expectedFingerprint: status.fingerprint,
+    }),
   });
   let pull: unknown;
   try {
@@ -777,7 +790,6 @@ export async function joinCollaboration(
   const label = cfg.oauth?.ownerEmail?.trim() || cfg.oauth?.ownerSub?.trim();
   if (!label) throw new Error("sign in with Connections before joining a collaboration");
   const link = createCollaborationLink({
-    inviteUrl,
     token: invite.token,
     relayUrl: invite.relayUrl,
     channelId: invite.channelId,
@@ -814,13 +826,22 @@ async function postSnapshot(
 }
 
 interface PublishState {
+  changesSignature: string;
   signature: string;
-  diff: string | null;
   lastSentAt: number;
 }
 
 const publishState = new Map<string, PublishState>();
 const HEARTBEAT_MS = 10_000;
+
+/** Signature for the actual peer-visible snapshot, not merely its path/stat overview. */
+export function collaborationPresenceSignature(changes: ChangedFile[], diff: string | null): string {
+  return createHash("sha256")
+    .update(JSON.stringify(changes))
+    .update("\0")
+    .update(diff ?? "")
+    .digest("base64url");
+}
 
 async function publishCollaboration(link: CollaborationLink): Promise<void> {
   const repo = getRepo(link.localRepoId);
@@ -828,21 +849,22 @@ async function publishCollaboration(link: CollaborationLink): Promise<void> {
   // Paths + totals provide the overview. A bounded patch makes "see their edits" literal for
   // tracked files; both forms travel only inside the encrypted snapshot.
   const changes = (await readChanges(repo.absPath, true)).slice(0, 2000);
-  const signature = createHash("sha256").update(JSON.stringify(changes)).digest("base64url");
+  const changesSignature = createHash("sha256").update(JSON.stringify(changes)).digest("base64url");
   const previous = publishState.get(link.id);
-  if (previous?.signature === signature && Date.now() - previous.lastSentAt < HEARTBEAT_MS) {
+  if (previous?.changesSignature === changesSignature && Date.now() - previous.lastSentAt < HEARTBEAT_MS) {
     return;
   }
-  const diff =
-    previous?.signature === signature
-      ? previous.diff
-      : changes.length
-        ? await collectPathsDiff(
-            repo.absPath,
-            changes.map((change) => change.path),
-            "lean",
-          )
-        : null;
+  // Recompute at least once per heartbeat even when path/stat totals are unchanged. Two edits can
+  // have identical line counts while different bytes; reusing the old patch would make "Theirs"
+  // stale indefinitely.
+  const diff = changes.length
+    ? await collectPathsDiff(
+        repo.absPath,
+        changes.map((change) => change.path),
+        "lean",
+      )
+    : null;
+  const signature = collaborationPresenceSignature(changes, diff);
   const snapshot: CollaborationSnapshot = {
     version: SNAPSHOT_VERSION,
     participantId: link.participantId,
@@ -880,7 +902,7 @@ async function publishCollaboration(link: CollaborationLink): Promise<void> {
       `collaboration endpoint returned ${response?.status ?? "no response"}`,
     );
   }
-  publishState.set(link.id, { signature, diff, lastSentAt: Date.now() });
+  publishState.set(link.id, { changesSignature, signature, lastSentAt: Date.now() });
 }
 
 export async function publishAllCollaborations(): Promise<void> {

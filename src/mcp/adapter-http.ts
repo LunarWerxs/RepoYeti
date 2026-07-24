@@ -49,6 +49,11 @@ export function httpBackend(): McpBackend {
       };
     },
 
+    async changes(idOrName) {
+      const repo = await resolveRepo(idOrName);
+      return get(`/api/repos/${repo.id}/changes`);
+    },
+
     async log(idOrName, opts?: LogOptions) {
       const repo = await resolveRepo(idOrName);
       const params = new URLSearchParams();

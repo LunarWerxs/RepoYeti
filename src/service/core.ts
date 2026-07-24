@@ -44,6 +44,12 @@ type VcsAction = (
   identity: Identity | null,
   auth: GitHubAuth | null,
 ) => Promise<ActionResult>;
+type VcsPrecondition = (
+  backend: VcsBackend,
+  absPath: string,
+  identity: Identity | null,
+  auth: GitHubAuth | null,
+) => Promise<ActionResult | null>;
 
 /**
  * The GitHub credential a repo's NETWORK op should run under, or null to leave it alone.
@@ -72,6 +78,7 @@ export async function runAction(
   action: VcsAction,
   markFetched = false,
   syncAccount = false,
+  precondition?: VcsPrecondition,
 ): Promise<ActionOutcome> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found", repoId };
@@ -86,7 +93,10 @@ export async function runAction(
   const auth = syncAccount ? await accountAuthFor(repo) : null;
   const identity = resolveRepoIdentity(repo);
   const backend = backendFor(repo.vcs);
-  const result = await enqueue(repoId, () => action(backend, repo.absPath, identity, auth));
+  const result = await enqueue(repoId, async () => {
+    const blocked = await precondition?.(backend, repo.absPath, identity, auth);
+    return blocked ?? action(backend, repo.absPath, identity, auth);
+  });
   // Reflect the new reality (ahead/behind/dirty) to all clients.
   await refreshRepo(repoId, repo.absPath, markFetched && result.ok);
   return { ...result, repoId };

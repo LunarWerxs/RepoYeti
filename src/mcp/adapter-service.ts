@@ -12,6 +12,7 @@
 import { getRepos, getRepo, type RepoView } from "../db.ts";
 import {
   getLog,
+  getChanges,
   getBranches,
   getStashes,
   searchChangedContent,
@@ -82,6 +83,11 @@ export function serviceBackend(): McpBackend {
         vcs: repo.vcs,
         status: repo.status,
       };
+    },
+
+    async changes(idOrName) {
+      const repo = resolveRepoView(idOrName);
+      return ensureOk(await getChanges(repo.id));
     },
 
     async log(idOrName, opts?: LogOptions) {

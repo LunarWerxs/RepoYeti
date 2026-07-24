@@ -22,6 +22,7 @@ import { runAction, refreshRepo, accountAuthFor, type ActionOutcome } from "./co
 import { guardRepo } from "./guards.ts";
 import { resolveRepoPath } from "./files.ts";
 import { normalizeRelPath } from "../paths.ts";
+import { collaborationFingerprint } from "../collaboration.ts";
 
 export const fetchRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.fetch(p, idn, auth), true, true);
 export const pullRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.pull(p, idn, auth), true, true);
@@ -32,6 +33,33 @@ export const commitRepo = (
   amend = false,
 ): Promise<ActionOutcome> =>
   runAction(id, (b, p, idn) => b.commitAll(p, idn, message, amend));
+
+/**
+ * Commit only if the exact collaboration fingerprint observed by a remote peer is still current.
+ * The comparison and staging/commit share one queue slot, closing the observation→commit race.
+ */
+export const commitRepoWithFingerprint = (
+  id: string,
+  message: string,
+  expectedFingerprint: string,
+): Promise<ActionOutcome> =>
+  runAction(
+    id,
+    (b, p, idn) => b.commitAll(p, idn, message, false),
+    false,
+    false,
+    async () => {
+      const current = await collaborationFingerprint(id);
+      if (!current.complete || current.fingerprint !== expectedFingerprint) {
+        return {
+          ok: false,
+          code: "PLAN_STALE",
+          message: "the working tree changed after the collaboration safety check; review it again before committing",
+        };
+      }
+      return null;
+    },
+  );
 
 // ── branch actions (switch / create / delete) ─────────────────────────────────────
 export const checkoutRepo = (id: string, branch: string): Promise<ActionOutcome> =>

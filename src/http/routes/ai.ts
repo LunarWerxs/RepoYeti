@@ -33,6 +33,17 @@ import {
 } from "../../schemas.ts";
 import { collectRepoDiff, collectRepoPathsDiff, planCommitInput } from "../../service/index.ts";
 import { requireId } from "../respond.ts";
+import { effectiveGuest } from "../../auth.ts";
+
+const GUEST_AI_WINDOW_MS = 60_000;
+const GUEST_AI_MAX_PER_WINDOW = 10;
+const GUEST_AI_MAX_CONCURRENT = 2;
+
+interface GuestAiUsage {
+  windowStartedAt: number;
+  used: number;
+  active: number;
+}
 
 export function register(app: Hono, { cfg }: Deps): void {
   // ── AI: bring-your-own-key commit messages ──────────────────────────────────
@@ -44,6 +55,31 @@ export function register(app: Hono, { cfg }: Deps): void {
   };
   const ensureAi = (): NonNullable<RepoYetiConfig["ai"]> => (cfg.ai ??= { providers: {} });
   const providerLabel = (id: AiProviderId): string => AI_CATALOG.find((e) => e.id === id)?.label ?? id;
+  const guestAiUsage = new Map<string, GuestAiUsage>();
+  const enterGuestAi = (c: Context): Response | (() => void) | null => {
+    const guest = effectiveGuest(c, cfg);
+    if (!guest) return null;
+    if (cfg.ai?.commitEnabled === false) {
+      return jsonError(c, "FORBIDDEN", "AI commit generation is disabled by the owner", 403);
+    }
+    const now = Date.now();
+    let usage = guestAiUsage.get(guest.id);
+    if (!usage || now - usage.windowStartedAt >= GUEST_AI_WINDOW_MS) {
+      usage = { windowStartedAt: now, used: 0, active: 0 };
+      guestAiUsage.set(guest.id, usage);
+    }
+    if (usage.active >= GUEST_AI_MAX_CONCURRENT) {
+      return jsonError(c, "AI_RATE_LIMITED", "too many AI requests are already running for this share link");
+    }
+    if (usage.used >= GUEST_AI_MAX_PER_WINDOW) {
+      return jsonError(c, "AI_RATE_LIMITED", "this share link has reached its AI request limit; retry shortly");
+    }
+    usage.used++;
+    usage.active++;
+    return () => {
+      usage!.active = Math.max(0, usage!.active - 1);
+    };
+  };
   // Turn a raw AiError into a client message. A 401/403 (AI_AUTH_FAILED) is enriched with WHICH
   // provider's key failed, so the owner isn't left staring at a bare "invalid or unauthorized key"
   // wondering what to fix.
@@ -185,7 +221,13 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (id instanceof Response) return id;
     const p = await parseBody(c, CommitMessageSchema);
     if (!p.ok) return p.res;
-    const requested = p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
+    const guest = effectiveGuest(c, cfg);
+    if (guest && cfg.ai?.commitEnabled === false) {
+      return jsonError(c, "FORBIDDEN", "AI commit generation is disabled by the owner", 403);
+    }
+    // Share guests may spend only the provider/model the owner selected as default. Provider
+    // overrides and provider identity remain owner-only.
+    const requested = guest || p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
     const provider = requested ?? effectiveDefaultProvider(cfg);
     if (!provider) return jsonError(c, "NO_AI_PROVIDER", "no AI provider configured");
     const apiKey = resolveApiKey(cfg, provider);
@@ -205,6 +247,8 @@ export function register(app: Hono, { cfg }: Deps): void {
         collected.code === "NOT_FOUND" ? 404 : collected.code === "NOTHING_TO_COMMIT" ? 409 : 400;
       return c.json(collected, status);
     }
+    const admission = enterGuestAi(c);
+    if (admission instanceof Response) return admission;
     try {
       const message = await generateCommitMessage(
         provider,
@@ -215,9 +259,11 @@ export function register(app: Hono, { cfg }: Deps): void {
         undefined,
         collected.files ?? 0, // anchors the body's bullet floor to the real file count
       );
-      return c.json({ ok: true, message, provider, model });
+      return c.json(guest ? { ok: true, message } : { ok: true, message, provider, model });
     } catch (e) {
       return aiErr(c, e, provider);
+    } finally {
+      admission?.();
     }
   });
 
@@ -229,7 +275,11 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (id instanceof Response) return id;
     const p = await parseBody(c, CommitPlanSchema);
     if (!p.ok) return p.res;
-    const requested = p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
+    const guest = effectiveGuest(c, cfg);
+    if (guest && cfg.ai?.commitEnabled === false) {
+      return jsonError(c, "FORBIDDEN", "AI commit generation is disabled by the owner", 403);
+    }
+    const requested = guest || p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
     const provider = requested ?? effectiveDefaultProvider(cfg);
     if (!provider) return jsonError(c, "NO_AI_PROVIDER", "no AI provider configured");
     const apiKey = resolveApiKey(cfg, provider);
@@ -250,9 +300,11 @@ export function register(app: Hono, { cfg }: Deps): void {
       return c.json(collected, status);
     }
     const style = cfg.ai?.style ?? "conventional";
+    const admission = enterGuestAi(c);
+    if (admission instanceof Response) return admission;
     try {
       const plan = await generateCommitPlan(provider, apiKey, model, collected.input!, style);
-      return c.json({ ok: true, plan, provider, model });
+      return c.json(guest ? { ok: true, plan } : { ok: true, plan, provider, model });
     } catch (e) {
       // A bad/rejected key is worth surfacing (the owner must fix it); anything else
       // (provider down, rate limit, garbage response) still falls back to the deterministic
@@ -266,7 +318,13 @@ export function register(app: Hono, { cfg }: Deps): void {
           ? { code: e.code, message: e.message }
           : { code: "AI_ERROR" as const, message: e instanceof Error ? e.message : String(e) };
       const plan = heuristicPlan(collected.input!, reason);
-      return c.json({ ok: true, plan, provider, model, fallback: true });
+      return c.json(
+        guest
+          ? { ok: true, plan, fallback: true }
+          : { ok: true, plan, provider, model, fallback: true },
+      );
+    } finally {
+      admission?.();
     }
   });
 }

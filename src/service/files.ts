@@ -4,7 +4,7 @@
  * request path is normalised and confined to the repo (no `../` escapes). Plus the runtime
  * settings for the patch-vs-models diff threshold (mirrored from the owner config at boot).
  */
-import { lstatSync, mkdirSync, realpathSync, renameSync, unlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { pathWithin, normalizeRelPath } from "../paths.ts";
 import { getRepo } from "../db.ts";
@@ -39,6 +39,12 @@ function looksBinary(bytes: Uint8Array): boolean {
   const n = Math.min(bytes.length, 8000);
   for (let i = 0; i < n; i++) if (bytes[i] === 0) return true;
   return false;
+}
+
+/** Windows resolves path segments case-insensitively, so `.GIT/config` reaches `.git/config`.
+ *  Keep the metadata boundary in one helper so every read/write/move route applies it equally. */
+function insideGitMetadata(clean: string): boolean {
+  return clean.split("/").some((segment) => segment.toLowerCase() === ".git");
 }
 
 /** Contents of a path at an arbitrary git rev (`git show <rev>:<path>`). A missing blob — the
@@ -77,11 +83,39 @@ interface TextRead {
   size: number;
 }
 
+interface SafeWorkFile {
+  real: string;
+  size: number;
+}
+
+/**
+ * Resolve an existing working-tree file through every symlink/junction and prove the final
+ * target is still inside the real repository root. A lexical `../` check is not enough here:
+ * Bun.file follows links, so a repository could otherwise expose an arbitrary owner-readable
+ * file through the share-link viewer.
+ */
+function resolveReadableWorkFile(repoRoot: string, abs: string): SafeWorkFile | null {
+  try {
+    lstatSync(abs);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+
+  const realRoot = realpathSync(repoRoot);
+  const real = realpathSync(abs);
+  if (!pathWithin(realRoot, real)) throw new Error("path escapes the repository through a link");
+  const st = statSync(real);
+  if (!st.isFile()) throw new Error("path is not a regular file");
+  return { real, size: st.size };
+}
+
 /** Working-tree text for an absolute path (read straight off disk), or null if it's gone. */
-async function readWorkText(abs: string): Promise<TextRead | null> {
-  const file = Bun.file(abs);
-  if (!(await file.exists())) return null;
-  const size = file.size;
+async function readWorkText(repoRoot: string, abs: string): Promise<TextRead | null> {
+  const safe = resolveReadableWorkFile(repoRoot, abs);
+  if (!safe) return null;
+  const file = Bun.file(safe.real);
+  const size = safe.size;
   const slice = size > MAX_FILE_BYTES ? file.slice(0, MAX_FILE_BYTES) : file;
   const bytes = new Uint8Array(await slice.arrayBuffer());
   if (looksBinary(bytes)) return { content: "", binary: true, truncated: false, size };
@@ -121,10 +155,13 @@ export async function readFileContent(
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  if (insideGitMetadata(r.clean)) {
+    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+  }
 
   try {
     if (ref === "work") {
-      const work = await readWorkText(r.abs);
+      const work = await readWorkText(repo.absPath, r.abs);
       if (work) return { ok: true, code: "OK", path: r.clean, ref: "work", ...work };
       // deleted from the working tree → fall through to the committed version
     }
@@ -166,7 +203,7 @@ export async function writeFileContent(
   // Never let an edit reach a .git directory — writing .git/hooks/* would be arbitrary code
   // execution on the next git command. The UI only opens tracked changes, but the endpoint is
   // directly reachable, so guard it here. (Covers submodule .git dirs too.)
-  if (r.clean.split("/").includes(".git")) {
+  if (insideGitMetadata(r.clean)) {
     return { ok: false, code: "NOT_WRITABLE", message: "refusing to write inside a .git directory" };
   }
 
@@ -259,7 +296,7 @@ export async function moveFile(repoId: string, from: string, toDir: string): Pro
 
   // Never move into/out of a .git dir — a file placed under .git/hooks would run on the next git
   // command. (The UI only drags tracked changes, but the endpoint is directly reachable.)
-  if (src.clean.split("/").includes(".git") || dst.clean.split("/").includes(".git")) {
+  if (insideGitMetadata(src.clean) || insideGitMetadata(dst.clean)) {
     return { ok: false, code: "NOT_WRITABLE", message: "refusing to move inside a .git directory" };
   }
   if (dst.clean === src.clean) {
@@ -375,8 +412,10 @@ export function setDiffPatchEnabled(enabled: boolean): void {
 
 /** Cheap binary probe of a working-tree file — peek the head for a NUL byte (git's signal),
  *  without reading the whole (possibly large) file. */
-async function workLooksBinary(abs: string): Promise<boolean> {
-  const head = new Uint8Array(await Bun.file(abs).slice(0, 8000).arrayBuffer());
+async function workLooksBinary(repoRoot: string, abs: string): Promise<boolean> {
+  const safe = resolveReadableWorkFile(repoRoot, abs);
+  if (!safe) return false;
+  const head = new Uint8Array(await Bun.file(safe.real).slice(0, 8000).arrayBuffer());
   return looksBinary(head);
 }
 
@@ -390,6 +429,9 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  if (insideGitMetadata(r.clean)) {
+    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+  }
 
   const backend = backendFor(repo.vcs);
   // Backends without whole-side reconstruction (Lore) only offer a unified patch — the viewer's
@@ -404,9 +446,9 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
   try {
     // Probe both sides' sizes cheaply (a working-tree stat + the HEAD blob size) BEFORE
     // reading megabytes off disk. A path that isn't in HEAD throws → it's newly added.
-    const workFile = Bun.file(r.abs);
-    const inWork = await workFile.exists();
-    const workSize = inWork ? workFile.size : 0;
+    const workFile = resolveReadableWorkFile(repo.absPath, r.abs);
+    const inWork = workFile !== null;
+    const workSize = workFile?.size ?? 0;
     let headSize = 0;
     let inHead = false;
     try {
@@ -425,7 +467,7 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
       inWork &&
       inHead &&
       Math.max(workSize, headSize) > getDiffPatchBytes() &&
-      !(await workLooksBinary(r.abs))
+      !(await workLooksBinary(repo.absPath, r.abs))
     ) {
       const fp = await backend.filePatch(repo.absPath, r.clean);
       if (fp.ok && fp.patch.trim())
@@ -435,7 +477,7 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
 
     const [head, work] = await Promise.all([
       readFromHead(repo.absPath, r.clean),
-      readWorkText(r.abs),
+      readWorkText(repo.absPath, r.abs),
     ]);
     if (!head.ok && !work) return { ok: false, code: "NOT_FOUND", message: "file not found" };
     return {
@@ -468,6 +510,9 @@ export async function readCommitFile(repoId: string, hash: string, relPath: stri
   if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) return { ok: false, code: "ERROR", message: "invalid commit hash" };
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  if (insideGitMetadata(r.clean)) {
+    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+  }
   // Per-rev blob reconstruction is a git concept; Lore has no arbitrary-rev blob view.
   if (!backendFor(repo.vcs).capabilities.fileModels) {
     return { ok: false, code: "ERROR", message: "commit file view isn't available for this repository" };

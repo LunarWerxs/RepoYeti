@@ -2,7 +2,14 @@ import { test, expect } from "bun:test";
 import { readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIR, loadConfig, saveConfig, hydrateSecrets } from "../src/config.ts";
-import { getSecret, setSecret, deleteSecret, aiKeyName, OAUTH_CLIENT_SECRET } from "../src/secrets.ts";
+import {
+  getSecret,
+  setSecret,
+  deleteSecret,
+  aiKeyName,
+  OAUTH_CLIENT_SECRET,
+  RELAY_PRIVATE_KEY,
+} from "../src/secrets.ts";
 
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 // An isolated keychain namespace so these tests never touch the user's real `repoyeti` entries.
@@ -228,6 +235,47 @@ test("hydrateSecrets migrates a plaintext key into the (in-memory) keychain + st
       expect(onDisk.ai.providers.openai.apiKey).toBeUndefined();
       expect(onDisk.ai.providers.openai.model).toBe("gpt-x");
       await deleteSecret(aiKeyName("openai"));
+    }),
+  );
+  restoreConfig(saved);
+});
+
+test("hydrateSecrets migrates the relay signing key while preserving its stable public identity", async () => {
+  const saved = snapshotConfig();
+  await withMemory(() =>
+    withService(async () => {
+      writeFileSync(
+        CONFIG_PATH,
+        JSON.stringify({
+          roots: [],
+          port: 7171,
+          maxDepth: 6,
+          maxRepos: 200,
+          relay: {
+            enabled: true,
+            identity: {
+              id: "stable-daemon-id",
+              publicKey: "public-ed25519-key",
+              privateKey: "private-ed25519-key",
+            },
+          },
+        }),
+      );
+
+      const cfg = loadConfig();
+      await hydrateSecrets(cfg);
+
+      expect(await getSecret(RELAY_PRIVATE_KEY)).toBe("private-ed25519-key");
+      expect(cfg.relay?.identity).toEqual({
+        id: "stable-daemon-id",
+        publicKey: "public-ed25519-key",
+        privateKey: "private-ed25519-key",
+      });
+      const onDisk = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
+      expect(onDisk.relay.identity.id).toBe("stable-daemon-id");
+      expect(onDisk.relay.identity.publicKey).toBe("public-ed25519-key");
+      expect(onDisk.relay.identity.privateKey).toBeUndefined();
+      await deleteSecret(RELAY_PRIVATE_KEY);
     }),
   );
   restoreConfig(saved);

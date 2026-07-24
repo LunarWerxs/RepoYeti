@@ -4,8 +4,13 @@
  * share token into an observable channel name or accidentally accept tampered peer state.
  */
 import { expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { $ } from "bun";
 import {
   collaborationChannel,
+  collaborationPresenceSignature,
+  collaborationFingerprint,
   commitAndSyncAcceptedCollaboration,
   decryptSnapshot,
   encryptSnapshot,
@@ -27,6 +32,9 @@ import {
 import { hashToken } from "../src/share/index.ts";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
+import { commitRepoWithFingerprint } from "../src/service/index.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 const snapshot: CollaborationSnapshot = {
   version: 1,
@@ -62,6 +70,35 @@ test("channel ids are deterministic, fixed-width, and domain-separated from the 
   expect(a).not.toContain("token-a");
   expect(collaborationChannel("token-a")).toBe(a);
   expect(collaborationChannel("token-b")).not.toBe(a);
+});
+
+test("presence signatures change when content changes but path/stat totals do not", () => {
+  const changes = [{ path: "src/a.ts", status: "M", staged: false, linesAdded: 1, linesDeleted: 1 }];
+  expect(collaborationPresenceSignature(changes, "-old\n+new-a")).not.toBe(
+    collaborationPresenceSignature(changes, "-old\n+new-b"),
+  );
+});
+
+test("the owner atomically rejects a collaboration commit when the observed tree changed", async () => {
+  const dir = mkScratchDir("gm-collaboration-atomic-");
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+  await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
+  writeFileSync(join(dir, "shared.txt"), "version one\n");
+  const id = mustUpsertRepo(dir, `collaboration-atomic-${crypto.randomUUID()}`, "auto", false);
+  const observed = await collaborationFingerprint(id);
+  expect(observed.complete).toBe(true);
+
+  // Same path and byte length, different content: a path/stat-only guard would miss this.
+  writeFileSync(join(dir, "shared.txt"), "version two\n");
+  const stale = await commitRepoWithFingerprint(id, "fix: stale remote attempt", observed.fingerprint);
+  expect(stale.ok).toBe(false);
+  expect(stale.code).toBe("PLAN_STALE");
+  expect((await $`git -C ${dir} rev-list --count HEAD`.text()).trim()).toBe("1");
+
+  const current = await collaborationFingerprint(id);
+  const committed = await commitRepoWithFingerprint(id, "fix: accepted remote work", current.fingerprint);
+  expect(committed.ok).toBe(true);
+  expect((await $`git -C ${dir} rev-list --count HEAD`.text()).trim()).toBe("2");
 });
 
 test("direct and relay invitations retain the secret only in the daemon-side parser", () => {
@@ -201,6 +238,16 @@ test("the public presence route requires the bearer secret and keeps owner reads
   });
   expect(denied.status).toBe(403);
 
+  const oversized = await app.request(path, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ data: "x".repeat(360_001) }),
+  });
+  expect(oversized.status).toBe(413);
+
   const accepted = await app.request(path, {
     method: "POST",
     headers: {
@@ -223,7 +270,6 @@ test("accepted collaborations expose remote dirty state and enforce ten quiet mi
   const remoteRepoId = `remote-${suffix}`;
   const token = `accepted-${suffix}`;
   const link = createCollaborationLink({
-    inviteUrl: `https://owner.example/s/${token}`,
     token,
     relayUrl: "",
     channelId: collaborationChannel(token),
@@ -234,8 +280,13 @@ test("accepted collaborations expose remote dirty state and enforce ten quiet mi
     remoteRepoId,
     label: "recipient@example.com",
   });
+  const persisted = initDb()
+    .query("SELECT invite_url AS inviteUrl FROM collaboration_links WHERE id = ?")
+    .get(link.id) as { inviteUrl: string };
+  expect(persisted.inviteUrl).toBe(""); // do not duplicate the bearer token inside a retained URL
   const originalFetch = globalThis.fetch;
   const mutations: string[] = [];
+  const commitBodies: unknown[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url === `https://owner.example/s/${encodeURIComponent(token)}`) {
@@ -294,6 +345,7 @@ test("accepted collaborations expose remote dirty state and enforce ten quiet mi
       url === `https://owner.example/api/repos/${remoteRepoId}/push`
     ) {
       mutations.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.endsWith("/commit")) commitBodies.push(JSON.parse(String(init?.body ?? "{}")));
       return Response.json({ ok: true, code: "OK" });
     }
     return new Response(null, { status: 404 });
@@ -334,6 +386,13 @@ test("accepted collaborations expose remote dirty state and enforce ten quiet mi
       `POST /api/repos/${remoteRepoId}/commit`,
       `POST /api/repos/${remoteRepoId}/pull`,
       `POST /api/repos/${remoteRepoId}/push`,
+    ]);
+    expect(commitBodies).toEqual([
+      {
+        message: "fix: shared work",
+        amend: false,
+        expectedFingerprint: "stable-remote-content",
+      },
     ]);
   } finally {
     globalThis.fetch = originalFetch;

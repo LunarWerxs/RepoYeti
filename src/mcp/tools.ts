@@ -84,6 +84,15 @@ export const TOOLS: McpTool[] = [
     run: (b, a) => b.repoStatus(reqString(a, "repo")),
   },
   {
+    name: "repo_changes",
+    description:
+      "List a repository's changed paths with status, staged state, line/character statistics, " +
+      "and truncation metadata. Use this before git_diff or git_commit.",
+    readOnly: true,
+    inputSchema: repoOnlySchema(),
+    run: (b, a) => b.changes(reqString(a, "repo")),
+  },
+  {
     name: "git_log",
     description: "List a repository's commit history (newest first). Optional limit and merge filter.",
     readOnly: true,
@@ -306,8 +315,3 @@ export const TOOLS: McpTool[] = [
     run: (b, a) => b.fetch(reqString(a, "repo")),
   },
 ];
-
-/** Look up a tool by its advertised name (used by tools/call). */
-export function findTool(name: string): McpTool | undefined {
-  return TOOLS.find((t) => t.name === name);
-}

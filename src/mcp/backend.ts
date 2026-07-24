@@ -29,6 +29,8 @@ export interface McpBackend {
   listRepos(): Promise<unknown>;
   /** One repo's resolved identity + cached status block. */
   repoStatus(idOrName: string): Promise<unknown>;
+  /** Changed paths with staged state, status, diff statistics, and truncation metadata. */
+  changes(idOrName: string): Promise<unknown>;
   /** Commit history (newest first), optionally limited / merge-filtered. */
   log(idOrName: string, opts?: LogOptions): Promise<unknown>;
   /** Local branches with their upstream + ahead/behind. */

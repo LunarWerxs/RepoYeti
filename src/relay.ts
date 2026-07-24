@@ -10,10 +10,11 @@
  * its own address. That signature is the whole security story — without it, anyone could repoint
  * someone else's link at their own server, turning a convenience into a phishing kit.
  *
- * OFF BY DEFAULT. RepoYeti is self-hosted; it should not phone anywhere unless asked. Enabling it
- * is a deliberate act, and the only thing that ever leaves is (id, origin, timestamp, signature) —
- * never a repo name, never a share token, never a path. The share token rides in the URL FRAGMENT,
- * which browsers do not transmit, so the relay cannot see it even in principle.
+ * DEFAULT ADDRESS. app.repoyeti.com is the zero-input stable-address choice; selecting the
+ * generated Cloudflare address disables this relay hop, and a named/custom tunnel does not need it.
+ * The only thing announced is (id, origin, timestamp, signature) — never a repo name, share token,
+ * or path. The share token rides in the URL FRAGMENT, which browsers do not transmit, so the relay
+ * cannot see it in principle.
  */
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 

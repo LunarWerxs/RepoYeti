@@ -97,8 +97,8 @@ export function register(app: Hono, { cfg }: Deps): void {
   // Turn the RELAY on or off, and choose which one.
   //
   // The relay gives this daemon one permanent URL that forwards to wherever its quick tunnel
-  // currently lives, so share links survive a restart (see relay/README.md). It is off until asked:
-  // a self-hosted tool should not phone anywhere by default, and enabling it here is that ask.
+  // currently lives, so share links survive a restart (see relay/README.md). This route also lets
+  // the owner switch explicitly to the generated Cloudflare address or a self-hosted relay.
   //
   // Enabling mints the signing identity immediately and announces straight away when a tunnel is
   // already up, so the owner leaves this call with a permanent URL they can actually copy — rather
@@ -119,7 +119,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (r.enabled && !r.url) r.url = DEFAULT_RELAY_URL;
     if (r.enabled) {
       // Mint before saving so the id (half of the permanent URL) exists for the response below.
-      ensureRelayIdentity(cfg);
+      await ensureRelayIdentity(cfg);
     }
     // Collapse an emptied-out block, but KEEP a minted identity: dropping it would re-register a
     // fresh id on the relay next time and silently break every link already handed out.

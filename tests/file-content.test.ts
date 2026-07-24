@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
@@ -69,6 +69,55 @@ test("refuses a path that escapes the repository", async () => {
 
   expect(res.ok).toBe(false);
   expect(res.code).toBe("ERROR");
+});
+
+test("refuses working-tree reads through a junction that resolves outside the repository", async () => {
+  const dir = await gitRepo();
+  const outside = mkScratchDir("gm-file-outside-");
+  writeFileSync(join(outside, "secret.txt"), "owner-only secret\n");
+  symlinkSync(outside, join(dir, "linked"), "junction");
+  const id = mustUpsertRepo(dir, "repo-link-escape", "auto", false);
+
+  const content = await readFileContent(id, "linked/secret.txt");
+  const diff = await readFileDiff(id, "linked/secret.txt");
+
+  expect(content.ok).toBe(false);
+  expect(content.code).toBe("ERROR");
+  expect(content.message).toContain("escapes the repository");
+  expect(content.content).toBeUndefined();
+  expect(diff.ok).toBe(false);
+  expect(diff.code).toBe("ERROR");
+  expect(diff.message).toContain("escapes the repository");
+  expect(diff.modified).toBeUndefined();
+});
+
+test("still reads through an internal junction whose real target remains inside the repository", async () => {
+  const dir = await gitRepo();
+  mkdirSync(join(dir, "real"));
+  writeFileSync(join(dir, "real", "inside.txt"), "safe internal target\n");
+  symlinkSync(join(dir, "real"), join(dir, "linked"), "junction");
+  const id = mustUpsertRepo(dir, "repo-link-inside", "auto", false);
+
+  const res = await readFileContent(id, "linked/inside.txt");
+
+  expect(res.ok).toBe(true);
+  expect(res.content).toBe("safe internal target\n");
+});
+
+test("refuses direct reads from the repository's private .git directory", async () => {
+  const dir = await gitRepo();
+  const id = mustUpsertRepo(dir, "repo-dotgit-read", "auto", false);
+
+  const content = await readFileContent(id, ".git/config");
+  const diff = await readFileDiff(id, ".git/config");
+  const mixedCase = await readFileContent(id, ".GIT/config");
+
+  expect(content.ok).toBe(false);
+  expect(content.message).toContain(".git");
+  expect(diff.ok).toBe(false);
+  expect(diff.message).toContain(".git");
+  expect(mixedCase.ok).toBe(false);
+  expect(mixedCase.message).toContain(".git");
 });
 
 test("unknown repo id is NOT_FOUND", async () => {

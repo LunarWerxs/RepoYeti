@@ -258,7 +258,9 @@ test("deleting an identity still clears repo + account links after the hygiene c
 const GUARD_PROBE_SCRIPT = join(import.meta.dir, "helpers", "guard-probe.ts");
 
 async function runGuardProbe(env: Record<string, string | undefined>): Promise<string> {
-  const proc = Bun.spawn(["bun", GUARD_PROBE_SCRIPT], {
+  // Use the exact runtime executing the suite. A PowerShell/npm Bun install exposes `bun.ps1`
+  // to the shell but no bare `bun.exe` on PATH, so Bun.spawn(["bun", ...]) is not portable.
+  const proc = Bun.spawn([process.execPath, GUARD_PROBE_SCRIPT], {
     env: { ...process.env, ...env },
     stdout: "pipe",
     stderr: "pipe",

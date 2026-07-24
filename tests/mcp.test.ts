@@ -1,4 +1,7 @@
 import { test, expect } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { $ } from "bun";
 import { handleRpc } from "../src/mcp/core.ts";
 import { serviceBackend } from "../src/mcp/adapter-service.ts";
 import { processLine } from "../src/mcp/stdio.ts";
@@ -48,6 +51,7 @@ test("tools/list returns the catalog including the key tools", async () => {
   const names = res.result.tools.map((t) => t.name);
   for (const expected of [
     "list_repos",
+    "repo_changes",
     "git_log",
     "git_commit",
     "list_branches",
@@ -107,6 +111,33 @@ test("tools/call repo_status resolves a seeded repo by name", async () => {
   expect(res.result.isError).toBeUndefined();
   const payload = JSON.parse(res.result.content[0]!.text) as { name: string };
   expect(payload.name).toBe("mcp-status-repo");
+});
+
+test("tools/call repo_changes discovers dirty paths", async () => {
+  const path = mkScratchDir("gm-mcp-changes-");
+  await $`git -c init.defaultBranch=main init -q ${path}`.quiet();
+  await $`git -C ${path} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
+  writeFileSync(join(path, "new-file.txt"), "pending work\n");
+  mustUpsertRepo(path, "mcp-changes-repo", "auto", false);
+
+  const res = (await handleRpc(
+    {
+      jsonrpc: "2.0",
+      id: 40,
+      method: "tools/call",
+      params: { name: "repo_changes", arguments: { repo: "mcp-changes-repo" } },
+    },
+    backend,
+  )) as {
+    result: {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+  };
+
+  expect(res.result.isError).toBeUndefined();
+  const payload = JSON.parse(res.result.content[0]!.text) as { files: Array<{ path: string }> };
+  expect(payload.files.map((file) => file.path)).toContain("new-file.txt");
 });
 
 test("tools/call with a missing required arg comes back as an error result (isError)", async () => {

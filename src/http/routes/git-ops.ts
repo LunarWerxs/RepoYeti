@@ -7,6 +7,7 @@ import {
   pullRepo,
   pushRepo,
   commitRepo,
+  commitRepoWithFingerprint,
   commitSelectedRepo,
   smartCommitRepo,
   forceRefresh,
@@ -36,7 +37,9 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (amend && effectiveGuest(c, cfg)) {
       return jsonError(c, "FORBIDDEN", "a share link can commit, but cannot amend", 403);
     }
-    const r = await commitRepo(id, message, amend);
+    const r = p.data.expectedFingerprint
+      ? await commitRepoWithFingerprint(id, message, p.data.expectedFingerprint)
+      : await commitRepo(id, message, amend);
     return c.json(r, r.ok ? 200 : statusForCode(r.code));
   });
 

@@ -120,6 +120,8 @@ export const ReorderSchema = z.object({ order: z.array(z.string()).max(10_000) }
 export const CommitSchema = z.object({
   message: z.string().optional(), // NO_MESSAGE stays a domain check in the handler
   amend: z.boolean().optional(),
+  /** Optional optimistic-concurrency guard used by remote collaboration commit+sync. */
+  expectedFingerprint: z.string().min(20).max(256).optional(),
 });
 
 // ── branches ──────────────────────────────────────────────────────────────────────

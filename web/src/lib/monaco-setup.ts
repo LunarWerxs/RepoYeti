@@ -6,7 +6,7 @@
 // (and the editor chunk) are excluded from the PWA precache (see vite.config.ts) and
 // fetched on demand instead.
 //
-// IMPORTANT — we import the *editor core* (`editor.api`) plus only the Monarch
+// IMPORTANT — we import the supported editor core entry point plus only the Monarch
 // syntax-highlighting grammars (see ./monaco-languages), NOT the full `monaco-editor`
 // barrel. The barrel additionally bundles four IntelliSense *language services*
 // (typescript/css/html/json), whose workers total ~8.8 MB (ts.worker alone is a full
@@ -18,24 +18,13 @@
 // Rebuild & Restart runs, with no highlighting regression. Colorization is a main-thread
 // Monarch concern; the only workers we bundle are the generic `editor.worker` (backs the
 // diff editor's diff computation) and the small `json.worker`.
-// NB: the explicit `.js` extensions are required for `vue-tsc` under moduleResolution
-// "bundler" — monaco-editor's package `exports` map is `"./*": "./*"`, so TS only maps a
-// deep import to its `.d.ts` when the `.js` is spelled out (matching ./monaco-languages).
-import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
+import * as monaco from "monaco-editor/editor";
 // ~80 Monarch grammars (colorization only — tiny per-language chunks, no services).
 import "./monaco-languages";
 // JSON is the one common language with no basic grammar — keep its (small, 400 KB) service.
-// Its .d.ts is `export {}`, so the runtime `jsonDefaults` export is untyped; we reach it
-// through an explicit shape below rather than a named import (which won't typecheck).
-import * as jsonContribution from "monaco-editor/esm/vs/language/json/monaco.contribution.js";
-import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import JsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
-
-// The json service module really exports `jsonDefaults` (a LanguageServiceDefaults); its
-// type declaration just doesn't say so. Narrow to only the method we call.
-const { jsonDefaults } = jsonContribution as unknown as {
-  jsonDefaults: { setDiagnosticsOptions(opts: { validate?: boolean }): void };
-};
+import { jsonDefaults } from "monaco-editor/languages/features/json/register";
+import EditorWorker from "monaco-editor/editor/editor.worker?worker";
+import JsonWorker from "monaco-editor/languages/features/json/json.worker?worker";
 
 export type EditorTheme = "light" | "dark";
 

@@ -10,6 +10,7 @@ import { namedTunnel, relayEffective, type RepoYetiConfig } from "./config.ts";
 import { broadcast } from "./bus.ts";
 import { announce, createRelayIdentity, relayShareUrl, type RelayIdentity } from "./relay.ts";
 import { saveConfig } from "./config.ts";
+import { RELAY_PRIVATE_KEY, setSecret } from "./secrets.ts";
 
 /**
  * Publish our current public address to the relay, if the owner turned it on.
@@ -22,7 +23,7 @@ import { saveConfig } from "./config.ts";
 export async function publishToRelay(cfg: RepoYetiConfig, origin: string): Promise<void> {
   const relay = relayEffective(cfg);
   if (!relay.enabled) return;
-  const identity = ensureRelayIdentity(cfg);
+  const identity = await ensureRelayIdentity(cfg);
   const res = await announce(relay.url, identity, origin);
   relayAnnounced = res.ok;
   relayError = res.ok ? null : (res.error ?? "announce failed");
@@ -39,11 +40,14 @@ export async function publishToRelay(cfg: RepoYetiConfig, origin: string): Promi
  * the permanent URL, and a Settings panel that says "your link is ready" has to be able to show it
  * before the next tunnel restart, not after.
  */
-export function ensureRelayIdentity(cfg: RepoYetiConfig): RelayIdentity {
+export async function ensureRelayIdentity(cfg: RepoYetiConfig): Promise<RelayIdentity> {
   const existing = cfg.relay?.identity;
-  if (existing) return existing;
+  if (existing?.privateKey) return existing as RelayIdentity;
   const identity = createRelayIdentity();
   cfg.relay = { ...cfg.relay, identity };
+  // If the keychain is unavailable this returns false and saveConfig deliberately retains the
+  // in-memory private key as the secure-degradation fallback. On normal hosts saveConfig strips it.
+  await setSecret(RELAY_PRIVATE_KEY, identity.privateKey);
   try {
     saveConfig(cfg);
   } catch {

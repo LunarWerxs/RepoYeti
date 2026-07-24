@@ -19,6 +19,7 @@ import {
   OAUTH_CLIENT_SECRET,
   TUNNEL_TOKEN,
   API_TOKEN,
+  RELAY_PRIVATE_KEY,
 } from "./secrets.ts";
 
 export const VERSION = "0.12.0";
@@ -50,20 +51,20 @@ export interface OAuthConfig {
 }
 
 /**
- * Relay settings. `identity` holds this daemon's Ed25519 keypair — the private half is what proves
- * only this machine may move its own forwarding address. It lives in config.json (0600) rather than
- * the OS keychain because losing it costs a re-register, not access to anything: it signs
- * "I am at this address" and nothing else.
+ * Relay settings. `identity` holds this daemon's stable public id/key; the private half is hydrated
+ * from the OS keychain at boot. A stolen signing key could repoint existing stable links, so it gets
+ * the same at-rest treatment as API and tunnel credentials.
  */
 export interface RelayConfig {
-  /** Base URL of the relay, e.g. https://go.repoyeti.app. Empty/absent = feature off. */
+  /** Base URL of the relay. Empty/absent uses the hosted app.repoyeti.com default. */
   url?: string;
-  /** Owner opted in. Absent/false = never contact the relay. */
+  /** Explicit address choice: absent/true = hosted default; false = generated Cloudflare address. */
   enabled?: boolean;
   identity?: {
     id: string;
     publicKey: string;
-    privateKey: string;
+    /** In-memory only when a keychain is available; plaintext fallback on keychain-less hosts. */
+    privateKey?: string;
   };
 }
 
@@ -808,6 +809,7 @@ function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
   }
   if (clone.oauth) delete clone.oauth.clientSecret;
   if (clone.tunnel) delete clone.tunnel.token;
+  if (clone.relay?.identity) delete clone.relay.identity.privateKey;
   delete clone.apiToken;
   return clone;
 }
@@ -894,6 +896,17 @@ export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
   } else {
     const t = await getSecret(API_TOKEN);
     if (t) cfg.apiToken = t;
+  }
+
+  // Stable-address relay signing key. Keep the public id/key in config so links remain renderable;
+  // migrate/hydrate only the private signing half.
+  if (cfg.relay?.identity) {
+    if (cfg.relay.identity.privateKey) {
+      if (await setSecret(RELAY_PRIVATE_KEY, cfg.relay.identity.privateKey)) migrated = true;
+    } else {
+      const privateKey = await getSecret(RELAY_PRIVATE_KEY);
+      if (privateKey) cfg.relay.identity.privateKey = privateKey;
+    }
   }
 
   // Re-persist so the now-migrated plaintext secrets are stripped from config.json.

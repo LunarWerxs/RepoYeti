@@ -177,6 +177,88 @@ test("a guest can read only whether the owner's daemon can generate AI text", as
   expect(raw).not.toContain("owner-secret-key");
 });
 
+test("a control guest cannot bypass the owner's disabled AI commit setting", async () => {
+  const app = createApp(
+    enforcedCfg({
+      ai: {
+        providers: {
+          openai: { apiKey: "owner-secret-key", model: "gpt-test" },
+          deepseek: { apiKey: "another-owner-key", model: "deepseek-test" },
+        },
+        defaultProvider: "openai",
+        commitEnabled: false,
+      },
+    }),
+  );
+  const res = await app.request(`/api/repos/${sharedRepoId}/commit-message`, {
+    method: "POST",
+    headers: {
+      ...REMOTE,
+      cookie: guestCookie(mkShare("control")),
+      "content-type": "application/json",
+    },
+    // A guessed non-default provider must not make the request reachable either.
+    body: JSON.stringify({ provider: "deepseek" }),
+  });
+  expect(res.status).toBe(403);
+  expect(await res.json()).toMatchObject({
+    ok: false,
+    code: "FORBIDDEN",
+  });
+});
+
+test("a guest AI request runs on the owner daemon with the owner's default key", async () => {
+  const repoId = await gitRepo(`guest-ai-${crypto.randomUUID()}`);
+  const repo = initDb().query("SELECT abs_path AS absPath FROM repos WHERE id = ?").get(repoId) as {
+    absPath: string;
+  };
+  writeFileSync(join(repo.absPath, "a.txt"), "guest-visible change\n");
+  const share = createShare(hashToken(mintToken()), {
+    label: "guest AI",
+    perm: "control",
+    scopeAll: false,
+    repoIds: [repoId],
+    expiresAt: null,
+  });
+  const app = createApp(
+    enforcedCfg({
+      ai: {
+        providers: {
+          openai: { apiKey: "owner-secret-key", model: "gpt-owner" },
+          deepseek: { apiKey: "must-not-be-used", model: "deepseek-guest-guess" },
+        },
+        defaultProvider: "openai",
+        commitEnabled: true,
+      },
+    }),
+  );
+  const originalFetch = globalThis.fetch;
+  let calledUrl = "";
+  let authorization = "";
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    calledUrl = String(input);
+    authorization = new Headers(init?.headers).get("authorization") ?? "";
+    return Response.json({ choices: [{ message: { content: "fix: shared change" } }] });
+  }) as typeof fetch;
+  try {
+    const res = await app.request(`/api/repos/${repoId}/commit-message`, {
+      method: "POST",
+      headers: {
+        ...REMOTE,
+        cookie: guestCookie(share),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ provider: "deepseek" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, message: "fix: shared change" });
+    expect(calledUrl).toContain("api.openai.com");
+    expect(authorization).toBe("Bearer owner-secret-key");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("a view guest's /api/repos carries the owner's pinned/starred grouping, not the owner's secrets", async () => {
   // guestRepoView() used to flatten pinned/starred to false, which meant a guest's dashboard rendered
   // one flat unlabelled list while the owner's showed Pinned / Starred / everything-else sections —

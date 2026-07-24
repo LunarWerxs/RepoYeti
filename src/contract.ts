@@ -64,6 +64,7 @@ export type ApiErrorCode =
   | "AI_AUTH_FAILED"
   | "AI_UNREACHABLE"
   | "AI_BAD_REQUEST"
+  | "AI_RATE_LIMITED"
   | "AI_ERROR"
   | "BAD_PROVIDER"
   | "NO_KEY"
@@ -150,6 +151,9 @@ export function statusForCode(code: ApiCode): ContentfulStatusCode {
     // 401 — a credential was supplied but rejected.
     case "AI_AUTH_FAILED":
       return 401;
+    // 429 — provider/share AI budget says to slow down.
+    case "AI_RATE_LIMITED":
+      return 429;
     // 403 — the credential is valid, it just doesn't reach this far (a share link).
     case "FORBIDDEN":
       return 403;

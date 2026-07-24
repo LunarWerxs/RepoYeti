@@ -36,10 +36,6 @@ export function addStat(a: DiffStat, b: DiffStat): DiffStat {
   };
 }
 
-export function isZeroStat(s: DiffStat): boolean {
-  return s.addedLines === 0 && s.removedLines === 0 && s.addedChars === 0 && s.removedChars === 0;
-}
-
 // ── runtime on/off flag (mirrors cfg.diffStats; set at boot + on the toggle route) ──
 let _enabled = false;
 export function diffStatsEnabled(): boolean {
