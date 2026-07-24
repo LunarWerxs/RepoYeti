@@ -116,4 +116,22 @@ describe("RemoteAccess — stable address and existing shares", () => {
     expect(wrapper.text()).not.toContain(i18n.global.t("remote.shareManage"));
     wrapper.unmount();
   });
+
+  it("falls back to the live quick-tunnel address and explains a hosted relay failure", async () => {
+    const store = useStore();
+    store.relayAnnounced = false;
+    store.relayError = "bad signature";
+    vi.spyOn(api, "listShares").mockResolvedValue({ shares: [] });
+
+    const wrapper = mountRemote();
+    await flush();
+
+    expect(wrapper.text()).toContain(DIRECT);
+    expect(wrapper.text()).not.toContain(RELAY);
+    expect(wrapper.text()).toContain(
+      i18n.global.t("remote.relayFailed", { error: "bad signature" }),
+    );
+    expect(wrapper.text()).not.toContain(i18n.global.t("remote.starting"));
+    wrapper.unmount();
+  });
 });

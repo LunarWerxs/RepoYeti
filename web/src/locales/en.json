@@ -572,7 +572,8 @@
       "detected": "Uses {login}",
       "fromGitConfig": "from this repo's git config",
       "fromRemote": "from this repo's remote",
-      "machineDefault": "Active account",
+      "fromPermission": "from GitHub permissions",
+      "machineDefault": "Automatic",
       "setTitle": "Choose the GitHub account this repo syncs as"
     },
     "rename": {
@@ -640,7 +641,8 @@
     "shareUnavailable": "This older link must be regenerated before it can be copied.",
     "shareManage": "View or edit share links",
     "shareNewTitle": "Share selected repositories",
-    "shareNewHint": "Scoped, expiring, and revocable."
+    "shareNewHint": "Scoped, expiring, and revocable.",
+    "relayFailed": "The stable address failed ({error}); this is the temporary Cloudflare address."
   },
   "notify": {
     "behindOneBody": "{count} commit behind its remote | {count} commits behind its remote",
@@ -773,6 +775,8 @@
     "tunnelSaveFailed": "Couldn't save the stable address",
     "relayRegistered": "Stable across restarts.",
     "relayPending": "Connecting the stable address…",
+    "relayFailedShort": "Stable address unavailable.",
+    "relayFailed": "Stable address failed: {error}. The temporary Cloudflare address is still available.",
     "cardRoots": "Scan folders",
     "rootsHint": "Folders RepoYeti scans for git repositories. Adding one scans it right away; removing one drops the repos found under it.",
     "scanFoldersEnable": "Watch specific folders",
@@ -1073,6 +1077,7 @@
     "leftHint": "Access from this tab has been cleared. You can close it now, or open the original share link again to return.",
     "ephemeralHost": "This is a temporary Cloudflare address. Choose RepoYeti hosted under Public address before sending links that must survive a restart.",
     "hostedAddressPending": "RepoYeti hosted is still connecting. Wait for the stable address before sending this link.",
+    "hostedAddressFailed": "RepoYeti hosted could not connect ({error}). Links use the temporary address until this is fixed.",
     "edit": "Edit",
     "editTitle": "Editing {label}",
     "editHint": "Changes apply to the existing link. Whoever already has the URL keeps it, and it now grants whatever you set here.",

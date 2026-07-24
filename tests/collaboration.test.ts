@@ -30,6 +30,7 @@ import {
   revokeShare,
 } from "../src/db.ts";
 import { hashToken } from "../src/share/index.ts";
+import { addListener, removeListener, type BusListener } from "../src/bus.ts";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { commitRepoWithFingerprint } from "../src/service/index.ts";
@@ -188,18 +189,28 @@ test("the owner accepts only fresh, correctly addressed snapshots from a live co
   });
   const live = { ...snapshot, updatedAt: Date.now(), repoId: `repo-${crypto.randomUUID()}` };
   const encoded = encryptSnapshot(token, live);
+  const events: Array<{ event: string; payload: unknown }> = [];
+  const listener: BusListener = (event, _data, payload) => {
+    if (event === "collaboration_snapshots_changed") events.push({ event, payload });
+  };
+  addListener(listener);
 
-  const channel = collaborationChannel(token);
-  expect(receiveCollaborationSnapshot(token, channel, live.participantId, encoded)).toBe(true);
-  expect(readCollaborationSnapshots()).toContainEqual(live);
-  expect(receiveCollaborationSnapshot(token, channel, "f".repeat(32), encoded)).toBe(false);
-  expect(receiveCollaborationSnapshot(token, collaborationChannel("wrong"), live.participantId, encoded)).toBe(
-    false,
-  );
+  try {
+    const channel = collaborationChannel(token);
+    expect(receiveCollaborationSnapshot(token, channel, live.participantId, encoded)).toBe(true);
+    expect(readCollaborationSnapshots()).toContainEqual(live);
+    expect(events.at(-1)?.payload).toEqual({ snapshots: expect.arrayContaining([live]) });
+    expect(receiveCollaborationSnapshot(token, channel, "f".repeat(32), encoded)).toBe(false);
+    expect(receiveCollaborationSnapshot(token, collaborationChannel("wrong"), live.participantId, encoded)).toBe(
+      false,
+    );
 
-  revokeShare(share.id);
-  expect(readCollaborationSnapshots()).not.toContainEqual(live);
-  expect(receiveCollaborationSnapshot(token, channel, live.participantId, encoded)).toBe(false);
+    revokeShare(share.id);
+    expect(readCollaborationSnapshots()).not.toContainEqual(live);
+    expect(receiveCollaborationSnapshot(token, channel, live.participantId, encoded)).toBe(false);
+  } finally {
+    removeListener(listener);
+  }
 });
 
 test("the public presence route requires the bearer secret and keeps owner reads owner-side", async () => {

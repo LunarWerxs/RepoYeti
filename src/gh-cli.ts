@@ -26,9 +26,17 @@ interface RunResult {
   stderr: string;
 }
 
-async function run(cmd: string[], timeoutMs = 5000): Promise<RunResult> {
+async function run(
+  cmd: string[],
+  timeoutMs = 5000,
+  extraEnv?: Record<string, string>,
+): Promise<RunResult> {
   try {
-    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn(cmd, {
+      stdout: "pipe",
+      stderr: "pipe",
+      ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
+    });
     const timer = setTimeout(() => {
       try {
         proc.kill();
@@ -193,6 +201,51 @@ export async function ghTokenFor(host: string, login: string): Promise<string | 
   const res = await run(["gh", "auth", "token", "--hostname", host, "--user", login], 5000);
   // gh prints the token on stdout; a failure prints guidance on stderr, which we never surface.
   return (res.ok && res.stdout.trim()) || null;
+}
+
+/**
+ * Whether one authenticated account can push to one GitHub repository.
+ *
+ * This is the evidence org-owned remotes cannot carry in their URL: `github.com/acme/widget`
+ * names the organization, not the human account whose token has write access. The token is read
+ * immediately before the probe and exists only in the `gh api` child's environment. The memo stores
+ * only the non-secret boolean result, which avoids repeating three API calls for the pull→push pair.
+ *
+ * `null` means the permission could not be determined (no token, network/API failure, unexpected
+ * response). Callers must not treat an unknown as permission.
+ */
+const REPO_PERMISSION_TTL_MS = 60_000;
+const repoPermissionMemo = new Map<string, { at: number; value: boolean }>();
+
+export async function ghRepoCanPush(
+  host: string,
+  login: string,
+  owner: string,
+  repo: string,
+): Promise<boolean | null> {
+  if (!isValidLogin(login) || !owner || !repo) return null;
+  const key = `${host.toLowerCase()}\0${login.toLowerCase()}\0${owner.toLowerCase()}\0${repo.toLowerCase()}`;
+  const memo = repoPermissionMemo.get(key);
+  if (memo && Date.now() - memo.at < REPO_PERMISSION_TTL_MS) return memo.value;
+  if (memo) repoPermissionMemo.delete(key);
+
+  const token = await ghTokenFor(host, login);
+  if (!token) return null;
+  const endpoint = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const res = await run(
+    ["gh", "api", "--hostname", host, endpoint, "--jq", ".permissions.push"],
+    8000,
+    { GH_TOKEN: token },
+  );
+  const output = res.stdout.trim().toLowerCase();
+  if (!res.ok || (output !== "true" && output !== "false")) return null;
+
+  const value = output === "true";
+  // Bound an otherwise long-lived daemon's cache without retaining token material or repo data
+  // indefinitely. Clearing merely causes fresh read-only probes on the next operation.
+  if (repoPermissionMemo.size >= 512) repoPermissionMemo.clear();
+  repoPermissionMemo.set(key, { at: Date.now(), value });
+  return value;
 }
 
 export type SwitchResult =

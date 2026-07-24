@@ -13,19 +13,28 @@
  *      failure into the answer.
  *   3. The remote's owner, when it exactly matches one of the authenticated logins — i.e.
  *      github.com/<login>/<repo>. A personal repo is nearly always pushed as its owner. Org and
- *      fork remotes match nothing and fall through, which is the safe direction.
+ *      fork remotes do not carry a human login in their URL, so when there is no exact match:
+ *   4. GitHub's own repository permissions. Probe every signed-in account and use the unique one
+ *      with push access. When several can push, prefer the active one; otherwise the choice is
+ *      genuinely ambiguous and falls through rather than guessing.
  *
  * Nothing here mutates git config or gh state; every step is a read. When no step answers, the
  * result is null and the operation runs unauthenticated-by-us — i.e. exactly as it did before,
  * under whatever credential helper the machine already has.
  */
 import { gitFor } from "./git.ts";
-import { accountsSnapshot, ghTokenFor, isValidLogin, type GhAccount } from "./gh-cli.ts";
+import {
+  accountsSnapshot,
+  ghRepoCanPush,
+  ghTokenFor,
+  isValidLogin,
+  type GhAccount,
+} from "./gh-cli.ts";
 import { gitHubAuth, type GitHubAuth } from "./git.ts";
 import type { RepoView } from "./db.ts";
 
 /** Where a repo's effective account came from — surfaced so the UI can explain itself. */
-export type AccountSource = "pinned" | "gitconfig" | "remote";
+export type AccountSource = "pinned" | "gitconfig" | "remote" | "permission";
 
 export interface ResolvedAccount {
   host: string;
@@ -34,6 +43,17 @@ export interface ResolvedAccount {
 }
 
 const DEFAULT_HOST = "github.com";
+
+export interface GitHubRepository {
+  host: string;
+  owner: string;
+  repo: string;
+}
+
+export type RepoPushAccessResolver = (
+  account: GhAccount,
+  repository: GitHubRepository,
+) => Promise<boolean | null>;
 
 /** Read one repo-local config value. Best-effort: an unset key or a non-repo yields null. */
 async function localConfig(absPath: string, key: string): Promise<string | null> {
@@ -66,15 +86,32 @@ export async function operativeRemoteUrl(absPath: string): Promise<string | null
   return localConfig(absPath, `remote.${named || "origin"}.url`);
 }
 
+/** The repository named by a github.com remote URL, for both https and ssh forms. */
+export function githubRepository(url: string): GitHubRepository | null {
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      !["http:", "https:", "ssh:"].includes(parsed.protocol) ||
+      parsed.hostname.toLowerCase() !== DEFAULT_HOST
+    ) {
+      return null;
+    }
+    const [owner, rawRepo] = parsed.pathname.split("/").filter(Boolean);
+    const repo = rawRepo?.replace(/\.git$/i, "") ?? "";
+    return owner && repo ? { host: DEFAULT_HOST, owner, repo } : null;
+  } catch {
+    // SCP/SSH form: git@github.com:owner/repo(.git)
+  }
+  const ssh = /^(?:ssh:\/\/)?[^@]+@github\.com[:/]([^/]+)\/([^/?#]+)$/i.exec(trimmed);
+  const owner = ssh?.[1] ?? "";
+  const repo = (ssh?.[2] ?? "").replace(/\.git$/i, "");
+  return owner && repo ? { host: DEFAULT_HOST, owner, repo } : null;
+}
+
 /** The `owner` in a github.com remote URL, for both https and ssh forms. */
 export function remoteOwner(url: string): string | null {
-  const trimmed = url.trim();
-  // https://github.com/owner/repo(.git) — with or without an embedded user@
-  const https = /^https?:\/\/(?:[^@/]+@)?github\.com\/([^/]+)\//i.exec(trimmed);
-  if (https?.[1]) return https[1];
-  // git@github.com:owner/repo(.git)
-  const ssh = /^(?:ssh:\/\/)?[^@]+@github\.com[:/]([^/]+)\//i.exec(trimmed);
-  return ssh?.[1] ?? null;
+  return githubRepository(url)?.owner ?? null;
 }
 
 /**
@@ -85,6 +122,8 @@ export function remoteOwner(url: string): string | null {
 export async function resolveRepoAccount(
   repo: RepoView,
   accounts: GhAccount[],
+  canPush: RepoPushAccessResolver = (account, repository) =>
+    ghRepoCanPush(account.host, account.login, repository.owner, repository.repo),
 ): Promise<ResolvedAccount | null> {
   // 1. Explicit pin. Trusted as-is: the owner chose it, and honouring it even when gh has since
   //    been logged out is better than silently syncing as somebody else.
@@ -108,10 +147,31 @@ export async function resolveRepoAccount(
 
   // 3. The remote's owner, when it names an account we hold.
   const url = await operativeRemoteUrl(repo.absPath);
-  const owner = url ? remoteOwner(url) : null;
-  if (owner && isValidLogin(owner)) {
-    const match = known(DEFAULT_HOST, owner);
+  const repository = url ? githubRepository(url) : null;
+  if (repository?.owner && isValidLogin(repository.owner)) {
+    const match = known(repository.host, repository.owner);
     if (match) return { host: match.host, login: match.login, source: "remote" };
+  }
+
+  // 4. Organization/fork remote: the URL names an owner that is not a signed-in human account.
+  // Ask GitHub which of this host's authenticated accounts can actually push. The checks run in
+  // parallel, and gh-cli.ts memoises only the resulting booleans so a pull→push pair pays once.
+  if (repository) {
+    const candidates = accounts.filter((account) => account.host.toLowerCase() === repository.host);
+    const access = await Promise.all(
+      candidates.map(async (account) => ({
+        account,
+        canPush: await canPush(account, repository).catch(() => null),
+      })),
+    );
+    const writable = access.filter((result) => result.canPush === true).map((result) => result.account);
+    const chosen =
+      writable.length === 1
+        ? writable[0]
+        : writable.length > 1
+          ? writable.find((account) => account.active)
+          : undefined;
+    if (chosen) return { host: chosen.host, login: chosen.login, source: "permission" };
   }
   return null;
 }

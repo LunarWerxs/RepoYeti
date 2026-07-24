@@ -303,6 +303,12 @@ async function copyExistingShare(): Promise<void> {
           >
             <ExternalLink :size="14" /> {{ $t("remote.open") }}
           </a>
+          <p
+            v-if="store.relayConfig.enabled && store.relayError"
+            class="text-center text-[11.5px] leading-snug text-destructive"
+          >
+            {{ $t("remote.relayFailed", { error: store.relayError }) }}
+          </p>
         </div>
 
         <p v-if="store.authenticated" class="text-center text-[12px] text-muted-foreground">

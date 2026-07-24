@@ -425,7 +425,10 @@ part of this section, not as a feature note.
   above, a cache would be exactly the module-level variable that rule forbids. The helper is keyed
   to `credential.https://<host>.helper`, not the bare `credential.helper`, so it is structurally
   incapable of answering for a host the account does not belong to. See `src/gh-account.ts` for how
-  the account is resolved and why a host mismatch refuses rather than falls back.
+  the account is resolved and why a host mismatch refuses rather than falls back. Organization
+  remotes cannot identify a human login by name, so RepoYeti asks GitHub for each signed-in
+  account's `permissions.push` value and uses the unique writable account (or the active writable
+  account when several qualify). Those non-secret booleans are cached briefly; tokens never are.
 - **`keytar` fallback:** if keytar fails to load (common on Windows without build tools), encrypt the
   daemon-side secrets to an **AES-256-GCM** file in the config dir, key =
   `HKDF-SHA256(machineUUID ‖ username ‖ 'repoyeti-v1')`, perms `0600`, with a **loud, specific terminal

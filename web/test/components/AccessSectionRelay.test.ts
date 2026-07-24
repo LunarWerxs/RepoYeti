@@ -182,4 +182,26 @@ describe("AccessSection — address choices", () => {
     expect(wrapper.text()).toContain(`${RELAY_DEFAULT}/r/${"b".repeat(32)}`);
     expect(wrapper.text()).not.toContain(i18n.global.t("settings.address.cloudflareNotice"));
   });
+
+  it("shows the relay failure instead of claiming it is still connecting", async () => {
+    const store = useStore();
+    store.mode = "remote";
+    store.tunnelUrl = "https://temporary.trycloudflare.com";
+    store.relayConfig = {
+      enabled: true,
+      url: RELAY_DEFAULT,
+      id: "c".repeat(32),
+      defaultUrl: RELAY_DEFAULT,
+    };
+    store.relayUrl = `${RELAY_DEFAULT}/r/${"c".repeat(32)}`;
+    store.relayAnnounced = false;
+    store.relayError = "bad signature";
+
+    const wrapper = mountAccess();
+
+    expect(wrapper.text()).toContain(
+      i18n.global.t("settings.relayFailed", { error: "bad signature" }),
+    );
+    expect(wrapper.text()).not.toContain(i18n.global.t("settings.relayPending"));
+  });
 });

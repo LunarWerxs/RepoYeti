@@ -15,6 +15,11 @@ import { scratchRoot } from "./helpers/scratch.ts";
 // without every other test in the suite tripping it.
 process.env.REPOYETI_HOME = mkdtempSync(join(scratchRoot(), "repoyeti-test-home-"));
 process.env.GIT_TERMINAL_PROMPT = "0";
+// Secret operations are process-local in tests. Filesystem isolation alone is insufficient:
+// a route test once minted a relay identity under the default Windows Credential Manager service
+// and silently replaced the live daemon's signing key. No test may touch an OS credential store.
+process.env.REPOYETI_KEYCHAIN_MEMORY = "1";
+process.env.REPOYETI_KEYCHAIN_SERVICE = `repoyeti-test-${process.pid}`;
 
 // ── the blast door ────────────────────────────────────────────────────────────────
 // Stop git from ever walking OUT of the scratch root and into this repository.

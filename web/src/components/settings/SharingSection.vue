@@ -440,7 +440,9 @@ watch(
         <p class="text-[11.5px] leading-snug text-muted-foreground">
           {{
             hostedAddressPending
-              ? $t("share.hostedAddressPending")
+              ? store.relayError
+                ? $t("share.hostedAddressFailed", { error: store.relayError })
+                : $t("share.hostedAddressPending")
               : $t("share.ephemeralHost")
           }}
         </p>

@@ -127,11 +127,12 @@ export interface DetectedIdentity {
  *   pinned    — the owner chose it on this repo
  *   gitconfig — the repo's own `credential.https://<host>.username`
  *   remote    — the remote is github.com/<login>/… and we hold that account
+ *   permission — GitHub reports that this signed-in account can push to the repository
  */
 export interface ResolvedRepoAccount {
   host: string;
   login: string;
-  source: "pinned" | "gitconfig" | "remote";
+  source: "pinned" | "gitconfig" | "remote" | "permission";
 }
 
 /** One authenticated GitHub (gh) account on the machine (mirrors src/gh-cli.ts GhAccount). */

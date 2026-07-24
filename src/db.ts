@@ -81,7 +81,7 @@ export interface RepoView {
   /** Repo-level identity override (null → inherit/none). */
   identityId: string | null;
   /** Repo-level GitHub "sync account" (host + login) to authenticate as for fetch/pull/push.
-   *  Null → use the machine's currently-active account. */
+   *  Null → resolve automatically from git config, remote ownership, or GitHub permissions. */
   syncAccountHost: string | null;
   syncAccountLogin: string | null;
   /** Owner-hidden from the dashboard (e.g. a deprecated repo). Display-only. */
@@ -834,8 +834,8 @@ export function setRepoIdentity(repoId: string, identityId: string | null): void
 }
 
 /**
- * Assign (or clear, with a null login) a repo's GitHub "sync account". When set, fetch/pull/push on
- * this repo first switch the machine's active gh account to (host, login) — see service/core.ts.
+ * Assign (or clear, with a null login) a repo's GitHub "sync account". When set, fetch/pull/push
+ * receives that account's credential for the one operation — see service/core.ts.
  */
 export function setRepoAccount(repoId: string, host: string | null, login: string | null): void {
   const h = login ? host || "github.com" : null;

@@ -154,8 +154,8 @@ function onAccount(a: { host: string; login: string } | null): void {
 }
 
 // What the repo will sync as when nothing is pinned. A repo usually answers this itself — via its
-// own credential username, or a remote it owns — and the menu has to say so: ticking "Active
-// account" while the sync authenticates as somebody else is the exact confusion that made the
+// own credential username, a remote it owns, or GitHub's push permissions — and the menu has to say
+// so: ticking "Automatic" while the sync authenticates as somebody else is the exact confusion that made the
 // original "could not read Password" failure unreadable. Fetched on open (it shells out to git on
 // the daemon), and only when it would actually be shown.
 const resolvedAccount = ref<ResolvedRepoAccount | null>(null);
@@ -170,11 +170,11 @@ function onMenuToggle(open: boolean): void {
 const detected = computed(() =>
   props.repo.syncAccountLogin ? null : resolvedAccount.value,
 );
-const detectedReason = computed(() =>
-  detected.value?.source === "remote"
-    ? t("repo.syncAccount.fromRemote")
-    : t("repo.syncAccount.fromGitConfig"),
-);
+const detectedReason = computed(() => {
+  if (detected.value?.source === "permission") return t("repo.syncAccount.fromPermission");
+  if (detected.value?.source === "remote") return t("repo.syncAccount.fromRemote");
+  return t("repo.syncAccount.fromGitConfig");
+});
 </script>
 
 <template>
@@ -401,7 +401,7 @@ const detectedReason = computed(() =>
             <div class="min-w-0 flex-1">
               <div class="truncate">{{ $t("repo.syncAccount.machineDefault") }}</div>
               <!-- Not pinned, but not a free-for-all either: name the account this repo resolves
-                   to on its own, and why, so the tick above isn't read as "syncs as whoever". -->
+                   to on its own, and why, so "Automatic" isn't read as "syncs as whoever". -->
               <div v-if="detected" class="truncate text-[11px] text-muted-foreground/80">
                 {{ $t("repo.syncAccount.detected", { login: detected.login }) }} · {{ detectedReason }}
               </div>

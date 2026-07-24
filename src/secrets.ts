@@ -137,9 +137,8 @@ export const TUNNEL_TOKEN = "tunnel/token";
  *  that lets a remote/headless agent authenticate over the tunnel. Off by default (absent ⇒ no
  *  behavior change); keychain-stored and stripped from config.json (see config.ts apiToken). */
 export const API_TOKEN = "api/token";
-/** Ed25519 private key used to authenticate stable-address relay announcements. Compromise lets an
- *  attacker repoint existing relay links, so the durable bytes belong in the keychain; config.json
- *  retains only the public id/key needed to render the permanent address before an announcement. */
+/** Legacy location for the relay private key. New versions keep the complete pair together in the
+ *  owner-only config file; hydrateSecrets() reads this once, validates it, then deletes it. */
 export const RELAY_PRIVATE_KEY = "relay/privateKey";
 /** The owner's Connections OAuth **refresh token** — obtained at "Sign in with Connections" and
  *  retained so the daemon (the BFF) can mint fresh access tokens to call the settings-sync store

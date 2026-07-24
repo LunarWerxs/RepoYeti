@@ -1,8 +1,19 @@
-import { ref, computed } from "vue";
+import { computed, ref } from "vue";
 import { toast } from "vue-sonner";
 import { t } from "../i18n";
 import type { ActionResult } from "../types.ts";
-import type { BehindRepo, SyncedRepo, AutoCommittedRepo, AutoCommitBlockedRepo } from "./settings.ts";
+import type { AutoCommitBlockedRepo, AutoCommittedRepo, BehindRepo, SyncedRepo } from "./settings.ts";
+
+interface HeaderNotification {
+  id: string;
+  title: string;
+  body?: string;
+  ts: number;
+  read: boolean;
+  kind?: "scan" | "ai-key" | "behind" | "update";
+  /** For a "behind" entry: the repos it covers, so the bell can offer Pull right there. */
+  behind?: BehindRepo[];
+}
 
 // Desktop-notification opt-in is per-browser (it rides the browser's Notification permission),
 // so it lives in localStorage, not the daemon config.
@@ -73,24 +84,14 @@ export function useSettingsNotifications(pullRepo?: (repoId: string) => Promise<
   // raised alongside a toast; see notifyNewProjects() below for the one producer today.
   const NEW_PROJECTS_NOTIFICATION_ID = "scan-new-projects";
   const AI_KEY_INVALID_NOTIFICATION_PREFIX = "ai-key-invalid:";
-  // One rolling "you are behind" entry, replaced in place: a repo that keeps falling behind
-  // should not grow the list, and once pulled there is nothing left to act on.
+  // One rolling "you are behind" entry, reconciled in place: a repo that keeps falling behind
+  // should not grow the list, another repo must not hide the first, and once pulled there is
+  // nothing left to act on.
   const BEHIND_NOTIFICATION_ID = "repos-behind";
   const UPDATE_NOTIFICATION_ID = "update-available";
   // `kind` tells the header bell where a click should go ("scan" → the scan modal, "ai-key" →
   // Settings → AI). Absent = a plain informational entry with no navigation.
-  const notifications = ref<
-    {
-      id: string;
-      title: string;
-      body?: string;
-      ts: number;
-      read: boolean;
-      kind?: "scan" | "ai-key" | "behind" | "update";
-      /** For a "behind" entry: the repos it covers, so the bell can offer Pull right there. */
-      behind?: BehindRepo[];
-    }[]
-  >([]);
+  const notifications = ref<HeaderNotification[]>([]);
   const unreadCount = computed(() => notifications.value.filter((n) => !n.read).length);
   function markNotificationsRead(): void {
     for (const n of notifications.value) n.read = true;
@@ -120,9 +121,14 @@ export function useSettingsNotifications(pullRepo?: (repoId: string) => Promise<
       }),
     );
     const failed = results.filter((r) => !r.res.ok);
+    // Resolve only the pulls that actually landed. A new behind event can arrive while these
+    // requests are in flight, so dismissing the whole rolling entry here could erase a repo this
+    // button never attempted.
+    for (const { repo, res } of results) {
+      if (res.ok) reconcileBehindNotification(repo.id, 0);
+    }
     if (!failed.length) {
       toast.success(t("notify.behindPullDone", { count: behind.length }, behind.length));
-      dismissNotification(BEHIND_NOTIFICATION_ID);
     } else if (failed.length === 1 && behind.length === 1) {
       const f = failed[0]!;
       toast.error(f.res.message || t("notify.behindPullFailed", { name: f.repo.name }));
@@ -164,23 +170,62 @@ export function useSettingsNotifications(pullRepo?: (repoId: string) => Promise<
     updatePromptOpen.value = false;
   }
 
+  /** Copy for the rolling behind entry. Kept in one place because live status changes can turn a
+   *  many-repo notification back into a one-repo notification (and vice versa). */
+  function behindNotificationCopy(behind: BehindRepo[]): { title: string; body: string } {
+    const one = behind.length === 1 ? behind[0]! : null;
+    return {
+      title: one ? one.name : t("notify.behindManyTitle"),
+      body: one
+        ? t("notify.behindOneBody", { count: one.behind }, one.behind)
+        : t("notify.behindManyBody", { count: behind.length }, behind.length),
+    };
+  }
+
+  /** Reconcile an existing behind notification with an authoritative repo status. Status changes
+   *  arrive after every fetch/pull/refresh, even when the action happened somewhere other than
+   *  the notification button. Preserve its timestamp/read state: correcting stale copy is not a
+   *  new alert. A separate `repo_behind` event marks genuine new remote work unread. */
+  function reconcileBehindNotification(repoId: string, behind: number): void {
+    const entry = notifications.value.find((n) => n.id === BEHIND_NOTIFICATION_ID);
+    if (!entry?.behind) return;
+    const repoAt = entry.behind.findIndex((r) => r.id === repoId);
+    if (repoAt === -1) return;
+
+    const next = [...entry.behind];
+    if (behind > 0) next[repoAt] = { ...next[repoAt]!, behind };
+    else next.splice(repoAt, 1);
+
+    if (next.length === 0) {
+      dismissNotification(BEHIND_NOTIFICATION_ID);
+      return;
+    }
+    const copy = behindNotificationCopy(next);
+    entry.behind = next;
+    entry.title = copy.title;
+    entry.body = copy.body;
+  }
+
   /** Warn about repos that just fell behind: always a toast, plus a system notification when the
    *  owner opted in and the browser granted permission. Summarised when several land at once. */
   function notifyBehind(behind: BehindRepo[]): void {
     if (!behind?.length) return;
-    const one = behind.length === 1 ? behind[0]! : null;
+    const id = BEHIND_NOTIFICATION_ID;
+    const existing = notifications.value.find((n) => n.id === id);
+    const merged = existing?.behind ? [...existing.behind] : [];
+    for (const repo of behind) {
+      const at = merged.findIndex((r) => r.id === repo.id);
+      if (at === -1) merged.push(repo);
+      else merged[at] = repo;
+    }
     // The REPO is the title. "Behind remote" told you the category of thing that happened but
     // not which repo it happened to, which is the only part you can't guess — and the bell shows
     // entries from several sources, so a generic title is easy to skim past.
-    const title = one ? one.name : t("notify.behindManyTitle");
-    const body = one
-      ? t("notify.behindOneBody", { count: one.behind }, one.behind)
-      : t("notify.behindManyBody", { count: behind.length }, behind.length);
+    const { title, body } = behindNotificationCopy(merged);
     // The bell is where this LIVES: a persistent entry the owner can come back to and resolve,
     // rather than a wall of text over the middle of the page that expires on its own. One entry
-    // per batch, replaced (not stacked) so a repo that keeps falling behind can't pile up.
-    const id = BEHIND_NOTIFICATION_ID;
-    const entry = { id, title, body, ts: Date.now(), read: false, kind: "behind" as const, behind };
+    // reconciled (not stacked) so a repo that keeps falling behind can't pile up.
+    const entry = { id, title, body, ts: Date.now(), read: false, kind: "behind" as const, behind: merged };
     const at = notifications.value.findIndex((n) => n.id === id);
     if (at === -1) notifications.value.unshift(entry);
     else notifications.value[at] = entry;
@@ -192,9 +237,9 @@ export function useSettingsNotifications(pullRepo?: (repoId: string) => Promise<
       duration: 6000,
       action: pullRepo
         ? {
-            label: one ? t("notify.behindPull") : t("notify.behindPullAll"),
+            label: merged.length === 1 ? t("notify.behindPull") : t("notify.behindPullAll"),
             onClick: () => {
-              void pullBehind(behind);
+              void pullBehind(merged);
             },
           }
         : undefined,
@@ -360,6 +405,7 @@ export function useSettingsNotifications(pullRepo?: (repoId: string) => Promise<
     notifyUpdateAvailable,
     clearUpdateNotification,
     pullBehind,
+    reconcileBehindNotification,
     notifyBehind,
     notifySynced,
     notifyAutoCommitted,

@@ -61,6 +61,7 @@ export function useSettings(deps: {
   relayConfig: Ref<RelayStatus>;
   relayUrl: Ref<string | null>;
   relayAnnounced: Ref<boolean>;
+  relayError: Ref<string | null>;
   diffStatsEnabled: Ref<boolean>;
   remoteEditing: Ref<boolean>;
   diffPatchBytes: Ref<number>;
@@ -97,6 +98,7 @@ export function useSettings(deps: {
     relayConfig,
     relayUrl,
     relayAnnounced,
+    relayError,
     diffStatsEnabled,
     remoteEditing,
     diffPatchBytes,
@@ -197,6 +199,7 @@ export function useSettings(deps: {
     relayConfig.value = r.relay;
     relayUrl.value = r.relayUrl;
     relayAnnounced.value = r.announced;
+    relayError.value = r.error;
   }
   async function logout(): Promise<void> {
     await api.logout();
@@ -642,6 +645,7 @@ export function useSettings(deps: {
     notifyUpdateAvailable,
     clearUpdateNotification,
     pullBehind,
+    reconcileBehindNotification,
     notifyBehind,
     notifySynced,
     notifyAutoCommitted,
@@ -733,6 +737,7 @@ export function useSettings(deps: {
     notifyUpdateAvailable,
     clearUpdateNotification,
     pullBehind,
+    reconcileBehindNotification,
     notifyBehind,
     notifySynced,
     notifyAutoCommitted,

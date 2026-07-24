@@ -10,6 +10,7 @@ import {
   OAUTH_CLIENT_SECRET,
   RELAY_PRIVATE_KEY,
 } from "../src/secrets.ts";
+import { createRelayIdentity } from "../src/relay.ts";
 
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 // An isolated keychain namespace so these tests never touch the user's real `repoyeti` entries.
@@ -240,10 +241,11 @@ test("hydrateSecrets migrates a plaintext key into the (in-memory) keychain + st
   restoreConfig(saved);
 });
 
-test("hydrateSecrets migrates the relay signing key while preserving its stable public identity", async () => {
+test("hydrateSecrets moves a matching legacy relay key into config and removes the credential", async () => {
   const saved = snapshotConfig();
   await withMemory(() =>
     withService(async () => {
+      const identity = createRelayIdentity();
       writeFileSync(
         CONFIG_PATH,
         JSON.stringify({
@@ -254,28 +256,52 @@ test("hydrateSecrets migrates the relay signing key while preserving its stable 
           relay: {
             enabled: true,
             identity: {
-              id: "stable-daemon-id",
-              publicKey: "public-ed25519-key",
-              privateKey: "private-ed25519-key",
+              id: identity.id,
+              publicKey: identity.publicKey,
             },
           },
         }),
       );
+      expect(await setSecret(RELAY_PRIVATE_KEY, identity.privateKey)).toBe(true);
 
       const cfg = loadConfig();
       await hydrateSecrets(cfg);
 
-      expect(await getSecret(RELAY_PRIVATE_KEY)).toBe("private-ed25519-key");
-      expect(cfg.relay?.identity).toEqual({
-        id: "stable-daemon-id",
-        publicKey: "public-ed25519-key",
-        privateKey: "private-ed25519-key",
-      });
+      expect(await getSecret(RELAY_PRIVATE_KEY)).toBeNull();
+      expect(cfg.relay?.identity).toEqual(identity);
       const onDisk = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-      expect(onDisk.relay.identity.id).toBe("stable-daemon-id");
-      expect(onDisk.relay.identity.publicKey).toBe("public-ed25519-key");
-      expect(onDisk.relay.identity.privateKey).toBeUndefined();
-      await deleteSecret(RELAY_PRIVATE_KEY);
+      expect(onDisk.relay.identity).toEqual(identity);
+    }),
+  );
+  restoreConfig(saved);
+});
+
+test("hydrateSecrets rejects and deletes a legacy relay key that does not match the public identity", async () => {
+  const saved = snapshotConfig();
+  await withMemory(() =>
+    withService(async () => {
+      const stored = createRelayIdentity();
+      const unrelated = createRelayIdentity();
+      writeFileSync(
+        CONFIG_PATH,
+        JSON.stringify({
+          roots: [],
+          port: 7171,
+          maxDepth: 6,
+          maxRepos: 200,
+          relay: {
+            enabled: true,
+            identity: { id: stored.id, publicKey: stored.publicKey },
+          },
+        }),
+      );
+      expect(await setSecret(RELAY_PRIVATE_KEY, unrelated.privateKey)).toBe(true);
+
+      const cfg = loadConfig();
+      await hydrateSecrets(cfg);
+
+      expect(cfg.relay?.identity?.privateKey).toBeUndefined();
+      expect(await getSecret(RELAY_PRIVATE_KEY)).toBeNull();
     }),
   );
   restoreConfig(saved);

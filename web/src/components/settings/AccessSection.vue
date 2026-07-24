@@ -211,12 +211,16 @@ watch(
               :class="
                 addressChoice === 'hosted' && store.relayAnnounced
                   ? 'text-success'
+                  : addressChoice === 'hosted' && store.relayError
+                    ? 'text-destructive'
                   : 'text-muted-foreground'
               "
             >
               {{
                 addressChoice === "hosted" && store.relayAnnounced
                   ? $t("settings.relayRegistered")
+                  : addressChoice === "hosted" && store.relayError
+                    ? $t("settings.relayFailedShort")
                   : addressHint(addressChoice)
               }}
             </p>
@@ -253,7 +257,13 @@ watch(
         </div>
 
         <p
-          v-if="addressChoice === 'hosted' && !store.relayAnnounced"
+          v-if="addressChoice === 'hosted' && store.relayError"
+          class="text-[11.5px] leading-snug text-destructive"
+        >
+          {{ $t("settings.relayFailed", { error: store.relayError }) }}
+        </p>
+        <p
+          v-else-if="addressChoice === 'hosted' && !store.relayAnnounced"
           class="text-[11.5px] leading-snug text-warning"
         >
           {{ $t("settings.relayPending") }}

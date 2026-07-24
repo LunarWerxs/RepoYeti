@@ -35,6 +35,7 @@ describe("settings store — relay toggle", () => {
     expect(store.relayConfig.defaultUrl).toBe(DEFAULT_URL);
     expect(store.relayUrl).toBeNull();
     expect(store.relayAnnounced).toBe(false);
+    expect(store.relayError).toBeNull();
   });
 
   it("enabling adopts the daemon's answer: config, permanent URL, and registered state", async () => {
@@ -47,6 +48,7 @@ describe("settings store — relay toggle", () => {
     expect(store.relayConfig.enabled).toBe(true);
     expect(store.relayUrl).toBe(`${DEFAULT_URL}/r/${"a".repeat(32)}`);
     expect(store.relayAnnounced).toBe(true);
+    expect(store.relayError).toBeNull();
   });
 
   it("stays UNregistered when the daemon could not announce (no tunnel up, or relay down)", async () => {
@@ -60,6 +62,7 @@ describe("settings store — relay toggle", () => {
     // On, but the panel must not claim links survive a restart yet — that would be a false promise.
     expect(store.relayConfig.enabled).toBe(true);
     expect(store.relayAnnounced).toBe(false);
+    expect(store.relayError).toBe("no relay configured");
   });
 
   it("disabling clears the permanent URL", async () => {
@@ -74,6 +77,7 @@ describe("settings store — relay toggle", () => {
 
     expect(store.relayConfig.enabled).toBe(false);
     expect(store.relayUrl).toBeNull();
+    expect(store.relayError).toBeNull();
   });
 
   it("passes a self-hosted relay URL straight through", async () => {

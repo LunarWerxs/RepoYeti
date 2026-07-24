@@ -35,7 +35,6 @@ export const useStore = defineStore("repoyeti", () => {
   const repos = ref<Repo[]>([]);
   /** Peer working-tree presence, decrypted by the daemon. */
   const collaborationSnapshots = ref<CollaborationSnapshot[]>([]);
-  let collaborationTimer: number | null = null;
   const loading = ref(true);
   const connected = ref(false);
   const { updateStatus, updateChecking, updateApplying, checkForUpdate, applyUpdate } =
@@ -71,6 +70,7 @@ export const useStore = defineStore("repoyeti", () => {
   });
   const relayUrl = ref<string | null>(null);
   const relayAnnounced = ref(false);
+  const relayError = ref<string | null>(null);
   // Access mode + local/remote auth state (see /api/auth/status).
   const mode = ref<AccessMode>("local");
 
@@ -384,6 +384,7 @@ export const useStore = defineStore("repoyeti", () => {
     notifyUpdateAvailable,
     clearUpdateNotification,
     pullBehind,
+    reconcileBehindNotification,
     notifyBehind,
     notifySynced,
     notifyAutoCommitted,
@@ -398,6 +399,7 @@ export const useStore = defineStore("repoyeti", () => {
     relayConfig,
     relayUrl,
     relayAnnounced,
+    relayError,
     diffStatsEnabled,
     remoteEditing,
     diffPatchBytes,
@@ -513,6 +515,7 @@ export const useStore = defineStore("repoyeti", () => {
       if (s.relay) relayConfig.value = s.relay;
       relayUrl.value = s.relayUrl ?? null;
       relayAnnounced.value = s.relayAnnounced === true;
+      relayError.value = s.relayError ?? null;
       diffStatsEnabled.value = s.diffStats;
       remoteEditing.value = s.remoteEditing;
       diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
@@ -552,9 +555,6 @@ export const useStore = defineStore("repoyeti", () => {
   // ── live updates (SSE) ──────────────────────────────────────────────────────
   function connect(): void {
     void loadCollaborations();
-    if (collaborationTimer === null) {
-      collaborationTimer = window.setInterval(() => void loadCollaborations(), 2500);
-    }
     const { status, event, data } = useEventSource(
       "/api/events",
       [
@@ -584,6 +584,7 @@ export const useStore = defineStore("repoyeti", () => {
         "update_available",
         "approval_pending",
         "approval_resolved",
+        "collaboration_snapshots_changed",
       ],
       { autoReconnect: { retries: -1, delay: 2500 } },
     );
@@ -592,8 +593,20 @@ export const useStore = defineStore("repoyeti", () => {
       if (!raw || !event.value) return;
       try {
         const payload = JSON.parse(raw);
-        if (event.value === "repo_state_changed") patchRepo(payload.id, { status: payload.status });
-        else if (event.value === "repo_added") {
+        if (event.value === "repo_state_changed") {
+          patchRepo(payload.id, { status: payload.status });
+          // Behind notifications are snapshots of a condition whose source of truth is the live
+          // repo status. Every pull/fetch/refresh reaches this event, even if it did not start
+          // from the notification, so keep its count current and retire it at zero. A failed
+          // status read reports zero as a fallback; do not treat that unknown state as resolved.
+          if (
+            payload.status &&
+            !payload.status.error &&
+            typeof payload.status.behind === "number"
+          ) {
+            reconcileBehindNotification(payload.id, payload.status.behind);
+          }
+        } else if (event.value === "repo_added") {
           // Background discovery found a repo after boot — append it (or refresh in place).
           const repo = payload.repo as Repo | undefined;
           if (repo?.id) {
@@ -609,6 +622,7 @@ export const useStore = defineStore("repoyeti", () => {
           // call it makes 404s against a repo this session can no longer reach.
           if (payload.id) {
             repos.value = repos.value.filter((r) => r.id !== payload.id);
+            reconcileBehindNotification(payload.id, 0);
             dismissViewerForRepo(payload.id);
           }
         } else if (event.value === "repo_renamed") {
@@ -654,12 +668,22 @@ export const useStore = defineStore("repoyeti", () => {
             reason: typeof payload.reason === "string" ? payload.reason : null,
           });
         } else if (event.value === "daemon_status") {
-          tunnelUrl.value = typeof payload.tunnelUrl === "string" ? payload.tunnelUrl : null;
+          // daemon_status is a PATCH, not a snapshot. The relay announces after the tunnel comes
+          // up and emits only relay fields; treating an absent tunnelUrl as null erased the healthy
+          // quick-tunnel URL and left the UI spinning forever.
+          if (payload.tunnelUrl !== undefined) {
+            tunnelUrl.value = typeof payload.tunnelUrl === "string" ? payload.tunnelUrl : null;
+          }
           if (typeof payload.tunnelActive === "boolean") tunnelActive.value = payload.tunnelActive;
           // A tunnel that came up or went away re-announces (or invalidates) the permanent link,
           // so the relay's registered state rides the same event rather than needing a poll.
           if (payload.relayUrl !== undefined) relayUrl.value = (payload.relayUrl as string | null) ?? null;
           if (typeof payload.relayAnnounced === "boolean") relayAnnounced.value = payload.relayAnnounced;
+          if (payload.relayError !== undefined) {
+            relayError.value =
+              typeof payload.relayError === "string" ? payload.relayError : null;
+          }
+          if (payload.relay) relayConfig.value = payload.relay as RelayStatus;
         } else if (event.value === "settings_changed") {
           if (typeof payload.diffStats === "boolean") diffStatsEnabled.value = payload.diffStats;
           if (typeof payload.remoteEditing === "boolean") remoteEditing.value = payload.remoteEditing;
@@ -711,6 +735,11 @@ export const useStore = defineStore("repoyeti", () => {
         } else if (event.value === "approval_resolved") {
           // Approved/denied/timed out — elsewhere (another tab) or by the auto-deny/approve timer.
           removePendingApproval(payload.id);
+        } else if (event.value === "collaboration_snapshots_changed") {
+          // Snapshot arrival and expiry are daemon events. This replaces a 2.5s HTTP poll in
+          // every open tab while still removing a peer promptly when its heartbeat expires.
+          if (Array.isArray(payload.snapshots))
+            collaborationSnapshots.value = payload.snapshots as CollaborationSnapshot[];
         } else if (event.value === "ai_key_invalid") {
           // The startup key-liveness check found a configured AI provider's key was rejected.
           notifyAiKeyInvalid(
@@ -859,6 +888,7 @@ export const useStore = defineStore("repoyeti", () => {
     relayConfig,
     relayUrl,
     relayAnnounced,
+    relayError,
     diffStatsEnabled,
     contentSearchMin,
     setDiffStats,

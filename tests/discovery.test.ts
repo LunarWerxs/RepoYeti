@@ -58,6 +58,14 @@ test("a concurrent walk still finds every repo", async () => {
   expect(found.length).toBe(12);
 });
 
+test("a concurrent walk never races past the maxRepos cap", async () => {
+  const root = tmp();
+  for (let i = 0; i < 24; i++) mkdirSync(join(root, `capped${i}`, ".git"), { recursive: true });
+  const found: FoundRepo[] = [];
+  await discoverStream([root], 6, 3, (f) => found.push(f), undefined, { concurrency: 16 });
+  expect(found.length).toBe(3);
+});
+
 test("overlapping roots are walked once (no double-count)", async () => {
   const root = tmp();
   mkdirSync(join(root, "nested", "repo", ".git"), { recursive: true });

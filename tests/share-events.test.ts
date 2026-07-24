@@ -74,6 +74,7 @@ test("owner-plane events are dropped entirely", () => {
     ["ai_key_invalid", { provider: "groq", label: "Groq" }],
     ["approval_pending", { id: "x", tool: "commit", repo: "some-repo" }],
     ["approval_resolved", { id: "x", tool: "commit", outcome: "approved" }],
+    ["collaboration_snapshots_changed", { snapshots: [] }],
     ["identity_rules_changed", { rules: [{ glob: "/work/**", identityId: "i1" }] }],
     ["auto_update_applying", { from: "abc", to: "def" }],
     ["auto_update_restarting", { message: "restarting" }],

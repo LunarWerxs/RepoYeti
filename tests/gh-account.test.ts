@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import {
   resolveRepoAccount,
+  githubRepository,
   remoteOwner,
   operativeRemoteUrl,
   authForRepo,
@@ -82,6 +83,19 @@ test("remoteOwner ignores hosts that aren't GitHub", () => {
   expect(remoteOwner("not a url")).toBeNull();
 });
 
+test("githubRepository extracts the owner and repository needed for a permission probe", () => {
+  expect(githubRepository("https://github.com/Lunarwerx/connections.git")).toEqual({
+    host: "github.com",
+    owner: "Lunarwerx",
+    repo: "connections",
+  });
+  expect(githubRepository("git@github.com:LunarWerxs/RepoYeti.git")).toEqual({
+    host: "github.com",
+    owner: "LunarWerxs",
+    repo: "RepoYeti",
+  });
+});
+
 // ── resolution order ────────────────────────────────────────────────────────────────
 
 test("an explicit pin wins over everything the repo says about itself", async () => {
@@ -118,9 +132,40 @@ test("a credential username we have no account for is ignored, not guessed at", 
   expect(await resolveRepoAccount(repoAt(dir), ACCOUNTS)).toBeNull();
 });
 
-test("an org remote matches no account and resolves to nothing", async () => {
+test("an org remote resolves to the unique signed-in account with push access", async () => {
   const dir = await scratchRepo({ "remote.origin.url": "https://github.com/Lunarwerx/askarr.git" });
-  expect(await resolveRepoAccount(repoAt(dir), ACCOUNTS)).toBeNull();
+  const checked: string[] = [];
+  const r = await resolveRepoAccount(repoAt(dir), ACCOUNTS, async (account) => {
+    checked.push(account.login);
+    return account.login === "lunawerx";
+  });
+  expect(checked).toEqual(["lunawerx", "L0garithmic", "LunarWerxs"]);
+  expect(r).toEqual({ host: "github.com", login: "lunawerx", source: "permission" });
+});
+
+test("when several accounts can push, the active writable account is the deterministic choice", async () => {
+  const dir = await scratchRepo({ "remote.origin.url": "https://github.com/Lunarwerx/askarr.git" });
+  const r = await resolveRepoAccount(
+    repoAt(dir),
+    ACCOUNTS,
+    async (account) => account.login === "lunawerx" || account.login === "L0garithmic",
+  );
+  expect(r).toEqual({ host: "github.com", login: "lunawerx", source: "permission" });
+});
+
+test("several writable non-active accounts remain ambiguous rather than being guessed", async () => {
+  const dir = await scratchRepo({ "remote.origin.url": "https://github.com/Lunarwerx/askarr.git" });
+  const r = await resolveRepoAccount(
+    repoAt(dir),
+    ACCOUNTS,
+    async (account) => account.login === "L0garithmic" || account.login === "LunarWerxs",
+  );
+  expect(r).toBeNull();
+});
+
+test("an org remote resolves to nothing when no signed-in account has push access", async () => {
+  const dir = await scratchRepo({ "remote.origin.url": "https://github.com/Lunarwerx/askarr.git" });
+  expect(await resolveRepoAccount(repoAt(dir), ACCOUNTS, async () => false)).toBeNull();
 });
 
 test("a repo with no remote and no pin resolves to nothing", async () => {

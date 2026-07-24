@@ -41,10 +41,14 @@ import { readChanges, type ChangedFile } from "./read/status.ts";
 import { hashToken, shareIsLive } from "./share/index.ts";
 import { collectPathsDiff } from "./git-actions/diff.ts";
 import { pathWithin } from "./paths.ts";
+import { addListener, broadcast, removeListener, type BusListener } from "./bus.ts";
 
 const SNAPSHOT_VERSION = 1;
 const MAX_PEERS = 50;
-const PUBLISH_INTERVAL_MS = 2500;
+// A full collaboration sample runs git status + optional diff. Known RepoYeti changes trigger
+// an immediate sample through the event bus; this slower fallback catches edits made outside the
+// app (the ordinary lightweight repo watcher intentionally watches .git, not every worktree file).
+const PUBLISH_INTERVAL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const SNAPSHOT_MAX_BYTES = 350_000;
 const SNAPSHOT_FRESH_MS = 30_000;
@@ -905,13 +909,34 @@ async function publishCollaboration(link: CollaborationLink): Promise<void> {
   publishState.set(link.id, { changesSignature, signature, lastSentAt: Date.now() });
 }
 
-export async function publishAllCollaborations(): Promise<void> {
+async function publishAllCollaborationsOnce(): Promise<void> {
   const links = listCollaborationLinks();
   const liveIds = new Set(links.map((link) => link.id));
   for (const id of publishState.keys()) {
     if (!liveIds.has(id)) publishState.delete(id);
   }
   await Promise.all(links.map((link) => publishCollaboration(link).catch(() => {})));
+}
+
+// Timer ticks, repo-state events, and the manual publish route can arrive together. Collapse them
+// into one in-flight pass plus at most one trailing pass so the same links never build a queue of
+// soon-obsolete git status/diff subprocesses.
+let publishInFlight: Promise<void> | null = null;
+let publishAgain = false;
+export function publishAllCollaborations(): Promise<void> {
+  if (publishInFlight) {
+    publishAgain = true;
+    return publishInFlight;
+  }
+  publishInFlight = (async () => {
+    do {
+      publishAgain = false;
+      await publishAllCollaborationsOnce();
+    } while (publishAgain);
+  })().finally(() => {
+    publishInFlight = null;
+  });
+  return publishInFlight;
 }
 
 interface Presence {
@@ -922,11 +947,38 @@ interface Presence {
 }
 
 const presence = new Map<string, Presence>();
+let presenceExpiryTimer: ReturnType<typeof setTimeout> | null = null;
 
-function prunePresence(now = Date.now()): void {
+function prunePresence(now = Date.now()): boolean {
+  let changed = false;
   for (const [key, entry] of presence) {
-    if (now - entry.receivedAt > SNAPSHOT_FRESH_MS) presence.delete(key);
+    if (now - entry.receivedAt > SNAPSHOT_FRESH_MS) {
+      presence.delete(key);
+      changed = true;
+    }
   }
+  return changed;
+}
+
+function broadcastCollaborationSnapshots(): void {
+  broadcast("collaboration_snapshots_changed", { snapshots: readCollaborationSnapshots() });
+}
+
+/** Expire stopped peers exactly once, without making every browser poll the daemon. */
+function schedulePresenceExpiry(): void {
+  if (presenceExpiryTimer) clearTimeout(presenceExpiryTimer);
+  presenceExpiryTimer = null;
+  let expiresAt = Number.POSITIVE_INFINITY;
+  for (const entry of presence.values()) {
+    expiresAt = Math.min(expiresAt, entry.receivedAt + SNAPSHOT_FRESH_MS + 1);
+  }
+  if (!Number.isFinite(expiresAt)) return;
+  presenceExpiryTimer = setTimeout(() => {
+    presenceExpiryTimer = null;
+    if (prunePresence()) broadcastCollaborationSnapshots();
+    schedulePresenceExpiry();
+  }, Math.max(1, expiresAt - Date.now()));
+  presenceExpiryTimer.unref?.();
 }
 
 /**
@@ -972,6 +1024,8 @@ export function receiveCollaborationSnapshot(
     snapshot,
     receivedAt: Date.now(),
   });
+  broadcastCollaborationSnapshots();
+  schedulePresenceExpiry();
   return true;
 }
 
@@ -999,16 +1053,32 @@ export function readCollaborationSnapshots(): CollaborationSnapshot[] {
 
 export { listCollaborationLinks, deleteCollaborationLink };
 
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
+let syncStarted = false;
 
-export function startCollaborationSync(): void {
-  if (timer) return;
-  void publishAllCollaborations();
-  timer = setInterval(() => void publishAllCollaborations(), PUBLISH_INTERVAL_MS);
+const collaborationBusListener: BusListener = (event) => {
+  if (event === "repo_state_changed") void publishAllCollaborations();
+};
+
+async function collaborationTick(): Promise<void> {
+  await publishAllCollaborations();
+  if (!syncStarted) return;
+  timer = setTimeout(() => void collaborationTick(), PUBLISH_INTERVAL_MS);
   timer.unref?.();
 }
 
+export function startCollaborationSync(): void {
+  if (syncStarted) return;
+  syncStarted = true;
+  addListener(collaborationBusListener);
+  void collaborationTick();
+}
+
 export function stopCollaborationSync(): void {
-  if (timer) clearInterval(timer);
+  syncStarted = false;
+  removeListener(collaborationBusListener);
+  if (timer) clearTimeout(timer);
   timer = null;
+  if (presenceExpiryTimer) clearTimeout(presenceExpiryTimer);
+  presenceExpiryTimer = null;
 }

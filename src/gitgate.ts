@@ -25,13 +25,19 @@ export interface Semaphore {
 export function createSemaphore(max: number): Semaphore {
   let active = 0;
   const queue: Array<() => void> = [];
+  let queueHead = 0;
 
   const release = (): void => {
     active--;
-    const next = queue.shift();
+    const next = queueHead < queue.length ? queue[queueHead++] : undefined;
     if (next) {
       active++; // hand the freed slot straight to the next waiter
       next();
+    }
+    // Amortized O(1) FIFO without retaining an indefinitely growing consumed prefix.
+    if (queueHead > 1024 && queueHead * 2 >= queue.length) {
+      queue.splice(0, queueHead);
+      queueHead = 0;
     }
   };
 
@@ -40,7 +46,7 @@ export function createSemaphore(max: number): Semaphore {
       return active;
     },
     get waiting() {
-      return queue.length;
+      return queue.length - queueHead;
     },
     run<T>(fn: () => Promise<T>): Promise<T> {
       let slot: Promise<void>;

@@ -165,6 +165,7 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       relay: redactRelay(cfg),
       relayUrl: getRelayBase(cfg),
       relayAnnounced: getRelayStatus().announced,
+      relayError: getRelayStatus().error,
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
       // Large-file Diff threshold (bytes) — owner setting; the viewer compares file size to it.

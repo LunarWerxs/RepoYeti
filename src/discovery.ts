@@ -137,6 +137,7 @@ export async function discoverStream(
   const dirKey = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
 
   const queue: Array<{ dir: string; depth: number }> = [];
+  let queueHead = 0;
   const enqueue = (dir: string, depth: number): void => {
     const k = dirKey(dir);
     if (seenDirs.has(k)) return;
@@ -159,6 +160,9 @@ export async function discoverStream(
     } catch {
       return; // permission denied / vanished — skip silently
     }
+    // Another concurrent read may have reached the repo cap (or the caller may have
+    // cancelled) while this directory was in flight.
+    if (stop()) return;
 
     const gitEntry = entries.find((e) => e.name === ".git");
     const loreEntry = lore ? entries.find((e) => e.name === ".lore" && e.isDirectory()) : undefined;
@@ -189,13 +193,40 @@ export async function discoverStream(
   // or a stop condition trips.
   await new Promise<void>((resolveWalk) => {
     let inFlight = 0;
+    let settled = false;
+    let abortListener: (() => void) | null = null;
+    let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const settle = (): void => {
+      if (settled) return;
+      settled = true;
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      if (signal && abortListener) signal.removeEventListener("abort", abortListener);
+      resolveWalk();
+    };
+
+    // A mapped/removable drive can leave readdir pending indefinitely. Enforce the advertised
+    // whole-walk deadline independently of completions, and likewise stop immediately on abort.
+    if (Number.isFinite(deadline)) {
+      deadlineTimer = setTimeout(settle, Math.max(0, deadline - Date.now()));
+      deadlineTimer.unref?.();
+    }
+    if (signal) {
+      abortListener = settle;
+      if (signal.aborted) settle();
+      else signal.addEventListener("abort", abortListener, { once: true });
+    }
+
     const pump = (): void => {
-      if (inFlight === 0 && (queue.length === 0 || stop())) {
-        resolveWalk();
+      if (settled) return;
+      if (inFlight === 0 && (queueHead >= queue.length || stop())) {
+        settle();
         return;
       }
-      while (inFlight < concurrency && queue.length > 0 && !stop()) {
-        const job = queue.shift()!;
+      while (inFlight < concurrency && queueHead < queue.length && !stop()) {
+        // Indexed FIFO avoids Array.shift() copying the entire machine-scan frontier for
+        // every directory visited.
+        const job = queue[queueHead++]!;
         inFlight++;
         void processDir(job.dir, job.depth).finally(() => {
           inFlight--;

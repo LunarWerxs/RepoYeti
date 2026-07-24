@@ -11,8 +11,13 @@
 import { test, expect } from "bun:test";
 import { createApp } from "../src/http/app.ts";
 import { redactRelay, DEFAULT_RELAY_URL, type RepoYetiConfig } from "../src/config.ts";
-import { publicShareOrigin, shareLinkFor, getRelayBase } from "../src/runtime.ts";
-import { createRelayIdentity } from "../src/relay.ts";
+import {
+  ensureRelayIdentity,
+  publicShareOrigin,
+  shareLinkFor,
+  getRelayBase,
+} from "../src/runtime.ts";
+import { createRelayIdentity, publicKeyFor } from "../src/relay.ts";
 import { isStaleOrigin } from "../src/share/index.ts";
 
 /** Minimal valid config; spread overrides for each case. */
@@ -61,6 +66,24 @@ test("redactRelay: exposes the public id but NEVER the private key", () => {
   const priv = cfg.relay?.identity?.privateKey ?? "";
   expect(priv.length).toBeGreaterThan(0);
   expect(JSON.stringify(r)).not.toContain(priv);
+});
+
+test("ensureRelayIdentity preserves a valid pair and rotates a mismatched pair as one unit", async () => {
+  const valid = createRelayIdentity();
+  const validCfg = base({ relay: { enabled: true, identity: valid } });
+  expect(await ensureRelayIdentity(validCfg)).toEqual(valid);
+
+  const unrelated = createRelayIdentity();
+  const brokenCfg = base({
+    relay: {
+      enabled: true,
+      identity: { ...valid, privateKey: unrelated.privateKey },
+    },
+  });
+  const repaired = await ensureRelayIdentity(brokenCfg);
+  expect(repaired.id).not.toBe(valid.id);
+  expect(repaired.publicKey).toBe(publicKeyFor(repaired.privateKey));
+  expect(brokenCfg.relay?.identity).toEqual(repaired);
 });
 
 // ── PUT /api/relay ─────────────────────────────────────────────────────────────────
@@ -129,6 +152,7 @@ test("GET /api/status carries the redacted relay for the owner, private key abse
   expect(st.relay.enabled).toBe(true);
   expect(st.relay.id).toBe(cfg.relay?.identity?.id);
   expect(st.relayUrl).toBe(`https://go.example.com/r/${cfg.relay?.identity?.id}`);
+  expect(st.relayError).toBeNull();
   expect(body).not.toContain(cfg.relay?.identity?.privateKey ?? "__absent__");
 });
 

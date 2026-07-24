@@ -6,6 +6,34 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-07-24
+
+### Changed
+
+- **Collaboration presence is event-driven instead of browser-polled.** Known repository changes
+  publish immediately, stopped peers expire through one daemon timer, and a slower fallback still
+  catches edits made outside RepoYeti. Concurrent triggers coalesce so status and diff subprocesses
+  cannot queue behind obsolete samples.
+- **Large repository scans and operation queues stay bounded.** Discovery now enforces its repository
+  cap across concurrent directory reads, honors cancellation and whole-walk deadlines even when a
+  filesystem call stalls, and uses amortized constant-time queues for both scanning and Git gates.
+
+### Fixed
+
+- **Hosted remote access now recovers from a broken relay identity instead of spinning forever.**
+  RepoYeti keeps the relay keypair together in the owner-only config, validates it before every
+  announce, migrates and removes the former Credential Manager entry, and rotates the complete
+  identity when the stored halves do not match. Relay-only status events no longer erase a healthy
+  Cloudflare tunnel URL, and the UI shows the actual relay failure while using that direct URL.
+- **Behind notifications now reconcile with current repository state.** Pull, fetch, refresh,
+  removal, and later background checks update the existing notification in place or clear it once
+  the repository is no longer behind, rather than leaving a stale commit count in the bell.
+- **Organization repositories now choose the GitHub account that can actually push.** When a
+  remote owner is an organization rather than a signed-in login, RepoYeti checks each authenticated
+  account's repository permissions and automatically uses the unique writable account (or the
+  active writable account when several qualify). The repo picker now calls this mode “Automatic”
+  and names permission-derived choices instead of implying it blindly uses the active account.
+
 ## [0.13.0] - 2026-07-23
 
 ### Added
@@ -744,7 +772,8 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
-[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.10.0...v0.11.0

@@ -17,6 +17,7 @@ import {
   publishToRelay,
   getRelayBase,
   getRelayStatus,
+  resetRelayStatus,
 } from "../../runtime.ts";
 import { broadcast } from "../../bus.ts";
 import { jsonError } from "../../contract.ts";
@@ -120,6 +121,8 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (r.enabled) {
       // Mint before saving so the id (half of the permanent URL) exists for the response below.
       await ensureRelayIdentity(cfg);
+    } else {
+      resetRelayStatus();
     }
     // Collapse an emptied-out block, but KEEP a minted identity: dropping it would re-register a
     // fresh id on the relay next time and silently break every link already handed out.

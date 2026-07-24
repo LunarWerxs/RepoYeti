@@ -6,11 +6,21 @@
  * (`daemon_status`), so the "remote access" panel shows a link/QR the moment it's ready.
  */
 import { startTunnel, startNamedTunnel, type TunnelHandle } from "./tunnel.ts";
-import { namedTunnel, relayEffective, type RepoYetiConfig } from "./config.ts";
+import {
+  namedTunnel,
+  redactRelay,
+  relayEffective,
+  saveConfig,
+  type RepoYetiConfig,
+} from "./config.ts";
 import { broadcast } from "./bus.ts";
-import { announce, createRelayIdentity, relayShareUrl, type RelayIdentity } from "./relay.ts";
-import { saveConfig } from "./config.ts";
-import { RELAY_PRIVATE_KEY, setSecret } from "./secrets.ts";
+import {
+  announce,
+  createRelayIdentity,
+  publicKeyFor,
+  relayShareUrl,
+  type RelayIdentity,
+} from "./relay.ts";
 
 /**
  * Publish our current public address to the relay, if the owner turned it on.
@@ -30,7 +40,12 @@ export async function publishToRelay(cfg: RepoYetiConfig, origin: string): Promi
   if (!res.ok) console.warn(`repoyeti: relay announce failed — ${res.error}`);
   // Tell the UI whether the permanent link is actually live, so "relay on" and "relay working"
   // are visibly different states rather than one hopeful toggle.
-  broadcast("daemon_status", { relayUrl: getRelayBase(cfg), relayAnnounced, relayError });
+  broadcast("daemon_status", {
+    relay: redactRelay(cfg),
+    relayUrl: getRelayBase(cfg),
+    relayAnnounced,
+    relayError,
+  });
 }
 
 /**
@@ -42,12 +57,22 @@ export async function publishToRelay(cfg: RepoYetiConfig, origin: string): Promi
  */
 export async function ensureRelayIdentity(cfg: RepoYetiConfig): Promise<RelayIdentity> {
   const existing = cfg.relay?.identity;
-  if (existing?.privateKey) return existing as RelayIdentity;
+  if (existing?.privateKey && /^[a-f0-9]{32}$/.test(existing.id)) {
+    try {
+      if (publicKeyFor(existing.privateKey) === existing.publicKey) {
+        return existing as RelayIdentity;
+      }
+    } catch {
+      /* malformed private key — rotate the complete identity below */
+    }
+  }
+  if (existing) {
+    console.warn(
+      "repoyeti: relay identity is incomplete or mismatched; rotating the stable address",
+    );
+  }
   const identity = createRelayIdentity();
   cfg.relay = { ...cfg.relay, identity };
-  // If the keychain is unavailable this returns false and saveConfig deliberately retains the
-  // in-memory private key as the secure-degradation fallback. On normal hosts saveConfig strips it.
-  await setSecret(RELAY_PRIVATE_KEY, identity.privateKey);
   try {
     saveConfig(cfg);
   } catch {
@@ -63,6 +88,12 @@ let relayError: string | null = null;
 /** Live relay state for the owner's UI — is the permanent URL actually registered? */
 export function getRelayStatus(): { announced: boolean; error: string | null } {
   return { announced: relayAnnounced, error: relayError };
+}
+
+/** Clear a relay result that is no longer applicable (opt-out or tunnel teardown). */
+export function resetRelayStatus(): void {
+  relayAnnounced = false;
+  relayError = null;
 }
 
 /**
@@ -170,7 +201,11 @@ export function stopManagedTunnel(): void {
   tunnelUrl = null;
   // The relay is still pointing at the address we just abandoned, so "registered" is no longer a
   // true statement about a link that works. Clear it rather than leave a stale green tick.
-  relayAnnounced = false;
-  relayError = null;
-  broadcast("daemon_status", { tunnelUrl: null, tunnelActive: false, relayAnnounced: false });
+  resetRelayStatus();
+  broadcast("daemon_status", {
+    tunnelUrl: null,
+    tunnelActive: false,
+    relayAnnounced: false,
+    relayError: null,
+  });
 }

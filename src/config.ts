@@ -2,8 +2,8 @@
  * Daemon configuration + paths.
  *
  * All local state lives under ~/.repoyeti (never inside any tracked repo). The
- * config file holds only non-secret operational settings (roots, port, limits);
- * secrets (AI keys, OAuth client_secret) live in the OS keychain via secrets.ts —
+ * config file holds operational settings plus the relay identity keypair. Credentials
+ * (AI keys, OAuth client_secret) live in the OS keychain via secrets.ts —
  * `hydrateSecrets()` loads them into memory at boot and `saveConfig()` strips them
  * from disk. They only fall back into config.json (0600) if no OS keychain exists.
  */
@@ -21,8 +21,9 @@ import {
   API_TOKEN,
   RELAY_PRIVATE_KEY,
 } from "./secrets.ts";
+import { publicKeyFor } from "./relay.ts";
 
-export const VERSION = "0.13.0";
+export const VERSION = "0.13.1";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
@@ -51,9 +52,9 @@ export interface OAuthConfig {
 }
 
 /**
- * Relay settings. `identity` holds this daemon's stable public id/key; the private half is hydrated
- * from the OS keychain at boot. A stolen signing key could repoint existing stable links, so it gets
- * the same at-rest treatment as API and tunnel credentials.
+ * Relay settings. The complete identity stays together in the owner-only config file (0600).
+ * Splitting its private half into the OS keychain made the public/private pair vulnerable to
+ * independent replacement and broke stable links. It is still redacted from every API response.
  */
 export interface RelayConfig {
   /** Base URL of the relay. Empty/absent uses the hosted app.repoyeti.com default. */
@@ -63,7 +64,7 @@ export interface RelayConfig {
   identity?: {
     id: string;
     publicKey: string;
-    /** In-memory only when a keychain is available; plaintext fallback on keychain-less hosts. */
+    /** Stored beside the public half in config.json; never returned to a client. */
     privateKey?: string;
   };
 }
@@ -809,7 +810,6 @@ function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
   }
   if (clone.oauth) delete clone.oauth.clientSecret;
   if (clone.tunnel) delete clone.tunnel.token;
-  if (clone.relay?.identity) delete clone.relay.identity.privateKey;
   delete clone.apiToken;
   return clone;
 }
@@ -898,15 +898,43 @@ export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
     if (t) cfg.apiToken = t;
   }
 
-  // Stable-address relay signing key. Keep the public id/key in config so links remain renderable;
-  // migrate/hydrate only the private signing half.
-  if (cfg.relay?.identity) {
-    if (cfg.relay.identity.privateKey) {
-      if (await setSecret(RELAY_PRIVATE_KEY, cfg.relay.identity.privateKey)) migrated = true;
-    } else {
-      const privateKey = await getSecret(RELAY_PRIVATE_KEY);
-      if (privateKey) cfg.relay.identity.privateKey = privateKey;
+  // One-time migration from the short-lived split relay-key design. The signing pair now stays
+  // together in config.json: unlike an API credential, this key is useful only with its matching
+  // public identity, and splitting the halves let tests (or a restored credential store) replace
+  // one independently and strand the stable address. Only attach a legacy key when it derives the
+  // stored public key; a mismatch is deliberately left incomplete so ensureRelayIdentity() rotates
+  // the whole identity instead of repeatedly sending bad signatures.
+  const legacyRelayPrivate = await getSecret(RELAY_PRIVATE_KEY);
+  if (legacyRelayPrivate) {
+    const identity = cfg.relay?.identity;
+    if (identity) {
+      let configMatches = false;
+      let legacyMatches = false;
+      try {
+        configMatches =
+          typeof identity.privateKey === "string" &&
+          publicKeyFor(identity.privateKey) === identity.publicKey;
+      } catch {
+        /* malformed config key — the valid legacy key may still recover it below */
+      }
+      try {
+        legacyMatches = publicKeyFor(legacyRelayPrivate) === identity.publicKey;
+      } catch {
+        /* malformed legacy credential — discard it below */
+      }
+      if (!configMatches && legacyMatches) {
+        identity.privateKey = legacyRelayPrivate;
+        migrated = true;
+      } else if (!configMatches && !legacyMatches) {
+        console.warn(
+          "repoyeti: legacy relay signing key does not match its public identity; " +
+            "the stable address will be rotated",
+        );
+      }
     }
+    // Whether recovered, superseded, orphaned, or malformed, the relay key no longer belongs in
+    // Credential Manager. Delete it so future test runs/restores cannot split the pair again.
+    await deleteSecret(RELAY_PRIVATE_KEY);
   }
 
   // Re-persist so the now-migrated plaintext secrets are stripped from config.json.

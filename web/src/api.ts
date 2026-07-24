@@ -140,6 +140,8 @@ export interface RuntimeStatus {
   relayUrl: string | null;
   /** The relay has accepted this daemon's current address, so the permanent link resolves. */
   relayAnnounced: boolean;
+  /** Why the latest relay announcement failed, or null when healthy/not attempted. */
+  relayError: string | null;
   /** Whether per-file/per-repo diff statistics are enabled (owner setting). */
   diffStats: boolean;
   /** Min query length before "search content" greps — server-owned, so the UI can't drift. */
