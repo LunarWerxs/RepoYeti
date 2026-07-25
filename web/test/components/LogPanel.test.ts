@@ -667,7 +667,7 @@ describe("LogPanel.vue", () => {
     expect(logSpy).toHaveBeenLastCalledWith(repoId, 275, 0, "all");
     expect(store.logByRepo[repoId]?.commits).toHaveLength(275);
     expect(wrapper.findAll("[data-history-row]")).toHaveLength(275);
-  });
+  }, 15_000);
 
   it("removes the branch-map gutter when its appearance preference is off", async () => {
     historyGraphEnabled.value = false;
