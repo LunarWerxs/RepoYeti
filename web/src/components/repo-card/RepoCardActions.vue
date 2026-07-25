@@ -4,7 +4,7 @@
 // overflow (⋮) menu both live in the card's identity line now (see RepoCardChanges.vue and
 // repo-card/RepoCardMenu.vue) — the busy state they and this component read is the store's shared
 // per-repo `busy` map, so their spinners (and any action's disabled state here) can never disagree.
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ArrowDownToLine, ArrowUpFromLine, DownloadCloud, Loader2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
@@ -16,9 +16,9 @@ import { Button } from "@/components/ui/button";
 import type { ButtonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { VCS_CAPABILITIES } from "../../types";
-import type { Repo } from "../../types";
+import type { PullDisposition, Repo } from "../../types";
 
-const props = defineProps<{ repo: Repo }>();
+const props = withDefaults(defineProps<{ repo: Repo; active?: boolean }>(), { active: true });
 const store = useStore();
 const { t } = useI18n();
 const { friendly } = useRepoFeedback();
@@ -33,13 +33,91 @@ const isLore = computed(() => props.repo.vcs === "lore");
 const hasUpstream = computed(() => isLore.value || hasRemote.value);
 // "Pull" for git; "Sync" for a centralized backend (Lore), where pull maps to `lore sync`.
 const pullLabel = computed(() => (caps.value.fetch ? t("repo.actions.pull") : t("repo.actions.sync")));
-const pullTooltip = computed(() =>
-  caps.value.fetch ? t("repo.actions.pullTooltip") : t("repo.actions.syncTooltip"),
-);
 const busyAction = computed(() => store.busy[props.repo.id]);
 const anyBusy = computed(() => !!busyAction.value);
-// Pull goes accent when there is actually something to pull. Computed once and handed to BOTH
-// halves of the split button, so the caret can never disagree with the button it is attached to.
+const incoming = computed(() => store.incomingByRepo[props.repo.id]);
+const statusDiverged = computed(() => (st.value?.ahead ?? 0) > 0 && (st.value?.behind ?? 0) > 0);
+
+const blockedDispositions = new Set<PullDisposition>([
+  "blocked_non_fast_forward",
+  "blocked_would_overwrite",
+]);
+/**
+ * Whether the cached preview still describes the live status snapshot.
+ *
+ * Counts alone are not identities: HEAD/upstream can both move while keeping the same numbers.
+ * `headOid` catches the former exactly; a newer fetched/status timestamp invalidates upstream or
+ * index/worktree changes, and the server's snapshot token proves those inputs stayed fixed for
+ * the duration of the preview itself. A legacy/incomplete success without that token fails closed.
+ */
+const previewMatchesStatus = computed(() => {
+  const preview = incoming.value;
+  const status = st.value;
+  if (!preview || !status || !Number.isFinite(preview.checkedAt)) return false;
+  if (preview.ahead !== status.ahead || preview.behind !== status.behind) return false;
+  if (status.updatedAt > preview.checkedAt) return false;
+  if ((status.fetchedAt ?? 0) > preview.checkedAt) return false;
+  if (
+    status.headOid &&
+    preview.snapshot?.headOid &&
+    status.headOid.toLowerCase() !== preview.snapshot.headOid.toLowerCase()
+  ) {
+    return false;
+  }
+  if (
+    status.upstreamOid &&
+    preview.snapshot?.upstreamOid &&
+    status.upstreamOid.toLowerCase() !== preview.snapshot.upstreamOid.toLowerCase()
+  ) {
+    return false;
+  }
+  if (
+    status.worktreeStateHash &&
+    preview.snapshot?.worktreeStateHash &&
+    status.worktreeStateHash !== preview.snapshot.worktreeStateHash
+  ) {
+    return false;
+  }
+  return true;
+});
+const currentPreview = computed(() =>
+  previewMatchesStatus.value && !store.incomingLoading[props.repo.id]
+    ? incoming.value
+    : undefined,
+);
+const currentPreviewDisposition = computed<PullDisposition | undefined>(
+  () => currentPreview.value?.pullDisposition,
+);
+const previewUnavailable = computed(() => {
+  // Once a preview exists, never fall back to an optimistic button while that preview is stale
+  // or being revalidated. That is how a same-count worktree edit used to leave a cached green
+  // verdict actionable until the dialog was opened again.
+  if (store.incomingLoading[props.repo.id]) return true;
+  if (incoming.value && !currentPreview.value) return true;
+  const preview = currentPreview.value;
+  if (!preview) return false;
+  return (
+    !preview.ok ||
+    preview.noUpstream ||
+    preview.relation === "no_upstream" ||
+    preview.relation === "unknown" ||
+    preview.pullDisposition === "unknown" ||
+    (preview.ok &&
+      !preview.noUpstream &&
+      (!preview.snapshot?.headOid || !preview.snapshot.worktreeStateHash))
+  );
+});
+const previewProvesBlocked = computed(() =>
+  currentPreviewDisposition.value
+    ? blockedDispositions.has(currentPreviewDisposition.value)
+    : false,
+);
+const pullProvesBlocked = computed(() =>
+  caps.value.fetch ? statusDiverged.value || previewProvesBlocked.value : false,
+);
+
+// Pull goes accent when there is something safe to pull, and destructive as soon as the local and
+// remote histories have diverged. One computed variant drives BOTH halves of the split button.
 /**
  * Whether the preview caret is actually rendered beside Pull.
  *
@@ -50,7 +128,65 @@ const anyBusy = computed(() => !!busyAction.value);
  */
 const hasPullCaret = computed(() => caps.value.fetch && !store.isGuest);
 const pullVariant = computed<ButtonVariants["variant"]>(() =>
-  st.value && st.value.behind > 0 ? "default" : "outline",
+  pullProvesBlocked.value
+    ? "destructive"
+    : previewUnavailable.value
+      ? "outline"
+    : st.value && st.value.behind > 0
+      ? "default"
+      : "outline",
+);
+const pullDisabled = computed(
+  () =>
+    !hasUpstream.value ||
+    anyBusy.value ||
+    pullProvesBlocked.value ||
+    (caps.value.fetch && previewUnavailable.value),
+);
+const caretDisabled = computed(() => !hasUpstream.value || anyBusy.value);
+const pullTooltip = computed(() => {
+  if (currentPreviewDisposition.value === "blocked_would_overwrite") {
+    return t("repo.actions.pullBlockedOverwriteTooltip");
+  }
+  if (
+    statusDiverged.value ||
+    currentPreviewDisposition.value === "blocked_non_fast_forward"
+  ) {
+    return t("repo.actions.pullBlockedDivergedTooltip");
+  }
+  if (previewUnavailable.value) return t("repo.actions.pullUnavailableTooltip");
+  return caps.value.fetch ? t("repo.actions.pullTooltip") : t("repo.actions.syncTooltip");
+});
+
+// A status with commits on both sides already proves `pull --ff-only` cannot run. While this
+// expanded owner card is visible, ask the read-only preview endpoint for the more specific
+// explanation without fetching again. Refresh it whenever status is reconciled after a fetch.
+watch(
+  () => [
+    props.active,
+    props.repo.vcs,
+    store.isGuest,
+    st.value?.ahead ?? 0,
+    st.value?.behind ?? 0,
+    st.value?.headOid ?? null,
+    st.value?.upstreamOid ?? null,
+    st.value?.worktreeStateHash ?? null,
+    st.value?.fetchedAt ?? null,
+    st.value?.updatedAt ?? 0,
+  ] as const,
+  ([active, vcs, guest, _ahead, behind]) => {
+    if (
+      active &&
+      vcs === "git" &&
+      !guest &&
+      !store.incomingLoading[props.repo.id] &&
+      ((behind > 0 && !currentPreview.value) ||
+        (!!incoming.value && !previewMatchesStatus.value))
+    ) {
+      void store.loadIncoming(props.repo.id, false);
+    }
+  },
+  { immediate: true },
 );
 
 async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
@@ -94,7 +230,8 @@ async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
               :variant="pullVariant"
               size="sm"
               :class="hasPullCaret ? 'rounded-r-none' : ''"
-              :disabled="!hasUpstream || anyBusy"
+              data-testid="repo-pull-primary"
+              :disabled="pullDisabled"
               @click="run('pull')"
             >
               <Loader2 v-if="busyAction === 'pull'" class="animate-spin" />
@@ -114,7 +251,9 @@ async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
         v-if="hasPullCaret"
         :repo-id="repo.id"
         :variant="pullVariant"
-        :disabled="!hasUpstream || anyBusy"
+        :disabled="caretDisabled"
+        :pull-disabled="pullDisabled"
+        :status-diverged="statusDiverged"
         @pull="run('pull')"
       />
     </div>

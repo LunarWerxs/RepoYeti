@@ -100,11 +100,23 @@ function startPollFallback(repoId: string, absPath: string): void {
   pollHandles.set(repoId, setTimeout(tick, nextPollDelay()));
 }
 
-export function watchOne(repoId: string, absPath: string): void {
+type WatchInstaller = typeof watchRepo;
+
+export function watchOne(
+  repoId: string,
+  absPath: string,
+  installWatch: WatchInstaller = watchRepo,
+): void {
   if (watchHandles.has(repoId)) return;
   // Watch the VCS's marker dir (.git / .lore) so a Lore repo's metadata changes still tick.
   const marker = backendFor(getRepo(repoId)?.vcs ?? "git").marker;
-  const handle = watchRepo(absPath, () => coalescedRefresh(repoId, absPath), marker);
+  const handle = installWatch(
+    absPath,
+    () => coalescedRefresh(repoId, absPath),
+    marker,
+    250,
+    () => startPollFallback(repoId, absPath),
+  );
   watchHandles.set(repoId, handle);
   if (!handle.watching) startPollFallback(repoId, absPath);
 }
@@ -142,5 +154,9 @@ export function stopWatching(): void {
 /** Watcher health snapshot for diagnostics/tests: how many repos are watched live vs
  *  degraded to polling, and which ids are degraded. */
 export function watcherHealth(): { watched: number; polling: number; unhealthy: string[] } {
-  return { watched: watchHandles.size, polling: pollHandles.size, unhealthy: [...unhealthyWatch] };
+  let watched = 0;
+  for (const handle of watchHandles.values()) {
+    if (handle.watching) watched++;
+  }
+  return { watched, polling: pollHandles.size, unhealthy: [...unhealthyWatch] };
 }

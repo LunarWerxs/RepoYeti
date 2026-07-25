@@ -57,7 +57,9 @@ To reach it from your phone (opens a Cloudflare tunnel and prints a QR code):
 bun run src/index.ts start --tunnel
 ```
 
-Prefer a single binary? Grab one from [Releases](https://github.com/LunarWerxs/RepoYeti/releases).
+Prefer a prebuilt copy? Grab the bundle for your platform from
+[Releases](https://github.com/LunarWerxs/RepoYeti/releases), extract the whole folder, and run the
+RepoYeti executable. Keep its bundled `web` folder beside it so the dashboard is available.
 
 ## AI setup: a free Groq key in 3 clicks
 

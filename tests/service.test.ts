@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { getRepo, setRepoStatus, type RepoStatus } from "../src/db.ts";
+import { addListener, removeListener, type BusListener } from "../src/bus.ts";
 import { enqueue } from "../src/opqueue.ts";
 import {
   coalescedRefresh,
@@ -48,6 +49,102 @@ test("refreshRepo preserves fetchedAt on non-fetch refreshes", async () => {
   await refreshRepo(id, dir);
 
   expect(getRepo(id)?.status?.fetchedAt).toBe(12345);
+});
+
+test("refreshRepo broadcasts a clean external commit when counters remain unchanged", async () => {
+  const dir = await gitRepo("gm-svc-head-");
+  const id = mustUpsertRepo(dir, "repo-head", "auto", false);
+  const events: Array<{ id: string; status: RepoStatus }> = [];
+  const listener: BusListener = (event, _data, payload) => {
+    if (event === "repo_state_changed" && (payload as { id?: string }).id === id) {
+      events.push(payload as { id: string; status: RepoStatus });
+    }
+  };
+  addListener(listener);
+  try {
+    await refreshRepo(id, dir);
+    const before = getRepo(id)?.status;
+    events.length = 0;
+
+    await $`git -C ${dir} -c user.name=External -c user.email=external@example.com commit -q --allow-empty -m external`.quiet();
+    await refreshRepo(id, dir);
+    const after = getRepo(id)?.status;
+
+    expect(after?.headOid).not.toBe(before?.headOid);
+    expect(after && before ? [after.branch, after.detached, after.dirty, after.ahead, after.behind] : null)
+      .toEqual(before ? [before.branch, before.detached, before.dirty, before.ahead, before.behind] : null);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.status.headOid).toBe(after?.headOid);
+  } finally {
+    removeListener(listener);
+  }
+});
+
+test("refreshRepo broadcasts a changed path when the dirty count stays unchanged", async () => {
+  const dir = await gitRepo("gm-svc-worktree-");
+  const id = mustUpsertRepo(dir, "repo-worktree", "auto", false);
+  const events: Array<{ id: string; status: RepoStatus }> = [];
+  const listener: BusListener = (event, _data, payload) => {
+    if (event === "repo_state_changed" && (payload as { id?: string }).id === id) {
+      events.push(payload as { id: string; status: RepoStatus });
+    }
+  };
+  addListener(listener);
+  try {
+    writeFileSync(join(dir, "first.txt"), "first\n");
+    await refreshRepo(id, dir);
+    const first = getRepo(id)?.status;
+    events.length = 0;
+
+    await $`git -C ${dir} clean -q -f -- first.txt`.quiet();
+    writeFileSync(join(dir, "second.txt"), "second\n");
+    await refreshRepo(id, dir);
+    const second = getRepo(id)?.status;
+
+    expect(first?.dirty).toBe(1);
+    expect(second?.dirty).toBe(1);
+    expect(second?.worktreeStateHash).not.toBe(first?.worktreeStateHash);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.status.worktreeStateHash).toBe(second?.worktreeStateHash);
+  } finally {
+    removeListener(listener);
+  }
+});
+
+test("refreshRepo broadcasts when a staged blob changes but its path/status tuple does not", async () => {
+  const dir = await gitRepo("gm-svc-index-blob-");
+  const id = mustUpsertRepo(dir, "repo-index-blob", "auto", false);
+  const events: Array<{ id: string; status: RepoStatus }> = [];
+  const listener: BusListener = (event, _data, payload) => {
+    if (event === "repo_state_changed" && (payload as { id?: string }).id === id) {
+      events.push(payload as { id: string; status: RepoStatus });
+    }
+  };
+  addListener(listener);
+  try {
+    const path = join(dir, "staged.txt");
+    writeFileSync(path, "staged version one\n");
+    await $`git -C ${dir} add staged.txt`.quiet();
+    const porcelainBefore = await $`git -C ${dir} status --porcelain=v1`.text();
+    await refreshRepo(id, dir);
+    const first = getRepo(id)?.status;
+    events.length = 0;
+
+    writeFileSync(path, "staged version two\n");
+    await $`git -C ${dir} add staged.txt`.quiet();
+    const porcelainAfter = await $`git -C ${dir} status --porcelain=v1`.text();
+    await refreshRepo(id, dir);
+    const second = getRepo(id)?.status;
+
+    expect(porcelainAfter).toBe(porcelainBefore);
+    expect(first?.dirty).toBe(1);
+    expect(second?.dirty).toBe(1);
+    expect(second?.worktreeStateHash).not.toBe(first?.worktreeStateHash);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.status.worktreeStateHash).toBe(second?.worktreeStateHash);
+  } finally {
+    removeListener(listener);
+  }
 });
 
 test("getChanges waits behind the per-repo operation queue", async () => {
@@ -114,7 +211,92 @@ test("getChanges caps an oversized changed-file list and flags truncation", asyn
   expect(result.files?.length).toBe(MAX_CHANGED_FILES);
 });
 
+test("a watcher-driven ref-only change broadcasts the new History ref identity", async () => {
+  const dir = await gitRepo("gm-svc-ref-watch-");
+  const id = mustUpsertRepo(dir, "repo-ref-watch", "auto", false);
+  await refreshRepo(id, dir);
+  const before = getRepo(id)?.status?.historyRefsHash;
+  let notify!: () => void;
+  watchOne(id, dir, (_path, onChange) => {
+    notify = onChange;
+    return {
+      watching: true,
+      close: () => {},
+    };
+  });
+
+  let resolveEvent!: (status: RepoStatus) => void;
+  const eventStatus = new Promise<RepoStatus>((resolve) => {
+    resolveEvent = resolve;
+  });
+  const listener: BusListener = (event, _data, payload) => {
+    const update = payload as { id?: string; status?: RepoStatus };
+    if (
+      event === "repo_state_changed" &&
+      update.id === id &&
+      update.status &&
+      update.status.historyRefsHash !== before
+    ) {
+      resolveEvent(update.status);
+    }
+  };
+  addListener(listener);
+  try {
+    await $`git -C ${dir} update-ref refs/tags/external-only HEAD`.quiet();
+    notify();
+    const emitted = await Promise.race([
+      eventStatus,
+      Bun.sleep(5_000).then(() => {
+        throw new Error("timed out waiting for watcher-driven repo_state_changed");
+      }),
+    ]);
+
+    expect(emitted.headOid).toBe(getRepo(id)?.status?.headOid);
+    expect(emitted.historyRefsHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(emitted.historyRefsHash).not.toBe(before);
+  } finally {
+    removeListener(listener);
+    unwatchOne(id);
+  }
+});
+
+test("a runtime native-watcher failure switches exactly once to polling", () => {
+  const dir = tmp();
+  const id = "runtime-watch-fallback";
+  const before = watcherHealth();
+  let fail!: () => void;
+  watchOne(id, dir, (_path, _onChange, _marker, _debounce, onUnhealthy) => {
+    let live = true;
+    fail = () => {
+      live = false;
+      onUnhealthy?.();
+    };
+    return {
+      get watching() {
+        return live;
+      },
+      close: () => {
+        live = false;
+      },
+    };
+  });
+
+  expect(watcherHealth().watched).toBe(before.watched + 1);
+  expect(watcherHealth().polling).toBe(before.polling);
+  fail();
+  fail();
+
+  expect(watcherHealth().watched).toBe(before.watched);
+  expect(watcherHealth().polling).toBe(before.polling + 1);
+  expect(watcherHealth().unhealthy).toContain(id);
+  unwatchOne(id);
+  expect(watcherHealth().polling).toBe(before.polling);
+});
+
 test("background refresh scheduling bounds pending promise chains across repos", async () => {
+  // Keep this scheduler accounting isolated from legitimate filesystem events emitted by
+  // repositories registered in earlier service tests.
+  stopWatching();
   const bare = tmp();
   let release!: () => void;
   const gate = new Promise<void>((resolveGate) => {

@@ -219,6 +219,12 @@ function collaborationStatus(status: RepoStatus | null): RepoStatus | null {
   return {
     branch: status.branch,
     detached: status.detached,
+    // A commit object id is content identity, not a credential. Preserve it so accepted
+    // collaboration consumers can detect clean external commits while remote URLs stay redacted.
+    headOid: status.headOid ?? null,
+    // Ref names never leave this digest; preserving it lets a collaborator's open History react
+    // to external branch/tag topology changes without exposing any additional repository data.
+    historyRefsHash: status.historyRefsHash ?? null,
     dirty: status.dirty,
     ahead: status.ahead,
     behind: status.behind,
@@ -290,6 +296,13 @@ function validStatus(value: unknown): value is RepoStatus | null {
   return (
     (s.branch === null || boundedText(s.branch, 500)) &&
     typeof s.detached === "boolean" &&
+    (s.headOid === undefined ||
+      s.headOid === null ||
+      (typeof s.headOid === "string" &&
+        /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(s.headOid))) &&
+    (s.historyRefsHash === undefined ||
+      s.historyRefsHash === null ||
+      (typeof s.historyRefsHash === "string" && /^[0-9a-f]{64}$/i.test(s.historyRefsHash))) &&
     Number.isSafeInteger(s.dirty) &&
     Number.isSafeInteger(s.ahead) &&
     Number.isSafeInteger(s.behind) &&

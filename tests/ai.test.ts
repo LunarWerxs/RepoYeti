@@ -7,11 +7,14 @@ import { redactAi, resolveApiKey, type RepoYetiConfig } from "../src/config.ts";
 import {
   parseModels,
   extractCompletion,
+  normalizeCompatibleBaseUrl,
   cleanCommitMessage,
   userPromptFor,
   listModels,
   generateCommitMessage,
+  generateCommitPlan,
   AiError,
+  type CommitPlanInput,
   type FetchFn,
 } from "../src/ai.ts";
 import { collectCommitDiff } from "../src/git-actions.ts";
@@ -26,6 +29,11 @@ test("redactAi never emits an apiKey and reports configured providers", () => {
       providers: {
         openai: { apiKey: "sk-SECRET-openai", model: "gpt-4o" },
         anthropic: { apiKey: "sk-ant-SECRET", model: null },
+        compatible: {
+          apiKey: "compatible-SECRET",
+          model: "acme-chat",
+          baseUrl: "https://ai.example.test/v1",
+        },
       },
       defaultProvider: "openai",
       style: "conventional",
@@ -35,6 +43,11 @@ test("redactAi never emits an apiKey and reports configured providers", () => {
   expect(JSON.stringify(r)).not.toContain("SECRET");
   expect(r.providers.openai).toEqual({ configured: true, model: "gpt-4o" });
   expect(r.providers.anthropic).toEqual({ configured: true, model: null });
+  expect(r.providers.compatible).toEqual({
+    configured: true,
+    model: "acme-chat",
+    baseUrl: "https://ai.example.test/v1",
+  });
   expect(r.providers.gemini).toBeUndefined();
   expect(r.defaultProvider).toBe("openai");
   expect(r.style).toBe("conventional");
@@ -112,6 +125,37 @@ test("deepseek parser keeps all chat ids", () => {
     data: [{ id: "deepseek-chat" }, { id: "deepseek-reasoner" }],
   }).map((m) => m.id);
   expect(ids.sort()).toEqual(["deepseek-chat", "deepseek-reasoner"]);
+});
+
+test("compatible base URLs are canonicalized and permit HTTP only on loopback", () => {
+  expect(normalizeCompatibleBaseUrl(" https://API.Example.com/v1/// ")).toBe(
+    "https://api.example.com/v1",
+  );
+  expect(normalizeCompatibleBaseUrl("http://localhost:11434/v1/")).toBe(
+    "http://localhost:11434/v1",
+  );
+  expect(normalizeCompatibleBaseUrl("http://127.0.0.1:1234/v1")).toBe(
+    "http://127.0.0.1:1234/v1",
+  );
+  expect(normalizeCompatibleBaseUrl("http://[::1]:8080/v1/")).toBe(
+    "http://[::1]:8080/v1",
+  );
+});
+
+test("compatible base URLs reject unsafe transports, URL data, and operation paths", () => {
+  const rejected = [
+    "",
+    "http://api.example.com/v1",
+    "ftp://api.example.com/v1",
+    "https://user:pass@api.example.com/v1",
+    "https://api.example.com/v1?tenant=1",
+    "https://api.example.com/v1#fragment",
+    "https://api.example.com/v1/models",
+    "https://api.example.com/v1/chat/completions/",
+    "https://api.example.com/v1/responses",
+    "https://api.example.com/v1/%6dodels",
+  ];
+  for (const value of rejected) expect(() => normalizeCompatibleBaseUrl(value)).toThrow();
 });
 
 // ── completion extraction + cleanup ─────────────────────────────────────────────
@@ -195,6 +239,51 @@ test("listModels parses a 200 body and maps 401 to AI_AUTH_FAILED", async () => 
   });
 });
 
+test("compatible model discovery uses only the normalized /models destination and blocks redirects", async () => {
+  let sentUrl = "";
+  let sentInit: RequestInit | undefined;
+  const models = await listModels(
+    "compatible",
+    "owner-key",
+    fakeFetch(200, { data: [{ id: "chat-a" }, { id: "whisper-large" }] }, (url, init) => {
+      sentUrl = url;
+      sentInit = init;
+    }),
+    { baseUrl: "https://gateway.example.test/openai/v1/" },
+  );
+  expect(sentUrl).toBe("https://gateway.example.test/openai/v1/models");
+  expect(new Headers(sentInit?.headers).get("authorization")).toBe("Bearer owner-key");
+  expect(sentInit?.redirect).toBe("error");
+  expect(models).toEqual([{ id: "chat-a", label: "chat-a" }]);
+});
+
+test("compatible loopback discovery can omit auth, while remote endpoints cannot", async () => {
+  let loopbackAuth: string | null = "not-called";
+  await listModels(
+    "compatible",
+    "",
+    fakeFetch(200, { data: [{ id: "local-chat" }] }, (_url, init) => {
+      loopbackAuth = new Headers(init?.headers).get("authorization");
+    }),
+    { baseUrl: "http://127.0.0.1:11434/v1" },
+  );
+  expect(loopbackAuth).toBeNull();
+
+  let remoteCalls = 0;
+  await expect(
+    listModels(
+      "compatible",
+      "",
+      async () => {
+        remoteCalls++;
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      },
+      { baseUrl: "https://gateway.example.test/v1" },
+    ),
+  ).rejects.toThrow("API key required");
+  expect(remoteCalls).toBe(0);
+});
+
 test("generateCommitMessage sends the model + returns a cleaned message", async () => {
   let sentUrl = "";
   let sentBody: { model?: string; messages?: Array<{ role?: string; content?: unknown }> } | null = null;
@@ -213,6 +302,41 @@ test("generateCommitMessage throws on an empty model reply", async () => {
   await expect(
     generateCommitMessage("openai", "sk-x", "gpt-4o", "DIFF", "concise", fakeFetch(200, { choices: [{ message: { content: "" } }] })),
   ).rejects.toBeInstanceOf(AiError);
+});
+
+test("compatible commit planning avoids optional JSON-mode extensions", async () => {
+  const input: CommitPlanInput = {
+    files: [{ path: "src/a.ts", status: "M", additions: 1, removals: 0, binary: false }],
+    diff: "diff --git a/src/a.ts b/src/a.ts\n",
+    truncated: false,
+  };
+  const planJson = JSON.stringify({
+    groups: [{ type: "fix", subject: "adjust a", files: ["src/a.ts"] }],
+    leftovers: [],
+  });
+  let sentUrl = "";
+  let sentBody: Record<string, unknown> = {};
+  const compatibleFetch = fakeFetch(
+    200,
+    { choices: [{ message: { content: planJson } }] },
+    (url, init) => {
+      sentUrl = url;
+      sentBody = init?.body ? JSON.parse(String(init.body)) : {};
+    },
+  );
+  const plan = await generateCommitPlan(
+    "compatible",
+    "owner-key",
+    "manual-model",
+    input,
+    "conventional",
+    compatibleFetch,
+    { baseUrl: "https://gateway.example.test/v1" },
+  );
+  expect(sentUrl).toBe("https://gateway.example.test/v1/chat/completions");
+  expect(sentBody.model).toBe("manual-model");
+  expect(sentBody.response_format).toBeUndefined();
+  expect(plan.groups[0]?.subject).toBe("adjust a");
 });
 
 // ── diff collection (read-only; capped) ─────────────────────────────────────────

@@ -85,8 +85,9 @@ test("headlines for the version being released are actually condensed", async ()
 
 test("the notes carry the install table and the changelog link", async () => {
   const { out } = await run(releasedVersions()[0]!);
-  expect(out).toContain("repoyeti-windows-x64.exe");
-  expect(out).toContain("repoyeti-macos-arm64");
-  expect(out).toContain("repoyeti-linux-x64");
+  expect(out).toContain("repoyeti-windows-x64.zip");
+  expect(out).toContain("repoyeti-macos-arm64.tar.gz");
+  expect(out).toContain("repoyeti-linux-x64.tar.gz");
+  expect(out).toContain("bundled `web` folder");
   expect(out).toContain("CHANGELOG.md");
 });

@@ -30,6 +30,9 @@ import { smartCommitRepo, pullRepo, pushRepo, planCommitInput } from "./service/
 import {
   effectiveDefaultProvider,
   resolveApiKey,
+  resolveAiBaseUrl,
+  aiProviderUsesNoAuth,
+  isAiProviderConfigured,
   resolveModel,
   DEFAULT_DIFF_DETAIL,
   type RepoYetiConfig,
@@ -217,13 +220,22 @@ async function buildPlan(repoId: string): Promise<BuiltPlan> {
   let plan: CommitPlan;
   let degraded = false;
   if (cfg && provider) {
-    const apiKey = resolveApiKey(cfg, provider);
+    const apiKey =
+      resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
     const model = resolveModel(cfg, provider);
     const style = cfg.ai?.style ?? "conventional";
     try {
       plan =
-        apiKey && model
-          ? await generateCommitPlan(provider, apiKey, model, input, style)
+        apiKey !== null && isAiProviderConfigured(cfg, provider) && model
+          ? await generateCommitPlan(
+              provider,
+              apiKey,
+              model,
+              input,
+              style,
+              undefined,
+              { baseUrl: resolveAiBaseUrl(cfg, provider) ?? undefined },
+            )
           : heuristicPlan(input);
     } catch {
       // Provider down / quota / unparseable. The owner asked for AI-split commits — "skip"

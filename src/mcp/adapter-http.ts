@@ -21,6 +21,10 @@ interface RepoView {
   status: {
     branch: string | null;
     detached: boolean;
+    /** Additive exact HEAD identity (absent on older/non-Git daemon statuses). */
+    headOid?: string | null;
+    /** Opaque identity of History-visible refs (absent on older/non-Git daemons). */
+    historyRefsHash?: string | null;
     dirty: number;
     ahead: number;
     behind: number;

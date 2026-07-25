@@ -1,6 +1,14 @@
 import { reactive } from "vue";
 import { api } from "../api";
-import type { ActionResult, BranchList, IncomingResult, LogResult, StashList, TagList } from "../types";
+import type {
+  ActionResult,
+  BranchList,
+  IncomingResult,
+  LogAuthorFilter,
+  LogResult,
+  StashList,
+  TagList,
+} from "../types";
 
 /**
  * History rows are deliberately retained in memory because the graph needs the preceding rows to
@@ -18,6 +26,7 @@ export function useGitOps(
   loadChanges: (repoId: string) => Promise<void>,
   asResult: (e: unknown) => ActionResult,
   isRepoLive: (repoId: string) => boolean,
+  onHistoryChanged: (repoId: string) => void = () => {},
 ) {
   // ── branches / history / stash (lazily loaded per repo when a section opens) ──
   const branchesByRepo = reactive<Record<string, BranchList>>({});
@@ -73,6 +82,7 @@ export function useGitOps(
     try {
       const r = await api.checkout(repoId, branch);
       await loadBranches(repoId);
+      if (r.ok) onHistoryChanged(repoId);
       return r;
     } catch (e) {
       return asResult(e);
@@ -86,6 +96,7 @@ export function useGitOps(
     try {
       const r = await api.createBranch(repoId, name, switchTo);
       await loadBranches(repoId);
+      if (r.ok) onHistoryChanged(repoId);
       return r;
     } catch (e) {
       return asResult(e);
@@ -99,6 +110,7 @@ export function useGitOps(
     try {
       const r = await api.deleteBranch(repoId, name);
       await loadBranches(repoId);
+      if (r.ok) onHistoryChanged(repoId);
       return r;
     } catch (e) {
       return asResult(e);
@@ -114,13 +126,22 @@ export function useGitOps(
     limit = 50,
     skip = 0,
     refs?: "head" | "local" | "all",
+    author?: LogAuthorFilter,
   ): Promise<void> {
     if (!isRepoLive(repoId)) return;
     const request = beginRead(repoId, "log");
     try {
-      const res = await api.log(repoId, limit, skip, refs);
+      const requestedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
+      const targetLimit = Math.min(requestedLimit, MAX_RETAINED_LOG_COMMITS);
+      const offset = Number.isFinite(skip) ? Math.max(0, Math.floor(skip)) : 0;
+      // The daemon shares the same 500-row cap, so every retained refresh is one `git log`
+      // process/ref snapshot. Keep the old complete rows published while that request is pending.
+      const res = author
+        ? await api.log(repoId, targetLimit, offset, refs, author)
+        : await api.log(repoId, targetLimit, offset, refs);
       if (!isCurrentRead(repoId, "log", request)) return;
-      if (skip > 0 && logByRepo[repoId]) {
+
+      if (offset > 0 && logByRepo[repoId]) {
         const commits = [...logByRepo[repoId]!.commits, ...res.commits];
         const retained = commits.slice(0, MAX_RETAINED_LOG_COMMITS);
         logByRepo[repoId] = {
@@ -143,7 +164,8 @@ export function useGitOps(
       // A paginated "load more" (skip>0) failure must NOT wipe the commits already on screen — a
       // flaky network request would otherwise blank the whole history. Keep what's shown; the user
       // can retry. Only surface the error/empty state on a first-page load.
-      if (skip > 0 && logByRepo[repoId]?.commits.length) return;
+      const offset = Number.isFinite(skip) ? Math.max(0, Math.floor(skip)) : 0;
+      if (offset > 0 && logByRepo[repoId]?.commits.length) return;
       logByRepo[repoId] = { ...asResult(e), commits: [], hasMore: false };
     } finally {
       finishRead(repoId, "log", request);
@@ -169,6 +191,12 @@ export function useGitOps(
           ...asResult(e),
           upstream: "",
           noUpstream: false,
+          ahead: 0,
+          behind: 0,
+          relation: "unknown",
+          pullDisposition: "unknown",
+          checkedAt: Date.now(),
+          snapshot: null,
           commits: [],
           commitsTruncated: false,
           files: [],
@@ -320,6 +348,7 @@ export function useGitOps(
     try {
       const r = await api.createTag(repoId, input);
       await loadTags(repoId);
+      if (r.ok) onHistoryChanged(repoId);
       return r;
     } catch (e) {
       return asResult(e);

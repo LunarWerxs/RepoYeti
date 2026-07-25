@@ -1,8 +1,9 @@
 name: Release
 
-# Tag a version (e.g. `git tag v0.1.0 && git push --tags`) to build the compiled binary on
-# each OS and publish them to a GitHub Release. The single self-contained binary IS the product,
-# so it ships as a first-class, CI-produced artifact rather than a local build.
+# Tag a version (e.g. `git tag v0.1.0 && git push --tags`) to build a complete runnable bundle on
+# each OS and publish it to a GitHub Release. The compiled daemon expects the built PWA (and may
+# use optional native Lore libraries) beside it, so each asset is an archive of the full `dist/`
+# tree rather than a bare executable that starts without its dashboard.
 #
 # NOTE: arch labels below are nominal (ubuntu→x64, macos-latest→arm64). Adjust the matrix /
 # `bun build --compile --target` in scripts/build.ts if you need additional arch variants.
@@ -23,11 +24,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: repoyeti-linux-x64
+            asset: repoyeti-linux-x64.tar.gz
           - os: macos-latest
-            asset: repoyeti-macos-arm64
+            asset: repoyeti-macos-arm64.tar.gz
           - os: windows-latest
-            asset: repoyeti-windows-x64.exe
+            asset: repoyeti-windows-x64.zip
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -37,16 +38,44 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: web
       - run: bun run build
-      - name: Stage compiled binary
+      - name: Package complete Unix bundle
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p out
-          bin=""
-          for f in dist/repoyeti.exe dist/repoyeti; do
-            if [ -f "$f" ]; then bin="$f"; break; fi
-          done
-          if [ -z "$bin" ]; then echo "::error::no compiled binary found in dist/"; ls -la dist || true; exit 1; fi
-          cp "$bin" "out/${{ matrix.asset }}"
+          test -f dist/repoyeti
+          test -f dist/web/dist/index.html
+          mkdir -p stage/RepoYeti out
+          cp -a dist/. stage/RepoYeti/
+          bun run scripts/smoke-release.ts stage/RepoYeti
+          tar -C stage -czf "out/${{ matrix.asset }}" RepoYeti
+          listing="$(tar -tzf "out/${{ matrix.asset }}")"
+          grep -qx 'RepoYeti/repoyeti' <<<"$listing"
+          grep -qx 'RepoYeti/web/dist/index.html' <<<"$listing"
+          grep -q '^RepoYeti/web/dist/assets/' <<<"$listing"
+      - name: Package complete Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath "dist/repoyeti.exe" -PathType Leaf)) {
+            throw "no compiled binary found at dist/repoyeti.exe"
+          }
+          if (-not (Test-Path -LiteralPath "dist/web/dist/index.html" -PathType Leaf)) {
+            throw "no built dashboard found at dist/web/dist/index.html"
+          }
+          New-Item -ItemType Directory -Path "stage/RepoYeti", "out" -Force | Out-Null
+          Copy-Item -Path "dist/*" -Destination "stage/RepoYeti" -Recurse
+          bun run scripts/smoke-release.ts stage/RepoYeti
+          Compress-Archive -Path "stage/RepoYeti" -DestinationPath "out/${{ matrix.asset }}"
+          $listing = tar -tf "out/${{ matrix.asset }}"
+          if ($listing -notcontains "RepoYeti/repoyeti.exe") {
+            throw "archive is missing RepoYeti/repoyeti.exe"
+          }
+          if ($listing -notcontains "RepoYeti/web/dist/index.html") {
+            throw "archive is missing RepoYeti/web/dist/index.html"
+          }
+          if (-not ($listing | Where-Object { $_ -like "RepoYeti/web/dist/assets/*" })) {
+            throw "archive is missing built dashboard assets"
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}

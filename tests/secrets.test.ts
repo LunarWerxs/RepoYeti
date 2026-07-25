@@ -241,6 +241,47 @@ test("hydrateSecrets migrates a plaintext key into the (in-memory) keychain + st
   restoreConfig(saved);
 });
 
+test("hydrateSecrets keeps a no-auth compatible loopback keyless across restart", async () => {
+  const saved = snapshotConfig();
+  await withMemory(() =>
+    withService(async () => {
+      const name = aiKeyName("compatible");
+      expect(await setSecret(name, "stale-remote-key")).toBe(true);
+      writeFileSync(
+        CONFIG_PATH,
+        JSON.stringify({
+          roots: [],
+          port: 7171,
+          maxDepth: 6,
+          maxRepos: 200,
+          ai: {
+            providers: {
+              compatible: {
+                apiKey: "stale-plaintext-key",
+                model: "local-model",
+                baseUrl: "http://localhost:11434/v1",
+                noAuth: true,
+              },
+            },
+            defaultProvider: "compatible",
+          },
+        }),
+      );
+
+      const cfg = loadConfig();
+      await hydrateSecrets(cfg);
+
+      expect(cfg.ai?.providers.compatible?.apiKey).toBeUndefined();
+      expect(cfg.ai?.providers.compatible?.noAuth).toBe(true);
+      expect(await getSecret(name)).toBeNull();
+      const onDisk = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
+      expect(onDisk.ai.providers.compatible.apiKey).toBeUndefined();
+      expect(onDisk.ai.providers.compatible.noAuth).toBe(true);
+    }),
+  );
+  restoreConfig(saved);
+});
+
 test("hydrateSecrets moves a matching legacy relay key into config and removes the credential", async () => {
   const saved = snapshotConfig();
   await withMemory(() =>

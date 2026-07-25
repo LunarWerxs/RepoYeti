@@ -47,6 +47,10 @@ import type { ChangedFile } from "../../types";
 const props = defineProps<{
   repoId: string;
   disabled?: boolean;
+  /** Disables Pull actions while leaving the caret and Preview option reachable. */
+  pullDisabled?: boolean;
+  /** Status alone proves a fast-forward cannot work, even before the preview request returns. */
+  statusDiverged?: boolean;
   variant?: ButtonVariants["variant"];
 }>();
 const emit = defineEmits<{ pull: [] }>();
@@ -63,7 +67,41 @@ watch(open, (isOpen) => {
 
 const commits = computed(() => result.value?.commits ?? []);
 const conflicts = computed(() => result.value?.conflicts ?? []);
-const hasIncoming = computed(() => commits.value.length > 0);
+const hasIncoming = computed(() => (result.value?.behind ?? commits.value.length) > 0);
+const disposition = computed(() =>
+  props.statusDiverged
+    ? "blocked_non_fast_forward"
+    : result.value?.pullDisposition ?? "unknown",
+);
+const isPullBlocked = computed(
+  () =>
+    disposition.value === "blocked_non_fast_forward" ||
+    disposition.value === "blocked_would_overwrite",
+);
+const previewRefusesPull = computed(
+  () =>
+    !!result.value &&
+    (!result.value.ok ||
+      result.value.noUpstream ||
+      result.value.relation === "no_upstream" ||
+      result.value.relation === "unknown" ||
+      result.value.pullDisposition === "unknown" ||
+      (result.value.ok && !result.value.noUpstream && !result.value.snapshot)),
+);
+// The repeated menu Pull obeys the same fail-closed preview contract as the card's primary
+// button and the dialog footer. In particular, a cached fetch error/unknown/no-upstream result
+// must not leave this secondary entry point actionable.
+const menuPullDisabled = computed(
+  () => !!props.pullDisabled || isPullBlocked.value || previewRefusesPull.value || loading.value,
+);
+const canPull = computed(
+  () =>
+    !!result.value?.ok &&
+    hasIncoming.value &&
+    disposition.value === "ready_fast_forward" &&
+    !loading.value &&
+    !props.pullDisabled,
+);
 
 // Reuse the card's changed-files tree so this reads exactly like the source-control panel.
 // IncomingFile → ChangedFile is a straight shape map; the tree only needs path/status/stat.
@@ -92,8 +130,13 @@ provideTreeCollapse(`incoming:${props.repoId}`);
 
 /** Pull, then close. The parent owns the actual action (and its toast). */
 function pullNow(): void {
+  if (!canPull.value) return;
   open.value = false;
   emit("pull");
+}
+
+function pullFromMenu(): void {
+  if (!menuPullDisabled.value) emit("pull");
 }
 </script>
 
@@ -123,7 +166,11 @@ function pullNow(): void {
     <DropdownMenuContent align="end" class="w-48">
       <!-- The primary action is repeated here, as it is in the commit menu: having opened the
            menu, you should not have to close it again to do the obvious thing. -->
-      <DropdownMenuItem @select="emit('pull')">
+      <DropdownMenuItem
+        data-testid="preview-menu-pull"
+        :disabled="menuPullDisabled"
+        @select="pullFromMenu"
+      >
         <ArrowDownToLine :size="15" />
         <span>{{ $t("repo.actions.pull") }}</span>
       </DropdownMenuItem>
@@ -143,12 +190,14 @@ function pullNow(): void {
         </DialogTitle>
         <DialogDescription>
           <template v-if="loading">{{ $t("repo.preview.checking") }}</template>
-          <template v-else-if="result?.noUpstream">{{ $t("repo.preview.noUpstream") }}</template>
           <template v-else-if="result && !result.ok">{{ result.message || $t("repo.preview.failed") }}</template>
+          <template v-else-if="result?.relation === 'no_upstream' || result?.noUpstream">
+            {{ $t("repo.preview.noUpstream") }}
+          </template>
           <template v-else-if="!hasIncoming">{{ $t("repo.preview.upToDate") }}</template>
           <template v-else>
             {{ $t("repo.preview.summary", {
-              commits: commits.length,
+              commits: result!.behind,
               files: result!.stat.filesChanged,
               upstream: result!.upstream,
             }) }}
@@ -160,15 +209,56 @@ function pullNow(): void {
         <Loader2 :size="15" class="animate-spin" />{{ $t("repo.preview.checking") }}
       </div>
 
-      <template v-else-if="hasIncoming">
-        <!-- conflict verdict: the reason this is worth opening before you pull -->
+      <template v-else-if="result?.ok && hasIncoming">
+        <!-- Lead with the verdict for the command RepoYeti ACTUALLY runs (`pull --ff-only`).
+             A clean hypothetical merge is secondary evidence and must never turn a diverged
+             pull green or imply that the primary button can create a merge commit. -->
         <div
-          v-if="conflicts.length"
+          v-if="disposition === 'blocked_non_fast_forward'"
+          data-testid="preview-pull-disposition"
           class="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive"
         >
           <AlertTriangle :size="15" class="mt-px shrink-0" />
+          <div class="font-medium">{{ $t("repo.preview.blockedDiverged") }}</div>
+        </div>
+        <div
+          v-else-if="disposition === 'blocked_would_overwrite'"
+          data-testid="preview-pull-disposition"
+          class="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive"
+        >
+          <AlertTriangle :size="15" class="mt-px shrink-0" />
+          <div class="font-medium">{{ $t("repo.preview.blockedWouldOverwrite") }}</div>
+        </div>
+        <div
+          v-else-if="disposition === 'ready_fast_forward'"
+          data-testid="preview-pull-disposition"
+          class="flex items-center gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-[12.5px] text-success"
+        >
+          <CheckCircle2 :size="15" class="shrink-0" />
+          {{ $t("repo.preview.cleanFastForward") }}
+        </div>
+        <div
+          v-else
+          data-testid="preview-pull-disposition"
+          class="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-[12.5px] text-muted-foreground"
+        >
+          <FileQuestion :size="15" class="shrink-0" />
+          {{ $t("repo.preview.pullCheckUnknown") }}
+        </div>
+
+        <!-- A merge-tree simulation is still useful for a developer who chooses to reconcile a
+             divergence manually, but it is deliberately quieter and explicitly labeled as a
+             MANUAL merge check. It never changes the fast-forward-only verdict above. -->
+        <div
+          v-if="result.relation === 'diverged' && conflicts.length"
+          data-testid="preview-manual-merge"
+          class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive"
+        >
+          <AlertTriangle :size="15" class="mt-px shrink-0" />
           <div class="min-w-0">
-            <div class="font-medium">{{ $t("repo.preview.willConflict", { count: conflicts.length }, conflicts.length) }}</div>
+            <div class="font-medium">
+              {{ $t("repo.preview.manualMergeWillConflict", { count: conflicts.length }, conflicts.length) }}
+            </div>
             <ul class="mono mt-1 space-y-0.5 text-[11.5px] opacity-90">
               <li v-for="p in conflicts.slice(0, 8)" :key="p" class="truncate">{{ p }}</li>
               <li v-if="conflicts.length > 8" class="opacity-70">
@@ -178,18 +268,20 @@ function pullNow(): void {
           </div>
         </div>
         <div
-          v-else-if="!result!.conflictCheck"
-          class="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-[12.5px] text-muted-foreground"
+          v-else-if="result.relation === 'diverged' && !result.conflictCheck"
+          data-testid="preview-manual-merge"
+          class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-3 py-2 text-[12.5px] text-muted-foreground"
         >
           <FileQuestion :size="15" class="shrink-0" />
-          {{ $t("repo.preview.conflictUnknown") }}
+          {{ $t("repo.preview.manualMergeUnknown") }}
         </div>
         <div
-          v-else
-          class="flex items-center gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-[12.5px] text-success"
+          v-else-if="result.relation === 'diverged'"
+          data-testid="preview-manual-merge"
+          class="flex items-center gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-2 text-[12.5px] text-info"
         >
           <CheckCircle2 :size="15" class="shrink-0" />
-          {{ result!.fastForward ? $t("repo.preview.cleanFastForward") : $t("repo.preview.cleanMerge") }}
+          {{ $t("repo.preview.manualMergeClean") }}
         </div>
 
         <!-- incoming commits -->
@@ -240,12 +332,15 @@ function pullNow(): void {
       <DialogFooter>
         <Button variant="ghost" @click="open = false">{{ $t("common.close") }}</Button>
         <Button
-          :disabled="!hasIncoming || loading"
-          :variant="conflicts.length ? 'secondary' : 'default'"
+          data-testid="preview-pull-action"
+          :disabled="!canPull"
+          :variant="canPull ? 'default' : 'secondary'"
           @click="pullNow"
         >
           <ArrowDownToLine />
-          {{ conflicts.length ? $t("repo.preview.pullAnyway") : $t("repo.actions.pull") }}
+          <template v-if="isPullBlocked">{{ $t("repo.preview.pullBlocked") }}</template>
+          <template v-else-if="disposition === 'unknown'">{{ $t("repo.preview.pullUnavailable") }}</template>
+          <template v-else>{{ $t("repo.actions.pull") }}</template>
         </Button>
       </DialogFooter>
     </DialogContent>

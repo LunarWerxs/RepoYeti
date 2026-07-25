@@ -11,7 +11,12 @@
  * boot-time network blip) is swallowed. Fire-and-forget: runs AFTER the server is serving, never
  * blocks boot, never throws.
  */
-import { AI_CATALOG, type AiProviderId, type RepoYetiConfig } from "./config.ts";
+import {
+  AI_CATALOG,
+  resolveAiBaseUrl,
+  type AiProviderId,
+  type RepoYetiConfig,
+} from "./config.ts";
 import { listModels, AiError, type FetchFn } from "./ai.ts";
 import { broadcast } from "./bus.ts";
 
@@ -33,9 +38,15 @@ export function invalidAiKeys(): InvalidAiKey[] {
   return invalid;
 }
 
-async function probe(id: AiProviderId, apiKey: string, label: string, fetchImpl: FetchFn): Promise<void> {
+async function probe(
+  id: AiProviderId,
+  apiKey: string,
+  label: string,
+  fetchImpl: FetchFn,
+  baseUrl?: string,
+): Promise<void> {
   try {
-    await listModels(id, apiKey, fetchImpl);
+    await listModels(id, apiKey, fetchImpl, { baseUrl });
   } catch (e) {
     if (e instanceof AiError && e.code === "AI_AUTH_FAILED") {
       invalid.push({ provider: id, label });
@@ -51,6 +62,6 @@ export async function checkAiKeys(cfg: RepoYetiConfig, fetchImpl: FetchFn = fetc
   for (const [id, p] of Object.entries(providers) as Array<[AiProviderId, { apiKey?: string } | undefined]>) {
     const apiKey = p?.apiKey;
     if (!apiKey) continue;
-    await probe(id, apiKey, labelFor(id), fetchImpl);
+    await probe(id, apiKey, labelFor(id), fetchImpl, resolveAiBaseUrl(cfg, id) ?? undefined);
   }
 }

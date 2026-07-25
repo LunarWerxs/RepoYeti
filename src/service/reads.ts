@@ -7,17 +7,29 @@
 import { enqueue } from "../opqueue.ts";
 import type { ChangedFile } from "../read/status.ts";
 import { diffStatsEnabled } from "../read/diffstat.ts";
-import { getRepo } from "../db.ts";
+import { getGitCommitStats, getRepo, putGitCommitStats } from "../db.ts";
 import { backendFor } from "../vcs/index.ts";
 import type { VcsBackend } from "../vcs/types.ts";
 import { collectCommitPlanInput } from "../git-actions.ts";
 import type { CommitPlanInput, PlanInputFile } from "../ai.ts";
 import { DEFAULT_DIFF_DETAIL, type DiffDetail } from "../config.ts";
-import { readTags, type BranchList, type LogResult, type StashList, type TagList, type CommitDetail, type MergeFilter, type RefScope } from "../read/inspect.ts";
 import {
+  readTags,
+  type BranchList,
+  type LogResult,
+  type StashList,
+  type TagList,
+  type CommitDetail,
+  type MergeFilter,
+  type RefScope,
+  type LogAuthorFilter,
+} from "../read/inspect.ts";
+import {
+  ACTIVITY_STAT_CACHE_VERSION,
   activityError,
   readFallbackActivity,
   readGitActivity,
+  type ActivityScale,
   type ActivityResult,
 } from "../read/activity.ts";
 import { readIncoming, type IncomingResult } from "../read/incoming.ts";
@@ -33,21 +45,46 @@ export function getBranches(repoId: string): Promise<BranchList> {
   return backendFor(repo.vcs).listBranches(repo.absPath);
 }
 
-export function getLog(repoId: string, limit?: number, skip?: number, merges?: MergeFilter, refScope?: RefScope): Promise<LogResult> {
+export function getLog(
+  repoId: string,
+  limit?: number,
+  skip?: number,
+  merges?: MergeFilter,
+  refScope?: RefScope,
+  author?: LogAuthorFilter,
+): Promise<LogResult> {
   const repo = getRepo(repoId);
   if (!repo) return Promise.resolve({ ok: false, code: "ERROR", message: "repo not found", commits: [], hasMore: false });
-  return backendFor(repo.vcs).readLog(repo.absPath, limit, skip, merges, refScope);
+  const backend = backendFor(repo.vcs);
+  return author
+    ? backend.readLog(repo.absPath, limit, skip, merges, refScope, author)
+    : backend.readLog(repo.absPath, limit, skip, merges, refScope);
 }
 
-/** Accurate rolling 24-hour history activity, independent of the browser's paginated log. */
-export function getActivity(repoId: string, refScope: RefScope = "head"): Promise<ActivityResult> {
+/** Accurate bounded history activity, independent of the browser's paginated log. */
+export function getActivity(
+  repoId: string,
+  refScope: RefScope = "head",
+  scale: ActivityScale = "hourly",
+): Promise<ActivityResult> {
   const repo = getRepo(repoId);
-  if (!repo) return Promise.resolve(activityError("repo not found"));
+  if (!repo) return Promise.resolve(activityError("repo not found", Date.now(), scale));
   const backend = backendFor(repo.vcs);
-  if (backend.kind === "git") return readGitActivity(repo.absPath, refScope);
+  if (backend.kind === "git") {
+    return readGitActivity(repo.absPath, refScope, Date.now(), scale, {
+      statCache: {
+        read: (since, until) =>
+          getGitCommitStats(repo.id, since, until, ACTIVITY_STAT_CACHE_VERSION),
+        write: (entries) =>
+          putGitCommitStats(repo.id, entries, ACTIVITY_STAT_CACHE_VERSION),
+      },
+    });
+  }
   return readFallbackActivity(
     (limit, skip, merges, scope) => backend.readLog(repo.absPath, limit, skip, merges, scope),
     refScope,
+    Date.now(),
+    scale,
   );
 }
 
@@ -56,7 +93,13 @@ const NO_INCOMING = (code: "OK" | "ERROR", message?: string): IncomingResult => 
   code,
   message,
   upstream: "",
-  noUpstream: true,
+  noUpstream: code === "OK",
+  ahead: 0,
+  behind: 0,
+  relation: code === "OK" ? "no_upstream" : "unknown",
+  pullDisposition: code === "OK" ? "noop" : "unknown",
+  checkedAt: Date.now(),
+  snapshot: null,
   commits: [],
   commitsTruncated: false,
   files: [],

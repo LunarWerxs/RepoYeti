@@ -4,7 +4,7 @@ import type {
   ActionName,
   ActionResult,
   AiCatalogEntry,
-  AiModel,
+  AiModelDiscovery,
   AiProviderId,
   AiSettings,
   CommitPlanResponse,
@@ -22,6 +22,7 @@ export function useAi(
   busy: Record<string, ActionName | undefined>,
   loadChanges: (repoId: string) => Promise<void>,
   asResult: (e: unknown) => ActionResult,
+  onHistoryChanged: (repoId: string) => void = () => {},
 ) {
   // BYOK AI settings (redacted — never holds a key). `aiEnabled` gates the Generate button.
   // Style defaults to Conventional Commits; it's pickable from Settings → AI and from the
@@ -86,14 +87,19 @@ export function useAi(
       aiReady.value = true;
     }
   }
-  /** Validate + save a key; returns the models it unlocks. Throws ApiError on bad key. */
-  async function connectProvider(provider: AiProviderId, apiKey: string): Promise<AiModel[]> {
-    const r = await api.ai.connect(provider, apiKey);
+  /** Validate + save a key; custom compatible providers also persist their non-secret endpoint. */
+  async function connectProvider(
+    provider: AiProviderId,
+    apiKey: string,
+    options: { baseUrl?: string; model?: string } = {},
+  ): Promise<AiModelDiscovery> {
+    const r = await api.ai.connect(provider, apiKey, options);
     aiSettings.value = r.settings;
-    return r.models;
+    return { models: r.models, discoveryAvailable: r.discoveryAvailable };
   }
-  async function listProviderModels(provider: AiProviderId): Promise<AiModel[]> {
-    return (await api.ai.models(provider)).models;
+  async function listProviderModels(provider: AiProviderId): Promise<AiModelDiscovery> {
+    const { models, discoveryAvailable } = await api.ai.models(provider);
+    return { models, discoveryAvailable };
   }
   async function selectModel(provider: AiProviderId, model: string | null): Promise<void> {
     aiSettings.value = await api.ai.setProvider(provider, { model });
@@ -172,6 +178,13 @@ export function useAi(
     try {
       const r = await api.smartCommit(repoId, commits, sync);
       await loadChanges(repoId); // some/all files were just committed
+      if (
+        r.committed?.some(
+          (commit) => commit.ok && commit.message !== "skipped (no changes)",
+        )
+      ) {
+        onHistoryChanged(repoId);
+      }
       return r;
     } catch (e) {
       return { ...asResult(e), repoId };

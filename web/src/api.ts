@@ -1,36 +1,40 @@
 // Thin REST client — one place that talks to the daemon. Throws an Error carrying
 // the parsed `{ code, message }` on any non-2xx so callers can show a real reason.
+
+import { httpJson } from "@/lib/httpClient";
 import type {
   AccountsSnapshot,
   ActionResult,
   AiCatalogEntry,
-  AiModel,
+  AiModelDiscovery,
   AiProviderId,
   AiSettings,
   BranchList,
-  CommitStyle,
-  DiffDetail,
   ChangedFile,
-  CommitPlanResponse,
-  FetchAllResult,
-  FileContent,
-  FileDiff,
-  Identity,
-  IdentityRule,
-  DetectedIdentity,
-  HistoryActivity,
-  LogResult,
-  CommitDetail,
-  IncomingResult,
-  LoreServer,
-  PendingApproval,
-  Repo,
-  Share,
-  ResolvedRepoAccount,
-  ShareCreated,
   CollaborationInvitePreview,
   CollaborationLink,
   CollaborationSnapshot,
+  CommitDetail,
+  CommitPlanResponse,
+  CommitStyle,
+  DetectedIdentity,
+  DiffDetail,
+  FetchAllResult,
+  FileContent,
+  FileDiff,
+  HistoryActivity,
+  HistoryActivityScale,
+  Identity,
+  IdentityRule,
+  IncomingResult,
+  LogAuthorFilter,
+  LogResult,
+  LoreServer,
+  PendingApproval,
+  Repo,
+  ResolvedRepoAccount,
+  Share,
+  ShareCreated,
   ShareDuration,
   ShareEvent,
   SharePerm,
@@ -41,7 +45,7 @@ import type {
   UpdateApplyResult,
   UpdateStatus,
 } from "./types";
-import { httpJson } from "@/lib/httpClient";
+
 export { ApiError } from "@/lib/httpClient";
 
 async function req<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -637,16 +641,35 @@ export const api = {
   deleteBranch: (id: string, name: string) =>
     req<ActionResult>("DELETE", `/api/repos/${id}/branch`, { name }),
   /** Commit history of the current branch, newest first. Paginate with `skip`. */
-  log: (id: string, limit = 50, skip = 0, refs?: "head" | "local" | "all") =>
+  log: (
+    id: string,
+    limit = 50,
+    skip = 0,
+    refs?: "head" | "local" | "all",
+    author?: LogAuthorFilter,
+  ) =>
     req<LogResult>(
       "GET",
-      `/api/repos/${id}/log?limit=${limit}&skip=${skip}${refs ? `&refs=${refs}` : ""}`,
+      `/api/repos/${id}/log?${new URLSearchParams({
+        limit: String(limit),
+        skip: String(skip),
+        ...(refs ? { refs } : {}),
+        ...(author?.name.trim() ? { authorName: author.name.trim() } : {}),
+        ...(author?.email.trim() ? { authorEmail: author.email.trim() } : {}),
+      }).toString()}`,
     ),
-  /** Accurate bounded 24-hour activity aggregate for the History overview. */
-  historyActivity: (id: string, refs?: "head" | "local" | "all") =>
+  /** Accurate bounded activity aggregate for the History overview. */
+  historyActivity: (
+    id: string,
+    refs?: "head" | "local" | "all",
+    scale: HistoryActivityScale = "hourly",
+  ) =>
     req<HistoryActivity>(
       "GET",
-      `/api/repos/${id}/activity${refs ? `?refs=${refs}` : ""}`,
+      `/api/repos/${id}/activity?${new URLSearchParams({
+        ...(refs ? { refs } : {}),
+        scale,
+      }).toString()}`,
     ),
   commitDetail: (id: string, hash: string) =>
     req<CommitDetail>("GET", `/api/repos/${id}/commit/${encodeURIComponent(hash)}`),
@@ -769,14 +792,18 @@ export const api = {
     setStyle: (style: CommitStyle) => req<AiSettings>("PUT", "/api/ai/settings", { style }),
     /** Set how much of each file's diff the smart-commit planner reads (the token-cost dial). */
     setDiffDetail: (diffDetail: DiffDetail) => req<AiSettings>("PUT", "/api/ai/settings", { diffDetail }),
-    connect: (provider: AiProviderId, apiKey: string) =>
-      req<{ ok: boolean; models: AiModel[]; settings: AiSettings }>(
+    connect: (
+      provider: AiProviderId,
+      apiKey: string,
+      options: { baseUrl?: string; model?: string } = {},
+    ) =>
+      req<{ ok: boolean; settings: AiSettings } & AiModelDiscovery>(
         "POST",
         `/api/ai/providers/${provider}/connect`,
-        { apiKey },
+        { apiKey, ...options },
       ),
     models: (provider: AiProviderId) =>
-      req<{ ok: boolean; models: AiModel[] }>("GET", `/api/ai/providers/${provider}/models`),
+      req<{ ok: boolean } & AiModelDiscovery>("GET", `/api/ai/providers/${provider}/models`),
     setProvider: (provider: AiProviderId, patch: { model?: string | null; makeDefault?: boolean }) =>
       req<AiSettings>("PUT", `/api/ai/providers/${provider}`, patch),
     removeProvider: (provider: AiProviderId) =>

@@ -56,6 +56,23 @@ describe("store (smoke)", () => {
     await store.loadChanges("repo-2");
     expect(store.changesByRepo["repo-2"]).toEqual([]);
   });
+
+  it("URL-encodes exact author identities in the History log query", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(logRes([])));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.log("repo-1", 25, 5, "all", {
+      name: "A. Dev [bot]",
+      email: "a+git@example.test",
+    });
+
+    const requested = new URL(fetchMock.mock.calls[0]![0] as string, "http://localhost");
+    expect(requested.searchParams.get("limit")).toBe("25");
+    expect(requested.searchParams.get("skip")).toBe("5");
+    expect(requested.searchParams.get("refs")).toBe("all");
+    expect(requested.searchParams.get("authorName")).toBe("A. Dev [bot]");
+    expect(requested.searchParams.get("authorEmail")).toBe("a+git@example.test");
+  });
 });
 
 // #9 — loadLog pagination (append on skip>0) and, critically, its error branch: a failed "load more"
@@ -113,6 +130,60 @@ describe("store.loadLog pagination", () => {
     expect(store.logByRepo.r.commits.at(-1)?.hash).toBe("next-4");
     expect(store.logByRepo.r.hasMore).toBe(false);
   });
+
+  it("forwards the same exact author identity across filtered pages", async () => {
+    const author = { name: "Ada Lovelace", email: "ada+git@example.test" };
+    const logSpy = vi.spyOn(api, "log")
+      .mockResolvedValueOnce(logRes([entry("ada-1"), entry("ada-2")], true))
+      .mockResolvedValueOnce(logRes([entry("ada-3")], false));
+    const store = useStore();
+
+    await store.loadLog("r", 2, 0, "all", author);
+    await store.loadLog("r", 2, 2, "all", author);
+
+    expect(logSpy).toHaveBeenNthCalledWith(1, "r", 2, 0, "all", author);
+    expect(logSpy).toHaveBeenNthCalledWith(2, "r", 2, 2, "all", author);
+    expect(store.logByRepo.r.commits.map((commit) => commit.hash)).toEqual([
+      "ada-1",
+      "ada-2",
+      "ada-3",
+    ]);
+  });
+
+  it.each([275, MAX_RETAINED_LOG_COMMITS])(
+    "atomically refreshes a %i-row retained window in one API snapshot",
+    async (count) => {
+      const old = Array.from({ length: count }, (_, i) => entry(`old-${i}`));
+      const fresh = Array.from({ length: count }, (_, i) => entry(`fresh-${i}`));
+      let resolveLog!: (result: LogResult) => void;
+      const logSpy = vi.spyOn(api, "log").mockImplementationOnce(
+        () =>
+          new Promise<LogResult>((resolve) => {
+            resolveLog = resolve;
+          }),
+      );
+      const store = useStore();
+      store.logByRepo.r = logRes(old, true);
+
+      const pending = store.loadLog("r", count, 0, "all");
+      await vi.waitFor(() => expect(logSpy).toHaveBeenCalledOnce());
+
+      // The old graph stays complete until the daemon's single git-log snapshot is ready.
+      expect(store.logByRepo.r.commits.map((commit) => commit.hash)).toEqual(
+        old.map((commit) => commit.hash),
+      );
+      expect(logSpy).toHaveBeenCalledWith("r", count, 0, "all");
+
+      resolveLog(logRes(fresh, true));
+      await pending;
+
+      expect(logSpy).toHaveBeenCalledOnce();
+      expect(store.logByRepo.r.commits.map((commit) => commit.hash)).toEqual(
+        fresh.map((commit) => commit.hash),
+      );
+      expect(store.logByRepo.r.hasMore).toBe(count < MAX_RETAINED_LOG_COMMITS);
+    },
+  );
 
   it("releases per-repo view caches after a successful removal", async () => {
     vi.spyOn(api, "removeRepo").mockResolvedValue({ ok: true, code: "OK" });
@@ -174,6 +245,33 @@ describe("store.loadLog pagination", () => {
     await all;
 
     expect(store.logByRepo.r.commits.map((commit) => commit.hash)).toEqual(["head"]);
+  });
+
+  it("keeps the newest author filter when an older author request resolves last", async () => {
+    let resolveAda!: (value: LogResult) => void;
+    let resolveSam!: (value: LogResult) => void;
+    vi.spyOn(api, "log").mockImplementation((_id, _limit, _skip, _refs, author) =>
+      new Promise((resolve) => {
+        if (author?.email === "ada@example.test") resolveAda = resolve;
+        else resolveSam = resolve;
+      })
+    );
+    const store = useStore();
+
+    const ada = store.loadLog("r", 50, 0, "all", {
+      name: "Ada",
+      email: "ada@example.test",
+    });
+    const sam = store.loadLog("r", 50, 0, "all", {
+      name: "Sam",
+      email: "sam@example.test",
+    });
+    resolveSam(logRes([entry("sam")]));
+    await sam;
+    resolveAda(logRes([entry("ada")]));
+    await ada;
+
+    expect(store.logByRepo.r.commits.map((commit) => commit.hash)).toEqual(["sam"]);
   });
 });
 

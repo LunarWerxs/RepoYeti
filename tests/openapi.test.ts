@@ -66,13 +66,15 @@ test("spot-check: POST /api/repos/:id/commit documents a body with a `message` p
   expect(schema.properties?.message).toBeDefined();
 });
 
-test("history activity documents its ref-scope query", async () => {
+test("history activity documents its ref-scope and scale queries", async () => {
   const res = await createApp(localCfg()).request("/api/openapi.json");
   const doc = await res.json();
   const op = doc.paths["/api/repos/{id}/activity"]?.get;
   expect(op).toBeDefined();
   const refs = op.parameters?.find((parameter: { name?: string }) => parameter.name === "refs");
   expect(refs?.schema?.enum).toEqual(["head", "local", "all"]);
+  const scale = op.parameters?.find((parameter: { name?: string }) => parameter.name === "scale");
+  expect(scale?.schema?.enum).toEqual(["hourly", "daily", "monthly"]);
 });
 
 test("POST /api/shutdown acknowledges before invoking the daemon cleanup hook", async () => {

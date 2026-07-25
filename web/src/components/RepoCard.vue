@@ -166,10 +166,10 @@ watch(
         />
 
         <!-- fetch/pull/push/stash/refresh + overflow menu — see repo-card/RepoCardActions.vue -->
-        <RepoCardActions :repo="repo" />
+        <RepoCardActions :repo="repo" :active="expanded" />
 
         <!-- commit history (lazy-loaded when opened) — see LogPanel.vue -->
-        <LogPanel :repo-id="repo.id" />
+        <LogPanel :repo-id="repo.id" :active="expanded" />
       </div>
     </CollapsibleContent>
   </Collapsible>

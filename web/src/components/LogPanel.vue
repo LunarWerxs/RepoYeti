@@ -24,6 +24,8 @@ import {
   FolderOpen,
   MessageSquareText,
   Mail,
+  UserRound,
+  X,
 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
@@ -37,6 +39,7 @@ import { openFile, isViewing } from "@/lib/file-viewer";
 import { historyFilesView } from "@/lib/history-view";
 import {
   historyActivityEnabled,
+  historyActivityScale,
   historyChangesDisplay,
   historyGraphEnabled,
 } from "@/lib/history-appearance";
@@ -54,11 +57,16 @@ import type {
   ChangedFile,
   CommitDetail,
   HistoryActivity as HistoryActivityResult,
+  HistoryActivityAuthor,
+  HistoryActivityScale,
+  LogAuthorFilter,
   LogEntry,
   TreeNode,
 } from "../types";
 
-const props = defineProps<{ repoId: string }>();
+const props = withDefaults(defineProps<{ repoId: string; active?: boolean }>(), {
+  active: true,
+});
 const store = useStore();
 const { t } = useI18n();
 const { friendly } = useRepoFeedback();
@@ -68,12 +76,19 @@ const WORKTREE = "__WORKTREE__"; // synthetic hash for the "uncommitted changes"
 
 const showHistory = ref(false);
 const scope = ref<Scope>("all"); // default to the full multi-branch DAG (owner's pick)
+const selectedAuthor = ref<LogAuthorFilter | null>(null);
 const logResult = computed(() => store.logByRepo[props.repoId]);
 const loadingLog = ref(false);
 let logRequest = 0;
 const activity = ref<HistoryActivityResult | null>(null);
 const loadingActivity = ref(false);
 let activityRequest = 0;
+const LOG_PAGE_SIZE = 50;
+const HISTORY_RELOAD_DEBOUNCE_MS = 180;
+let historyReloadTimer: ReturnType<typeof setTimeout> | null = null;
+let historyReloadRunning = false;
+let historyReloadTrailing = false;
+let historyReloadTrailingResetsPagination = false;
 
 const repo = computed(() => store.repos.find((r) => r.id === props.repoId));
 const dirtyCount = computed(() => repo.value?.status?.dirty ?? 0);
@@ -117,7 +132,9 @@ function linkPath(lk: GraphLink): string {
 
 // ── graph layout: prepend a synthetic "working tree" row when the repo is dirty ──────
 const headHash = computed(() => (logResult.value?.commits ?? []).find((c) => /\bHEAD\b/.test(c.refs))?.hash ?? null);
-const showWorktree = computed(() => dirtyCount.value > 0 && headHash.value != null);
+const showWorktree = computed(
+  () => !selectedAuthor.value && dirtyCount.value > 0 && headHash.value != null,
+);
 
 interface Item { kind: "wt" | "commit"; commit?: LogEntry; row: ReturnType<typeof computeGraph>["rows"][number] }
 const graph = computed(() => {
@@ -134,7 +151,10 @@ const graph = computed(() => {
 });
 const gutterW = computed(() => Math.min(graph.value.laneCount, LANE_CAP) * lanePx.value || lanePx.value);
 /** Appearance can hide the branch map without changing row content or the underlying DAG. */
-const visibleGutterW = computed(() => (historyGraphEnabled.value ? gutterW.value : 0));
+const showHistoryGraph = computed(
+  () => historyGraphEnabled.value && !selectedAuthor.value,
+);
+const visibleGutterW = computed(() => (showHistoryGraph.value ? gutterW.value : 0));
 // ONE column template, shared verbatim by the wide-mode header and every commit row. The header
 // and each row are SEPARATE grids, so content-sized tracks (auto / minmax) resolve independently
 // per grid — the header sizing to the word "AUTHOR", each row to its own author name — which is
@@ -199,12 +219,19 @@ function changeShare(c: LogEntry, kind: "added" | "removed"): string {
 // ── data loading + scope switching ───────────────────────────────────────────────────
 function failedActivity(message: string): HistoryActivityResult {
   const until = Date.now();
+  const selectedScale = historyActivityScale.value;
+  const windowCount = selectedScale === "daily" ? 30 : selectedScale === "monthly" ? 12 : 24;
+  const windowHours =
+    selectedScale === "daily" ? 30 * 24 : selectedScale === "monthly" ? 365 * 24 : 24;
   return {
     ok: false,
     code: "ERROR",
     message,
-    windowHours: 24,
-    since: until - 24 * 60 * 60 * 1000,
+    scale: selectedScale,
+    bucketUnit: selectedScale === "daily" ? "day" : selectedScale === "monthly" ? "month" : "hour",
+    windowCount,
+    windowHours,
+    since: until - windowHours * 60 * 60 * 1000,
     until,
     commits: 0,
     commitsLastHour: 0,
@@ -215,15 +242,21 @@ function failedActivity(message: string): HistoryActivityResult {
     authors: [],
     buckets: [],
     truncated: false,
+    commitsTruncated: false,
+    changeStatsTruncated: false,
   };
 }
 
 async function loadActivity(): Promise<void> {
-  if (!historyActivityEnabled.value) return;
+  if (!props.active || !showHistory.value || !historyActivityEnabled.value) return;
   const request = ++activityRequest;
   loadingActivity.value = true;
   try {
-    const next = await api.historyActivity(props.repoId, scope.value);
+    const next = await api.historyActivity(
+      props.repoId,
+      scope.value,
+      historyActivityScale.value,
+    );
     if (request === activityRequest) activity.value = next;
   } catch (e) {
     if (request !== activityRequest) return;
@@ -237,35 +270,136 @@ async function loadActivity(): Promise<void> {
   }
 }
 
-async function reload(): Promise<void> {
-  const request = ++logRequest;
-  loadingLog.value = true;
-  const activityLoad = historyActivityEnabled.value ? loadActivity() : Promise.resolve();
+/**
+ * Refresh the current History snapshot.
+ *
+ * A normal refresh retains however many rows the owner has paged in, so reopening History or an
+ * SSE revision cannot collapse a 150-row graph back to the first page. A branch-scope change is
+ * the one intentional reset because its old rows belong to a different graph.
+ */
+async function reload(resetPagination = false): Promise<void> {
+  if (!props.active || !showHistory.value) return;
+  if (historyReloadRunning) {
+    historyReloadTrailing = true;
+    historyReloadTrailingResetsPagination ||= resetPagination;
+    return;
+  }
+  historyReloadRunning = true;
+  let resetThisPass = resetPagination;
   try {
-    await Promise.all([store.loadLog(props.repoId, 50, 0, scope.value), activityLoad]);
+    do {
+      historyReloadTrailing = false;
+      resetThisPass ||= historyReloadTrailingResetsPagination;
+      historyReloadTrailingResetsPagination = false;
+      const request = ++logRequest;
+      loadingLog.value = true;
+      const activityLoad = historyActivityEnabled.value ? loadActivity() : Promise.resolve();
+      const retainedCount = logResult.value?.commits.length ?? 0;
+      const limit = resetThisPass ? LOG_PAGE_SIZE : Math.max(LOG_PAGE_SIZE, retainedCount);
+      resetThisPass = false;
+      try {
+        await Promise.all([
+          store.loadLog(
+            props.repoId,
+            limit,
+            0,
+            scope.value,
+            selectedAuthor.value ?? undefined,
+          ),
+          activityLoad,
+        ]);
+      } finally {
+        if (request === logRequest) loadingLog.value = false;
+      }
+    } while (historyReloadTrailing && props.active && showHistory.value);
   } finally {
-    if (request === logRequest) loadingLog.value = false;
+    historyReloadRunning = false;
   }
 }
+
+/** Coalesce commit + status + sync event bursts into one fresh History snapshot. */
+function scheduleHistoryReload(delay = HISTORY_RELOAD_DEBOUNCE_MS): void {
+  if (!props.active || !showHistory.value) return;
+  if (historyReloadTimer) clearTimeout(historyReloadTimer);
+  historyReloadTimer = setTimeout(() => {
+    historyReloadTimer = null;
+    void reload();
+  }, delay);
+}
+
 async function toggleHistory(): Promise<void> {
+  if (!props.active) return;
   showHistory.value = !showHistory.value;
-  if (!showHistory.value) return;
-  if (!logResult.value) await reload();
-  else if (historyActivityEnabled.value && !activity.value) await loadActivity();
+  if (!showHistory.value) {
+    if (historyReloadTimer) clearTimeout(historyReloadTimer);
+    historyReloadTimer = null;
+    return;
+  }
+  // A rolling "last hour / 24 hours" snapshot is inherently time-sensitive. Reopening History
+  // always refreshes it instead of reviving an old zero from the component cache.
+  await reload();
 }
 async function setScope(s: Scope): Promise<void> {
   if (scope.value === s) return;
   scope.value = s;
   expandedCommit.value = null;
-  activity.value = null;
-  await reload();
+  // Keep the last complete snapshot and rows visible while their replacements are fetched.
+  // Retiring the activity request here is still important when a second scope is chosen while
+  // reload() is coalescing an earlier request: an old-scope response must never win the race.
+  activityRequest += 1;
+  await reload(true);
+}
+
+function authorIdentityKey(author: LogAuthorFilter): string {
+  const email = author.email.trim().toLowerCase();
+  return email ? `email:${email}` : `name:${author.name.trim().toLowerCase()}`;
+}
+
+const selectedAuthorLabel = computed(
+  () => selectedAuthor.value?.name.trim() || selectedAuthor.value?.email.trim() || "—",
+);
+
+async function setAuthorFilter(author: HistoryActivityAuthor): Promise<void> {
+  const identity = { name: author.name, email: author.email };
+  selectedAuthor.value =
+    selectedAuthor.value &&
+    authorIdentityKey(selectedAuthor.value) === authorIdentityKey(identity)
+      ? null
+      : identity;
+  expandedCommit.value = null;
+  wtOpen.value = false;
+  await reload(true);
+  await nextTick();
+  if (scrollEl.value) scrollEl.value.scrollTop = 0;
+}
+
+async function clearAuthorFilter(): Promise<void> {
+  if (!selectedAuthor.value) return;
+  const current = selectedAuthor.value;
+  await setAuthorFilter({
+    ...current,
+    commits: 0,
+    addedLines: 0,
+    removedLines: 0,
+  });
+}
+
+function setActivityScale(next: HistoryActivityScale): void {
+  if (historyActivityScale.value === next) return;
+  historyActivityScale.value = next;
 }
 async function loadMoreLog(): Promise<void> {
-  if (loadingLog.value) return;
+  if (!props.active || !showHistory.value || loadingLog.value) return;
   const request = ++logRequest;
   loadingLog.value = true;
   try {
-    await store.loadLog(props.repoId, 50, logResult.value?.commits.length ?? 0, scope.value);
+    await store.loadLog(
+      props.repoId,
+      LOG_PAGE_SIZE,
+      logResult.value?.commits.length ?? 0,
+      scope.value,
+      selectedAuthor.value ?? undefined,
+    );
   } finally {
     if (request === logRequest) loadingLog.value = false;
   }
@@ -276,12 +410,20 @@ async function loadMoreLog(): Promise<void> {
 // mounts/unmounts (history opened AND more pages remain).
 const scrollEl = useTemplateRef<HTMLElement>("scrollEl");
 const sentinelEl = useTemplateRef<HTMLElement>("sentinelEl");
-watch(sentinelEl, (el) => {
+watch([sentinelEl, () => props.active], ([el, active]) => {
   io?.disconnect();
-  if (!el) return;
+  if (!el || !active) return;
   io = new IntersectionObserver(
     (entries) => {
-      if (entries[0]?.isIntersecting && logResult.value?.hasMore && !loadingLog.value) void loadMoreLog();
+      if (
+        props.active &&
+        showHistory.value &&
+        entries[0]?.isIntersecting &&
+        logResult.value?.hasMore &&
+        !loadingLog.value
+      ) {
+        void loadMoreLog();
+      }
     },
     { root: scrollEl.value ?? null, rootMargin: "200px" },
   );
@@ -572,31 +714,63 @@ function jumpToParent(hash: string): void {
 }
 onBeforeUnmount(() => {
   if (flashTimer) clearTimeout(flashTimer);
+  if (historyReloadTimer) clearTimeout(historyReloadTimer);
 });
 
 // Reset caches when the repo changes underneath us.
 watch(
   () => props.repoId,
   () => {
+    const reloadOpenHistory = showHistory.value;
     logRequest += 1;
     loadingLog.value = false;
     activityRequest += 1;
     activity.value = null;
     loadingActivity.value = false;
+    selectedAuthor.value = null;
     expandedCommit.value = null;
     commitCache.value = {};
     commitCacheOrder.length = 0;
     wtOpen.value = false;
     rowEls.clear();
+    if (reloadOpenHistory) scheduleHistoryReload(0);
+  },
+);
+watch(
+  () => props.active,
+  (active, previous) => {
+    if (!active) {
+      if (historyReloadTimer) clearTimeout(historyReloadTimer);
+      historyReloadTimer = null;
+      historyReloadTrailing = false;
+      historyReloadTrailingResetsPagination = false;
+      return;
+    }
+    // A kept-alive card may have missed activity-scale and history-revision invalidations while
+    // hidden. One refresh on reactivation covers all of them and refreshes the rolling time window.
+    if (!previous && showHistory.value) scheduleHistoryReload(0);
+  },
+);
+watch(
+  () => store.historyRevisionByRepo[props.repoId] ?? 0,
+  (revision, previous) => {
+    if (revision !== previous) scheduleHistoryReload();
   },
 );
 watch(historyActivityEnabled, (enabled) => {
   activityRequest += 1; // retire any response started under the old visibility choice
   loadingActivity.value = false;
-  if (enabled && showHistory.value) {
+  if (enabled && props.active && showHistory.value) {
     activity.value = null;
     void loadActivity();
   }
+});
+watch(historyActivityScale, () => {
+  activityRequest += 1; // retire the response for the previously selected aggregation
+  loadingActivity.value = false;
+  // Stale-while-refresh: the completed KPIs, authors, and chart stay mounted until the replacement
+  // arrives. HistoryActivity marks the section busy and animates only the values that changed.
+  if (props.active && showHistory.value && historyActivityEnabled.value) void loadActivity();
 });
 </script>
 
@@ -652,7 +826,7 @@ watch(historyActivityEnabled, (enabled) => {
               class="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
               :aria-label="$t('repo.history.refresh')"
               :disabled="loadingLog"
-              @click="reload"
+              @click="reload()"
             >
               <RefreshCw :size="13" :class="loadingLog && 'animate-spin'" />
             </button>
@@ -666,7 +840,39 @@ watch(historyActivityEnabled, (enabled) => {
         class="mb-2"
         :activity="activity"
         :loading="loadingActivity"
+        :scale="historyActivityScale"
+        :selected-author="selectedAuthor"
+        @select-scale="setActivityScale"
+        @select-author="setAuthorFilter"
       />
+
+      <Transition name="history-filter">
+        <div
+          v-if="selectedAuthor"
+          class="mb-2 flex min-h-7 items-center gap-2 rounded-md border border-info/25 bg-info/8 px-2 py-1 text-[11px] text-foreground/85"
+          role="status"
+          aria-live="polite"
+          data-testid="history-author-filter"
+        >
+          <span class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-info/15 text-info">
+            <UserRound :size="10" aria-hidden="true" />
+          </span>
+          <span class="min-w-0 flex-1 truncate">
+            {{ $t("repo.history.authorFilterActive", { name: selectedAuthorLabel }) }}
+          </span>
+          <button
+            type="button"
+            class="inline-flex h-5 shrink-0 items-center gap-1 rounded px-1 text-muted-foreground outline-none transition-colors hover:bg-info/12 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+            :aria-label="$t('repo.history.authorFilterClear')"
+            :title="$t('repo.history.authorFilterClear')"
+            data-testid="history-author-filter-clear"
+            @click="clearAuthorFilter"
+          >
+            <X :size="11" aria-hidden="true" />
+            <span>{{ $t("repo.history.authorFilterClearShort") }}</span>
+          </button>
+        </div>
+      </Transition>
 
       <!-- loading / error / empty -->
       <div v-if="loadingLog && !logResult" class="flex items-center gap-2 px-1 py-1.5 text-[12px] text-muted-foreground">
@@ -676,7 +882,11 @@ watch(historyActivityEnabled, (enabled) => {
         {{ logResult.message || $t("repo.history.detailUnavailable") }}
       </div>
       <div v-else-if="logResult && !logResult.commits.length" class="px-1 py-1.5 text-[12px] text-muted-foreground">
-        {{ $t("repo.history.empty") }}
+        {{
+          selectedAuthor
+            ? $t("repo.history.authorFilterEmpty", { name: selectedAuthorLabel })
+            : $t("repo.history.empty")
+        }}
       </div>
 
       <template v-else-if="logResult">
@@ -697,11 +907,23 @@ watch(historyActivityEnabled, (enabled) => {
           </div>
         </div>
 
-        <div ref="scrollEl" class="scroll-slim max-h-104 overflow-y-auto">
-          <div
-            v-for="item in graph.items"
-            :key="item.kind === 'wt' ? WORKTREE : item.commit!.hash"
+        <div
+          ref="scrollEl"
+          class="scroll-slim max-h-104 overflow-y-auto"
+          :data-refreshing="loadingLog ? 'true' : 'false'"
+          :aria-busy="loadingLog"
+          data-history-transition="rows"
+        >
+          <TransitionGroup
+            name="history-row"
+            tag="div"
+            class="history-row-list relative"
           >
+            <div
+              v-for="item in graph.items"
+              :key="item.kind === 'wt' ? WORKTREE : item.commit!.hash"
+              class="history-row-item"
+            >
             <!-- ══ uncommitted-changes row ══ -->
             <template v-if="item.kind === 'wt'">
               <div
@@ -710,7 +932,7 @@ watch(historyActivityEnabled, (enabled) => {
                 @click="toggleWorktree"
               >
                 <svg
-                  v-if="historyGraphEnabled"
+                  v-if="showHistoryGraph"
                   :width="visibleGutterW"
                   :height="rowPx"
                   class="shrink-0"
@@ -805,32 +1027,28 @@ watch(historyActivityEnabled, (enabled) => {
 
             <!-- ══ commit row ══ -->
             <template v-else>
-              <!-- A clickable row, made operable by keyboard: it was a bare <div> with a click
-                   handler, so it carried aria-expanded but could not be reached by Tab or fired
-                   with Enter. Same treatment the repo-card header row uses. It stays a div rather
-                   than a <button> because it contains its own copy-hash control, and a button
-                   cannot legally contain another button. -->
+              <!-- The row is a non-interactive group because it contains independent controls
+                   (the disclosure, change-stat tooltip, and copy-hash button). Pointer users can
+                   still click the row background, while keyboard users get a real disclosure
+                   button. This avoids nesting focusable controls inside role="button". -->
               <ContextMenu>
                 <ContextMenuTrigger as-child>
                   <div
                     :ref="setRowEl(item.commit!.hash)"
-                    role="button"
-                    tabindex="0"
-                    class="history-row-visibility group/r flex cursor-pointer items-stretch rounded-md outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40"
+                    role="group"
+                    :data-history-row="item.commit!.hash"
+                    class="history-row-visibility group/r flex cursor-pointer items-stretch rounded-md transition-colors hover:bg-accent/40"
                     :class="[
                       compact && 'history-row-compact',
                       expandedCommit === item.commit!.hash && 'bg-accent/40',
                       flashHash === item.commit!.hash && 'flash',
                     ]"
-                    :aria-expanded="expandedCommit === item.commit!.hash"
                     :aria-label="t('repo.history.commitRowLabel', { subject: item.commit!.subject })"
                     @click="toggleCommit(item.commit!.hash)"
-                    @keydown.enter.prevent="toggleCommit(item.commit!.hash)"
-                    @keydown.space.prevent="toggleCommit(item.commit!.hash)"
                   >
                 <!-- graph gutter -->
                 <svg
-                  v-if="historyGraphEnabled"
+                  v-if="showHistoryGraph"
                   :width="visibleGutterW"
                   :height="rowPx"
                   class="shrink-0"
@@ -871,7 +1089,15 @@ watch(historyActivityEnabled, (enabled) => {
                   class="grid min-w-0 flex-1 items-center py-1 pr-1"
                   :style="{ gridTemplateColumns: COLS }"
                 >
-                  <div class="flex min-w-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    class="flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    :data-history-disclosure="item.commit!.hash"
+                    :aria-expanded="expandedCommit === item.commit!.hash"
+                    :aria-controls="`history-detail-${item.commit!.hash}`"
+                    :aria-label="t('repo.history.commitRowLabel', { subject: item.commit!.subject })"
+                    @click.stop="toggleCommit(item.commit!.hash)"
+                  >
                     <GitMerge
                       v-if="item.row.node.isMerge"
                       :size="12"
@@ -896,7 +1122,7 @@ watch(historyActivityEnabled, (enabled) => {
                       +{{ refChips(item.commit!.refs).length - CHIP_CAP }}
                     </span>
                     <span class="truncate text-[12.5px] text-foreground" :title="item.commit!.subject">{{ item.commit!.subject }}</span>
-                  </div>
+                  </button>
                   <!-- Changes can stay numeric or become a GitKraken-style proportional bar.
                        Both modes keep exact figures available on hover and in accessible text. -->
                   <div
@@ -969,7 +1195,16 @@ watch(historyActivityEnabled, (enabled) => {
                 </div>
 
                 <!-- COMPACT: two-line stack -->
-                <div v-else class="flex min-w-0 flex-1 flex-col justify-center py-1 pr-1">
+                <button
+                  v-else
+                  type="button"
+                  class="flex min-w-0 flex-1 flex-col justify-center rounded-sm py-1 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  :data-history-disclosure="item.commit!.hash"
+                  :aria-expanded="expandedCommit === item.commit!.hash"
+                  :aria-controls="`history-detail-${item.commit!.hash}`"
+                  :aria-label="t('repo.history.commitRowLabel', { subject: item.commit!.subject })"
+                  @click.stop="toggleCommit(item.commit!.hash)"
+                >
                   <div class="flex min-w-0 items-center gap-1">
                     <GitMerge v-if="item.row.node.isMerge" :size="11" class="shrink-0 text-muted-foreground" />
                     <span
@@ -1001,8 +1236,8 @@ watch(historyActivityEnabled, (enabled) => {
                       </span>
                     </template>
                   </div>
-                    </div>
-                  </div>
+                </button>
+              </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent class="w-60">
                   <ContextMenuItem @select="toggleCommit(item.commit!.hash)">
@@ -1028,7 +1263,7 @@ watch(historyActivityEnabled, (enabled) => {
                   >
                     <Mail :size="15" /><span>{{ $t("repo.history.ctxCopyAuthorEmail") }}</span>
                   </ContextMenuItem>
-                  <template v-if="item.commit!.parents.length">
+                  <template v-if="!selectedAuthor && item.commit!.parents.length">
                     <ContextMenuSeparator />
                     <ContextMenuItem
                       v-for="parent in item.commit!.parents"
@@ -1044,13 +1279,17 @@ watch(historyActivityEnabled, (enabled) => {
 
               <!-- commit detail (files + bounded diff), indented past the gutter -->
               <Transition name="expand">
-                <div v-if="expandedCommit === item.commit!.hash" class="expand-grid">
+                <div
+                  v-if="expandedCommit === item.commit!.hash"
+                  :id="`history-detail-${item.commit!.hash}`"
+                  class="expand-grid"
+                >
                   <div class="min-h-0 overflow-hidden">
                     <div
                       class="mb-1 mt-0.5 rounded-md border-l-2 py-1.5 pl-2.5 pr-2"
                       :style="{
                         marginLeft: `${visibleGutterW}px`,
-                        borderColor: historyGraphEnabled ? laneColor(item.row.node.color) : 'var(--border)',
+                        borderColor: showHistoryGraph ? laneColor(item.row.node.color) : 'var(--border)',
                       }"
                     >
                 <div v-if="loadingCommit === item.commit!.hash" class="flex items-center gap-2 text-[12px] text-muted-foreground">
@@ -1073,7 +1312,7 @@ watch(historyActivityEnabled, (enabled) => {
                       </TooltipTrigger>
                       <TooltipContent>{{ $t("repo.history.copyHash") }}</TooltipContent>
                     </Tooltip>
-                    <template v-if="expandedDetail.parents.length">
+                    <template v-if="!selectedAuthor && expandedDetail.parents.length">
                       <span class="ml-1 text-muted-foreground/70">{{ $t("repo.history.parents") }}:</span>
                       <button
                         v-for="p in expandedDetail.parents"
@@ -1189,16 +1428,18 @@ watch(historyActivityEnabled, (enabled) => {
                 </div>
               </Transition>
             </template>
-          </div>
-          <!-- infinite-scroll sentinel: fetch the next page as it nears view (no "Load more" button) -->
-          <div
-            v-if="logResult.hasMore"
-            ref="sentinelEl"
-            class="flex items-center justify-center gap-1.5 py-2 text-[12px] text-muted-foreground"
-          >
-            <Loader2 v-if="loadingLog" :size="13" class="animate-spin" />
-            <span v-if="loadingLog">{{ $t("repo.history.loading") }}</span>
-          </div>
+            </div>
+            <!-- infinite-scroll sentinel: fetch the next page as it nears view (no "Load more" button) -->
+            <div
+              v-if="logResult.hasMore"
+              key="history-sentinel"
+              ref="sentinelEl"
+              class="flex items-center justify-center gap-1.5 py-2 text-[12px] text-muted-foreground"
+            >
+              <Loader2 v-if="loadingLog" :size="13" class="animate-spin" />
+              <span v-if="loadingLog">{{ $t("repo.history.loading") }}</span>
+            </div>
+          </TransitionGroup>
         </div>
       </template>
     </div>
@@ -1217,6 +1458,37 @@ watch(historyActivityEnabled, (enabled) => {
 }
 .history-row-visibility.history-row-compact {
   contain-intrinsic-size: auto 46px;
+}
+
+/* Scope refreshes retain shared commits by hash. New/removed rows ease into place around those
+   stable rows, so changing All / Local / Current reads as a graph update instead of a redraw. */
+.history-row-enter-active,
+.history-row-leave-active,
+.history-row-move {
+  transition:
+    opacity 170ms ease,
+    transform 190ms ease;
+}
+.history-row-enter-from,
+.history-row-leave-to {
+  opacity: 0;
+  transform: translateY(3px);
+}
+.history-row-leave-active {
+  position: absolute;
+  width: 100%;
+}
+
+.history-filter-enter-active,
+.history-filter-leave-active {
+  transition:
+    opacity 150ms ease,
+    transform 170ms ease;
+}
+.history-filter-enter-from,
+.history-filter-leave-to {
+  opacity: 0;
+  transform: translateY(-2px);
 }
 
 /* Smooth height animation for a commit's detail expand/collapse (grid-rows technique — animates
@@ -1245,7 +1517,14 @@ watch(historyActivityEnabled, (enabled) => {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2em), transparent 100%);
 }
 @media (prefers-reduced-motion: reduce) {
-  .commit-body {
+  .commit-body,
+  .history-row-enter-active,
+  .history-row-leave-active,
+  .history-row-move {
+    transition: none;
+  }
+  .history-filter-enter-active,
+  .history-filter-leave-active {
     transition: none;
   }
 }

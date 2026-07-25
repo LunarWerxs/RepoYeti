@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { DB_PATH, ensureConfigDir } from "./config.ts";
 import { isUnderTempDir } from "./paths.ts";
 import type { DiffStat } from "./read/diffstat.ts";
+import type { CommitStat } from "./read/inspect.ts";
 import type { VcsKind } from "./vcs/types.ts";
 
 export type RepoSource = "auto" | "pinned" | "created";
@@ -18,6 +19,25 @@ export type RepoSource = "auto" | "pinned" | "created";
 export interface RepoStatus {
   branch: string | null;
   detached: boolean;
+  /**
+   * Full object id currently resolved by HEAD. Unlike branch/ahead/behind counters, this changes
+   * when another Git client commits + pushes, amends, or resets between watcher refreshes. Null
+   * for an unborn/error state; optional so persisted pre-field and non-Git statuses still parse.
+   */
+  headOid?: string | null;
+  /** Full object id of the configured upstream tip; null/absent when nothing is tracked. */
+  upstreamOid?: string | null;
+  /**
+   * Deterministic identity of every ref included by History's Local/All scopes
+   * (`refs/heads`, `refs/remotes`, and `refs/tags`). This catches external ref creation,
+   * deletion, and force-moves even when HEAD/upstream/counters stay unchanged.
+   */
+  historyRefsHash?: string | null;
+  /**
+   * Opaque hash of changed paths and their index/worktree status letters. This deliberately
+   * excludes contents: pull checkout safety changes when the affected path/state set changes.
+   */
+  worktreeStateHash?: string | null;
   dirty: number;
   ahead: number;
   /** From last fetch only — never auto-fetched on a watch event. */
@@ -234,6 +254,22 @@ export function initDb(): Database {
       created_at      INTEGER NOT NULL,
       enabled         INTEGER NOT NULL DEFAULT 1
     );
+    -- Immutable per-commit diff statistics used by the History activity chart. Live Git metadata
+    -- still decides reachability, author identity, and calendar membership on every request; this
+    -- table only saves re-diffing a full object hash that was already measured for this repo.
+    CREATE TABLE IF NOT EXISTS git_commit_stats (
+      repo_id        TEXT NOT NULL,
+      commit_hash    TEXT NOT NULL,
+      committed_at   INTEGER NOT NULL,
+      files_changed  INTEGER NOT NULL CHECK (files_changed >= 0),
+      added_lines    INTEGER NOT NULL CHECK (added_lines >= 0),
+      removed_lines  INTEGER NOT NULL CHECK (removed_lines >= 0),
+      stat_version   INTEGER NOT NULL,
+      cached_at      INTEGER NOT NULL,
+      PRIMARY KEY (repo_id, commit_hash)
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS git_commit_stats_repo_date
+      ON git_commit_stats (repo_id, committed_at);
   `);
   // Migrations: add columns to pre-existing databases. Each throws "duplicate column
   // name" on DBs that already have it (incl. fresh ones) — ignore.
@@ -395,8 +431,22 @@ export function pruneTempRepos(handle: Database): number {
   if (victims.length === 0) return 0;
 
   const stmt = handle.query(`DELETE FROM repos WHERE id = ?`);
+  // `pruneTempRepos` is also used as a pre-migration repair helper against minimal legacy DBs.
+  const hasStatsTable = Boolean(
+    handle
+      .query(
+        `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'git_commit_stats' LIMIT 1`,
+      )
+      .get(),
+  );
+  const clearStats = hasStatsTable
+    ? handle.query(`DELETE FROM git_commit_stats WHERE repo_id = ?`)
+    : null;
   const tx = handle.transaction((xs: typeof victims) => {
-    for (const v of xs) stmt.run(v.id);
+    for (const v of xs) {
+      clearStats?.run(v.id);
+      stmt.run(v.id);
+    }
   });
   tx(victims);
 
@@ -493,6 +543,95 @@ export function mergeDuplicateIdentities(handle: Database): IdentityMergeSummary
 
 function getDb(): Database {
   return db ?? initDb();
+}
+
+export interface GitCommitStatCacheEntry {
+  hash: string;
+  date: number;
+  stat: CommitStat;
+}
+
+/** Read immutable shortstats previously measured for this repo and commit-date window. */
+export function getGitCommitStats(
+  repoId: string,
+  since: number,
+  until: number,
+  statVersion: number,
+): Map<string, CommitStat> {
+  const rows = getDb()
+    .query(
+      `SELECT commit_hash, files_changed, added_lines, removed_lines
+       FROM git_commit_stats
+       WHERE repo_id = ? AND stat_version = ? AND committed_at >= ? AND committed_at <= ?`,
+    )
+    .all(repoId, statVersion, Math.floor(since), Math.floor(until)) as Array<{
+    commit_hash: string;
+    files_changed: number;
+    added_lines: number;
+    removed_lines: number;
+  }>;
+  const stats = new Map<string, CommitStat>();
+  for (const row of rows) {
+    if (
+      !row.commit_hash ||
+      !Number.isSafeInteger(row.files_changed) ||
+      row.files_changed < 0 ||
+      !Number.isSafeInteger(row.added_lines) ||
+      row.added_lines < 0 ||
+      !Number.isSafeInteger(row.removed_lines) ||
+      row.removed_lines < 0
+    ) {
+      continue;
+    }
+    stats.set(row.commit_hash, {
+      filesChanged: row.files_changed,
+      addedLines: row.added_lines,
+      removedLines: row.removed_lines,
+    });
+  }
+  return stats;
+}
+
+/** Transactionally persist a batch of successful measurements; explicit all-zero stats count. */
+export function putGitCommitStats(
+  repoId: string,
+  entries: readonly GitCommitStatCacheEntry[],
+  statVersion: number,
+): void {
+  if (entries.length === 0) return;
+  const handle = getDb();
+  const repoExists = handle.query(`SELECT 1 FROM repos WHERE id = ? LIMIT 1`);
+  const statement = handle.query(
+    `INSERT INTO git_commit_stats
+       (repo_id, commit_hash, committed_at, files_changed, added_lines, removed_lines, stat_version, cached_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(repo_id, commit_hash) DO UPDATE SET
+       committed_at = excluded.committed_at,
+       files_changed = excluded.files_changed,
+       added_lines = excluded.added_lines,
+       removed_lines = excluded.removed_lines,
+       stat_version = excluded.stat_version,
+       cached_at = excluded.cached_at`,
+  );
+  const cachedAt = Date.now();
+  const write = handle.transaction((rows: readonly GitCommitStatCacheEntry[]) => {
+    // An activity read can finish after the repo was removed. Check inside the same transaction
+    // as the upserts so that race cannot resurrect permanent orphan cache rows.
+    if (!repoExists.get(repoId)) return;
+    for (const entry of rows) {
+      statement.run(
+        repoId,
+        entry.hash,
+        Math.floor(entry.date),
+        Math.max(0, Math.floor(entry.stat.filesChanged)),
+        Math.max(0, Math.floor(entry.stat.addedLines)),
+        Math.max(0, Math.floor(entry.stat.removedLines)),
+        statVersion,
+        cachedAt,
+      );
+    }
+  });
+  write(entries);
 }
 
 /**
@@ -652,6 +791,7 @@ export function forgetRepo(id: string, ignore = true): RepoView | null {
     }
     d.query(`DELETE FROM share_repos WHERE repo_id = ?`).run(id);
     d.query(`DELETE FROM shares WHERE id NOT IN (SELECT share_id FROM share_repos)`).run();
+    d.query(`DELETE FROM git_commit_stats WHERE repo_id = ?`).run(id);
     d.query(`DELETE FROM repos WHERE id = ?`).run(id);
   });
   tx();
@@ -676,8 +816,12 @@ export function deleteRepos(ids: string[]): void {
   if (ids.length === 0) return;
   const d = getDb();
   const stmt = d.query(`DELETE FROM repos WHERE id = ?`);
+  const clearStats = d.query(`DELETE FROM git_commit_stats WHERE repo_id = ?`);
   const tx = d.transaction((xs: string[]) => {
-    for (const id of xs) stmt.run(id);
+    for (const id of xs) {
+      clearStats.run(id);
+      stmt.run(id);
+    }
   });
   tx(ids);
 }

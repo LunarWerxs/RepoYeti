@@ -191,7 +191,13 @@ export const RelaySettingsSchema = z.object({
 });
 
 // ── AI ──────────────────────────────────────────────────────────────────────────
-export const ConnectSchema = z.object({ apiKey: z.string().optional() }); // NO_KEY stays in handler
+export const ConnectSchema = z.object({
+  apiKey: z.string().optional(), // NO_KEY stays in handler
+  /** Used only by the generic OpenAI-compatible provider. */
+  baseUrl: z.string().max(2048).optional(),
+  /** Manual fallback because compatible endpoints do not have to implement GET /models. */
+  model: z.string().max(512).optional(),
+});
 
 export const AiSettingsSchema = z.object({
   style: z.enum(["conventional", "concise", "detailed"]).optional(),
@@ -202,7 +208,7 @@ export const AiSettingsSchema = z.object({
 });
 
 export const ProviderUpdateSchema = z.object({
-  model: z.string().nullish(),
+  model: z.string().max(512).nullish(),
   makeDefault: z.boolean().optional(),
 });
 

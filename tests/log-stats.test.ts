@@ -1,8 +1,8 @@
-import { test, expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
-import { readLog } from "../src/read/inspect.ts";
+import { logAuthorMatches, readLog } from "../src/read/inspect.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 
 // `git log --numstat` makes the log output MULTI-line per commit (one stat row per changed file
@@ -31,6 +31,35 @@ async function repoWithKnownStats(): Promise<string> {
   await git("rm", "-q", "b.txt");
   await git("commit", "-q", "-m", "c3 drop b");
 
+  return dir;
+}
+
+function authorEnv(name: string, email: string): Record<string, string | undefined> {
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: name,
+    GIT_AUTHOR_EMAIL: email,
+    GIT_COMMITTER_NAME: name,
+    GIT_COMMITTER_EMAIL: email,
+  };
+}
+
+async function commitAs(
+  dir: string,
+  sequence: number,
+  subject: string,
+  name: string,
+  email: string,
+): Promise<void> {
+  const path = `author-${sequence}.txt`;
+  writeFileSync(join(dir, path), `${subject}\n`);
+  await $`git -C ${dir} add -- ${path}`.quiet();
+  await $`git -C ${dir} commit -q -m ${subject}`.env(authorEnv(name, email)).quiet();
+}
+
+async function repoWithAuthors(): Promise<string> {
+  const dir = mkScratchDir("gm-logauthor-");
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   return dir;
 }
 
@@ -90,6 +119,107 @@ test("readLog pagination is unaffected by the extra stat lines", async () => {
   expect(page2.commits.length).toBe(1);
   expect(page2.hasMore).toBe(false);
   expect(page2.commits[0]!.subject).toBe("c1 add a");
+});
+
+test("author-filter pagination counts matching commits rather than intervening history", async () => {
+  const dir = await repoWithAuthors();
+  await commitAs(dir, 1, "ada oldest", "Ada", "ada@example.com");
+  await commitAs(dir, 2, "other one", "Other", "other@example.com");
+  await commitAs(dir, 3, "ada middle", "Ada Alternate", "ADA@example.com");
+  await commitAs(dir, 4, "other two", "Other", "other@example.com");
+  await commitAs(dir, 5, "ada newest", "Ada", "ada@example.com");
+
+  const first = await readLog(dir, 2, 0, undefined, "head", {
+    name: "ignored because email wins",
+    email: "  ADA@EXAMPLE.COM  ",
+  });
+  expect(first.ok).toBe(true);
+  expect(first.commits.map((commit) => commit.subject)).toEqual([
+    "ada newest",
+    "ada middle",
+  ]);
+  expect(first.hasMore).toBe(true);
+
+  const second = await readLog(dir, 2, 2, undefined, "head", {
+    email: "ada@example.com",
+  });
+  expect(second.commits.map((commit) => commit.subject)).toEqual(["ada oldest"]);
+  expect(second.hasMore).toBe(false);
+});
+
+test("author filtering separates identical names by email and treats punctuation literally", async () => {
+  const dir = await repoWithAuthors();
+  await commitAs(dir, 1, "shared alpha", "Shared Name", "alpha@example.com");
+  await commitAs(dir, 2, "shared beta", "Shared Name", "beta@example.com");
+  await commitAs(
+    dir,
+    3,
+    "literal punctuation",
+    "Regex.*[Coder]",
+    "literal+[]()@example.com",
+  );
+  await commitAs(dir, 4, "regex lookalike", "RegexZZCoder", "literall@example.com");
+
+  const alpha = await readLog(dir, 50, 0, undefined, "head", {
+    name: "Shared Name",
+    email: "alpha@example.com",
+  });
+  expect(alpha.commits.map((commit) => commit.subject)).toEqual(["shared alpha"]);
+
+  const punctuation = await readLog(dir, 50, 0, undefined, "head", {
+    email: "literal+[]()@example.com",
+  });
+  expect(punctuation.commits.map((commit) => commit.subject)).toEqual([
+    "literal punctuation",
+  ]);
+
+  const nameFallback = await readLog(dir, 50, 0, undefined, "head", {
+    name: "  REGEX.*[CODER]  ",
+  });
+  expect(nameFallback.commits.map((commit) => commit.subject)).toEqual([
+    "literal punctuation",
+  ]);
+});
+
+test("name-only author filters use exact normalized names", () => {
+  expect(logAuthorMatches({ name: "  NAME ONLY  " }, "Name Only", "")).toBe(true);
+  expect(logAuthorMatches({ name: "Name Only" }, "Name Onlyish", "")).toBe(false);
+  expect(logAuthorMatches({ name: "Regex.*[Coder]" }, "Regex.*[Coder]", "")).toBe(true);
+  expect(logAuthorMatches({ name: "Regex.*[Coder]" }, "RegexZZCoder", "")).toBe(false);
+});
+
+test("author filtering returns every alias grouped by .mailmap under its canonical identity", async () => {
+  const dir = await repoWithAuthors();
+  writeFileSync(
+    join(dir, ".mailmap"),
+    [
+      "Canonical Coder <canonical@example.com> Alias One <one@example.com>",
+      "Canonical Coder <canonical@example.com> Alias Two <two@example.com>",
+      "",
+    ].join("\n"),
+  );
+  await $`git -C ${dir} add -- .mailmap`.quiet();
+  await $`git -C ${dir} commit -q -m ${"first alias"}`
+    .env(authorEnv("Alias One", "one@example.com"))
+    .quiet();
+  await commitAs(dir, 2, "unrelated", "Other", "other@example.com");
+  await commitAs(dir, 3, "second alias", "Alias Two", "two@example.com");
+
+  const filtered = await readLog(dir, 50, 0, undefined, "head", {
+    name: "Canonical Coder",
+    email: "canonical@example.com",
+  });
+
+  expect(filtered.commits.map((commit) => commit.subject)).toEqual([
+    "second alias",
+    "first alias",
+  ]);
+  expect(
+    filtered.commits.map(({ authorName, authorEmail }) => ({ authorName, authorEmail })),
+  ).toEqual([
+    { authorName: "Canonical Coder", authorEmail: "canonical@example.com" },
+    { authorName: "Canonical Coder", authorEmail: "canonical@example.com" },
+  ]);
 });
 
 test("a merge commit reports zero stats rather than a missing/duplicated record", async () => {

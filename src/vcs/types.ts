@@ -16,7 +16,15 @@ import type { Identity, RepoStatus } from "../db.ts";
 import type { GitHubAuth } from "../git.ts";
 import type { ChangedFile } from "../read/status.ts";
 import type { ActionResult, CommitGroupSpec, CommitGroupsResult } from "../contract.ts";
-import type { BranchList, LogResult, StashList, CommitDetail, MergeFilter, RefScope } from "../read/inspect.ts";
+import type {
+  BranchList,
+  LogResult,
+  StashList,
+  CommitDetail,
+  MergeFilter,
+  RefScope,
+  LogAuthorFilter,
+} from "../read/inspect.ts";
 import type { DiffDetail } from "../config.ts";
 
 export type VcsKind = "git" | "lore";
@@ -89,7 +97,14 @@ export interface VcsBackend {
   deleteBranch(absPath: string, name: string): Promise<ActionResult>;
 
   // ── history ──
-  readLog(absPath: string, limit?: number, skip?: number, merges?: MergeFilter, refScope?: RefScope): Promise<LogResult>;
+  readLog(
+    absPath: string,
+    limit?: number,
+    skip?: number,
+    merges?: MergeFilter,
+    refScope?: RefScope,
+    author?: LogAuthorFilter,
+  ): Promise<LogResult>;
   /** Full detail for one commit: changed-file list + a bounded unified diff. */
   readCommit(absPath: string, hash: string): Promise<CommitDetail>;
 

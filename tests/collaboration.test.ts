@@ -322,6 +322,7 @@ test("accepted collaborations expose remote dirty state and enforce ten quiet mi
             status: {
               branch: "main",
               detached: false,
+              headOid: "c".repeat(40),
               dirty: 1,
               ahead: 0,
               behind: 0,
@@ -365,6 +366,7 @@ test("accepted collaborations expose remote dirty state and enforce ten quiet mi
   try {
     const first = await readAcceptedCollaborationStatus(link.id, 1_000);
     expect(first.changes.map((file) => file.path)).toEqual(["src/shared.ts"]);
+    expect(first.remoteRepo.status?.headOid).toBe("c".repeat(40));
     expect(first.stableForMs).toBe(0);
     expect(first.commitEligibleAt).toBe(1_000 + REMOTE_COMMIT_IDLE_MS);
 

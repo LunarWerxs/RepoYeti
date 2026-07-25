@@ -39,7 +39,17 @@ import {
   type CommitGroupResult,
   type CommitGroupsResult,
 } from "../contract.ts";
-import type { BranchList, LogResult, StashList, CommitDetail } from "../read/inspect.ts";
+import {
+  LOG_PAGE_MAX,
+  logAuthorMatches,
+  type BranchList,
+  type LogResult,
+  type StashList,
+  type CommitDetail,
+  type LogAuthorFilter,
+  type MergeFilter,
+  type RefScope,
+} from "../read/inspect.ts";
 import type { VcsBackend } from "./types.ts";
 
 /** The Lore binary. Overridable for tests / non-PATH installs (e.g. a downloaded release). */
@@ -250,6 +260,8 @@ function errorStatus(message: string): RepoStatus {
   return {
     branch: null,
     detached: false,
+    headOid: null,
+    historyRefsHash: null,
     dirty: 0,
     ahead: 0,
     behind: 0,
@@ -266,6 +278,8 @@ function statusFrom(branch: string | null, dirty: number): RepoStatus {
   return {
     branch,
     detached: branch === null,
+    headOid: null,
+    historyRefsHash: null,
     dirty,
     ahead: 0,
     behind: 0,
@@ -358,12 +372,23 @@ async function loreDeleteBranch(absPath: string, name: string): Promise<ActionRe
 
 // ── history ───────────────────────────────────────────────────────────────────────────
 
-async function loreReadLog(absPath: string, limit = 50, _skip = 0): Promise<LogResult> {
-  const cap = Math.max(1, Math.floor(limit));
+async function loreReadLog(
+  absPath: string,
+  limit = 50,
+  skip = 0,
+  _merges?: MergeFilter,
+  _refScope?: RefScope,
+  author?: LogAuthorFilter,
+): Promise<LogResult> {
+  const cap = Math.min(Math.max(1, Math.floor(limit)), LOG_PAGE_MAX);
+  const off = Math.max(0, Math.floor(skip));
+  // Lore has no server-side author predicate yet. Read the same bounded History window used by
+  // the browser, then apply the identical exact identity semantics before paginating.
+  const scanCap = author ? LOG_PAGE_MAX : Math.min(LOG_PAGE_MAX, cap + off + 1);
   // Prefer the structured SDK; fall back to scraping `lore history` text.
-  const s = await sdkLog(absPath, cap);
+  const s = await sdkLog(absPath, scanCap);
   if (s) {
-    const commits = s.slice(0, cap).map((c) => ({
+    const matching = s.map((c) => ({
       hash: c.hash,
       shortHash: c.hash.slice(0, 12),
       subject: c.subject,
@@ -373,10 +398,13 @@ async function loreReadLog(absPath: string, limit = 50, _skip = 0): Promise<LogR
       refs: "",
       parents: [], // Lore history is linear — no merge commits
       isMerge: false,
-    }));
-    return { ok: true, code: "OK", commits, hasMore: commits.length >= cap };
+    })).filter((commit) =>
+      logAuthorMatches(author, commit.authorName, commit.authorEmail)
+    );
+    const commits = matching.slice(off, off + cap);
+    return { ok: true, code: "OK", commits, hasMore: matching.length > off + cap };
   }
-  const run = await runLore(absPath, ["history", String(cap)]);
+  const run = await runLore(absPath, ["history", String(scanCap)]);
   if (run.spawnError || run.code !== 0) {
     return {
       ok: false,
@@ -386,8 +414,11 @@ async function loreReadLog(absPath: string, limit = 50, _skip = 0): Promise<LogR
       hasMore: false,
     };
   }
-  const commits = parseHistory(run.stdout, cap);
-  return { ok: true, code: "OK", commits, hasMore: commits.length >= cap };
+  const matching = parseHistory(run.stdout, scanCap).filter((commit) =>
+    logAuthorMatches(author, commit.authorName, commit.authorEmail)
+  );
+  const commits = matching.slice(off, off + cap);
+  return { ok: true, code: "OK", commits, hasMore: matching.length > off + cap };
 }
 
 // ── branches: list ────────────────────────────────────────────────────────────────────

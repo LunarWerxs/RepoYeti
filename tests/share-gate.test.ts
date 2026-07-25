@@ -259,6 +259,106 @@ test("a guest AI request runs on the owner daemon with the owner's default key",
   }
 });
 
+test("guest AI failures never reveal a custom endpoint, key, model, or provider error text", async () => {
+  const repoId = await gitRepo(`guest-ai-redaction-${crypto.randomUUID()}`);
+  const repo = initDb().query("SELECT abs_path AS absPath FROM repos WHERE id = ?").get(repoId) as {
+    absPath: string;
+  };
+  writeFileSync(join(repo.absPath, "a.txt"), "guest-visible redaction change\n");
+  const share = createShare(hashToken(mintToken()), {
+    label: "guest AI redaction",
+    perm: "control",
+    scopeAll: false,
+    repoIds: [repoId],
+    expiresAt: null,
+  });
+  const cfg = enforcedCfg({
+    ai: {
+      providers: {
+        compatible: {
+          apiKey: "owner-super-secret",
+          model: "private-model-id",
+          baseUrl: "https://private-gateway.example/v1",
+        },
+      },
+      defaultProvider: "compatible",
+      commitEnabled: true,
+    },
+  });
+  const app = createApp(cfg);
+  const originalFetch = globalThis.fetch;
+  const providerDetail =
+    "REMOTE_DETAIL https://private-gateway.example/v1 owner-super-secret private-model-id";
+  globalThis.fetch = (async () =>
+    Response.json({ error: { message: providerDetail } }, { status: 500 })) as unknown as typeof fetch;
+
+  const guestHeaders = {
+    ...REMOTE,
+    cookie: guestCookie(share),
+    "content-type": "application/json",
+  };
+  try {
+    const messageRes = await app.request(`/api/repos/${repoId}/commit-message`, {
+      method: "POST",
+      headers: guestHeaders,
+      body: "{}",
+    });
+    expect(messageRes.status).toBe(502);
+    const messageRaw = await messageRes.text();
+    expect(JSON.parse(messageRaw)).toMatchObject({
+      ok: false,
+      code: "AI_ERROR",
+      message: "The configured AI service returned an error.",
+    });
+
+    const planRes = await app.request(`/api/repos/${repoId}/commit-plan`, {
+      method: "POST",
+      headers: guestHeaders,
+      body: "{}",
+    });
+    expect(planRes.status).toBe(200);
+    const planRaw = await planRes.text();
+    const planBody = JSON.parse(planRaw);
+    expect(planBody).toMatchObject({
+      ok: true,
+      fallback: true,
+      plan: {
+        degraded: true,
+        degradedCode: "AI_ERROR",
+        degradedMessage: "The configured AI service returned an error.",
+      },
+    });
+
+    for (const raw of [messageRaw, planRaw]) {
+      expect(raw).not.toContain("compatible");
+      expect(raw).not.toContain("private-gateway");
+      expect(raw).not.toContain("owner-super-secret");
+      expect(raw).not.toContain("private-model-id");
+      expect(raw).not.toContain("REMOTE_DETAIL");
+    }
+
+    // Adapter/configuration failures happen before requestJson can map them to AiError. That
+    // unexpected-error branch must use the same guest-safe projection.
+    cfg.ai!.providers.compatible!.baseUrl = "not-a-valid-private-gateway-url";
+    const malformedRes = await app.request(`/api/repos/${repoId}/commit-message`, {
+      method: "POST",
+      headers: guestHeaders,
+      body: "{}",
+    });
+    expect(malformedRes.status).toBe(502);
+    const malformedRaw = await malformedRes.text();
+    expect(JSON.parse(malformedRaw)).toMatchObject({
+      ok: false,
+      code: "AI_ERROR",
+      message: "The configured AI service returned an error.",
+    });
+    expect(malformedRaw).not.toContain("OpenAI-compatible");
+    expect(malformedRaw).not.toContain("private-gateway");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("a view guest's /api/repos carries the owner's pinned/starred grouping, not the owner's secrets", async () => {
   // guestRepoView() used to flatten pinned/starred to false, which meant a guest's dashboard rendered
   // one flat unlabelled list while the owner's showed Pinned / Starred / everything-else sections —

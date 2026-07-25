@@ -5,7 +5,12 @@
 // split across commits) — see docs/ARCHITECTURE.md §14 (Smart Commit) for why (the safety invariant). The plan
 // is a SUGGESTION: the daemon validates it, the owner edits it, and a separate call commits.
 import type { AiProviderId, CommitStyle } from "../config.ts";
-import { AI_ADAPTERS, PLAN_SAMPLING, planMaxTokens } from "./adapters.ts";
+import {
+  AI_ADAPTERS,
+  PLAN_SAMPLING,
+  planMaxTokens,
+  type AiProviderRuntime,
+} from "./adapters.ts";
 import { AiError, BODY_DOCTRINE, requestJson, wrapCommitBody, type AiCode, type FetchFn } from "./commit-message.ts";
 import { normalizeRelPath } from "../paths.ts";
 
@@ -346,6 +351,7 @@ export async function generateCommitPlan(
   input: CommitPlanInput,
   style: CommitStyle,
   fetchImpl: FetchFn = fetch,
+  runtime: AiProviderRuntime = {},
 ): Promise<CommitPlan> {
   const adapter = AI_ADAPTERS[provider];
   const system = planSystemPrompt(style);
@@ -371,8 +377,12 @@ export async function generateCommitPlan(
 
   const ask = async (user: string): Promise<CommitPlan | null> => {
     const json = await requestJson(
-      adapter.generateUrl(model, apiKey),
-      { method: "POST", headers: adapter.headers(apiKey), body: JSON.stringify(build(model, system, user)) },
+      adapter.generateUrl(model, apiKey, runtime),
+      {
+        method: "POST",
+        headers: adapter.headers(apiKey, runtime),
+        body: JSON.stringify(build(model, system, user)),
+      },
       fetchImpl,
       PLAN_TIMEOUT_MS,
       provider, // gate on 429 so re-clicking Auto can't machine-gun a limited provider

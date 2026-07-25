@@ -40,6 +40,7 @@ export function useRepoActions(
   repos: Ref<Repo[]>,
   busy: Record<string, ActionName | undefined>,
   asResult: (e: unknown) => ActionResult,
+  onHistoryChanged: (repoId: string) => void = () => {},
 ) {
   // ── display sort mode (client-only; never touches the daemon's drag-persisted order) ──
   const sortMode = ref<SortMode>(loadSortModePref());
@@ -208,6 +209,7 @@ export function useRepoActions(
     const r = findRepo(id);
     if (r) Object.assign(r, patch);
   }
+  const getRepoStatus = (repoId: string): Repo["status"] => findRepo(repoId)?.status ?? null;
   const hasRepo = (repoId: string): boolean => findRepo(repoId) !== undefined;
 
   // ── actions ─────────────────────────────────────────────────────────────────
@@ -223,7 +225,9 @@ export function useRepoActions(
         patchRepo(repoId, { status: repo.status });
         return { ok: true, code: "OK", message: "refreshed" };
       }
-      return await api[name](repoId);
+      const result = await api[name](repoId);
+      if (result.ok && (name === "fetch" || name === "pull")) onHistoryChanged(repoId);
+      return result;
     } catch (e) {
       return asResult(e);
     } finally {
@@ -258,7 +262,9 @@ export function useRepoActions(
   async function commit(repoId: string, message: string, amend = false): Promise<ActionResult> {
     busy[repoId] = "commit";
     try {
-      return await api.commit(repoId, message, amend);
+      const result = await api.commit(repoId, message, amend);
+      if (result.ok) onHistoryChanged(repoId);
+      return result;
     } catch (e) {
       return asResult(e);
     } finally {
@@ -272,7 +278,9 @@ export function useRepoActions(
   async function commitSelected(repoId: string, message: string, paths: string[]): Promise<ActionResult> {
     busy[repoId] = "commit";
     try {
-      return await api.commitSelected(repoId, message, paths);
+      const result = await api.commitSelected(repoId, message, paths);
+      if (result.ok) onHistoryChanged(repoId);
+      return result;
     } catch (e) {
       return asResult(e);
     } finally {
@@ -426,6 +434,7 @@ export function useRepoActions(
     needsAttentionRepos,
     visibleAttentionRepos,
     dismissAttention,
+    getRepoStatus,
     hasRepo,
     patchRepo,
     upsertRepo,

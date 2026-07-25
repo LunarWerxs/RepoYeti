@@ -1,22 +1,30 @@
 import { expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
+import type { RepoYetiConfig } from "../src/config.ts";
+import { getGitCommitStats, putGitCommitStats } from "../src/db.ts";
+import { createApp } from "../src/http/app.ts";
 import {
   ACTIVITY_AUTHOR_CAP,
   ACTIVITY_COMMIT_CAP,
+  ACTIVITY_COMMIT_CAPS,
   ACTIVITY_QUERY_LIMIT,
+  ACTIVITY_STAT_CACHE_VERSION,
   ACTIVITY_WINDOW_HOURS,
+  type ActivityCommit,
+  type ActivityStatCache,
+  activityWindow,
   aggregateActivity,
+  normalizeActivityScale,
   parseGitActivity,
   readFallbackActivity,
   readGitActivity,
-  type ActivityCommit,
+  selectChangeStatCommits,
 } from "../src/read/activity.ts";
-import { createApp } from "../src/http/app.ts";
-import type { RepoYetiConfig } from "../src/config.ts";
-import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 
 const HOUR_MS = 60 * 60 * 1000;
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
@@ -99,6 +107,152 @@ test("aggregateActivity builds exact rolling totals, contributor groups, and 24 
   expect(result.buckets[19]!.commits).toBe(1);
 });
 
+test("aggregateActivity builds 30 local-calendar day buckets including today", () => {
+  const until = new Date(2026, 6, 24, 18, 30).getTime();
+  const window = activityWindow("daily", until);
+  const today = new Date(2026, 6, 24).getTime();
+  const yesterday = new Date(2026, 6, 23).getTime();
+  const result = aggregateActivity(
+    [
+      {
+        authorName: "First",
+        authorEmail: "first@example.com",
+        date: window.since,
+        stat: { filesChanged: 1, addedLines: 2, removedLines: 0 },
+      },
+      {
+        authorName: "Yesterday",
+        authorEmail: "yesterday@example.com",
+        date: yesterday + HOUR_MS,
+        stat: { filesChanged: 1, addedLines: 3, removedLines: 1 },
+      },
+      {
+        authorName: "Today",
+        authorEmail: "today@example.com",
+        date: today + HOUR_MS,
+        stat: { filesChanged: 1, addedLines: 4, removedLines: 2 },
+      },
+      {
+        authorName: "Too old",
+        authorEmail: "old@example.com",
+        date: window.since - 1,
+      },
+    ],
+    until,
+    false,
+    "daily",
+  );
+
+  expect(result.scale).toBe("daily");
+  expect(result.bucketUnit).toBe("day");
+  expect(result.windowCount).toBe(30);
+  expect(result.buckets).toHaveLength(30);
+  expect(result.buckets[0]!.start).toBe(window.since);
+  expect(result.buckets[0]!.end).toBe(result.buckets[1]!.start);
+  expect(result.buckets[28]!.start).toBe(yesterday);
+  expect(result.buckets[29]!.start).toBe(today);
+  expect(result.buckets[29]!.end).toBe(until);
+  expect(result.buckets[0]!.commits).toBe(1);
+  expect(result.buckets[28]!.commits).toBe(1);
+  expect(result.buckets[29]!.commits).toBe(1);
+  expect(result.commits).toBe(3);
+  expect(result.addedLines).toBe(9);
+  expect(result.windowHours).toBe((until - window.since) / HOUR_MS);
+});
+
+test("aggregateActivity builds 12 calendar-aware month buckets including this month", () => {
+  const until = new Date(2026, 6, 24, 18, 30).getTime();
+  const firstMonth = new Date(2025, 7, 1).getTime();
+  const previousMonth = new Date(2026, 5, 1).getTime();
+  const currentMonth = new Date(2026, 6, 1).getTime();
+  const result = aggregateActivity(
+    [
+      {
+        authorName: "First",
+        authorEmail: "first@example.com",
+        date: firstMonth,
+      },
+      {
+        authorName: "Previous",
+        authorEmail: "previous@example.com",
+        date: new Date(2026, 5, 30, 23, 59).getTime(),
+      },
+      {
+        authorName: "Current",
+        authorEmail: "current@example.com",
+        date: currentMonth,
+      },
+      {
+        authorName: "Before range",
+        authorEmail: "old@example.com",
+        date: firstMonth - 1,
+      },
+    ],
+    until,
+    false,
+    "monthly",
+  );
+
+  expect(result.scale).toBe("monthly");
+  expect(result.bucketUnit).toBe("month");
+  expect(result.windowCount).toBe(12);
+  expect(result.buckets).toHaveLength(12);
+  expect(result.since).toBe(firstMonth);
+  expect(result.buckets[0]!.start).toBe(firstMonth);
+  expect(result.buckets[0]!.end).toBe(result.buckets[1]!.start);
+  expect(result.buckets[10]!.start).toBe(previousMonth);
+  expect(result.buckets[11]!.start).toBe(currentMonth);
+  expect(result.buckets[11]!.end).toBe(until);
+  expect(result.buckets[0]!.commits).toBe(1);
+  expect(result.buckets[10]!.commits).toBe(1);
+  expect(result.buckets[11]!.commits).toBe(1);
+  expect(result.commits).toBe(3);
+});
+
+test("activity scale parsing defaults invalid values to hourly", () => {
+  expect(normalizeActivityScale(undefined)).toBe("hourly");
+  expect(normalizeActivityScale("hourly")).toBe("hourly");
+  expect(normalizeActivityScale("daily")).toBe("daily");
+  expect(normalizeActivityScale("monthly")).toBe("monthly");
+  expect(normalizeActivityScale("yearly")).toBe("hourly");
+});
+
+test("change-stat sampling covers every active Daily and Monthly bucket", () => {
+  const until = new Date(2026, 6, 24, 18, 30).getTime();
+  for (const scale of ["daily", "monthly"] as const) {
+    const window = activityWindow(scale, until);
+    const commits = window.starts
+      .flatMap((start, bucket) =>
+        Array.from({ length: bucket + 2 }, (_, index) => ({
+          hash: `${scale}-${bucket}-${index}`,
+          date: start + index + 1,
+        })),
+      )
+      .sort((a, b) => b.date - a.date);
+    const selected = selectChangeStatCommits(
+      commits,
+      window.starts,
+      window.starts.length,
+    );
+
+    expect(selected).toHaveLength(window.starts.length);
+    expect(
+      new Set(selected.map((commit) => Number(commit.hash.split("-")[1]))),
+    ).toEqual(new Set(window.starts.map((_, index) => index)));
+  }
+
+  const sparseStarts = [100, 200, 300];
+  const sparse = [
+    ...Array.from({ length: 20 }, (_, index) => ({ hash: `new-${index}`, date: 301 + index })),
+    { hash: "middle-only", date: 201 },
+    { hash: "old-only", date: 101 },
+  ];
+  const selected = selectChangeStatCommits(sparse, sparseStarts, 10);
+  expect(selected).toHaveLength(10);
+  expect(selected.some((commit) => commit.hash === "old-only")).toBe(true);
+  expect(selected.some((commit) => commit.hash === "middle-only")).toBe(true);
+});
+
 test("aggregateActivity keeps the newest 5000 commits and exposes the cap sentinel", () => {
   const until = Date.UTC(2026, 6, 24, 18, 30);
   const commits: ActivityCommit[] = Array.from({ length: ACTIVITY_QUERY_LIMIT }, (_, index) => ({
@@ -113,6 +267,44 @@ test("aggregateActivity keeps the newest 5000 commits and exposes the cap sentin
   expect(result.filesChanged).toBe(ACTIVITY_COMMIT_CAP);
   expect(result.addedLines).toBe(ACTIVITY_COMMIT_CAP);
   expect(result.truncated).toBe(true);
+  expect(result.commitsTruncated).toBe(true);
+  expect(result.changeStatsTruncated).toBe(false);
+});
+
+test("aggregateActivity keeps commit counts exact while marking bounded change statistics", () => {
+  const until = new Date(2026, 6, 24, 18, 30).getTime();
+  const result = aggregateActivity(
+    [
+      {
+        authorName: "Known",
+        authorEmail: "known@example.com",
+        date: until - HOUR_MS,
+        stat: { filesChanged: 2, addedLines: 9, removedLines: 3 },
+        changeStatsKnown: true,
+      },
+      {
+        authorName: "Metadata only",
+        authorEmail: "metadata@example.com",
+        date: until - 2 * HOUR_MS,
+        changeStatsKnown: false,
+      },
+    ],
+    until,
+    false,
+    "daily",
+    true,
+  );
+
+  expect(result.commits).toBe(2);
+  expect(result.contributors).toBe(2);
+  expect(result.filesChanged).toBe(2);
+  expect(result.addedLines).toBe(9);
+  expect(result.removedLines).toBe(3);
+  expect(result.commitsTruncated).toBe(false);
+  expect(result.changeStatsTruncated).toBe(true);
+  expect(result.truncated).toBe(true);
+  expect(result.buckets.reduce((sum, bucket) => sum + bucket.commits, 0)).toBe(2);
+  expect(result.buckets.reduce((sum, bucket) => sum + bucket.changeStatsCommits, 0)).toBe(1);
 });
 
 test("aggregateActivity keeps the contributor count exact while capping ranked author detail", () => {
@@ -134,7 +326,7 @@ test("aggregateActivity keeps the contributor count exact while capping ranked a
   expect(result.authors.at(-1)!.name).toBe("User 24");
 });
 
-test("readFallbackActivity reuses normalized log entries and stays honest about a smaller backend cap", async () => {
+test("readFallbackActivity marks Lore entries without stats partial but preserves explicit zero stats", async () => {
   const until = Date.UTC(2026, 6, 24, 18, 30);
   let call: unknown[] = [];
   const result = await readFallbackActivity(
@@ -160,7 +352,33 @@ test("readFallbackActivity reuses normalized log entries and stays honest about 
   expect(result.filesChanged).toBe(0);
   expect(result.addedLines).toBe(0);
   expect(result.removedLines).toBe(0);
-  expect(result.truncated).toBe(false);
+  expect(result.commitsTruncated).toBe(false);
+  expect(result.changeStatsTruncated).toBe(true);
+  expect(result.truncated).toBe(true);
+  expect(result.buckets.reduce((sum, bucket) => sum + bucket.changeStatsCommits, 0)).toBe(0);
+
+  const knownZero = await readFallbackActivity(
+    async () => ({
+      ok: true,
+      code: "OK",
+      commits: [
+        entry(
+          until - HOUR_MS,
+          "Stats-capable User",
+          "stats@example.com",
+          { filesChanged: 0, addedLines: 0, removedLines: 0 },
+        ),
+      ],
+      hasMore: false,
+    }),
+    "head",
+    until,
+  );
+  expect(knownZero.changeStatsTruncated).toBe(false);
+  expect(knownZero.truncated).toBe(false);
+  expect(
+    knownZero.buckets.reduce((sum, bucket) => sum + bucket.changeStatsCommits, 0),
+  ).toBe(1);
 
   const capped = await readFallbackActivity(
     async () => ({
@@ -173,6 +391,20 @@ test("readFallbackActivity reuses normalized log entries and stays honest about 
     until,
   );
   expect(capped.truncated).toBe(true);
+
+  let dailyLimit = 0;
+  const daily = await readFallbackActivity(
+    async (limit) => {
+      dailyLimit = limit ?? 0;
+      return { ok: true, code: "OK", commits: [], hasMore: false };
+    },
+    "head",
+    until,
+    "daily",
+  );
+  expect(dailyLimit).toBe(ACTIVITY_COMMIT_CAPS.daily + 1);
+  expect(daily.scale).toBe("daily");
+  expect(daily.buckets).toHaveLength(30);
 });
 
 function commitEnv(name: string, email: string, date: number): Record<string, string | undefined> {
@@ -245,11 +477,165 @@ test("shortstat parser handles translated labels, one-sided changes, and no-stat
   ]);
 });
 
+test("metadata parser distinguishes omitted diff statistics from genuine zero-change commits", () => {
+  const field = "\x1f";
+  const raw = `abc${field}Author${field}author@example.com${field}100`;
+  expect(parseGitActivity(raw, false)).toEqual([
+    {
+      hash: "abc",
+      authorName: "Author",
+      authorEmail: "author@example.com",
+      date: 100_000,
+      stat: undefined,
+      changeStatsKnown: false,
+    },
+  ]);
+});
+
+test("persistent commit-stat cache is repo-scoped, versioned, and preserves known zero stats", () => {
+  const repoId = mustUpsertRepo(
+    mkScratchDir("ry-activity-cache-"),
+    `activity-cache-${randomUUID()}`,
+    "auto",
+    false,
+  );
+  const otherRepoId = `activity-cache-${randomUUID()}`;
+  const hash = "a".repeat(40);
+  const date = Date.UTC(2026, 6, 1);
+  const zero = { filesChanged: 0, addedLines: 0, removedLines: 0 };
+
+  putGitCommitStats(
+    repoId,
+    [{ hash, date, stat: zero }],
+    ACTIVITY_STAT_CACHE_VERSION,
+  );
+
+  expect(
+    getGitCommitStats(
+      repoId,
+      date - 1,
+      date + 1,
+      ACTIVITY_STAT_CACHE_VERSION,
+    ).get(hash),
+  ).toEqual(zero);
+  expect(
+    getGitCommitStats(
+      otherRepoId,
+      date - 1,
+      date + 1,
+      ACTIVITY_STAT_CACHE_VERSION,
+    ).size,
+  ).toBe(0);
+  expect(
+    getGitCommitStats(
+      repoId,
+      date - 1,
+      date + 1,
+      ACTIVITY_STAT_CACHE_VERSION + 1,
+    ).size,
+  ).toBe(0);
+
+  putGitCommitStats(
+    otherRepoId,
+    [{ hash, date, stat: zero }],
+    ACTIVITY_STAT_CACHE_VERSION,
+  );
+  expect(
+    getGitCommitStats(
+      otherRepoId,
+      date - 1,
+      date + 1,
+      ACTIVITY_STAT_CACHE_VERSION,
+    ).size,
+  ).toBe(0);
+});
+
+test("Git Daily sampling fills old, middle, and recent bars progressively from cache misses", async () => {
+  const dir = mkScratchDir("ry-activity-stratified-");
+  const until = new Date(2026, 6, 24, 18, 30).getTime();
+  const window = activityWindow("daily", until);
+  const activeBuckets = [1, 15, 29];
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+
+  for (const bucket of activeBuckets) {
+    for (let index = 0; index < 2; index++) {
+      await commitFile(
+        dir,
+        `bucket-${bucket}-${index}.txt`,
+        `bucket ${bucket}, commit ${index}\n`,
+        `bucket ${bucket}, commit ${index}`,
+        "Sampler",
+        "sampler@example.com",
+        window.starts[bucket]! + HOUR_MS + index * 60_000,
+      );
+    }
+  }
+
+  const stored = new Map<string, { filesChanged: number; addedLines: number; removedLines: number }>();
+  const writeSizes: number[] = [];
+  const statCache: ActivityStatCache = {
+    read: () => new Map(stored),
+    write: (entries) => {
+      writeSizes.push(entries.length);
+      for (const entry of entries) stored.set(entry.hash, entry.stat);
+    },
+  };
+
+  const first = await readGitActivity(dir, "head", until, "daily", {
+    changeStatCap: 3,
+    statCache,
+  });
+  expect(first.ok).toBe(true);
+  expect(first.commits).toBe(6);
+  expect(first.buckets.reduce((sum, bucket) => sum + bucket.commits, 0)).toBe(6);
+  expect(first.buckets.reduce((sum, bucket) => sum + bucket.changeStatsCommits, 0)).toBe(3);
+  for (const bucket of activeBuckets) {
+    expect(first.buckets[bucket]).toMatchObject({
+      commits: 2,
+      changeStatsCommits: 1,
+      filesChanged: 1,
+      addedLines: 1,
+      removedLines: 0,
+    });
+  }
+  expect(first.commitsTruncated).toBe(false);
+  expect(first.changeStatsTruncated).toBe(true);
+  expect(first.truncated).toBe(true);
+  expect(writeSizes).toEqual([3]);
+
+  const second = await readGitActivity(dir, "head", until, "daily", {
+    changeStatCap: 3,
+    statCache,
+  });
+  expect(second.buckets.reduce((sum, bucket) => sum + bucket.changeStatsCommits, 0)).toBe(6);
+  for (const bucket of activeBuckets) {
+    expect(second.buckets[bucket]).toMatchObject({
+      commits: 2,
+      changeStatsCommits: 2,
+      filesChanged: 2,
+      addedLines: 2,
+      removedLines: 0,
+    });
+  }
+  expect(second.changeStatsTruncated).toBe(false);
+  expect(second.truncated).toBe(false);
+  expect(writeSizes).toEqual([3, 3]);
+
+  const third = await readGitActivity(dir, "head", until, "daily", {
+    changeStatCap: 3,
+    statCache,
+  });
+  expect(third).toEqual(second);
+  expect(writeSizes).toEqual([3, 3]);
+});
+
 test("Git shortstat activity counts add-only, delete-only, pure rename, and binary commits", async () => {
   const dir = mkScratchDir("ry-activity-stats-");
   const until = Date.now();
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
-  await $`git -C ${dir} config diff.renames true`.quiet();
+  // The activity policy pins rename detection, so a mutable repo preference cannot change an
+  // already-cached commit's meaning.
+  await $`git -C ${dir} config diff.renames false`.quiet();
   await commitFile(
     dir,
     "seed.txt",
@@ -315,19 +701,18 @@ test("Git shortstat activity counts add-only, delete-only, pure rename, and bina
   });
 });
 
-test("Git activity matches History author dates and canonicalizes contributors through mailmap", async () => {
-  const dir = mkScratchDir("ry-activity-identity-");
+test("Git activity filters and buckets commits by the author date shown in History", async () => {
+  const dir = mkScratchDir("ry-activity-author-date-");
   const until = Date.now();
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
 
-  writeFileSync(join(dir, ".mailmap"), "Canonical Coder <canonical@example.com> Alias Coder <alias@example.com>\n");
   writeFileSync(join(dir, "rebased.txt"), "old authored work\n");
-  await $`git -C ${dir} add -- .mailmap rebased.txt`.quiet();
+  await $`git -C ${dir} add -- rebased.txt`.quiet();
   await $`git -C ${dir} commit -q -m "rebased old work"`
     .env(
       splitDateCommitEnv(
-        "Alias Coder",
-        "alias@example.com",
+        "Earlier Author",
+        "earlier@example.com",
         until - 48 * HOUR_MS,
         until - 2 * HOUR_MS,
       ),
@@ -338,23 +723,76 @@ test("Git activity matches History author dates and canonicalizes contributors t
     dir,
     "recent.txt",
     "recent\n",
-    "recent canonical work",
-    "Alias Coder",
-    "alias@example.com",
+    "recent work",
+    "Recent Author",
+    "recent@example.com",
+    until - HOUR_MS,
+  );
+
+  const hourly = await readGitActivity(dir, "head", until);
+  expect(hourly.ok).toBe(true);
+  // The earlier commit's recent committer timestamp must not leak it into the author-date window.
+  expect(hourly.commits).toBe(1);
+  expect(hourly.authors).toEqual([
+    {
+      name: "Recent Author",
+      email: "recent@example.com",
+      commits: 1,
+      addedLines: 1,
+      removedLines: 0,
+    },
+  ]);
+
+  const daily = await readGitActivity(dir, "head", until, "daily");
+  expect(daily.ok).toBe(true);
+  expect(daily.commits).toBe(2);
+  const earlierBucket = daily.buckets.find(
+    (bucket) => bucket.start <= until - 48 * HOUR_MS && until - 48 * HOUR_MS < bucket.end,
+  );
+  const committerBucket = daily.buckets.find(
+    (bucket) => bucket.start <= until - 2 * HOUR_MS && until - 2 * HOUR_MS < bucket.end,
+  );
+  expect(earlierBucket?.commits).toBe(1);
+  expect(committerBucket?.commits).toBe(1);
+});
+
+test("Git activity canonicalizes contributor aliases through mailmap", async () => {
+  const dir = mkScratchDir("ry-activity-mailmap-");
+  const until = Date.now();
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+
+  writeFileSync(
+    join(dir, ".mailmap"),
+    [
+      "Canonical Coder <canonical@example.com> Alias One <one@example.com>",
+      "Canonical Coder <canonical@example.com> Alias Two <two@example.com>",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(join(dir, "one.txt"), "one\n");
+  await $`git -C ${dir} add -- .mailmap one.txt`.quiet();
+  await $`git -C ${dir} commit -q -m "first alias"`
+    .env(commitEnv("Alias One", "one@example.com", until - 2 * HOUR_MS))
+    .quiet();
+  await commitFile(
+    dir,
+    "two.txt",
+    "two\n",
+    "second alias",
+    "Alias Two",
+    "two@example.com",
     until - HOUR_MS,
   );
 
   const result = await readGitActivity(dir, "head", until);
   expect(result.ok).toBe(true);
-  // The rebased commit has a recent committer timestamp but the old author timestamp shown by
-  // History, so it must not leak into today's chart.
-  expect(result.commits).toBe(1);
+  expect(result.contributors).toBe(1);
   expect(result.authors).toEqual([
     {
       name: "Canonical Coder",
       email: "canonical@example.com",
-      commits: 1,
-      addedLines: 1,
+      commits: 2,
+      addedLines: 4,
       removedLines: 0,
     },
   ]);
@@ -421,13 +859,29 @@ test("Git activity respects the 24-hour window and ref scope, and counts a merge
 
   const id = mustUpsertRepo(dir, "activity-route", "auto", false);
   const app = createApp(localCfg());
-  const response = await app.request(`/api/repos/${id}/activity?refs=all`);
+  const response = await app.request(`/api/repos/${id}/activity?refs=all&scale=daily`);
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body.ok).toBe(true);
-  expect(body.windowHours).toBe(24);
-  expect(body.commits).toBe(3);
-  expect(body.buckets).toHaveLength(24);
-  expect(body.until - body.since).toBe(24 * HOUR_MS);
+  expect(body.scale).toBe("daily");
+  expect(body.bucketUnit).toBe("day");
+  expect(body.windowCount).toBe(30);
+  expect(body.commits).toBe(4);
+  expect(body.buckets).toHaveLength(30);
+  expect(body.commitsTruncated).toBe(false);
+  expect(body.changeStatsTruncated).toBe(false);
+  expect(body.buckets.every((bucket: { end?: number }) => Number.isFinite(bucket.end))).toBe(true);
+  expect(body.until - body.since).toBeGreaterThan(29 * 24 * HOUR_MS);
+  expect(
+    getGitCommitStats(
+      id,
+      body.since,
+      body.until,
+      ACTIVITY_STAT_CACHE_VERSION,
+    ).size,
+  ).toBe(4);
+
+  const defaultResponse = await app.request(`/api/repos/${id}/activity?scale=invalid`);
+  expect((await defaultResponse.json()).scale).toBe("hourly");
   expect((await app.request("/api/repos/missing/activity")).status).toBe(404);
 });

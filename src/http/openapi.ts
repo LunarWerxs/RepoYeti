@@ -125,19 +125,34 @@ export const META: Record<string, RouteMeta> = {
 
   // ── history ─────────────────────────────────────────────────────────────────────
   "GET /api/repos/:id/log": {
-    summary: "Paginated commit history (limit/skip/merges filters).",
+    summary: "Paginated commit history with ref, merge, and exact author filters.",
     tags: ["history"],
     query: [
-      { name: "limit", description: "Max commits to return (page size)." },
+      { name: "limit", description: "Max commits to return (page size, capped at 500)." },
       { name: "skip", description: "Commits to skip (pagination offset)." },
       { name: "merges", description: "Filter merge commits.", enum: ["only", "exclude"] },
       { name: "refs", description: "Refs to include.", enum: ["head", "local", "all"] },
+      {
+        name: "authorEmail",
+        description: "Exact canonical author email (case-insensitive; takes precedence over name).",
+      },
+      {
+        name: "authorName",
+        description: "Exact canonical author name when no email is supplied (case-insensitive).",
+      },
     ],
   },
   "GET /api/repos/:id/activity": {
-    summary: "Bounded rolling 24-hour commit, contributor, file, and line activity.",
+    summary: "Bounded hourly, daily, or monthly commit, contributor, file, and line activity.",
     tags: ["history"],
-    query: [{ name: "refs", description: "Refs to include.", enum: ["head", "local", "all"] }],
+    query: [
+      { name: "refs", description: "Refs to include.", enum: ["head", "local", "all"] },
+      {
+        name: "scale",
+        description: "Activity bucket scale (defaults to hourly).",
+        enum: ["hourly", "daily", "monthly"],
+      },
+    ],
   },
   "GET /api/repos/:id/commit/:hash": { summary: "One commit's detail (changed files with per-file line counts; capped list + filesTotal).", tags: ["history"] },
 

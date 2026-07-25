@@ -21,7 +21,11 @@ const US = "\x1f"; // field separator (unit separator) — can't appear in a ref
 export const MAX_BRANCHES = 200;
 export const MAX_STASHES = 50;
 export const LOG_PAGE_DEFAULT = 50;
-export const LOG_PAGE_MAX = 200;
+// Match the browser's retained History window. A retained refresh can therefore come from one
+// `git log` process/ref snapshot instead of stitching together pages while refs may be moving.
+export const LOG_PAGE_MAX = 500;
+// Keep hash argv comfortably below Windows' command-line limit during filtered stat enrichment.
+const LOG_HASH_CHUNK = 200;
 
 export interface BranchInfo {
   /** Short branch name, e.g. "main" or "feature/x". */
@@ -119,6 +123,45 @@ export type MergeFilter = "only" | "exclude";
  */
 export type RefScope = "head" | "local" | "all";
 
+/** Exact author identity used by the History table filter. Email wins when both are present,
+ *  matching the activity overview's contributor grouping; name is the fallback for VCSes that
+ *  do not expose author email. */
+export interface LogAuthorFilter {
+  name?: string;
+  email?: string;
+}
+
+const LOG_AUTHOR_PART_MAX = 320;
+
+/** Keep direct callers and HTTP callers on the same bounded, case-insensitive identity rules. */
+export function normalizeLogAuthorFilter(
+  author?: LogAuthorFilter,
+): { name: string; email: string } | undefined {
+  const clean = (value: string | undefined): string =>
+    Array.from(value ?? "", (character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || code === 127 ? " " : character;
+    })
+      .join("")
+      .trim()
+      .slice(0, LOG_AUTHOR_PART_MAX)
+      .toLowerCase();
+  const normalized = { name: clean(author?.name), email: clean(author?.email) };
+  return normalized.email || normalized.name ? normalized : undefined;
+}
+
+/** VCS-neutral equivalent of git's exact --author match, also used by the Lore adapter. */
+export function logAuthorMatches(
+  filter: LogAuthorFilter | undefined,
+  authorName: string,
+  authorEmail: string,
+): boolean {
+  const normalized = normalizeLogAuthorFilter(filter);
+  if (!normalized) return true;
+  if (normalized.email) return authorEmail.trim().toLowerCase() === normalized.email;
+  return authorName.trim().toLowerCase() === normalized.name;
+}
+
 /**
  * What one commit changed, totalled across its files (`git log --numstat`).
  * Line counts only — `--numstat` reports lines, never characters, so this is deliberately
@@ -177,6 +220,7 @@ export async function readLog(
   skip = 0,
   merges?: MergeFilter,
   refScope: RefScope = "head",
+  author?: LogAuthorFilter,
 ): Promise<LogResult> {
   const cap = Math.min(Math.max(1, Math.floor(limit)), LOG_PAGE_MAX);
   const off = Math.max(0, Math.floor(skip));
@@ -184,8 +228,9 @@ export async function readLog(
     return await readGate.run(async () => {
       // %P = space-separated parent hashes (→ merge detection). Subject (%s) stays LAST so any
       // odd character in it can't shift earlier fields when we split on the unit separator.
-      const fmt = ["%H", "%h", "%an", "%ae", "%at", "%P", "%D", "%s"].join(US);
+      const fmt = ["%H", "%h", "%aN", "%aE", "%at", "%P", "%D", "%s"].join(US);
       const mergeFlag = merges === "only" ? ["--merges"] : merges === "exclude" ? ["--no-merges"] : [];
+      const normalizedAuthor = normalizeLogAuthorFilter(author);
       // Which refs to walk. HEAD-only stays the historical default (linear current-branch log).
       // local/all add the other branch tips (+ remotes) plus --date-order, so the graph's lanes
       // stay stable across pages. HEAD is passed explicitly so a detached checkout still appears.
@@ -196,20 +241,77 @@ export async function readLog(
             ? ["HEAD", "--branches", "--tags", "--date-order"]
             : [];
       let raw = "";
+      let hasMore = false;
       try {
-        raw = await gitFor(absPath).raw([
-          "log",
-          "--no-color",
-          ...scopeArgs,
-          ...mergeFlag,
-          `--max-count=${cap}`,
-          `--skip=${off}`,
-          // Per-commit file/line totals for the history table's "changes" column. This makes the
-          // output MULTI-line per commit (a numstat line per changed file follows each record),
-          // which the parser below handles by shape — see the US test.
-          "--numstat",
-          `--pretty=format:${fmt}`,
-        ]);
+        if (normalizedAuthor) {
+          // `%aN` / `%aE` apply .mailmap. Select hashes from canonical metadata first, because
+          // git's built-in --author predicate is documented to match the raw author header and
+          // would make a clicked canonical activity chip silently omit that person's aliases.
+          const metadataFormat = ["%H", "%aN", "%aE"].join(US);
+          const metadataRaw = await gitFor(absPath).raw([
+            "log",
+            "--no-color",
+            ...scopeArgs,
+            ...mergeFlag,
+            "--use-mailmap",
+            `--pretty=tformat:${metadataFormat}`,
+          ]);
+          const matchingHashes = metadataRaw
+            .split("\n")
+            .filter((line) => line.includes(US))
+            .map((line) => {
+              const [hash = "", authorName = "", authorEmail = ""] = line.split(US);
+              return { hash, authorName, authorEmail };
+            })
+            .filter((commit) =>
+              normalizedAuthor.email
+                ? commit.authorEmail.trim().toLowerCase() === normalizedAuthor.email
+                : commit.authorName.trim().toLowerCase() === normalizedAuthor.name
+            )
+            .map((commit) => commit.hash);
+          const candidates = matchingHashes.slice(off, off + cap + 1);
+          const pageHashes = candidates.slice(0, cap);
+          hasMore = candidates.length > cap;
+          if (pageHashes.length === 0) {
+            return { ok: true, code: "OK" as const, commits: [], hasMore: false };
+          }
+          // --no-walk=unsorted preserves the selected newest-first order and avoids traversing
+          // each hash's ancestry again. Chunking keeps even a 500-row page safe on Windows.
+          const chunks = Array.from(
+            { length: Math.ceil(pageHashes.length / LOG_HASH_CHUNK) },
+            (_, index) =>
+              pageHashes.slice(index * LOG_HASH_CHUNK, (index + 1) * LOG_HASH_CHUNK),
+          );
+          const details = await Promise.all(
+            chunks.map((hashes) =>
+              gitFor(absPath).raw([
+                "log",
+                "--no-color",
+                "--no-walk=unsorted",
+                "--use-mailmap",
+                "--numstat",
+                `--pretty=tformat:${fmt}`,
+                ...hashes,
+              ])
+            ),
+          );
+          raw = details.join("\n");
+        } else {
+          raw = await gitFor(absPath).raw([
+            "log",
+            "--no-color",
+            ...scopeArgs,
+            ...mergeFlag,
+            "--use-mailmap",
+            `--max-count=${cap}`,
+            `--skip=${off}`,
+            // Per-commit file/line totals for the history table's "changes" column. This makes the
+            // output MULTI-line per commit (a numstat line per changed file follows each record),
+            // which the parser below handles by shape — see the US test.
+            "--numstat",
+            `--pretty=format:${fmt}`,
+          ]);
+        }
       } catch {
         return { ok: true, code: "OK" as const, commits: [], hasMore: false }; // unborn HEAD
       }
@@ -247,7 +349,12 @@ export async function readLog(
         if (addedRaw !== "-") current.stat.addedLines += Number(addedRaw) || 0;
         if (removedRaw !== "-") current.stat.removedLines += Number(removedRaw) || 0;
       }
-      return { ok: true, code: "OK" as const, commits, hasMore: commits.length === cap };
+      return {
+        ok: true,
+        code: "OK" as const,
+        commits,
+        hasMore: normalizedAuthor ? hasMore : commits.length === cap,
+      };
     });
   } catch (e) {
     return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e), commits: [], hasMore: false };

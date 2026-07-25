@@ -96,15 +96,17 @@ ${section}
 
 ## Install
 
-Download the binary for your platform below and run it. No install step, no runtime to fetch.
+Download the bundle for your platform, extract the whole folder, and run the RepoYeti executable.
+No install step or runtime is required; keep the bundled \`web\` folder beside the executable.
 
 | Platform | Asset |
 | --- | --- |
-| Linux (x64) | \`repoyeti-linux-x64\` |
-| macOS (Apple silicon) | \`repoyeti-macos-arm64\` |
-| Windows (x64) | \`repoyeti-windows-x64.exe\` |
+| Linux (x64) | \`repoyeti-linux-x64.tar.gz\` |
+| macOS (Apple silicon) | \`repoyeti-macos-arm64.tar.gz\` |
+| Windows (x64) | \`repoyeti-windows-x64.zip\` |
 
-Already running it? RepoYeti tells you when a new version is out; nothing installs without your say-so.
+Source checkouts can update in-app. Portable-bundle installs update by downloading and extracting
+the newer archive; nothing is installed without your say-so.
 Full history: [CHANGELOG.md](https://github.com/${repo}/blob/main/CHANGELOG.md)
 `;
 

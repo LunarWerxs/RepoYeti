@@ -2,12 +2,14 @@
  * Read a repo's current state via the system git binary (simple-git).
  *
  * One `git status` call gives branch, ahead/behind, and the dirty file set; a
- * second cheap call resolves the remote URL. A 30s block timeout guards against
- * a hung child (e.g. an SSH key prompt). `behind` reflects the last fetch only —
- * we never fetch here, so a watch event never touches the network.
+ * `rev-parse` records HEAD's exact object id and the remote URL is resolved (usually
+ * from the config-keyed cache). A 30s block timeout guards against a hung child
+ * (e.g. an SSH key prompt). `behind` reflects the last fetch only — we never fetch
+ * here, so a watch event never touches the network.
  */
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { SimpleGit } from "simple-git";
 import { gitFor, currentGitOperation } from "../git.ts";
 import { readGate } from "../gitgate.ts";
@@ -69,6 +71,81 @@ async function resolveRemote(git: SimpleGit, absPath: string): Promise<string | 
   return remote;
 }
 
+/** Full ref identity for invalidation. An unborn/missing ref has no object yet. */
+async function resolveOid(git: SimpleGit, ref: string): Promise<string | null> {
+  try {
+    const oid = (await git.revparse(["--verify", ref])).trim();
+    // Git repositories may use SHA-1 (40 hex) or SHA-256 (64 hex). Refuse any diagnostic
+    // text rather than letting an unexpected command response become an unstable signal.
+    return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(oid) ? oid.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stable identity for every ref that can add/remove/decorate a row in History.
+ *
+ * `for-each-ref` reads only Git's ref store (it does not walk commits), and one sorted command
+ * covers loose, packed, and reftable refs across linked worktrees. Recomputing is intentional:
+ * this value is itself the cache-invalidation key, so caching it behind filesystem metadata
+ * would reintroduce the stale-ref edge case it exists to prevent.
+ */
+export async function resolveHistoryRefsHash(git: SimpleGit): Promise<string> {
+  const refs = await git.raw([
+    "for-each-ref",
+    "--sort=refname",
+    // `symref` matters for decorations such as origin/HEAD -> origin/main: its object id can
+    // stay identical when the symbolic target changes.
+    "--format=%(refname)%00%(objectname)%00%(symref)",
+    "refs/heads",
+    "refs/remotes",
+    "refs/tags",
+  ]);
+  return createHash("sha256").update(refs, "utf8").digest("hex");
+}
+
+interface WorktreeStatusPath {
+  path: string;
+  from?: string;
+  index: string;
+  working_dir: string;
+}
+
+/**
+ * Stable, content-free identity for the path/state inputs that control checkout safety.
+ *
+ * A plain dirty-file count misses important transitions (`a.ts` → `b.ts`, staged → unstaged)
+ * that can flip a pull between ready and WOULD_OVERWRITE. The staged-index identity includes
+ * exact blob OIDs, so replacing the staged contents of the same `M` path also invalidates a
+ * preview. Sorting keeps simple-git's output order out of the path/status portion; filenames and
+ * object IDs never leave this SHA-256 digest.
+ */
+function worktreeStateHash(
+  files: readonly WorktreeStatusPath[],
+  stagedIndexIdentity: string,
+): string {
+  const state = files
+    .map((file) => [
+      file.path,
+      file.from ?? "",
+      file.index ?? " ",
+      file.working_dir ?? " ",
+    ])
+    .sort((a, b) => {
+      for (let i = 0; i < a.length; i++) {
+        const compared = (a[i] ?? "").localeCompare(b[i] ?? "");
+        if (compared !== 0) return compared;
+      }
+      return 0;
+    });
+  return createHash("sha256")
+    .update(JSON.stringify(state), "utf8")
+    .update("\0", "utf8")
+    .update(stagedIndexIdentity, "utf8")
+    .digest("hex");
+}
+
 /** One changed file for the tree view: porcelain status collapsed to a single letter. */
 export interface ChangedFile {
   path: string;
@@ -87,6 +164,46 @@ export interface ChangedFile {
  *  so both agree on exactly one definition. */
 function isConflictPair(x: string, y: string): boolean {
   return x === "U" || y === "U" || (x === "A" && y === "A") || (x === "D" && y === "D");
+}
+
+/**
+ * Hash the exact staged index delta together with the canonical porcelain path/status tuples.
+ *
+ * `git diff --cached --raw --no-abbrev` is deliberately proportional to staged changes rather
+ * than every tracked file, which keeps the hot status path practical in large repositories. Its
+ * raw records contain each stage-0 blob OID and mode, work with an unborn HEAD, and are stable
+ * across locale/diff-driver settings. An unmerged raw diff uses zero OIDs, so only in that rare
+ * state do we append `ls-files --unmerged` to include the exact stage 1/2/3 entries.
+ */
+export async function readWorktreeStateHash(
+  git: SimpleGit,
+  files: readonly WorktreeStatusPath[],
+): Promise<string> {
+  const hasUnmerged = files.some((file) =>
+    isConflictPair(file.index ?? " ", file.working_dir ?? " "),
+  );
+  const hasStaged = files.some((file) => {
+    const index = file.index ?? " ";
+    return index !== " " && index !== "?";
+  });
+  // A clean, untracked-only, or unstaged-only index is already identified by HEAD plus the
+  // porcelain tuples. Avoid an extra Git child on those overwhelmingly common status ticks.
+  const staged = hasStaged
+    ? await git.raw([
+        "diff",
+        "--cached",
+        "--raw",
+        "--no-abbrev",
+        "--no-renames",
+        "--no-ext-diff",
+        "--ignore-submodules=none",
+        "-z",
+      ])
+    : "";
+  const unmerged = hasUnmerged
+    ? await git.raw(["ls-files", "--unmerged", "--stage", "-z"])
+    : "";
+  return worktreeStateHash(files, `${staged}\0${unmerged}`);
 }
 
 /**
@@ -144,7 +261,13 @@ export async function readStatus(absPath: string, withDiff = false): Promise<Rep
     return await readGate.run(async () => {
       const git = gitFor(absPath);
       const status = await git.status();
-      const remote = await resolveRemote(git, absPath);
+      const [remote, headOid, upstreamOid, historyRefsHash] = await Promise.all([
+        resolveRemote(git, absPath),
+        resolveOid(git, "HEAD"),
+        resolveOid(git, "@{u}"),
+        resolveHistoryRefsHash(git),
+      ]);
+      const statusStateHash = await readWorktreeStateHash(git, status.files);
       const detached =
         Boolean(status.detached) || status.current === "HEAD" || status.current === null;
       let diff: DiffStat | null = null;
@@ -162,6 +285,10 @@ export async function readStatus(absPath: string, withDiff = false): Promise<Rep
       return {
         branch: status.current ?? null,
         detached,
+        headOid,
+        upstreamOid,
+        historyRefsHash,
+        worktreeStateHash: statusStateHash,
         dirty: status.files.length,
         ahead: status.ahead ?? 0,
         behind: status.behind ?? 0,
@@ -178,6 +305,10 @@ export async function readStatus(absPath: string, withDiff = false): Promise<Rep
     return {
       branch: null,
       detached: false,
+      headOid: null,
+      upstreamOid: null,
+      historyRefsHash: null,
+      worktreeStateHash: null,
       dirty: 0,
       ahead: 0,
       behind: 0,

@@ -8,6 +8,9 @@ import {
   AI_CATALOG,
   resolveApiKey,
   resolveModel,
+  resolveAiBaseUrl,
+  aiProviderUsesNoAuth,
+  isAiProviderConfigured,
   effectiveDefaultProvider,
   DEFAULT_DIFF_DETAIL,
   type RepoYetiConfig,
@@ -19,7 +22,10 @@ import {
   generateCommitPlan,
   heuristicPlan,
   clearRateGate,
+  normalizeCompatibleBaseUrl,
+  isCompatibleLoopbackBaseUrl,
   AiError,
+  type AiModel,
 } from "../../ai.ts";
 import { jsonError, type ApiErrorCode } from "../../contract.ts";
 import { setSecret, deleteSecret, aiKeyName } from "../../secrets.ts";
@@ -55,7 +61,23 @@ export function register(app: Hono, { cfg }: Deps): void {
   };
   const ensureAi = (): NonNullable<RepoYetiConfig["ai"]> => (cfg.ai ??= { providers: {} });
   const providerLabel = (id: AiProviderId): string => AI_CATALOG.find((e) => e.id === id)?.label ?? id;
+  const runtimeFor = (id: AiProviderId): { baseUrl?: string } =>
+    id === "compatible" ? { baseUrl: resolveAiBaseUrl(cfg, id) ?? undefined } : {};
   const guestAiUsage = new Map<string, GuestAiUsage>();
+  const guestAiErrorMessage = (code: ApiErrorCode): string => {
+    switch (code) {
+      case "AI_AUTH_FAILED":
+        return "The configured AI service rejected authentication.";
+      case "AI_RATE_LIMITED":
+        return "The configured AI service is temporarily rate limited.";
+      case "AI_BAD_REQUEST":
+        return "The configured AI service could not process this request.";
+      case "AI_UNREACHABLE":
+        return "The configured AI service could not be reached.";
+      default:
+        return "The configured AI service returned an error.";
+    }
+  };
   const enterGuestAi = (c: Context): Response | (() => void) | null => {
     const guest = effectiveGuest(c, cfg);
     if (!guest) return null;
@@ -84,14 +106,30 @@ export function register(app: Hono, { cfg }: Deps): void {
   // provider's key failed, so the owner isn't left staring at a bare "invalid or unauthorized key"
   // wondering what to fix.
   const aiErr = (c: Context, e: unknown, provider?: AiProviderId) => {
+    const guest = effectiveGuest(c, cfg);
     if (e instanceof AiError) {
+      if (guest) {
+        return jsonError(
+          c,
+          e.code as ApiErrorCode,
+          guestAiErrorMessage(e.code as ApiErrorCode),
+        );
+      }
       if (e.code === "AI_AUTH_FAILED" && provider) {
         const label = providerLabel(provider);
         return jsonError(c, e.code as ApiErrorCode, `${label} rejected the API key. Update your ${label} key in Settings → AI.`);
       }
       return jsonError(c, e.code as ApiErrorCode, e.message);
     }
-    return jsonError(c, "AI_ERROR", e instanceof Error ? e.message : String(e));
+    return jsonError(
+      c,
+      "AI_ERROR",
+      guest
+        ? guestAiErrorMessage("AI_ERROR")
+        : e instanceof Error
+          ? e.message
+          : String(e),
+    );
   };
 
   // Static provider catalog — safe display metadata (no secrets).
@@ -104,7 +142,7 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/ai/availability", (c) => {
     const provider = effectiveDefaultProvider(cfg);
     return c.json({
-      usable: !!(provider && resolveApiKey(cfg, provider) && resolveModel(cfg, provider)),
+      usable: !!(provider && isAiProviderConfigured(cfg, provider) && resolveModel(cfg, provider)),
       commitEnabled: cfg.ai?.commitEnabled !== false,
     });
   });
@@ -123,8 +161,8 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (typeof p.data.commitEnabled === "boolean") ai.commitEnabled = p.data.commitEnabled;
     if (p.data.defaultProvider !== undefined) {
       const dp = p.data.defaultProvider == null ? undefined : (p.data.defaultProvider as AiProviderId);
-      if (dp !== undefined && !resolveApiKey(cfg, dp)) {
-        return jsonError(c, "NOT_CONFIGURED", `${dp} has no key`);
+      if (dp !== undefined && !isAiProviderConfigured(cfg, dp)) {
+        return jsonError(c, "NOT_CONFIGURED", `${dp} is not configured`);
       }
       ai.defaultProvider = dp;
     }
@@ -132,16 +170,57 @@ export function register(app: Hono, { cfg }: Deps): void {
     return c.json(redactAi(cfg));
   });
 
-  // Connect a provider: validate the key by listing models, then SAVE it.
+  // Connect a provider: validate the key by listing models, then SAVE it. The generic compatible
+  // provider treats discovery as optional because OpenAI-compatible generation does not imply
+  // that GET /models exists; its manually entered model remains usable when discovery is absent.
   app.post("/api/ai/providers/:provider/connect", async (c) => {
     const provider = parseProvider(c);
     if (!provider) return jsonError(c, "BAD_PROVIDER", "unknown provider");
     const p = await parseBody(c, ConnectSchema);
     if (!p.ok) return p.res;
     const apiKey = (p.data.apiKey ?? "").trim();
-    if (!apiKey) return jsonError(c, "NO_KEY", "API key required");
+
+    const compatible = provider === "compatible";
+    if (!compatible && !apiKey) return jsonError(c, "NO_KEY", "API key required");
+    const manualModel = (p.data.model ?? "").trim();
+    let baseUrl: string | undefined;
+    if (compatible) {
+      if (!manualModel) {
+        return jsonError(c, "AI_BAD_REQUEST", "Model ID required for an OpenAI-compatible provider");
+      }
+      try {
+        baseUrl = normalizeCompatibleBaseUrl(p.data.baseUrl ?? "");
+      } catch (e) {
+        return jsonError(
+          c,
+          "AI_BAD_REQUEST",
+          e instanceof Error ? e.message : "Invalid OpenAI-compatible base URL",
+        );
+      }
+      if (!apiKey && !isCompatibleLoopbackBaseUrl(baseUrl ?? "")) {
+        return jsonError(
+          c,
+          "NO_KEY",
+          "API key required unless the OpenAI-compatible endpoint is on loopback",
+        );
+      }
+    }
+
     try {
-      const models = await listModels(provider, apiKey);
+      let discoveryAvailable = true;
+      let models: AiModel[];
+      try {
+        models = await listModels(provider, apiKey, fetch, { baseUrl });
+      } catch (e) {
+        // A confirmed rejection still blocks connection. Everything else can mean only that this
+        // otherwise-compatible endpoint omits /models, so retain the explicit manual model.
+        if (!compatible || (e instanceof AiError && e.code === "AI_AUTH_FAILED")) throw e;
+        discoveryAvailable = false;
+        models = [];
+      }
+      if (compatible && !models.some((m) => m.id === manualModel)) {
+        models.unshift({ id: manualModel, label: manualModel });
+      }
       const ai = ensureAi();
       const prev = ai.providers[provider]?.model ?? null;
       // Auto-pick a model so it works immediately: keep a still-valid prior choice, else the
@@ -149,23 +228,36 @@ export function register(app: Hono, { cfg }: Deps): void {
       // else the first CHAT model (non-chat models are already filtered out in adapters.ts, so
       // models[0] is a safe fallback — no more Groq → Whisper default).
       const recommended = AI_CATALOG.find((e) => e.id === provider)?.recommended;
-      const model =
-        prev && models.some((m) => m.id === prev)
+      const model = compatible
+        ? manualModel
+        : prev && models.some((m) => m.id === prev)
           ? prev
           : recommended && models.some((m) => m.id === recommended)
             ? recommended
             : (models[0]?.id ?? null);
       // The key bytes go to the OS keychain; config.json (written by saveConfig) keeps only
       // the model. apiKey stays in the in-memory cfg so this running daemon can use it.
-      await setSecret(aiKeyName(provider), apiKey);
-      ai.providers[provider] = { apiKey, model };
-      if (!ai.defaultProvider) ai.defaultProvider = provider;
+      if (apiKey) await setSecret(aiKeyName(provider), apiKey);
+      else await deleteSecret(aiKeyName(provider));
+      ai.providers[provider] = {
+        ...(apiKey ? { apiKey } : {}),
+        model,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(!apiKey && compatible ? { noAuth: true as const } : {}),
+      };
+      if (
+        !ai.defaultProvider ||
+        !isAiProviderConfigured(cfg, ai.defaultProvider) ||
+        !resolveModel(cfg, ai.defaultProvider)
+      ) {
+        ai.defaultProvider = provider;
+      }
       // A new key is exactly how an owner fixes a spent quota (upgraded tier / different account),
       // so drop any rate-limit pause we're holding for this provider — otherwise the fix would
       // look like it didn't work until the pause aged out.
       clearRateGate(provider);
       saveConfig(cfg);
-      return c.json({ ok: true, models, settings: redactAi(cfg) });
+      return c.json({ ok: true, models, discoveryAvailable, settings: redactAi(cfg) });
     } catch (e) {
       return aiErr(c, e, provider);
     }
@@ -175,11 +267,34 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/ai/providers/:provider/models", async (c) => {
     const provider = parseProvider(c);
     if (!provider) return jsonError(c, "BAD_PROVIDER", "unknown provider");
-    const apiKey = resolveApiKey(cfg, provider);
+    const apiKey =
+      resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
     // 404 (not the default 400): the named provider has no stored key to list models for.
-    if (!apiKey) return jsonError(c, "NOT_CONFIGURED", "no key for this provider", 404);
+    if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
+      return jsonError(c, "NOT_CONFIGURED", "provider is not fully configured", 404);
+    }
     try {
-      return c.json({ ok: true, models: await listModels(provider, apiKey) });
+      try {
+        const models = await listModels(provider, apiKey, fetch, runtimeFor(provider));
+        const saved = resolveModel(cfg, provider);
+        if (provider === "compatible" && saved && !models.some((m) => m.id === saved)) {
+          models.unshift({ id: saved, label: saved });
+        }
+        return c.json({ ok: true, models, discoveryAvailable: true });
+      } catch (e) {
+        if (
+          provider !== "compatible" ||
+          (e instanceof AiError && e.code === "AI_AUTH_FAILED")
+        ) {
+          throw e;
+        }
+        const saved = resolveModel(cfg, provider);
+        return c.json({
+          ok: true,
+          models: saved ? [{ id: saved, label: saved }] : [],
+          discoveryAvailable: false,
+        });
+      }
     } catch (e) {
       return aiErr(c, e, provider);
     }
@@ -189,14 +304,24 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.put("/api/ai/providers/:provider", async (c) => {
     const provider = parseProvider(c);
     if (!provider) return jsonError(c, "BAD_PROVIDER", "unknown provider");
-    if (!resolveApiKey(cfg, provider)) {
+    if (!isAiProviderConfigured(cfg, provider)) {
       return jsonError(c, "NOT_CONFIGURED", "connect this provider first", 404);
     }
     const p = await parseBody(c, ProviderUpdateSchema);
     if (!p.ok) return p.res;
+    if (
+      provider === "compatible" &&
+      p.data.model !== undefined &&
+      !(p.data.model ?? "").trim()
+    ) {
+      return jsonError(c, "AI_BAD_REQUEST", "Model ID required for an OpenAI-compatible provider");
+    }
     const ai = ensureAi();
     const entry = ai.providers[provider];
-    if (p.data.model !== undefined && entry) entry.model = p.data.model ?? null;
+    if (p.data.model !== undefined && entry) {
+      entry.model =
+        provider === "compatible" ? (p.data.model ?? "").trim() : (p.data.model ?? null);
+    }
     if (p.data.makeDefault) ai.defaultProvider = provider;
     saveConfig(cfg);
     return c.json(redactAi(cfg));
@@ -209,7 +334,8 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (cfg.ai?.providers) delete cfg.ai.providers[provider];
     await deleteSecret(aiKeyName(provider)); // drop the key from the OS keychain too
     if (cfg.ai && cfg.ai.defaultProvider === provider) {
-      cfg.ai.defaultProvider = AI_PROVIDERS.find((p) => cfg.ai!.providers?.[p]?.apiKey);
+      cfg.ai.defaultProvider = undefined;
+      cfg.ai.defaultProvider = effectiveDefaultProvider(cfg) ?? undefined;
     }
     saveConfig(cfg);
     return c.json(redactAi(cfg));
@@ -230,8 +356,11 @@ export function register(app: Hono, { cfg }: Deps): void {
     const requested = guest || p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
     const provider = requested ?? effectiveDefaultProvider(cfg);
     if (!provider) return jsonError(c, "NO_AI_PROVIDER", "no AI provider configured");
-    const apiKey = resolveApiKey(cfg, provider);
-    if (!apiKey) return jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`);
+    const apiKey =
+      resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
+    if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
+      return jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`);
+    }
     const model = resolveModel(cfg, provider);
     if (!model) return jsonError(c, "NO_MODEL", `pick a model for ${provider} in Settings`);
 
@@ -258,6 +387,7 @@ export function register(app: Hono, { cfg }: Deps): void {
         cfg.ai?.style ?? "conventional",
         undefined,
         collected.files ?? 0, // anchors the body's bullet floor to the real file count
+        runtimeFor(provider),
       );
       return c.json(guest ? { ok: true, message } : { ok: true, message, provider, model });
     } catch (e) {
@@ -282,8 +412,11 @@ export function register(app: Hono, { cfg }: Deps): void {
     const requested = guest || p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
     const provider = requested ?? effectiveDefaultProvider(cfg);
     if (!provider) return jsonError(c, "NO_AI_PROVIDER", "no AI provider configured");
-    const apiKey = resolveApiKey(cfg, provider);
-    if (!apiKey) return jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`);
+    const apiKey =
+      resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
+    if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
+      return jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`);
+    }
     const model = resolveModel(cfg, provider);
     if (!model) return jsonError(c, "NO_MODEL", `pick a model for ${provider} in Settings`);
 
@@ -303,7 +436,15 @@ export function register(app: Hono, { cfg }: Deps): void {
     const admission = enterGuestAi(c);
     if (admission instanceof Response) return admission;
     try {
-      const plan = await generateCommitPlan(provider, apiKey, model, collected.input!, style);
+      const plan = await generateCommitPlan(
+        provider,
+        apiKey,
+        model,
+        collected.input!,
+        style,
+        undefined,
+        runtimeFor(provider),
+      );
       return c.json(guest ? { ok: true, plan } : { ok: true, plan, provider, model });
     } catch (e) {
       // A bad/rejected key is worth surfacing (the owner must fix it); anything else
@@ -315,8 +456,20 @@ export function register(app: Hono, { cfg }: Deps): void {
       if (e instanceof AiError && e.code === "AI_AUTH_FAILED") return aiErr(c, e, provider);
       const reason =
         e instanceof AiError
-          ? { code: e.code, message: e.message }
-          : { code: "AI_ERROR" as const, message: e instanceof Error ? e.message : String(e) };
+          ? {
+              code: e.code,
+              message: guest
+                ? guestAiErrorMessage(e.code as ApiErrorCode)
+                : e.message,
+            }
+          : {
+              code: "AI_ERROR" as const,
+              message: guest
+                ? guestAiErrorMessage("AI_ERROR")
+                : e instanceof Error
+                  ? e.message
+                  : String(e),
+            };
       const plan = heuristicPlan(collected.input!, reason);
       return c.json(
         guest

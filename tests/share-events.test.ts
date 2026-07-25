@@ -287,7 +287,7 @@ test("guestRepoView drops the owner's credential bookkeeping + private flags", (
     pinned: true,
     starred: true,
     autoCommit: true,
-    status: { branch: "main", detached: false, dirty: 0, ahead: 0, behind: 0, remote: "https://u:p@h/r.git", error: null, fetchedAt: null, updatedAt: 0 },
+    status: { branch: "main", detached: false, headOid: "d".repeat(40), dirty: 0, ahead: 0, behind: 0, remote: "https://u:p@h/r.git", error: null, fetchedAt: null, updatedAt: 0 },
     updatedAt: 0,
   });
   expect(view.identityId).toBeNull();
@@ -295,6 +295,7 @@ test("guestRepoView drops the owner's credential bookkeeping + private flags", (
   expect(view.syncAccountLogin).toBeNull();
   expect(view.autoCommit).toBe(false);
   expect(view.status!.remote).toBe("https://h/r.git");
+  expect(view.status!.headOid).toBe("d".repeat(40));
   expect(JSON.stringify(view)).not.toContain("owner-login");
   // `hidden` is flattened for a different reason than the rest: the share's scope already decides
   // what a guest sees, and passing it through would blank a share that names a hidden repo.

@@ -23,7 +23,7 @@ import {
 } from "./secrets.ts";
 import { publicKeyFor } from "./relay.ts";
 
-export const VERSION = "0.13.1";
+export const VERSION = "0.14.0";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
@@ -82,7 +82,8 @@ export type AiProviderId =
   | "gemini"
   | "deepseek"
   | "groq"
-  | "openrouter";
+  | "openrouter"
+  | "compatible";
 
 /**
  * Safe display metadata for one AI provider — contains NO secrets.
@@ -94,9 +95,11 @@ export interface AiCatalogEntry {
   /** Human-readable provider name shown in the Settings UI. */
   label: string;
   /** The console/key-management URL (without "https://") shown as a link. */
-  url: string;
+  url?: string;
   /** API-key format hint shown in the password input placeholder. */
   keyPlaceholder: string;
+  /** The owner supplies this provider's OpenAI-compatible base URL. */
+  customBaseUrl?: boolean;
   /** True when the provider offers a free tier (shows a "Free tier available" badge — this means
    *  the vendor's API has a free usage tier, NOT that a key is present or that only the free tier
    *  is supported; it's a signpost to a zero-cost option). */
@@ -126,6 +129,12 @@ export const AI_CATALOG: readonly AiCatalogEntry[] = [
   { id: "anthropic",  label: "Claude",     url: "console.anthropic.com",    keyPlaceholder: "sk-ant-…",              recommended: "claude-3-5-haiku-latest" },
   { id: "openai",     label: "ChatGPT",    url: "platform.openai.com",      keyPlaceholder: "sk-…",                  recommended: "gpt-4o-mini" },
   { id: "deepseek",   label: "DeepSeek",   url: "platform.deepseek.com",    keyPlaceholder: "sk-…",                  recommended: "deepseek-chat" },
+  {
+    id: "compatible",
+    label: "OpenAI-compatible",
+    keyPlaceholder: "API key",
+    customBaseUrl: true,
+  },
 ];
 
 /** Static catalogue — drives route validation. Derived from AI_CATALOG so they stay in sync. */
@@ -172,6 +181,10 @@ export interface AiProviderCfg {
   apiKey?: string;
   /** The model selected for this provider (null until the owner picks one). */
   model: string | null;
+  /** Non-secret API base URL for owner-supplied OpenAI-compatible endpoints. */
+  baseUrl?: string;
+  /** Explicitly records a compatible loopback endpoint that does not use bearer auth. */
+  noAuth?: true;
 }
 
 export interface AiConfig {
@@ -510,7 +523,9 @@ export interface IdentityRule {
 
 /** The redacted AI view safe to send to any client — keys are dropped entirely. */
 export interface RedactedAiConfig {
-  providers: Partial<Record<AiProviderId, { configured: true; model: string | null }>>;
+  providers: Partial<
+    Record<AiProviderId, { configured: true; model: string | null; baseUrl?: string }>
+  >;
   defaultProvider: AiProviderId | null;
   style: CommitStyle;
   /** How much of each file's diff the smart-commit planner reads. Default DEFAULT_DIFF_DETAIL. */
@@ -538,12 +553,32 @@ export function resolveModel(cfg: RepoYetiConfig, provider: AiProviderId): strin
   return cfg.ai?.providers?.[provider]?.model ?? null;
 }
 
+/** Effective non-secret API base URL for a provider, when it has one. */
+export function resolveAiBaseUrl(cfg: RepoYetiConfig, provider: AiProviderId): string | null {
+  const baseUrl = cfg.ai?.providers?.[provider]?.baseUrl?.trim();
+  return baseUrl || null;
+}
+
+/** Whether a compatible provider was explicitly connected as a no-auth loopback endpoint. */
+export function aiProviderUsesNoAuth(cfg: RepoYetiConfig, provider: AiProviderId): boolean {
+  return provider === "compatible" && cfg.ai?.providers?.[provider]?.noAuth === true;
+}
+
+/** Whether a provider has the credentials and endpoint required to make requests. */
+export function isAiProviderConfigured(cfg: RepoYetiConfig, provider: AiProviderId): boolean {
+  if (provider !== "compatible") return !!resolveApiKey(cfg, provider);
+  return (
+    !!resolveAiBaseUrl(cfg, provider) &&
+    (!!resolveApiKey(cfg, provider) || aiProviderUsesNoAuth(cfg, provider))
+  );
+}
+
 /** Which provider "Generate" uses: the owner's choice if usable, else the first usable provider. */
 export function effectiveDefaultProvider(cfg: RepoYetiConfig): AiProviderId | null {
   const pref = cfg.ai?.defaultProvider;
-  if (pref && resolveApiKey(cfg, pref) && resolveModel(cfg, pref)) return pref;
+  if (pref && isAiProviderConfigured(cfg, pref) && resolveModel(cfg, pref)) return pref;
   for (const id of AI_PROVIDERS) {
-    if (resolveApiKey(cfg, id) && resolveModel(cfg, id)) return id;
+    if (isAiProviderConfigured(cfg, id) && resolveModel(cfg, id)) return id;
   }
   return null;
 }
@@ -559,8 +594,12 @@ export function redactAi(cfg: RepoYetiConfig): RedactedAiConfig {
     commitEnabled: cfg.ai?.commitEnabled !== false, // default ON
   };
   for (const id of AI_PROVIDERS) {
-    if (resolveApiKey(cfg, id)) {
-      out.providers[id] = { configured: true, model: resolveModel(cfg, id) };
+    if (isAiProviderConfigured(cfg, id)) {
+      out.providers[id] = {
+        configured: true,
+        model: resolveModel(cfg, id),
+        ...(id === "compatible" ? { baseUrl: resolveAiBaseUrl(cfg, id) ?? undefined } : {}),
+      };
     }
   }
   out.defaultProvider = effectiveDefaultProvider(cfg);
@@ -845,6 +884,17 @@ export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
   if (cfg.ai?.providers) {
     for (const [id, p] of Object.entries(cfg.ai.providers)) {
       if (!p) continue;
+      if (id === "compatible" && p.noAuth === true) {
+        // A loopback endpoint explicitly connected without auth must stay keyless across restarts.
+        // Clear a stale credential left by an older/keyed configuration instead of silently
+        // re-hydrating it and sending an Authorization header the owner no longer expects.
+        if (p.apiKey) {
+          delete p.apiKey;
+          migrated = true;
+        }
+        await deleteSecret(aiKeyName(id));
+        continue;
+      }
       if (p.apiKey) {
         // Legacy plaintext key on disk → move it into the keychain (then it gets stripped).
         if (await setSecret(aiKeyName(id), p.apiKey)) migrated = true;

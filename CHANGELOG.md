@@ -6,18 +6,28 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-25
+
 ### Added
 
 - **The primary commit button is configurable.** Settings → Appearance can now make either
   **Commit** or **Commit & Sync** the default action. The preference persists locally, updates
   every repository card immediately, and safely falls back to a plain commit when a repository
   has no sync target.
-- **History now explains repository activity at a glance.** A compact, accurate 24-hour overview
-  shows commits in the last hour/day, contributors, lines changed, average hourly churn, and an
-  interactive additions/deletions chart. Appearance controls can independently hide the overview
-  or colored branch map and can replace numeric change totals with proportional green/red bars.
-  Commit rows also gain a right-click menu for details, copying commit/author information, and
-  jumping to parents; the Changes, Date, Author, and Commit columns are centered consistently.
+- **History now explains repository activity at a glance.** Compact colored cards and an
+  interactive chart cover hourly, daily, and monthly activity with accurate additions, deletions,
+  commits, contributors, and churn. Historical line statistics are cached once stable; tooltips
+  are color-coded and offset from the pointer; range changes transition without blanking the
+  panel; and contributor chips apply an exact, pagination-safe History filter. Appearance controls
+  can independently hide the overview or colored branch map and can replace numeric change totals
+  with proportional green/red bars. Commit rows also gain a right-click menu for details, copying
+  commit/author information, and jumping to parents; the Changes, Date, Author, and Commit columns
+  are centered consistently.
+- **Any OpenAI-compatible endpoint can power commit assistance.** Owners can bring an HTTPS base
+  URL, API key, and exact model ID, with optional model discovery, URL-only presets for Hugging
+  Face Router and DashScope, and keyless loopback support for local models. Redirect blocking,
+  bounded input, OS-backed secrets, and guest-safe error redaction keep the provider-neutral path
+  inside RepoYeti's existing security boundary.
 
 ### Changed
 
@@ -31,6 +41,9 @@ All notable changes to RepoYeti are documented here. The format is based on
   compressed; Monaco stays out of the PWA precache; large diff algorithms, history, and detail
   caches are bounded; stale file/store requests are cancelled or ignored; and off-screen cards and
   large changed-file trees avoid repeated full-DOM work.
+- **Release downloads are complete platform bundles.** Each archive keeps the compiled daemon,
+  built dashboard, and optional native runtime sidecars together, so a downloaded release runs
+  without requiring a source checkout or a separately built web app.
 
 ### Fixed
 
@@ -41,6 +54,15 @@ All notable changes to RepoYeti are documented here. The format is based on
   visually unambiguous. In automatic mode, live file additions and removals now explicitly
   remeasure the viewport so it grows and shrinks with the visible rows up to that preset, using
   a short firm ease-out animation that yields to direct dragging and reduced-motion preferences.
+- **Pull preview and Pull now make the same safety decision.** The preview models RepoYeti's actual
+  fast-forward-only pull, fingerprints HEAD, upstream, staged blobs, and the working tree, and
+  clearly marks divergence, conflicts, unsafe local changes, or an unknown/stale result. Pull
+  turns destructive red and disables itself when the preview says the operation is unsafe instead
+  of promising a clean merge and failing afterward.
+- **History reacts to Git changes made outside RepoYeti.** Branch, tag, packed-ref, reftable, linked
+  worktree, staged-blob, and equal-count path changes now participate in revision identity.
+  Recursive ref watching remains descriptor-bounded and falls back once to jittered polling when
+  a required native watch cannot be installed or later fails.
 
 ## [0.13.1] - 2026-07-24
 
@@ -808,7 +830,8 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
-[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.11.0...v0.12.0

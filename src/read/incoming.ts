@@ -7,19 +7,24 @@
  * commits, the file list, the line counts and the patches are all sitting in `.git` and can be
  * read without going near the tree. Nothing here mutates anything.
  *
- * Three git reads, none of which touch the working tree or the index:
+ * Git reads only; none of them modify the working tree or index:
+ *   · `rev-list --left-right --count` — one atomic ahead/behind relationship snapshot
  *   · `log HEAD..@{u}`             — the commits you don't have yet
  *   · `diff --numstat HEAD...@{u}` — the net file/line effect (three dots = compare against the
  *                                    merge base, so it excludes YOUR local-only commits; that
  *                                    matches what merging actually brings in)
+ *   · `read-tree -n -m -u`         — dry-run the checkout safety rules for a fast-forward,
+ *                                    including dirty paths that would be overwritten
  *   · `merge-tree --write-tree`    — a full merge simulated in memory. Exits non-zero and names
  *                                    the paths when the merge would conflict, which is the part
  *                                    most git GUIs make you discover by attempting the merge and
  *                                    then backing out.
  */
+import { createHash } from "node:crypto";
 import { gitFor } from "../git.ts";
 import { readGate } from "../gitgate.ts";
 import type { CommitStat, LogEntry } from "./inspect.ts";
+import { readWorktreeStateHash } from "./status.ts";
 
 const US = "\x1f"; // field separator — see inspect.ts
 
@@ -39,6 +44,27 @@ export interface IncomingFile {
   binary: boolean;
 }
 
+/**
+ * Exact repository state against which the pull verdict was checked.
+ *
+ * Ahead/behind counts are not identities: HEAD and the upstream can both move while preserving
+ * the same counts, and a dirty path can change without moving either ref. Keep all three inputs
+ * in one opaque token so the client can fail closed when a later status snapshot no longer
+ * describes this preview.
+ */
+export interface IncomingSnapshot {
+  /** Full object id of the checked-out commit. */
+  headOid: string;
+  /** Full object id of the configured upstream tip. */
+  upstreamOid: string;
+  /** Same path/status-state hash exposed by RepoStatus for exact client invalidation. */
+  worktreeStateHash: string;
+  /** SHA-256 of Git's index/worktree/untracked-path state. */
+  indexWorktreeHash: string;
+  /** SHA-256 of the three fields above; opaque to API consumers. */
+  token: string;
+}
+
 export interface IncomingResult {
   ok: boolean;
   code: "OK" | "ERROR";
@@ -47,6 +73,28 @@ export interface IncomingResult {
   upstream: string;
   /** True when the branch has no upstream at all — nothing to preview, and nothing to pull. */
   noUpstream: boolean;
+  /** Local-only / upstream-only commit counts from one atomic rev-list snapshot. */
+  ahead: number;
+  behind: number;
+  /** The branch relationship that determines whether an ff-only pull is possible. */
+  relation:
+    | "no_upstream"
+    | "up_to_date"
+    | "ahead_only"
+    | "behind_fast_forward"
+    | "diverged"
+    | "unknown";
+  /** The same safety verdict enforced by `git pull --ff-only`, including dirty-tree overlap. */
+  pullDisposition:
+    | "noop"
+    | "ready_fast_forward"
+    | "blocked_non_fast_forward"
+    | "blocked_would_overwrite"
+    | "unknown";
+  /** Wall-clock time at which the final snapshot below was verified. */
+  checkedAt: number;
+  /** Null for no-upstream/error results that did not produce a trustworthy snapshot. */
+  snapshot: IncomingSnapshot | null;
   /** Commits present upstream but not locally, newest first. */
   commits: LogEntry[];
   /** True when the commit list was capped (there are more than MAX_INCOMING_COMMITS). */
@@ -75,6 +123,12 @@ const empty = (code: "OK" | "ERROR", message?: string): IncomingResult => ({
   message,
   upstream: "",
   noUpstream: true,
+  ahead: 0,
+  behind: 0,
+  relation: code === "OK" ? "no_upstream" : "unknown",
+  pullDisposition: code === "OK" ? "noop" : "unknown",
+  checkedAt: Date.now(),
+  snapshot: null,
   commits: [],
   commitsTruncated: false,
   files: [],
@@ -84,6 +138,62 @@ const empty = (code: "OK" | "ERROR", message?: string): IncomingResult => ({
   conflictCheck: false,
   fastForward: false,
 });
+
+/** Error-shaped incoming response for a failed fetch or an unreadable relationship. */
+export const incomingError = (message: string): IncomingResult => ({
+  ...empty("ERROR", message),
+  // Unknown is different from "we positively resolved that this branch has no upstream".
+  noUpstream: false,
+});
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isWouldOverwrite(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return (
+    message.includes("would be overwritten") ||
+    message.includes("not uptodate. cannot merge") ||
+    message.includes("not up to date. cannot merge") ||
+    message.includes("local changes would be lost")
+  );
+}
+
+function relationship(ahead: number, behind: number): IncomingResult["relation"] {
+  if (ahead === 0 && behind === 0) return "up_to_date";
+  if (ahead > 0 && behind === 0) return "ahead_only";
+  if (ahead === 0 && behind > 0) return "behind_fast_forward";
+  return "diverged";
+}
+
+const sha256 = (value: string): string =>
+  createHash("sha256").update(value, "utf8").digest("hex");
+
+/**
+ * Capture every input that can change an ff-only verdict.
+ *
+ * Git status records staged/unstaged state plus every untracked path. The shared state hash also
+ * includes exact staged blob OIDs, because the same path can remain `M` while its index contents
+ * change enough to alter checkout safety. Hashing those inputs avoids exposing filenames or
+ * object IDs through the API snapshot.
+ */
+async function captureSnapshot(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+): Promise<IncomingSnapshot> {
+  const headOid = (await git.raw(["rev-parse", "--verify", "HEAD"])).trim().toLowerCase();
+  const upstreamOid = (await git.raw(["rev-parse", "--verify", upstream])).trim().toLowerCase();
+  const status = await git.status();
+  const indexWorktreeHash = await readWorktreeStateHash(git, status.files);
+  return {
+    headOid,
+    upstreamOid,
+    worktreeStateHash: indexWorktreeHash,
+    indexWorktreeHash,
+    token: sha256(`${headOid}\0${upstreamOid}\0${indexWorktreeHash}`),
+  };
+}
 
 /** Parse one `--numstat` row: "<added>\t<removed>\t<path>" ("-" counts mean binary). */
 function parseNumstat(line: string): { path: string; added: number; removed: number; binary: boolean } | null {
@@ -117,6 +227,53 @@ export async function readIncoming(absPath: string): Promise<IncomingResult> {
         return { ...empty("OK"), message: undefined };
       }
       if (!upstream) return empty("OK");
+
+      // Capture before and after the multi-command preview. `readGate` limits child-process
+      // fan-out but does not serialize this read with every external Git/file-system mutation.
+      // If anything relevant changes mid-read, fail closed instead of returning data assembled
+      // from two different repository states.
+      let initialSnapshot: IncomingSnapshot;
+      try {
+        initialSnapshot = await captureSnapshot(git, upstream);
+      } catch (error) {
+        return {
+          ...incomingError(errorMessage(error)),
+          upstream,
+        };
+      }
+
+      // One command, one graph snapshot: the left count is commits reachable only from HEAD;
+      // the right count is commits reachable only from the upstream. Computing these separately
+      // lets a ref update between calls produce an impossible relationship and a green preview
+      // that `pull --ff-only` immediately rejects.
+      let ahead = 0;
+      let behind = 0;
+      try {
+        const counts = (await git.raw(["rev-list", "--left-right", "--count", `HEAD...${upstream}`]))
+          .trim()
+          .split(/\s+/);
+        ahead = Number(counts[0]);
+        behind = Number(counts[1]);
+        if (
+          counts.length < 2 ||
+          !Number.isSafeInteger(ahead) ||
+          !Number.isSafeInteger(behind) ||
+          ahead < 0 ||
+          behind < 0
+        ) {
+          throw new Error("git returned invalid ahead/behind counts");
+        }
+      } catch (error) {
+        return {
+          ...empty("ERROR", errorMessage(error)),
+          upstream,
+          noUpstream: false,
+          relation: "unknown",
+          pullDisposition: "unknown",
+        };
+      }
+      const relation = relationship(ahead, behind);
+      const hasIncoming = behind > 0;
 
       // ── the commits you don't have ────────────────────────────────────────────────
       // Same field layout as readLog (subject last so an odd character can't shift a field),
@@ -168,7 +325,7 @@ export async function readIncoming(absPath: string): Promise<IncomingResult> {
       // would also report your own local-only commits inverted, which is not what a pull brings.
       let files: IncomingFile[] = [];
       const stat: CommitStat = { filesChanged: 0, addedLines: 0, removedLines: 0 };
-      if (commits.length > 0 || commitsTruncated) {
+      if (hasIncoming) {
         // status letters and line counts come from two passes over the same range, keyed by path
         const statusByPath = new Map<string, string>();
         try {
@@ -215,18 +372,35 @@ export async function readIncoming(absPath: string): Promise<IncomingResult> {
       // lines name the paths. Older git lacks --write-tree entirely, hence conflictCheck.
       let conflicts: string[] = [];
       let conflictCheck = false;
-      let fastForward = false;
-      if (commits.length > 0 || commitsTruncated) {
-        try {
-          // Behind-only (a pure fast-forward) can't conflict: there is nothing of yours to merge.
-          const localOnly = (await git.raw(["rev-list", "--count", `${upstream}..HEAD`])).trim();
-          fastForward = localOnly === "0";
-        } catch {
-          /* leave fastForward false — the merge simulation below still runs */
-        }
+      const fastForward = relation === "behind_fast_forward";
+      let pullDisposition: IncomingResult["pullDisposition"] =
+        relation === "diverged"
+          ? "blocked_non_fast_forward"
+          : relation === "behind_fast_forward"
+            ? "unknown"
+            : "noop";
+      let dispositionMessage: string | undefined;
+      if (hasIncoming) {
         if (fastForward) {
-          conflictCheck = true; // a fast-forward is conflict-free by definition
-        } else {
+          // Commit-graph safety is not enough: a fast-forward can still be refused when an
+          // uncommitted or staged path overlaps an incoming change. `read-tree -n` runs git's
+          // unpack/checkout safety checks without updating either the index or working tree,
+          // so this mirrors the important part of `pull --ff-only` without performing the pull.
+          conflictCheck = true; // no commit-level merge is required for a fast-forward
+          try {
+            await git.raw(["read-tree", "-n", "-m", "-u", "HEAD", upstream]);
+            pullDisposition = "ready_fast_forward";
+          } catch (error) {
+            if (isWouldOverwrite(error)) {
+              pullDisposition = "blocked_would_overwrite";
+            } else {
+              // Fail closed. A preflight Git/version/environment failure must never become a
+              // reassuring green state just because it was not one of the expected overlap forms.
+              pullDisposition = "unknown";
+              dispositionMessage = "could not verify whether the fast-forward is safe for the working tree";
+            }
+          }
+        } else if (relation === "diverged") {
           try {
             // Output shape (git's documented `--write-tree` format):
             //   <OID of the merged toplevel tree>
@@ -255,11 +429,34 @@ export async function readIncoming(absPath: string): Promise<IncomingResult> {
         }
       }
 
+      let snapshot: IncomingSnapshot;
+      try {
+        snapshot = await captureSnapshot(git, upstream);
+      } catch (error) {
+        return {
+          ...incomingError(errorMessage(error)),
+          upstream,
+        };
+      }
+      if (snapshot.token !== initialSnapshot.token) {
+        return {
+          ...incomingError("repository changed while the pull preview was being checked"),
+          upstream,
+        };
+      }
+
       return {
         ok: true,
         code: "OK" as const,
+        message: dispositionMessage,
         upstream,
         noUpstream: false,
+        ahead,
+        behind,
+        relation,
+        pullDisposition,
+        checkedAt: Date.now(),
+        snapshot,
         commits,
         commitsTruncated,
         files,
@@ -271,6 +468,6 @@ export async function readIncoming(absPath: string): Promise<IncomingResult> {
       };
     });
   } catch (e) {
-    return empty("ERROR", e instanceof Error ? e.message : String(e));
+    return incomingError(errorMessage(e));
   }
 }

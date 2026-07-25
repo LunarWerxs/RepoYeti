@@ -11,6 +11,14 @@ export interface DiffStat {
 export interface RepoStatus {
   branch: string | null;
   detached: boolean;
+  /** Full Git object id resolved by HEAD; null/absent for unborn, errored, or non-Git repos. */
+  headOid?: string | null;
+  /** Full Git object id resolved by the current branch's upstream. */
+  upstreamOid?: string | null;
+  /** Opaque identity of local, remote, and tag refs included by History. */
+  historyRefsHash?: string | null;
+  /** Opaque hash of changed paths and their staged/unstaged state. */
+  worktreeStateHash?: string | null;
   dirty: number;
   ahead: number;
   behind: number;
@@ -270,6 +278,12 @@ export interface LogResult {
   hasMore: boolean;
 }
 
+/** Exact History author identity. Email wins; name is the fallback when no email is available. */
+export interface LogAuthorFilter {
+  name: string;
+  email: string;
+}
+
 /** One contributor's totals in the bounded History activity window. */
 export interface HistoryActivityAuthor {
   name: string;
@@ -283,18 +297,34 @@ export interface HistoryActivityAuthor {
 export interface HistoryActivityBucket {
   /** Bucket start as epoch milliseconds. */
   start: number;
+  /** Exclusive bucket end as epoch milliseconds. */
+  end?: number;
   commits: number;
   filesChanged: number;
   addedLines: number;
   removedLines: number;
+  /** Commits represented by the file/line totals (less than `commits` means partial stats). */
+  changeStatsCommits?: number;
 }
+
+/** User-selectable aggregation scale for the History activity overview. */
+export type HistoryActivityScale = "hourly" | "daily" | "monthly";
+
+/** Calendar unit represented by one History activity bucket. */
+export type HistoryActivityBucketUnit = "hour" | "day" | "month";
 
 /** Compact repository-activity summary shown above the History table. */
 export interface HistoryActivity {
   ok: boolean;
   code: ApiCode;
   message?: string;
-  /** Width of the aggregation window; currently 24 hours. */
+  /** Requested aggregation preset. */
+  scale: HistoryActivityScale;
+  /** Unit represented by each chronological bucket. */
+  bucketUnit: HistoryActivityBucketUnit;
+  /** Number of buckets in the requested window (24 hours, 30 days, or 12 months). */
+  windowCount: number;
+  /** Exact width of the aggregation window in hours. */
   windowHours: number;
   /** Inclusive aggregation start as epoch milliseconds. */
   since: number;
@@ -307,10 +337,14 @@ export interface HistoryActivity {
   addedLines: number;
   removedLines: number;
   authors: HistoryActivityAuthor[];
-  /** Oldest-to-newest hourly buckets. */
+  /** Oldest-to-newest buckets at the requested scale. */
   buckets: HistoryActivityBucket[];
   /** True when a safety cap made the returned activity totals partial. */
   truncated: boolean;
+  /** True when a metadata cap made commit, contributor, and bucket totals partial. */
+  commitsTruncated?: boolean;
+  /** True when commit counts are exact but expensive file/line statistics are partial. */
+  changeStatsTruncated?: boolean;
 }
 
 /** One file a pull would change. Mirrors src/read/incoming.ts. */
@@ -323,6 +357,35 @@ export interface IncomingFile {
   binary: boolean;
 }
 
+/** How the checked-out commit relates to its configured upstream. */
+export type IncomingRelation =
+  | "no_upstream"
+  | "up_to_date"
+  | "ahead_only"
+  | "behind_fast_forward"
+  | "diverged"
+  | "unknown";
+
+/** Whether RepoYeti's actual `pull --ff-only` action is safe to offer right now. */
+export type PullDisposition =
+  | "noop"
+  | "ready_fast_forward"
+  | "blocked_non_fast_forward"
+  | "blocked_would_overwrite"
+  | "unknown";
+
+/** Exact Git state against which the pull verdict was checked. */
+export interface IncomingSnapshot {
+  headOid: string;
+  upstreamOid: string;
+  /** Same path/status-state hash exposed by RepoStatus for exact client invalidation. */
+  worktreeStateHash: string;
+  /** Opaque SHA-256 of staged, unstaged, and untracked-path state. */
+  indexWorktreeHash: string;
+  /** Opaque SHA-256 of HEAD, upstream, and index/worktree state together. */
+  token: string;
+}
+
 /** What a pull would bring in, described without pulling. Mirrors src/read/incoming.ts. */
 export interface IncomingResult {
   ok: boolean;
@@ -332,6 +395,17 @@ export interface IncomingResult {
   upstream: string;
   /** True when the branch tracks nothing, so there is nothing to preview or pull. */
   noUpstream: boolean;
+  /** Local-only and remote-only commit counts from the fetched upstream comparison. */
+  ahead: number;
+  behind: number;
+  /** Authoritative relationship between HEAD and the fetched upstream. */
+  relation: IncomingRelation;
+  /** Verdict for the same fast-forward-only pull command the primary button runs. */
+  pullDisposition: PullDisposition;
+  /** Time at which RepoYeti verified the final snapshot. */
+  checkedAt: number;
+  /** Null when no complete, trustworthy Git snapshot could be produced. */
+  snapshot: IncomingSnapshot | null;
   commits: LogEntry[];
   commitsTruncated: boolean;
   files: IncomingFile[];
@@ -491,7 +565,8 @@ export type AiProviderId =
   | "gemini"
   | "deepseek"
   | "groq"
-  | "openrouter";
+  | "openrouter"
+  | "compatible";
 
 /**
  * Safe display metadata for one AI provider — mirrors src/config.ts AiCatalogEntry.
@@ -500,9 +575,12 @@ export type AiProviderId =
 export interface AiCatalogEntry {
   id: AiProviderId;
   label: string;
-  url: string;
+  /** Optional vendor/key-management page. Custom endpoints deliberately have no vendor link. */
+  url?: string;
   keyPlaceholder: string;
   free?: boolean;
+  /** This provider asks the owner for an OpenAI-compatible base URL instead of using a fixed API. */
+  customBaseUrl?: boolean;
   /** The one provider we steer new owners to (Groq) — renders a "Suggested" badge + get-a-key nudge. */
   suggested?: boolean;
   /** Preferred chat model id, marked "Recommended" in the model picker + used as the connect-time
@@ -532,6 +610,14 @@ export interface AiModel {
 export interface AiProviderState {
   configured: true;
   model: string | null;
+  /** Non-secret destination for a custom OpenAI-compatible provider. */
+  baseUrl?: string;
+}
+
+/** Result of model discovery. A manually-entered model remains available when discovery fails. */
+export interface AiModelDiscovery {
+  models: AiModel[];
+  discoveryAvailable: boolean;
 }
 
 export interface AiSettings {

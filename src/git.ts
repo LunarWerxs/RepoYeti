@@ -66,6 +66,53 @@ export function gitFor(absPath: string, blockMs = 30_000, extraEnv?: Record<stri
 }
 
 /**
+ * Run one read-only Git command with bounded text supplied on stdin.
+ *
+ * simple-git's raw API has no convenient stdin seam. Activity sampling uses this for
+ * `git diff-tree --stdin`, which avoids putting hundreds of commit hashes in argv (and therefore
+ * avoids Windows' command-line limit) while retaining the same safe daemon environment as
+ * `gitFor()`. Callers remain responsible for taking a readGate slot.
+ */
+export async function gitRawWithInput(
+  absPath: string,
+  args: readonly string[],
+  input: string,
+  blockMs = 30_000,
+): Promise<string> {
+  const proc = Bun.spawn(["git", ...args], {
+    cwd: absPath,
+    env: safeGitEnv(),
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const kill = (): void => {
+    try {
+      proc.kill();
+    } catch {
+      /* already exited */
+    }
+  };
+  const timer = setTimeout(kill, blockMs);
+  try {
+    proc.stdin.write(input);
+    proc.stdin.end();
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (code !== 0) {
+      throw new Error(stderr.trim() || `git ${args[0] ?? "command"} failed with exit code ${code}`);
+    }
+    return stdout;
+  } finally {
+    clearTimeout(timer);
+    kill();
+  }
+}
+
+/**
  * The env var a per-op GitHub token rides in.
  *
  * It is referenced BY NAME inside the credential-helper snippet, so the token itself never appears

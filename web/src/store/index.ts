@@ -42,6 +42,38 @@ export const useStore = defineStore("repoyeti", () => {
   /** repoId → the action currently in flight (drives per-button loading state). */
   const busy = reactive<Record<string, ActionName | undefined>>({});
 
+  /**
+   * Monotonic per-repo signal for lazily-mounted History views. Mutations bump only when an
+   * operation known to affect commits or refs succeeds, so an open History can refresh without
+   * polling and without reacting to every ordinary status/SSE update.
+   */
+  const historyRevisionByRepo = reactive<Record<string, number>>({});
+  function bumpHistoryRevision(repoId: string): void {
+    historyRevisionByRepo[repoId] = (historyRevisionByRepo[repoId] ?? 0) + 1;
+  }
+
+  /**
+   * A repo watcher also sees commits/checkouts made by Codex, a terminal, or another Git client.
+   * Its generic state event has no explicit "history changed" bit, so use only fields that can
+   * reveal a commit/ref transition. Ignore initial hydration and timestamp/diff-only churn.
+   */
+  function isHistoryRelevantStatusChange(
+    previous: Repo["status"],
+    next: Repo["status"],
+  ): boolean {
+    if (!previous || !next) return false;
+    return (
+      previous.branch !== next.branch ||
+      previous.detached !== next.detached ||
+      (previous.headOid ?? null) !== (next.headOid ?? null) ||
+      (previous.upstreamOid ?? null) !== (next.upstreamOid ?? null) ||
+      (previous.historyRefsHash ?? null) !== (next.historyRefsHash ?? null) ||
+      previous.ahead !== next.ahead ||
+      previous.behind !== next.behind ||
+      next.dirty < previous.dirty
+    );
+  }
+
   // Public cloudflared tunnel URL (null until one exists) + whether a tunnel is up.
   // Surfaced in the connection panel so the owner can open RepoYeti on their phone.
   const tunnelUrl = ref<string | null>(null);
@@ -177,6 +209,7 @@ export const useStore = defineStore("repoyeti", () => {
     needsAttentionRepos,
     visibleAttentionRepos,
     dismissAttention,
+    getRepoStatus,
     hasRepo,
     patchRepo,
     upsertRepo,
@@ -194,7 +227,7 @@ export const useStore = defineStore("repoyeti", () => {
     setAutoCommit: setRepoAutoCommit,
     clearRepoCache: clearRepoViewCache,
     pruneRepoCache: pruneRepoViewCache,
-  } = useRepoActions(repos, busy, asResult);
+  } = useRepoActions(repos, busy, asResult, bumpHistoryRevision);
 
   const {
     aiSettings,
@@ -218,7 +251,7 @@ export const useStore = defineStore("repoyeti", () => {
     genCommitMessage,
     genCommitPlan,
     smartCommit,
-  } = useAi(busy, loadChanges, asResult);
+  } = useAi(busy, loadChanges, asResult, bumpHistoryRevision);
 
   const {
     branchesByRepo,
@@ -252,6 +285,7 @@ export const useStore = defineStore("repoyeti", () => {
     loadChanges,
     asResult,
     hasRepo,
+    bumpHistoryRevision,
   );
 
   /** All large per-repo client caches share the lifecycle of the dashboard card. */
@@ -259,6 +293,7 @@ export const useStore = defineStore("repoyeti", () => {
     clearRepoViewCache(repoId);
     clearGitOpsCache(repoId);
     delete busy[repoId];
+    delete historyRevisionByRepo[repoId];
   }
 
   function pruneRepoCaches(liveRepoIds: ReadonlySet<string>): void {
@@ -266,6 +301,9 @@ export const useStore = defineStore("repoyeti", () => {
     pruneGitOpsCache(liveRepoIds);
     for (const repoId of Object.keys(busy)) {
       if (!liveRepoIds.has(repoId)) delete busy[repoId];
+    }
+    for (const repoId of Object.keys(historyRevisionByRepo)) {
+      if (!liveRepoIds.has(repoId)) delete historyRevisionByRepo[repoId];
     }
   }
 
@@ -669,7 +707,12 @@ export const useStore = defineStore("repoyeti", () => {
       try {
         const payload = JSON.parse(raw);
         if (event.value === "repo_state_changed") {
-          patchRepo(payload.id, { status: payload.status });
+          const previousStatus = getRepoStatus(payload.id);
+          const nextStatus = (payload.status as Repo["status"] | undefined) ?? null;
+          patchRepo(payload.id, { status: nextStatus });
+          if (isHistoryRelevantStatusChange(previousStatus, nextStatus)) {
+            bumpHistoryRevision(payload.id);
+          }
           // Behind notifications are snapshots of a condition whose source of truth is the live
           // repo status. Every pull/fetch/refresh reaches this event, even if it did not start
           // from the notification, so keep its count current and retire it at zero. A failed
@@ -724,10 +767,18 @@ export const useStore = defineStore("repoyeti", () => {
           notifyBehind((payload.repos as BehindRepo[] | undefined) ?? []);
         } else if (event.value === "repo_synced") {
           // "Keep in sync" auto-pulled these — quiet confirmation (the cards already updated).
-          notifySynced((payload.repos as SyncedRepo[] | undefined) ?? []);
+          const synced = (payload.repos as SyncedRepo[] | undefined) ?? [];
+          for (const repo of synced) {
+            if (repo.pulled > 0) bumpHistoryRevision(repo.id);
+          }
+          notifySynced(synced);
         } else if (event.value === "repo_auto_committed") {
           // The auto-commit timer committed (and maybe synced) these — quiet success toast.
-          notifyAutoCommitted((payload.repos as AutoCommittedRepo[] | undefined) ?? []);
+          const committed = (payload.repos as AutoCommittedRepo[] | undefined) ?? [];
+          for (const repo of committed) {
+            if (repo.commits > 0) bumpHistoryRevision(repo.id);
+          }
+          notifyAutoCommitted(committed);
         } else if (event.value === "repo_auto_commit_blocked") {
           // The auto-commit timer skipped these (conflict / mid-operation / failed sync) → warn.
           notifyAutoCommitBlocked((payload.repos as AutoCommitBlockedRepo[] | undefined) ?? []);
@@ -863,6 +914,8 @@ export const useStore = defineStore("repoyeti", () => {
     applyUpdate,
     recordPulse,
     busy,
+    historyRevisionByRepo,
+    bumpHistoryRevision,
     changesByRepo,
     changesLoading,
     changesMeta,

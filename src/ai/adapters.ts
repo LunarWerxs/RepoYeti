@@ -191,6 +191,80 @@ const chatExtract = (json: unknown): string => {
   return typeof content === "string" ? content : "";
 };
 
+/** Per-request values that are intentionally not compiled into a provider adapter. */
+export interface AiProviderRuntime {
+  /** Owner-supplied API root for the generic OpenAI-compatible provider. */
+  baseUrl?: string;
+}
+
+const isLoopbackHostname = (hostname: string): boolean => {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return true;
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!match) return false;
+  const octets = match.slice(1).map(Number);
+  return octets.every((part) => part >= 0 && part <= 255) && octets[0] === 127;
+};
+
+/**
+ * Validate and canonicalize an owner-supplied OpenAI-compatible API root.
+ *
+ * HTTPS is mandatory off-device. Plain HTTP is useful for a local Ollama/LM Studio-style
+ * endpoint, but is accepted only for literal loopback hosts. A base URL must be an API root,
+ * never a complete operation URL: RepoYeti appends `/models` or `/chat/completions` itself.
+ */
+export function normalizeCompatibleBaseUrl(raw: string): string {
+  const input = raw.trim();
+  if (!input) throw new TypeError("OpenAI-compatible base URL is required");
+  if (input.length > 2048) throw new TypeError("OpenAI-compatible base URL is too long");
+
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new TypeError("OpenAI-compatible base URL must be a valid absolute URL");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new TypeError("OpenAI-compatible base URL must use HTTPS");
+  }
+  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    throw new TypeError("OpenAI-compatible base URL must use HTTPS unless it is a loopback address");
+  }
+  if (url.username || url.password) {
+    throw new TypeError("OpenAI-compatible base URL cannot contain credentials");
+  }
+  // URL normalisation erases an empty trailing ?/#, so inspect the source too.
+  if (url.search || url.hash || input.includes("?") || input.includes("#")) {
+    throw new TypeError("OpenAI-compatible base URL cannot contain a query or fragment");
+  }
+
+  const pathname = url.pathname.replace(/\/+$/, "");
+  let decodedPath = pathname;
+  try {
+    decodedPath = decodeURIComponent(pathname);
+  } catch {
+    throw new TypeError("OpenAI-compatible base URL contains an invalid path");
+  }
+  if (/(?:^|\/)(?:models|responses|completions|chat\/completions)$/i.test(decodedPath)) {
+    throw new TypeError(
+      "OpenAI-compatible base URL must be an API root, not a models or generation endpoint",
+    );
+  }
+  return `${url.origin}${pathname}`;
+}
+
+/** True only for a valid compatible base URL whose parsed host is local loopback. */
+export function isCompatibleLoopbackBaseUrl(raw: string): boolean {
+  try {
+    return isLoopbackHostname(new URL(normalizeCompatibleBaseUrl(raw)).hostname);
+  } catch {
+    return false;
+  }
+}
+
+const compatibleBaseUrl = (runtime?: AiProviderRuntime): string =>
+  normalizeCompatibleBaseUrl(runtime?.baseUrl ?? "");
+
 /** Pull the text out of one content "part" of an Anthropic/Gemini response array (defensive). */
 const partText = (p: unknown): string => {
   const t = (p as { text?: unknown })?.text;
@@ -199,13 +273,13 @@ const partText = (p: unknown): string => {
 
 // ── per-provider adapters ─────────────────────────────────────────────────────────
 
-interface AiAdapter {
+export interface AiAdapter {
   /** Model-list endpoint (key in query for gemini, else a constant). */
-  modelsUrl: (apiKey: string) => string;
+  modelsUrl: (apiKey: string, runtime?: AiProviderRuntime) => string;
   /** Generation endpoint (model + key in path/query for gemini, else a constant). */
-  generateUrl: (model: string, apiKey: string) => string;
+  generateUrl: (model: string, apiKey: string, runtime?: AiProviderRuntime) => string;
   /** Auth headers for both calls. */
-  headers: (apiKey: string) => Record<string, string>;
+  headers: (apiKey: string, runtime?: AiProviderRuntime) => Record<string, string>;
   /** Raw `{ id, label }[]` from the provider's model-list body (pre dedup/sort). */
   models: (json: unknown) => AiModel[];
   /** The generation request body for this provider's API shape. `messages` is the full turn
@@ -224,7 +298,7 @@ interface AiAdapter {
   extractCompletion: (json: unknown) => string;
 }
 
-/** Factory for the four OpenAI-compatible providers (Bearer + chat/completions + data[]). */
+/** Factory for fixed OpenAI-compatible providers (Bearer + chat/completions + data[]). */
 function openAiCompatible(opts: {
   modelsUrl: string;
   generateUrl: string;
@@ -340,8 +414,8 @@ export const AI_ADAPTERS: Record<AiProviderId, AiAdapter> = {
     },
   },
 
-  // OpenAI-compatible: same Bearer auth + /chat/completions shape; they differ only in
-  // endpoint host and which model ids they expose.
+  // Fixed OpenAI-compatible providers: same Bearer auth + /chat/completions shape; they differ
+  // only in endpoint host and which model ids they expose.
   openai: openAiCompatible({
     modelsUrl: "https://api.openai.com/v1/models",
     generateUrl: "https://api.openai.com/v1/chat/completions",
@@ -363,6 +437,22 @@ export const AI_ADAPTERS: Record<AiProviderId, AiAdapter> = {
     keep: (id) => id.endsWith(":free") && isChatModel(id), // free CHAT models only
     label: (m) => String(m.name ?? m.id ?? ""), // OpenRouter ships a friendly `name`
   }),
+  compatible: {
+    modelsUrl: (_apiKey, runtime) => `${compatibleBaseUrl(runtime)}/models`,
+    generateUrl: (_model, _apiKey, runtime) => `${compatibleBaseUrl(runtime)}/chat/completions`,
+    headers: (apiKey, runtime) => {
+      if (apiKey) return bearerHeaders(apiKey);
+      if (!isCompatibleLoopbackBaseUrl(runtime?.baseUrl ?? "")) {
+        throw new TypeError("API key required for a non-loopback OpenAI-compatible endpoint");
+      }
+      return { "content-type": "application/json" };
+    },
+    models: (json) => openaiModels(json, { keep: isChatModel }),
+    buildBody: chatBody,
+    // Deliberately no `jsonBody`: an arbitrary compatible endpoint is not guaranteed to
+    // implement OpenAI's response_format extension. The plan prompt already requires JSON.
+    extractCompletion: chatExtract,
+  },
 };
 
 /** Normalize a provider's raw model-list JSON into `{ id, label }[]` (deduped + sorted). */

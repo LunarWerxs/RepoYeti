@@ -7,7 +7,14 @@
  * pattern in git-actions.ts).
  */
 import type { AiProviderId, CommitStyle } from "../config.ts";
-import { AI_ADAPTERS, MESSAGE_SAMPLING, messageMaxTokens, parseModels, type AiModel } from "./adapters.ts";
+import {
+  AI_ADAPTERS,
+  MESSAGE_SAMPLING,
+  messageMaxTokens,
+  parseModels,
+  type AiModel,
+  type AiProviderRuntime,
+} from "./adapters.ts";
 
 export type AiCode =
   | "OK"
@@ -385,7 +392,13 @@ export async function requestJson(
   }
   let res: Response;
   try {
-    res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    res = await fetchImpl(url, {
+      ...init,
+      // Provider calls may carry owner secrets and source diffs. Never forward either to a
+      // redirect target selected by the remote endpoint.
+      redirect: "error",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
   } catch {
     throw new AiError("AI_UNREACHABLE", "could not reach the AI provider (timeout or network error)");
   }
@@ -429,11 +442,12 @@ export async function listModels(
   provider: AiProviderId,
   apiKey: string,
   fetchImpl: FetchFn = fetch,
+  runtime: AiProviderRuntime = {},
 ): Promise<AiModel[]> {
   const adapter = AI_ADAPTERS[provider];
   const json = await requestJson(
-    adapter.modelsUrl(apiKey),
-    { method: "GET", headers: adapter.headers(apiKey) },
+    adapter.modelsUrl(apiKey, runtime),
+    { method: "GET", headers: adapter.headers(apiKey, runtime) },
     fetchImpl,
   );
   return parseModels(provider, json);
@@ -449,6 +463,7 @@ export async function generateCommitMessage(
   style: CommitStyle,
   fetchImpl: FetchFn = fetch,
   fileCount = 0,
+  runtime: AiProviderRuntime = {},
 ): Promise<string> {
   const adapter = AI_ADAPTERS[provider];
   // `concise` never writes a body, so the anchor would only be an instruction it must ignore
@@ -460,10 +475,10 @@ export async function generateCommitMessage(
     { role: "user" as const, content: user },
   ];
   const json = await requestJson(
-    adapter.generateUrl(model, apiKey),
+    adapter.generateUrl(model, apiKey, runtime),
     {
       method: "POST",
-      headers: adapter.headers(apiKey),
+      headers: adapter.headers(apiKey, runtime),
       body: JSON.stringify(adapter.buildBody(model, messages, messageMaxTokens(style), MESSAGE_SAMPLING)),
     },
     fetchImpl,

@@ -22,8 +22,13 @@
  *   - commit-message.ts  error/result types + HTTP plumbing + single commit-message drafting
  *   - commit-plan.ts     multi-commit "Smart Commit" planning
  */
-export type { AiModel } from "./adapters.ts";
-export { parseModels, extractCompletion } from "./adapters.ts";
+export type { AiModel, AiProviderRuntime } from "./adapters.ts";
+export {
+  parseModels,
+  extractCompletion,
+  normalizeCompatibleBaseUrl,
+  isCompatibleLoopbackBaseUrl,
+} from "./adapters.ts";
 
 export type { AiCode, FetchFn } from "./commit-message.ts";
 export {

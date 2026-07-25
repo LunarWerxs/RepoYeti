@@ -28,6 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  OPENAI_COMPATIBLE_PRESETS,
+  compatiblePresetForUrl,
+  compatiblePresetUrl,
+  displayCompatibleBaseUrl,
+  isLoopbackCompatibleBaseUrl,
+} from "@/lib/ai-compatible";
 import type { AiCatalogEntry, AiModel, AiProviderId, CommitStyle, DiffDetail } from "../../types";
 
 /** Whether the parent Settings sheet is open — drives the model-list prefetch below. */
@@ -41,18 +48,24 @@ const PROVIDERS = computed<AiCatalogEntry[]>(() => store.aiCatalog);
 interface Row {
   open: boolean;
   keyInput: string;
+  baseUrlInput: string;
+  modelInput: string;
   connecting: boolean;
   loadingModels: boolean;
   confirmRemove: boolean;
   models: AiModel[];
+  discoveryAvailable: boolean | null;
 }
 const blank = (): Row => ({
   open: false,
   keyInput: "",
+  baseUrlInput: "",
+  modelInput: "",
   connecting: false,
   loadingModels: false,
   confirmRemove: false,
   models: [],
+  discoveryAvailable: null,
 });
 const rows = reactive<Record<string, Row>>({});
 /** Lazily initialise a row the first time it's needed (handles dynamic catalog). */
@@ -103,7 +116,31 @@ watch(
 // providers connected, so collapse them away entirely rather than show dead controls.
 const anyProviderConfigured = computed(() => Object.keys(settings.value.providers).length > 0);
 const savedModel = (id: AiProviderId): string | null => settings.value.providers[id]?.model ?? null;
+const savedBaseUrl = (id: AiProviderId): string =>
+  displayCompatibleBaseUrl(settings.value.providers[id]?.baseUrl);
 const nameOf = (id: AiProviderId): string => PROVIDERS.value.find((p) => p.id === id)?.label ?? id;
+const isCompatible = (provider: AiCatalogEntry | AiProviderId): boolean =>
+  typeof provider === "string"
+    ? provider === "compatible"
+    : provider.id === "compatible" || provider.customBaseUrl === true;
+const compatibleDestination = (id: AiProviderId): string =>
+  savedBaseUrl(id) || displayCompatibleBaseUrl(rowFor(id).baseUrlInput);
+const compatibleKeyOptional = (id: AiProviderId): boolean =>
+  isLoopbackCompatibleBaseUrl(rowFor(id).baseUrlInput);
+const selectedCompatiblePreset = (id: AiProviderId): string =>
+  compatiblePresetForUrl(rowFor(id).baseUrlInput);
+
+function applyCompatiblePreset(id: AiProviderId, presetId: string): void {
+  const url = compatiblePresetUrl(presetId);
+  if (url) rowFor(id).baseUrlInput = url;
+}
+
+function canConnect(id: AiProviderId): boolean {
+  const row = rowFor(id);
+  if (!isCompatible(id)) return !!row.keyInput.trim();
+  if (!row.baseUrlInput.trim() || !row.modelInput.trim()) return false;
+  return !!row.keyInput.trim() || compatibleKeyOptional(id);
+}
 
 function modelOptions(id: AiProviderId): { label: string; value: string }[] {
   // Mark the provider's curated `recommended` model (config.ts AI_CATALOG) when the live list has
@@ -136,13 +173,28 @@ watch(
 async function connect(id: AiProviderId): Promise<void> {
   const row = rowFor(id);
   const key = row.keyInput.trim();
-  if (!key) return;
+  if (!canConnect(id)) return;
   row.connecting = true;
   try {
-    const models = await store.connectProvider(id, key);
-    row.models = models;
+    const result = await store.connectProvider(
+      id,
+      key,
+      isCompatible(id)
+        ? { baseUrl: row.baseUrlInput.trim(), model: row.modelInput.trim() }
+        : {},
+    );
+    row.models = result.models;
+    row.discoveryAvailable = result.discoveryAvailable;
     row.keyInput = "";
-    toast.success(t("settings.toastConnected", { name: nameOf(id), count: models.length }, models.length));
+    row.baseUrlInput = "";
+    row.modelInput = "";
+    toast.success(
+      t(
+        "settings.toastConnected",
+        { name: nameOf(id), count: result.models.length },
+        result.models.length,
+      ),
+    );
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : t("settings.toastConnectFailed"));
   } finally {
@@ -154,7 +206,9 @@ async function refreshModels(id: AiProviderId): Promise<void> {
   const row = rowFor(id);
   row.loadingModels = true;
   try {
-    row.models = await store.listProviderModels(id);
+    const result = await store.listProviderModels(id);
+    row.models = result.models;
+    row.discoveryAvailable = result.discoveryAvailable;
   } catch {
     /* keep whatever we had — refresh is best-effort */
   } finally {
@@ -293,7 +347,7 @@ async function onDiffDetail(detail: string): Promise<void> {
               <!-- tier + provider link. The "Free tier available" badge is a catalog fact about the
                    VENDOR (they offer a no-cost tier) — NOT a statement about the owner's key/plan —
                    so an InfoHint spells that out (owners kept reading it as "only free tier works"). -->
-              <div class="flex items-center justify-between gap-2">
+              <div v-if="p.free || p.url" class="flex items-center justify-between gap-2">
                 <span v-if="p.free" class="flex items-center gap-1">
                   <Badge variant="success" class="px-1.5 py-0 text-[10px]">
                     {{ $t("settings.badgeFreeTier") }}
@@ -301,6 +355,7 @@ async function onDiffDetail(detail: string): Promise<void> {
                   <InfoHint :text="$t('settings.freeTierHint')" />
                 </span>
                 <a
+                  v-if="p.url"
                   :href="`https://${p.url}`"
                   target="_blank"
                   rel="noopener noreferrer"
@@ -311,7 +366,7 @@ async function onDiffDetail(detail: string): Promise<void> {
               <!-- not configured → bring your own key. For the suggested provider (Groq), a short
                    nudge: it's free + fast and takes ~30s, so a fresh install has an obvious path. -->
               <div v-if="!isConfigured(p.id)" class="flex flex-col gap-2.5">
-                <p v-if="p.suggested" class="text-[12px] text-muted-foreground">
+                <p v-if="p.suggested && p.url" class="text-[12px] text-muted-foreground">
                   {{ $t("settings.suggestedNudge") }}
                   <a
                     :href="`https://${p.url}`"
@@ -320,18 +375,97 @@ async function onDiffDetail(detail: string): Promise<void> {
                     class="text-primary underline-offset-2 hover:underline"
                   >{{ p.url }}</a>
                 </p>
+
+                <div
+                  v-if="isCompatible(p)"
+                  class="flex flex-col gap-2.5 rounded-md border border-border/70 bg-background/35 p-2.5"
+                >
+                  <label class="flex flex-col gap-1">
+                    <span class="text-[11px] font-medium text-muted-foreground">
+                      {{ $t("settings.compatiblePreset") }}
+                    </span>
+                    <Select
+                      :model-value="selectedCompatiblePreset(p.id)"
+                      @update:model-value="(v) => typeof v === 'string' && applyCompatiblePreset(p.id, v)"
+                    >
+                      <SelectTrigger class="w-full" :aria-label="$t('settings.compatiblePreset')">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem
+                          v-for="preset in OPENAI_COMPATIBLE_PRESETS"
+                          :key="preset.id"
+                          :value="preset.id"
+                        >
+                          {{ preset.label }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <p class="text-[11px] leading-relaxed text-muted-foreground">
+                    {{ $t("settings.compatiblePresetHint") }}
+                  </p>
+
+                  <label class="flex flex-col gap-1">
+                    <span class="text-[11px] font-medium text-muted-foreground">
+                      {{ $t("settings.compatibleBaseUrl") }}
+                    </span>
+                    <Input
+                      v-model="rowFor(p.id).baseUrlInput"
+                      type="url"
+                      spellcheck="false"
+                      autocomplete="url"
+                      :aria-label="$t('settings.compatibleBaseUrl')"
+                      :placeholder="$t('settings.compatibleBaseUrlPlaceholder')"
+                      @keyup.enter="connect(p.id)"
+                    />
+                  </label>
+
+                  <p
+                    v-if="compatibleDestination(p.id)"
+                    class="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+                  >
+                    {{
+                      $t("settings.compatibleDestinationDisclosure", {
+                        url: compatibleDestination(p.id),
+                      })
+                    }}
+                  </p>
+
+                  <label class="flex flex-col gap-1">
+                    <span class="text-[11px] font-medium text-muted-foreground">
+                      {{ $t("settings.compatibleManualModel") }}
+                    </span>
+                    <Input
+                      v-model="rowFor(p.id).modelInput"
+                      type="text"
+                      spellcheck="false"
+                      :aria-label="$t('settings.compatibleManualModel')"
+                      :placeholder="$t('settings.compatibleManualModelPlaceholder')"
+                      @keyup.enter="connect(p.id)"
+                    />
+                  </label>
+                  <p class="text-[11px] leading-relaxed text-muted-foreground">
+                    {{ $t("settings.compatibleManualModelHint") }}
+                  </p>
+                </div>
+
                 <div class="flex items-center gap-2">
                   <Input
                     v-model="rowFor(p.id).keyInput"
                     type="password"
                     class="flex-1"
                     :aria-label="`${p.label} API key`"
-                    :placeholder="p.keyPlaceholder"
+                    :placeholder="
+                      isCompatible(p) && compatibleKeyOptional(p.id)
+                        ? $t('settings.compatibleApiKeyOptionalPlaceholder')
+                        : p.keyPlaceholder
+                    "
                     @keyup.enter="connect(p.id)"
                   />
                   <Button
                     size="sm"
-                    :disabled="!rowFor(p.id).keyInput.trim() || rowFor(p.id).connecting"
+                    :disabled="!canConnect(p.id) || rowFor(p.id).connecting"
                     @click="connect(p.id)"
                   >
                     <Link2 />
@@ -348,10 +482,28 @@ async function onDiffDetail(detail: string): Promise<void> {
                     {{ $t("common.cancel") }}
                   </Button>
                 </div>
+                <p v-if="isCompatible(p)" class="text-[11px] leading-relaxed text-muted-foreground">
+                  {{
+                    compatibleKeyOptional(p.id)
+                      ? $t("settings.compatibleApiKeyLoopbackHint")
+                      : $t("settings.compatibleApiKeyRemoteHint")
+                  }}
+                </p>
               </div>
 
               <!-- owner-configured → choose a model, set default, or remove -->
               <template v-else>
+                <div
+                  v-if="isCompatible(p) && compatibleDestination(p.id)"
+                  class="rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+                >
+                  {{
+                    $t("settings.compatibleSavedDestination", {
+                      url: compatibleDestination(p.id),
+                    })
+                  }}
+                </div>
+
                 <div class="flex items-center gap-2">
                   <Select
                     :model-value="savedModel(p.id) ?? undefined"
@@ -377,6 +529,13 @@ async function onDiffDetail(detail: string): Promise<void> {
                     <RefreshCw :class="rowFor(p.id).loadingModels && 'animate-spin'" />
                   </Button>
                 </div>
+
+                <p
+                  v-if="isCompatible(p) && rowFor(p.id).discoveryAvailable === false"
+                  class="text-[11px] leading-relaxed text-muted-foreground"
+                >
+                  {{ $t("settings.compatibleDiscoveryUnavailable") }}
+                </p>
 
                 <div class="flex items-center gap-2">
                   <Button

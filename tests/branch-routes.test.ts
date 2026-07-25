@@ -1,11 +1,11 @@
-import { test, expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
-import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { createApp } from "../src/http/app.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 
 // Local mode (no OIDC) → /api/* is ungated, so routes are exercised directly.
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
@@ -99,6 +99,58 @@ test("GET /log returns commits", async () => {
   expect(j.ok).toBe(true);
   expect(j.commits.length).toBeGreaterThanOrEqual(1);
   expect(j.commits[0].subject).toBe("init");
+});
+
+test("GET /log composes encoded exact-author, ref, merge, and pagination queries", async () => {
+  const { dir, id } = await repoWithId();
+  const commitAs = async (
+    path: string,
+    subject: string,
+    name: string,
+    email: string,
+  ): Promise<void> => {
+    writeFileSync(join(dir, path), `${subject}\n`);
+    await $`git -C ${dir} add -- ${path}`.quiet();
+    await $`git -C ${dir} commit -q -m ${subject}`
+      .env({
+        ...process.env,
+        GIT_AUTHOR_NAME: name,
+        GIT_AUTHOR_EMAIL: email,
+        GIT_COMMITTER_NAME: name,
+        GIT_COMMITTER_EMAIL: email,
+      })
+      .quiet();
+  };
+  await commitAs(
+    "punctuation.txt",
+    "encoded author",
+    "A+B & Co",
+    "a+b@example.com",
+  );
+  await commitAs("decoy.txt", "newer decoy", "AAB and Co", "aaab@example.com");
+
+  const query = new URLSearchParams({
+    limit: "1",
+    skip: "0",
+    refs: "head",
+    merges: "exclude",
+    authorName: "A+B & Co",
+    authorEmail: "a+b@example.com",
+  });
+  const app = createApp(localCfg());
+  const response = await app.request(`/api/repos/${id}/log?${query}`);
+  expect(response.status).toBe(200);
+  const result = await response.json();
+
+  expect(result.ok).toBe(true);
+  expect(result.commits.map((commit: { subject: string }) => commit.subject)).toEqual([
+    "encoded author",
+  ]);
+  expect(result.commits[0]).toMatchObject({
+    authorName: "A+B & Co",
+    authorEmail: "a+b@example.com",
+  });
+  expect(result.hasMore).toBe(false);
 });
 
 test("stash save → list → pop round-trips over the routes", async () => {
