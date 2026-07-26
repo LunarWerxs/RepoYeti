@@ -8,7 +8,7 @@ import { lstatSync, mkdirSync, realpathSync, renameSync, statSync, unlinkSync } 
 import { resolve, dirname } from "node:path";
 import { pathWithin, normalizeRelPath } from "../paths.ts";
 import { getRepo } from "../db.ts";
-import { gitFor } from "../git.ts";
+import { gitFor, safeGitEnv } from "../git.ts";
 import { backendFor } from "../vcs/index.ts";
 
 /** A single file's contents for the read-only source-control viewer. */
@@ -39,6 +39,183 @@ function looksBinary(bytes: Uint8Array): boolean {
   const n = Math.min(bytes.length, 8000);
   for (let i = 0; i < n; i++) if (bytes[i] === 0) return true;
   return false;
+}
+
+/** Browser-native image formats the viewer can safely serve through an <img>. TIFF/HEIC are not
+ * decoded consistently enough across supported browsers. SVG is kept in image context and served
+ * with a sandboxed CSP by the HTTP route, so repository-authored scripts cannot execute. */
+const IMAGE_PREVIEW_TYPES: Readonly<Record<string, string>> = {
+  png: "image/png",
+  apng: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  svg: "image/svg+xml",
+  svgz: "image/svg+xml",
+};
+
+export type BinaryPreviewKind = "image" | "pdf" | "audio" | "video";
+
+interface PreviewDescriptor {
+  kind: BinaryPreviewKind;
+  contentType: string;
+}
+
+const DOCUMENT_MEDIA_PREVIEW_TYPES: Readonly<Record<string, PreviewDescriptor>> = {
+  pdf: { kind: "pdf", contentType: "application/pdf" },
+  mp3: { kind: "audio", contentType: "audio/mpeg" },
+  wav: { kind: "audio", contentType: "audio/wav" },
+  oga: { kind: "audio", contentType: "audio/ogg" },
+  ogg: { kind: "audio", contentType: "audio/ogg" },
+  opus: { kind: "audio", contentType: "audio/ogg" },
+  flac: { kind: "audio", contentType: "audio/flac" },
+  m4a: { kind: "audio", contentType: "audio/mp4" },
+  mp4: { kind: "video", contentType: "video/mp4" },
+  m4v: { kind: "video", contentType: "video/mp4" },
+  webm: { kind: "video", contentType: "video/webm" },
+  ogv: { kind: "video", contentType: "video/ogg" },
+};
+
+/** Binary previews bypass Monaco, so keep the bytes bounded before shipping them to a browser.
+ * SVGZ is also bounded after decompression. */
+const MAX_BINARY_PREVIEW_BYTES = 25 * 1024 * 1024;
+
+function pathExtension(path: string): string {
+  const name = path.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
+}
+
+function imagePreviewType(path: string): string | null {
+  return IMAGE_PREVIEW_TYPES[pathExtension(path)] ?? null;
+}
+
+function binaryPreviewDescriptor(path: string, expectedKind: BinaryPreviewKind): PreviewDescriptor | null {
+  const imageType = imagePreviewType(path);
+  const descriptor = imageType
+    ? { kind: "image" as const, contentType: imageType }
+    : DOCUMENT_MEDIA_PREVIEW_TYPES[pathExtension(path)];
+  return descriptor?.kind === expectedKind ? descriptor : null;
+}
+
+function asciiAt(bytes: Uint8Array, offset: number, text: string): boolean {
+  if (bytes.length < offset + text.length) return false;
+  for (let i = 0; i < text.length; i++) {
+    if (bytes[offset + i] !== text.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+function looksLikeSvg(bytes: Uint8Array): boolean {
+  if (bytes.includes(0)) return false;
+  try {
+    let head = new TextDecoder("utf-8", { fatal: true })
+      .decode(bytes.subarray(0, Math.min(bytes.length, 16_384)))
+      .replace(/^\uFEFF/, "")
+      .trimStart();
+    // Keep the accepted subset deliberately image-like. DTD/entities and stylesheet processing
+    // instructions are unnecessary for normal SVG art and create avoidable parser/network edges.
+    if (/<!DOCTYPE|<!ENTITY|<\?xml-stylesheet/i.test(head)) return false;
+    for (let i = 0; i < 32; i++) {
+      const prefix =
+        head.match(/^<\?xml(?:\s[\s\S]*?)?\?>\s*/i)?.[0] ??
+        head.match(/^<!--[\s\S]*?-->\s*/)?.[0];
+      if (!prefix) break;
+      head = head.slice(prefix.length);
+    }
+    return /^<svg(?:\s|>)/i.test(head);
+  } catch {
+    return false;
+  }
+}
+
+/** Do not trust an extension alone. Besides preventing renamed HTML from being served under an
+ * image MIME, this turns corrupt/partial images into a clear unsupported-preview response. */
+function matchesImageSignature(bytes: Uint8Array, contentType: string): boolean {
+  switch (contentType) {
+    case "image/png":
+      return (
+        bytes.length >= 8 &&
+        bytes[0] === 0x89 &&
+        asciiAt(bytes, 1, "PNG") &&
+        bytes[4] === 0x0d &&
+        bytes[5] === 0x0a &&
+        bytes[6] === 0x1a &&
+        bytes[7] === 0x0a
+      );
+    case "image/jpeg":
+      return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    case "image/gif":
+      return asciiAt(bytes, 0, "GIF87a") || asciiAt(bytes, 0, "GIF89a");
+    case "image/webp":
+      return asciiAt(bytes, 0, "RIFF") && asciiAt(bytes, 8, "WEBP");
+    case "image/avif": {
+      if (!asciiAt(bytes, 4, "ftyp")) return false;
+      const brands = new TextDecoder("ascii").decode(bytes.subarray(8, Math.min(bytes.length, 40)));
+      return brands.includes("avif") || brands.includes("avis");
+    }
+    case "image/bmp":
+      return asciiAt(bytes, 0, "BM");
+    case "image/x-icon":
+      return (
+        bytes.length >= 4 &&
+        bytes[0] === 0 &&
+        bytes[1] === 0 &&
+        bytes[2] === 1 &&
+        bytes[3] === 0
+      );
+    case "image/svg+xml":
+      return looksLikeSvg(bytes);
+    default:
+      return false;
+  }
+}
+
+function hasIsoBmffType(bytes: Uint8Array): boolean {
+  return asciiAt(bytes, 4, "ftyp");
+}
+
+function matchesDocumentMediaSignature(bytes: Uint8Array, contentType: string): boolean {
+  switch (contentType) {
+    case "application/pdf":
+      return new TextDecoder("ascii").decode(bytes.subarray(0, Math.min(bytes.length, 1024))).includes("%PDF-");
+    case "audio/mpeg":
+      return (
+        asciiAt(bytes, 0, "ID3") ||
+        (bytes.length >= 2 &&
+          bytes[0] === 0xff &&
+          (bytes[1]! & 0xe0) === 0xe0 &&
+          (bytes[1]! & 0x06) !== 0)
+      );
+    case "audio/wav":
+      return asciiAt(bytes, 0, "RIFF") && asciiAt(bytes, 8, "WAVE");
+    case "audio/ogg":
+    case "video/ogg":
+      return asciiAt(bytes, 0, "OggS");
+    case "audio/flac":
+      return asciiAt(bytes, 0, "fLaC");
+    case "audio/mp4":
+    case "video/mp4":
+      return hasIsoBmffType(bytes);
+    case "video/webm":
+      return (
+        bytes.length >= 4 &&
+        bytes[0] === 0x1a &&
+        bytes[1] === 0x45 &&
+        bytes[2] === 0xdf &&
+        bytes[3] === 0xa3 &&
+        new TextDecoder("ascii")
+          .decode(bytes.subarray(0, Math.min(bytes.length, 4096)))
+          .toLowerCase()
+          .includes("webm")
+      );
+    default:
+      return false;
+  }
 }
 
 /** Windows resolves path segments case-insensitively, so `.GIT/config` reaches `.git/config`.
@@ -88,6 +265,16 @@ interface SafeWorkFile {
   size: number;
 }
 
+export interface BinaryPreviewResult {
+  ok: boolean;
+  code: "OK" | "NOT_FOUND" | "ERROR" | "UNSUPPORTED" | "TOO_LARGE";
+  message?: string;
+  path?: string;
+  contentType?: string;
+  bytes?: Uint8Array;
+  size?: number;
+}
+
 /**
  * Resolve an existing working-tree file through every symlink/junction and prove the final
  * target is still inside the real repository root. A lexical `../` check is not enough here:
@@ -108,6 +295,298 @@ function resolveReadableWorkFile(repoRoot: string, abs: string): SafeWorkFile | 
   const st = statSync(real);
   if (!st.isFile()) throw new Error("path is not a regular file");
   return { real, size: st.size };
+}
+
+interface RawPreviewBytes {
+  bytes: Uint8Array;
+  size: number;
+}
+
+/** Read a working-tree preview through the same realpath boundary as the text viewer. */
+async function readWorkPreview(repoRoot: string, abs: string): Promise<RawPreviewBytes | null> {
+  const safe = resolveReadableWorkFile(repoRoot, abs);
+  if (!safe) return null;
+  if (safe.size > MAX_BINARY_PREVIEW_BYTES) {
+    throw new RangeError(`file exceeds the ${MAX_BINARY_PREVIEW_BYTES}-byte preview limit`);
+  }
+  // Slice even after stat: if the file grows concurrently, the read remains bounded.
+  const bytes = new Uint8Array(
+    await Bun.file(safe.real)
+      .slice(0, MAX_BINARY_PREVIEW_BYTES + 1)
+      .arrayBuffer(),
+  );
+  if (bytes.length > MAX_BINARY_PREVIEW_BYTES) {
+    throw new RangeError(`file exceeds the ${MAX_BINARY_PREVIEW_BYTES}-byte preview limit`);
+  }
+  return { bytes, size: bytes.length };
+}
+
+/** Read an immutable Git blob as bytes. Resolve rev:path to an object id first so HEAD moving
+ * between the size probe and byte read cannot swap in a larger object. */
+async function readPreviewBlobAtRev(absPath: string, rev: string, clean: string): Promise<RawPreviewBytes | null> {
+  try {
+    const oid = (await gitFor(absPath).raw(["rev-parse", "--verify", `${rev}:${clean}`])).trim();
+    if (!/^[0-9a-f]{40,64}$/i.test(oid)) return null;
+    const size = Number((await gitFor(absPath).raw(["cat-file", "-s", oid])).trim());
+    if (!Number.isSafeInteger(size) || size < 0) return null;
+    if (size > MAX_BINARY_PREVIEW_BYTES) {
+      throw new RangeError(`file exceeds the ${MAX_BINARY_PREVIEW_BYTES}-byte preview limit`);
+    }
+
+    const proc = Bun.spawn(["git", "cat-file", "blob", oid], {
+      cwd: absPath,
+      env: safeGitEnv(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [buffer, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).arrayBuffer(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (exitCode !== 0) throw new Error(stderr.trim() || "could not read preview blob");
+    const bytes = new Uint8Array(buffer);
+    if (bytes.length > MAX_BINARY_PREVIEW_BYTES) {
+      throw new RangeError(`file exceeds the ${MAX_BINARY_PREVIEW_BYTES}-byte preview limit`);
+    }
+    return { bytes, size: bytes.length };
+  } catch (e) {
+    if (e instanceof RangeError) throw e;
+    return null;
+  }
+}
+
+async function gunzipPreview(raw: RawPreviewBytes): Promise<RawPreviewBytes> {
+  const source = raw.bytes.buffer.slice(
+    raw.bytes.byteOffset,
+    raw.bytes.byteOffset + raw.bytes.byteLength,
+  ) as ArrayBuffer;
+  const reader = new Blob([source])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"))
+    .getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BINARY_PREVIEW_BYTES) {
+        throw new RangeError(`file exceeds the ${MAX_BINARY_PREVIEW_BYTES}-byte preview limit`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, size };
+}
+
+async function checkedImageResult(
+  clean: string,
+  raw: RawPreviewBytes,
+  contentType: string,
+): Promise<BinaryPreviewResult> {
+  let normalized = raw;
+  if (pathExtension(clean) === "svgz") {
+    try {
+      normalized = await gunzipPreview(raw);
+    } catch (e) {
+      if (e instanceof RangeError) throw e;
+      return {
+        ok: false,
+        code: "UNSUPPORTED",
+        message: "file contents do not match a supported image format",
+      };
+    }
+  }
+  if (!matchesImageSignature(normalized.bytes, contentType)) {
+    return {
+      ok: false,
+      code: "UNSUPPORTED",
+      message: "file contents do not match a supported image format",
+    };
+  }
+  return {
+    ok: true,
+    code: "OK",
+    path: clean,
+    contentType,
+    bytes: normalized.bytes,
+    size: normalized.size,
+  };
+}
+
+function checkedDocumentMediaResult(
+  clean: string,
+  raw: RawPreviewBytes,
+  descriptor: PreviewDescriptor,
+): BinaryPreviewResult {
+  if (!matchesDocumentMediaSignature(raw.bytes, descriptor.contentType)) {
+    return {
+      ok: false,
+      code: "UNSUPPORTED",
+      message: "file contents do not match the requested preview format",
+    };
+  }
+  return {
+    ok: true,
+    code: "OK",
+    path: clean,
+    contentType: descriptor.contentType,
+    bytes: raw.bytes,
+    size: raw.size,
+  };
+}
+
+/**
+ * Browser-native image bytes for the working-tree viewer. A deleted path falls back to HEAD just
+ * like readFileContent. Only an allowlisted extension with a matching file signature is returned.
+ */
+export async function readImagePreview(
+  repoId: string,
+  relPath: string,
+  ref: "work" | "head" = "work",
+): Promise<BinaryPreviewResult> {
+  const repo = getRepo(repoId);
+  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  const r = resolveRepoPath(repo.absPath, relPath);
+  if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  if (insideGitMetadata(r.clean)) {
+    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+  }
+  const contentType = imagePreviewType(r.clean);
+  if (!contentType) {
+    return { ok: false, code: "UNSUPPORTED", message: "image format is not supported for preview" };
+  }
+
+  try {
+    let raw = ref === "work" ? await readWorkPreview(repo.absPath, r.abs) : null;
+    if (!raw) raw = await readPreviewBlobAtRev(repo.absPath, "HEAD", r.clean);
+    if (!raw) return { ok: false, code: "NOT_FOUND", message: "file not found" };
+    return await checkedImageResult(r.clean, raw, contentType);
+  } catch (e) {
+    if (e instanceof RangeError) return { ok: false, code: "TOO_LARGE", message: e.message };
+    return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Image bytes at one historical commit. A deletion falls back to the first parent so the Content
+ * view can still show the image that commit removed.
+ */
+export async function readCommitImagePreview(
+  repoId: string,
+  hash: string,
+  relPath: string,
+): Promise<BinaryPreviewResult> {
+  const repo = getRepo(repoId);
+  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) {
+    return { ok: false, code: "ERROR", message: "invalid commit hash" };
+  }
+  const r = resolveRepoPath(repo.absPath, relPath);
+  if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  if (insideGitMetadata(r.clean)) {
+    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+  }
+  if (!backendFor(repo.vcs).capabilities.fileModels) {
+    return { ok: false, code: "ERROR", message: "commit file view isn't available for this repository" };
+  }
+  const contentType = imagePreviewType(r.clean);
+  if (!contentType) {
+    return { ok: false, code: "UNSUPPORTED", message: "image format is not supported for preview" };
+  }
+
+  try {
+    const raw =
+      (await readPreviewBlobAtRev(repo.absPath, hash, r.clean)) ??
+      (await readPreviewBlobAtRev(repo.absPath, `${hash}^`, r.clean));
+    if (!raw) return { ok: false, code: "NOT_FOUND", message: "file not found in this commit" };
+    return await checkedImageResult(r.clean, raw, contentType);
+  } catch (e) {
+    if (e instanceof RangeError) return { ok: false, code: "TOO_LARGE", message: e.message };
+    return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** PDF/audio/video bytes for the working-tree viewer. Uses the same confinement, cap, signature
+ * checks, and deleted-file HEAD fallback as image previews. */
+export async function readBinaryPreview(
+  repoId: string,
+  relPath: string,
+  kind: Exclude<BinaryPreviewKind, "image">,
+  ref: "work" | "head" = "work",
+): Promise<BinaryPreviewResult> {
+  const repo = getRepo(repoId);
+  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  const r = resolveRepoPath(repo.absPath, relPath);
+  if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  if (insideGitMetadata(r.clean)) {
+    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+  }
+  const descriptor = binaryPreviewDescriptor(r.clean, kind);
+  if (!descriptor) {
+    return { ok: false, code: "UNSUPPORTED", message: `${kind} format is not supported for preview` };
+  }
+
+  try {
+    let raw = ref === "work" ? await readWorkPreview(repo.absPath, r.abs) : null;
+    if (!raw) raw = await readPreviewBlobAtRev(repo.absPath, "HEAD", r.clean);
+    if (!raw) return { ok: false, code: "NOT_FOUND", message: "file not found" };
+    return checkedDocumentMediaResult(r.clean, raw, descriptor);
+  } catch (e) {
+    if (e instanceof RangeError) return { ok: false, code: "TOO_LARGE", message: e.message };
+    return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** PDF/audio/video bytes at one commit; a deletion falls back to the first parent. */
+export async function readCommitBinaryPreview(
+  repoId: string,
+  hash: string,
+  relPath: string,
+  kind: Exclude<BinaryPreviewKind, "image">,
+): Promise<BinaryPreviewResult> {
+  const repo = getRepo(repoId);
+  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  if (!/^[0-9a-fA-F]{4,64}$/.test(hash)) {
+    return { ok: false, code: "ERROR", message: "invalid commit hash" };
+  }
+  const r = resolveRepoPath(repo.absPath, relPath);
+  if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  if (insideGitMetadata(r.clean)) {
+    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+  }
+  if (!backendFor(repo.vcs).capabilities.fileModels) {
+    return { ok: false, code: "ERROR", message: "commit file view isn't available for this repository" };
+  }
+  const descriptor = binaryPreviewDescriptor(r.clean, kind);
+  if (!descriptor) {
+    return { ok: false, code: "UNSUPPORTED", message: `${kind} format is not supported for preview` };
+  }
+
+  try {
+    const raw =
+      (await readPreviewBlobAtRev(repo.absPath, hash, r.clean)) ??
+      (await readPreviewBlobAtRev(repo.absPath, `${hash}^`, r.clean));
+    if (!raw) return { ok: false, code: "NOT_FOUND", message: "file not found in this commit" };
+    return checkedDocumentMediaResult(r.clean, raw, descriptor);
+  } catch (e) {
+    if (e instanceof RangeError) return { ok: false, code: "TOO_LARGE", message: e.message };
+    return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** Working-tree text for an absolute path (read straight off disk), or null if it's gone. */

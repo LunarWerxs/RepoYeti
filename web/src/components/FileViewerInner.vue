@@ -23,6 +23,8 @@ import { t } from "@/i18n";
 import { api, ApiError } from "@/api";
 import { fileVisual } from "@/lib/file-icons";
 import { STATUS_COLOR } from "@/lib/git-status-colors";
+import { binaryPreviewKind, binaryPreviewUrl } from "@/lib/binary-preview";
+import { isPreviewableMarkdown } from "@/lib/markdown-preview";
 import { cn } from "@/lib/utils";
 import type { EditorTheme } from "@/lib/monaco-setup";
 import { useTheme } from "@/lib/theme";
@@ -36,6 +38,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import MarkdownPreview from "@/components/MarkdownPreview.vue";
 import {
   viewerMode,
   wordLevelDiff,
@@ -93,6 +96,23 @@ const editorTheme = computed<EditorTheme>(() => (isDark.value ? "dark" : "light"
 
 // ── header bits ───────────────────────────────────────────────────────────────
 const fileName = computed(() => props.target?.path.split("/").pop() ?? "");
+const previewKind = computed(() => binaryPreviewKind(props.target?.path ?? ""));
+const binaryPreview = computed(() => previewKind.value !== null);
+const previewableImage = computed(() => previewKind.value === "image");
+const previewableMarkdown = computed(() => isPreviewableMarkdown(props.target?.path ?? ""));
+const previewSrc = computed(() =>
+  props.target && previewKind.value ? binaryPreviewUrl(props.target, previewKind.value) : "",
+);
+const previewLoading = ref(true);
+const previewFailed = ref(false);
+watch(
+  previewSrc,
+  () => {
+    previewLoading.value = true;
+    previewFailed.value = false;
+  },
+  { immediate: true },
+);
 const dirName = computed(() => {
   const parts = props.target?.path.split("/") ?? [];
   return parts.slice(0, -1).join("/");
@@ -164,12 +184,27 @@ const remoteEditBlocked = computed(() => !store.canContinueLocal && !store.remot
 // Diff tab is editable whenever it's rendering the rich side-by-side view (a real `modified`
 // working-tree string in hand) rather than a compact unified patch — patch mode ships only
 // the hunks, so there's no whole-file text here to seed an editor with.
-const diffEditable = computed(() => viewerMode.value === "diff" && !patchMode.value);
-const showEditControls = computed(() => !props.target?.commit && (viewerMode.value === "content" || diffEditable.value));
+const diffEditable = computed(
+  () => viewerMode.value === "diff" && !patchMode.value && !binaryPreview.value,
+);
+const showEditControls = computed(
+  () =>
+    !binaryPreview.value &&
+    !props.target?.commit &&
+    (viewerMode.value === "content" || diffEditable.value),
+);
 
 const canEdit = computed(() => {
   if (props.target?.commit) return false; // a historical commit view is read-only
-  if (loading.value || !!errorMsg.value || binary.value || truncated.value || remoteEditBlocked.value) return false;
+  if (
+    binaryPreview.value ||
+    loading.value ||
+    !!errorMsg.value ||
+    binary.value ||
+    truncated.value ||
+    remoteEditBlocked.value
+  )
+    return false;
   if (viewerMode.value === "content") return !fromHead.value;
   // Diff tab: patch mode has no whole-file text (see diffEditable); a Deleted file has
   // nothing left in the working tree to write over (mirrors content mode's fromHead guard).
@@ -196,10 +231,6 @@ watch(
       loading.value = false;
       return;
     }
-    const controller = new AbortController();
-    contentController = controller;
-    const { repoId, path, commit } = props.target;
-    loading.value = true;
     errorMsg.value = null;
     binary.value = false;
     truncated.value = false;
@@ -207,6 +238,16 @@ watch(
     patchMode.value = false;
     editing.value = false; // a new file/mode drops any in-progress edit
     dirty.value = false;
+    // Browser-native binary previews load from the authenticated raw representation directly.
+    // Avoid asking the text/diff endpoints to decode those bytes as UTF-8 first.
+    if (binaryPreview.value) {
+      loading.value = false;
+      return;
+    }
+    const controller = new AbortController();
+    contentController = controller;
+    const { repoId, path, commit } = props.target;
+    loading.value = true;
     try {
       if (commit) {
         // History file: the first-parent↔commit models diff (read-only). Both tabs come from one
@@ -432,7 +473,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <!-- Content ↔ Diff toggle -->
-      <div class="flex shrink-0 items-center rounded-md border border-border bg-secondary/40 p-0.5 text-[12px] font-medium">
+      <div
+        v-if="!binaryPreview"
+        class="flex shrink-0 items-center rounded-md border border-border bg-secondary/40 p-0.5 text-[12px] font-medium"
+      >
         <button
           type="button"
           :class="
@@ -508,7 +552,7 @@ onBeforeUnmount(() => {
             <Pencil :size="14" />
             {{ $t("fileViewer.edit") }}
           </DropdownMenuItem>
-          <DropdownMenuItem @select.prevent="wordWrap = !wordWrap">
+          <DropdownMenuItem v-if="!binaryPreview" @select.prevent="wordWrap = !wordWrap">
             <WrapText :size="14" />
             {{ $t("fileViewer.wordWrap") }}
             <Check v-if="wordWrap" :size="14" class="ml-auto text-primary" />
@@ -528,7 +572,7 @@ onBeforeUnmount(() => {
             {{ diffSplitView ? $t("fileViewer.unifiedView") : $t("fileViewer.splitView") }}
           </DropdownMenuItem>
           <template v-if="store.canContinueLocal && !store.isGuest">
-            <DropdownMenuSeparator />
+            <DropdownMenuSeparator v-if="!binaryPreview" />
             <DropdownMenuItem @select="openWith()">
               <ExternalLink :size="14" />
               {{ $t("fileViewer.openWith") }}
@@ -574,6 +618,92 @@ onBeforeUnmount(() => {
       </div>
 
       <div
+        v-else-if="previewableImage && !previewFailed"
+        class="relative flex h-full items-center justify-center overflow-auto bg-secondary/15 p-4"
+      >
+        <Loader2
+          v-if="previewLoading"
+          :size="20"
+          class="absolute animate-spin text-muted-foreground"
+        />
+        <img
+          :src="previewSrc"
+          :alt="fileName"
+          class="max-h-full max-w-full object-contain transition-opacity"
+          :class="previewLoading ? 'opacity-0' : 'opacity-100'"
+          @load="previewLoading = false"
+          @error="previewFailed = true"
+        />
+      </div>
+
+      <div
+        v-else-if="previewKind === 'pdf' && !previewFailed"
+        class="relative h-full bg-secondary/15"
+      >
+        <Loader2
+          v-if="previewLoading"
+          :size="20"
+          class="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+        />
+        <iframe
+          :src="previewSrc"
+          :title="fileName"
+          class="h-full w-full border-0"
+          sandbox=""
+          @load="previewLoading = false"
+          @error="previewFailed = true"
+        />
+      </div>
+
+      <div
+        v-else-if="previewKind === 'audio' && !previewFailed"
+        class="relative flex h-full items-center justify-center bg-secondary/15 p-6"
+      >
+        <Loader2
+          v-if="previewLoading"
+          :size="20"
+          class="absolute animate-spin text-muted-foreground"
+        />
+        <audio
+          :src="previewSrc"
+          :aria-label="fileName"
+          class="w-full max-w-2xl"
+          controls
+          preload="metadata"
+          @loadedmetadata="previewLoading = false"
+          @error="previewFailed = true"
+        />
+      </div>
+
+      <div
+        v-else-if="previewKind === 'video' && !previewFailed"
+        class="relative flex h-full items-center justify-center overflow-auto bg-black/90 p-4"
+      >
+        <Loader2
+          v-if="previewLoading"
+          :size="20"
+          class="absolute animate-spin text-white/70"
+        />
+        <video
+          :src="previewSrc"
+          :aria-label="fileName"
+          class="max-h-full max-w-full"
+          controls
+          preload="metadata"
+          @loadedmetadata="previewLoading = false"
+          @error="previewFailed = true"
+        />
+      </div>
+
+      <div
+        v-else-if="previewFailed"
+        class="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground"
+      >
+        <FileWarning :size="22" />
+        <div class="text-[13px]">{{ $t("fileViewer.previewUnavailable") }}</div>
+      </div>
+
+      <div
         v-else-if="binary"
         class="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground"
       >
@@ -591,12 +721,16 @@ onBeforeUnmount(() => {
           <span v-else>{{ $t("fileViewer.truncated") }}</span>
         </div>
         <div class="min-h-0 flex-1">
+          <MarkdownPreview
+            v-if="previewableMarkdown && viewerMode === 'content' && !editing && !truncated"
+            :source="content"
+          />
           <!-- Large modified files arrive as a unified patch (compact diff) — rendered in a
                read-only editor with `diff` highlighting; small files use the rich side-by-side.
                Clicking Edit on the Diff tab drops the side-by-side view for the same single-pane
                editable editor Content mode uses, seeded from the working-tree (`modified`) text. -->
           <MonacoDiffViewer
-            v-if="diffEditable && !editing"
+            v-else-if="diffEditable && !editing"
             :original="original"
             :modified="modified"
             :filename="target?.path ?? ''"

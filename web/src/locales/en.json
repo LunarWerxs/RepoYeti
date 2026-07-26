@@ -1,6 +1,7 @@
 {
   "fileViewer": {
     "binary": "Binary file: preview not available",
+    "previewUnavailable": "This file couldn't be previewed",
     "close": "Close",
     "editorFailed": "Couldn't load the editor",
     "error": "Couldn't load this file",

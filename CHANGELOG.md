@@ -4,7 +4,15 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.14.1] - 2026-07-25
+## [0.15.0] - 2026-07-26
+
+### Added
+
+- **The file viewer now previews the files people actually inspect.** Markdown renders as
+  sanitized GitHub-style documentation, while browser-native images, PDF documents, audio, and
+  video open in bounded inline previews from either the working tree or commit history. Binary
+  responses verify their signatures, reject oversized content, sandbox SVG, and support byte
+  ranges for media playback.
 
 ### Changed
 
@@ -844,7 +852,8 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
-[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.12.0...v0.13.0

@@ -10,13 +10,103 @@ import {
   getChanges,
   searchChangedContent,
   readFileContent,
+  readImagePreview,
+  readBinaryPreview,
   readFileDiff,
   readCommitFile,
+  readCommitImagePreview,
+  readCommitBinaryPreview,
   writeFileContent,
   moveFile,
   forceRefresh,
 } from "../../service/index.ts";
 import { requireId, remoteEditingBlocked } from "../respond.ts";
+
+type ImageResult = Awaited<ReturnType<typeof readImagePreview>>;
+
+interface ByteRange {
+  start: number;
+  end: number;
+}
+
+function parseRange(value: string | undefined, size: number): ByteRange | null | "invalid" {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim());
+  if (!match || size === 0) return "invalid";
+  const startRaw = match[1] ?? "";
+  const endRaw = match[2] ?? "";
+  if (!startRaw && !endRaw) return "invalid";
+  if (!startRaw) {
+    const suffix = Number(endRaw);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return "invalid";
+    return { start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(startRaw);
+  const requestedEnd = endRaw ? Number(endRaw) : size - 1;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(requestedEnd) ||
+    start < 0 ||
+    start >= size ||
+    requestedEnd < start
+  )
+    return "invalid";
+  return { start, end: Math.min(requestedEnd, size - 1) };
+}
+
+function previewResponse(result: ImageResult, rangeHeader?: string): Response {
+  if (!result.ok || !result.bytes || !result.contentType) {
+    let status = 400;
+    if (result.code === "NOT_FOUND") status = 404;
+    else if (result.code === "TOO_LARGE") status = 413;
+    else if (result.code === "UNSUPPORTED") status = 415;
+    return Response.json(result, { status });
+  }
+  const { bytes } = result;
+  const range = parseRange(rangeHeader, bytes.byteLength);
+  const baseHeaders: Record<string, string> = {
+    "content-type": result.contentType,
+    "cache-control": "private, no-store",
+    "content-disposition": "inline",
+    "accept-ranges": "bytes",
+    "cross-origin-resource-policy": "same-origin",
+    "x-content-type-options": "nosniff",
+  };
+  if (result.contentType === "image/svg+xml") {
+    Object.assign(baseHeaders, {
+      // SVGs often rely on inline <style>, but stay inert: image context disables scripting and
+      // external loads, while this response policy also protects a direct navigation to the URL.
+      "content-security-policy":
+        "default-src 'none'; script-src 'none'; object-src 'none'; base-uri 'none'; connect-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; sandbox",
+    });
+  }
+  if (range === "invalid") {
+    return new Response(null, {
+      status: 416,
+      headers: { ...baseHeaders, "content-range": `bytes */${bytes.byteLength}` },
+    });
+  }
+  const start = range?.start ?? 0;
+  const end = range?.end ?? bytes.byteLength - 1;
+  const body = bytes.buffer.slice(
+    bytes.byteOffset + start,
+    bytes.byteOffset + end + 1,
+  ) as ArrayBuffer;
+  const headers: Record<string, string> = {
+    ...baseHeaders,
+    "content-length": String(body.byteLength),
+  };
+  if (range) headers["content-range"] = `bytes ${start}-${end}/${bytes.byteLength}`;
+  return new Response(body, {
+    status: range ? 206 : 200,
+    headers,
+  });
+}
+
+type DocumentMediaKind = "pdf" | "audio" | "video";
+function documentMediaKind(value: string | undefined): DocumentMediaKind | null {
+  return value === "pdf" || value === "audio" || value === "video" ? value : null;
+}
 
 export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/repos/:id/changes", async (c) => {
@@ -35,6 +125,17 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (id instanceof Response) return id;
     const path = c.req.query("path") ?? "";
     const ref = c.req.query("ref") === "head" ? "head" : "work";
+    const preview = c.req.query("preview");
+    if (preview === "image") {
+      return previewResponse(await readImagePreview(id, path, ref), c.req.header("range"));
+    }
+    const mediaKind = documentMediaKind(preview);
+    if (mediaKind) {
+      return previewResponse(
+        await readBinaryPreview(id, path, mediaKind, ref),
+        c.req.header("range"),
+      );
+    }
     const result = await readFileContent(id, path, ref);
     if (result.ok) return c.json(result);
     // A bad/escaping path is a client error (400), not a 500; a missing repo/file is 404.
@@ -66,6 +167,25 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/repos/:id/commit/:hash/file", async (c) => {
     const id = requireId(c);
     if (id instanceof Response) return id;
+    const preview = c.req.query("preview");
+    if (preview === "image") {
+      return previewResponse(
+        await readCommitImagePreview(id, c.req.param("hash"), c.req.query("path") ?? ""),
+        c.req.header("range"),
+      );
+    }
+    const mediaKind = documentMediaKind(preview);
+    if (mediaKind) {
+      return previewResponse(
+        await readCommitBinaryPreview(
+          id,
+          c.req.param("hash"),
+          c.req.query("path") ?? "",
+          mediaKind,
+        ),
+        c.req.header("range"),
+      );
+    }
     const result = await readCommitFile(id, c.req.param("hash"), c.req.query("path") ?? "");
     if (result.ok) return c.json(result);
     return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
