@@ -6,10 +6,11 @@
  * access tokens as needed, and calls the settings-sync store
  * (`studio.connections.icu/v1/app-data/{clientId}`).
  *
- * Since 2026-07-08 the token machinery is the OFFICIAL SDK — @cnct/connect (+ @cnct/locker for the
- * store) — instead of a hand-rolled refresh loop: single-flight rotation-safe refresh (Connections
- * rotates third-party refresh tokens and family-revokes on replay), dead-session cleanup, and
- * server-side revoke on forget all come from the shared package. This module keeps only the
+ * Since 2026-07-08 the token machinery is the OFFICIAL SDK — @cnct/connect (which also ships the
+ * settings-sync store, formerly the separate @cnct/locker package) — instead of a hand-rolled
+ * refresh loop: single-flight rotation-safe refresh (Connections rotates third-party refresh
+ * tokens and family-revokes on replay), dead-session cleanup, and server-side revoke on forget all
+ * come from the shared package. This module keeps only the
  * RepoYeti-specific parts: the KEYCHAIN persistence seam (the refresh token never touches disk in
  * plaintext; the access token lives in memory only), the settings allowlist, and the sync
  * orchestration. Interactive sign-in stays in src/auth.ts (the hardened OIDC module) — it hands the
@@ -20,8 +21,7 @@
  *
  * Off by default and additive: with `cfg.cloudSync.enabled` false (the default) nothing here runs.
  */
-import type { ConnectClient, ConnectStore, TokenSet } from "@cnct/connect";
-import type { LockerClient } from "@cnct/locker";
+import type { ConnectClient, ConnectStore, TokenSet, LockerClient } from "@cnct/connect";
 import {
   saveConfig,
   type RepoYetiConfig,
@@ -110,8 +110,8 @@ function storeFor(clientId: string): ConnectStore {
 
 let client: ConnectClient | null = null;
 let clientKey = "";
-// Both SDK packages are import()-ed lazily so a daemon that never syncs (cloudSync disabled, the
-// default) never loads them — they only resolve on an actual sync/forget operation.
+// The SDK is import()-ed lazily so a daemon that never syncs (cloudSync disabled, the default)
+// never loads it — it only resolves on an actual sync/forget operation.
 async function connectFor(oauth: OAuthConfig): Promise<ConnectClient> {
   const key = `${oauth.issuer.replace(/\/+$/, "")}|${oauth.clientId}`;
   if (!client || clientKey !== key) {
@@ -192,7 +192,7 @@ export async function clearTokens(): Promise<void> {
 }
 
 async function lockerFor(oauth: OAuthConfig): Promise<LockerClient> {
-  const { createLocker } = await import("@cnct/locker");
+  const { createLocker } = await import("@cnct/connect");
   return createLocker({ appId: oauth.clientId, getToken: async () => (await connectFor(oauth)).getAccessToken() });
 }
 
