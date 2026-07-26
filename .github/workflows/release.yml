@@ -33,6 +33,7 @@ jobs:
         with:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
+      - run: bun install --cwd web --frozen-lockfile
       - run: bun run build
       - name: Package Unix executable
         if: runner.os != 'Windows'
