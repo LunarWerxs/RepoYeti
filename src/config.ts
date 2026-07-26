@@ -23,7 +23,7 @@ import {
 } from "./secrets.ts";
 import { publicKeyFor } from "./relay.ts";
 
-export const VERSION = "0.15.1";
+export const VERSION = "0.15.2";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");

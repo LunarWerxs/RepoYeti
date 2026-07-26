@@ -4,7 +4,7 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.15.1] - 2026-07-26
+## [0.15.2] - 2026-07-26
 
 ### Added
 
@@ -29,6 +29,8 @@ All notable changes to RepoYeti are documented here. The format is based on
   reports no configured scan routes and then appears to do nothing.
 - **Release builds install the embedded dashboard dependencies.** Fresh tag runners now restore
   both lockfiles before compiling, so every supported platform can produce the one-file bundle.
+- **The Windows updater ZIP is validated correctly.** Release automation now treats the
+  one-line archive listing as a one-item list instead of indexing the first character.
 
 ## [0.14.0] - 2026-07-25
 
@@ -854,8 +856,8 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
-[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.15.1...HEAD
-[0.15.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.15.0...v0.15.1
+[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/LunarWerxs/RepoYeti/compare/v0.14.0...v0.15.2
 [0.15.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.0...v0.13.1
