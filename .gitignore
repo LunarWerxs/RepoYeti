@@ -3,6 +3,7 @@ node_modules/
 dist/
 dist-next/
 dist-old/
+/out/
 *.tsbuildinfo
 
 # local secrets / env (bun auto-loads .env at startup) — NEVER commit
