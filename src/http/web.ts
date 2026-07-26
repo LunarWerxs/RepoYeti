@@ -34,6 +34,12 @@ const COMPRESSION_THRESHOLD_BYTES = 1024;
 const STATIC_EXT =
   /\.(?:js|mjs|css|map|json|webmanifest|wasm|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|txt|xml)$/i;
 
+/** Compile-time injected by scripts/build.ts. Undefined in a source checkout. */
+function embeddedWeb(): Readonly<Record<string, string>> | undefined {
+  return (globalThis as { __REPOYETI_EMBEDDED_WEB__?: Readonly<Record<string, string>> })
+    .__REPOYETI_EMBEDDED_WEB__;
+}
+
 /**
  * Serve the SPA + assets with traversal protection.
  *
@@ -63,15 +69,17 @@ export function mountWeb(app: Hono): void {
     let pathname = decodeURIComponent(new URL(c.req.url).pathname);
     if (pathname === "/" || pathname === "") pathname = "/index.html";
 
+    const embedded = embeddedWeb();
     const filePath = normalize(join(WEB_ROOT, pathname));
     if (!filePath.startsWith(WEB_ROOT)) return c.text("forbidden", 403);
 
     const lastSeg = pathname.slice(pathname.lastIndexOf("/") + 1);
     const isAssetRequest = pathname.startsWith("/assets/") || STATIC_EXT.test(lastSeg);
 
-    const file = Bun.file(filePath);
+    const embeddedPath = embedded?.[pathname];
+    const file = Bun.file(embeddedPath ?? filePath);
     if (await file.exists()) {
-      const ext = filePath.slice(filePath.lastIndexOf("."));
+      const ext = pathname.slice(pathname.lastIndexOf("."));
       const headers: Record<string, string> = {
         "cache-control": pathname.startsWith("/assets/") ? IMMUTABLE_CACHE : "no-cache",
         // Hono's streaming compressor uses Content-Length to enforce its size threshold. Bun.file
@@ -86,7 +94,7 @@ export function mountWeb(app: Hono): void {
     if (isAssetRequest) return c.text("not found", 404, { "cache-control": "no-store" });
 
     // Navigation route → SPA fallback to index.html, always revalidated.
-    const index = Bun.file(join(WEB_ROOT, "index.html"));
+    const index = Bun.file(embedded?.["/index.html"] ?? join(WEB_ROOT, "index.html"));
     if (!(await index.exists())) {
       return c.text("web app not built — run: bun run --cwd web build:fast", 503);
     }

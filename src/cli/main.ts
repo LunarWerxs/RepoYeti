@@ -7,10 +7,10 @@
  * implicit default so a bare `repoyeti` boots the daemon, preserving the original behavior.
  */
 import { VERSION } from "../config.ts";
-import { start, addRootCmd, statusCmd } from "./lifecycle.ts";
-import { runGitVerb } from "./git.ts";
-import { runTokenVerb } from "./token.ts";
 import { runStdioMcp } from "../mcp/stdio.ts";
+import { runGitVerb } from "./git.ts";
+import { addRootCmd, start, statusCmd } from "./lifecycle.ts";
+import { runTokenVerb } from "./token.ts";
 
 /** Verbs that drive a running daemon over HTTP (src/cli/git.ts). `status` is handled separately
  *  because of the name clash with the daemon-config summary (see the switch below). */
@@ -31,10 +31,20 @@ const GIT_VERBS = new Set([
 
 export async function main(argv: string[]): Promise<void> {
   const cmd = argv[0] ?? "start";
+  const releaseDoubleClick =
+    argv.length === 0 &&
+    (globalThis as { __REPOYETI_RELEASE_BUILD__?: boolean }).__REPOYETI_RELEASE_BUILD__ === true;
 
   switch (cmd) {
+    case "--version":
+    case "version":
+      console.log(VERSION);
+      break;
+
     case "start":
-      await start(argv.slice(1));
+      await start(argv.slice(1), {
+        openUi: releaseDoubleClick && process.env.REPOYETI_NO_OPEN !== "1",
+      });
       break;
     case "add-root":
       addRootCmd(argv[1]);

@@ -1,6 +1,6 @@
 {
   "name": "repoyeti",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "System-wide remote git manager — a background daemon with a mobile dashboard.",
   "type": "module",
   "license": "MIT",
@@ -49,7 +49,7 @@
     "build": "bun run scripts/build.ts"
   },
   "dependencies": {
-    "@cnct/connect": "^1.0.0",
+    "@cnct/connect": "^1.1.0",
     "hono": "^4.6.14",
     "jose": "^6.2.3",
     "qrcode-terminal": "^0.12.0",

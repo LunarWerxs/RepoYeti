@@ -260,7 +260,7 @@ test("enable → push → pull → disable round-trips through the real HTTP rou
   expect(disableBody.connected).toBe(true);
 });
 
-test("PUT /api/settings/sync {appearance} alone updates+pushes the appearance when enabled+connected", async () => {
+test("PUT /api/settings/sync {appearance} queues the engine and manual push flushes it", async () => {
   await rememberTokens({ refresh_token: "rt-1" }, OAUTH);
   const app = createApp(oidcCfg({ cloudSync: { enabled: true } }));
 
@@ -273,6 +273,10 @@ test("PUT /api/settings/sync {appearance} alone updates+pushes the appearance wh
   const body = await res.json();
   expect(body.ok).toBe(true);
   expect(body.appearance).toEqual({ theme: "light" });
+  expect(server.settings.appearance).toBeUndefined();
+
+  const flush = await app.request("/api/settings/sync/push", { method: "POST" });
+  expect((await flush.json()).ok).toBe(true);
   expect(server.settings.appearance).toEqual({ theme: "light" });
 });
 

@@ -4,7 +4,20 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.14.1] - 2026-07-25
+
+### Changed
+
+- **Windows releases are single-file again.** Ship an icon-bearing GUI executable alongside the
+  compact ZIP consumed by automatic updates. The dashboard is embedded, so releases no longer
+  contain loose `web` or `node_modules` directories.
+- **Connections sync is safer across devices and accounts.** Upgrade to the 1.1 engine, including
+  one-step first-account seeding, nested conflict-safe patches, and a final flush before shutdown.
+
+### Fixed
+
+- **Double-click startup opens the dashboard normally.** RepoYeti no longer opens a console that
+  reports no configured scan routes and then appears to do nothing.
 
 ## [0.14.0] - 2026-07-25
 

@@ -1,9 +1,7 @@
 name: Release
 
-# Tag a version (e.g. `git tag v0.1.0 && git push --tags`) to build a complete runnable bundle on
-# each OS and publish it to a GitHub Release. The compiled daemon expects the built PWA (and may
-# use optional native Lore libraries) beside it, so each asset is an archive of the full `dist/`
-# tree rather than a bare executable that starts without its dashboard.
+# Tag a version (e.g. `git tag v0.1.0 && git push --tags`) to build one self-contained executable
+# per OS. The Vue app is embedded in the binary; no web/ or node_modules/ sidecars are released.
 #
 # NOTE: arch labels below are nominal (ubuntu→x64, macos-latest→arm64). Adjust the matrix /
 # `bun build --compile --target` in scripts/build.ts if you need additional arch variants.
@@ -35,51 +33,41 @@ jobs:
         with:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
-      - run: bun install --frozen-lockfile
-        working-directory: web
       - run: bun run build
-      - name: Package complete Unix bundle
+      - name: Package Unix executable
         if: runner.os != 'Windows'
         shell: bash
         run: |
           test -f dist/repoyeti
-          test -f dist/web/dist/index.html
-          mkdir -p stage/RepoYeti out
-          cp -a dist/. stage/RepoYeti/
-          bun run scripts/smoke-release.ts stage/RepoYeti
-          tar -C stage -czf "out/${{ matrix.asset }}" RepoYeti
+          test "$(find dist -mindepth 1 -maxdepth 1 | wc -l)" -eq 1
+          bun run scripts/smoke-release.ts dist
+          mkdir -p out
+          tar -C dist -czf "out/${{ matrix.asset }}" repoyeti
           listing="$(tar -tzf "out/${{ matrix.asset }}")"
-          grep -qx 'RepoYeti/repoyeti' <<<"$listing"
-          grep -qx 'RepoYeti/web/dist/index.html' <<<"$listing"
-          grep -q '^RepoYeti/web/dist/assets/' <<<"$listing"
-      - name: Package complete Windows bundle
+          grep -qx 'repoyeti' <<<"$listing"
+          test "$(wc -l <<<"$listing")" -eq 1
+      - name: Package Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           if (-not (Test-Path -LiteralPath "dist/repoyeti.exe" -PathType Leaf)) {
             throw "no compiled binary found at dist/repoyeti.exe"
           }
-          if (-not (Test-Path -LiteralPath "dist/web/dist/index.html" -PathType Leaf)) {
-            throw "no built dashboard found at dist/web/dist/index.html"
+          if ((Get-ChildItem -LiteralPath "dist" -Force).Count -ne 1) {
+            throw "dist must contain only the self-contained executable"
           }
-          New-Item -ItemType Directory -Path "stage/RepoYeti", "out" -Force | Out-Null
-          Copy-Item -Path "dist/*" -Destination "stage/RepoYeti" -Recurse
-          bun run scripts/smoke-release.ts stage/RepoYeti
-          Compress-Archive -Path "stage/RepoYeti" -DestinationPath "out/${{ matrix.asset }}"
+          bun run scripts/smoke-release.ts dist
+          New-Item -ItemType Directory -Path "out" -Force | Out-Null
+          Copy-Item -LiteralPath "dist/repoyeti.exe" -Destination "out/repoyeti-windows-x64.exe"
+          Compress-Archive -Path "dist/repoyeti.exe" -DestinationPath "out/${{ matrix.asset }}"
           $listing = tar -tf "out/${{ matrix.asset }}"
-          if ($listing -notcontains "RepoYeti/repoyeti.exe") {
-            throw "archive is missing RepoYeti/repoyeti.exe"
-          }
-          if ($listing -notcontains "RepoYeti/web/dist/index.html") {
-            throw "archive is missing RepoYeti/web/dist/index.html"
-          }
-          if (-not ($listing | Where-Object { $_ -like "RepoYeti/web/dist/assets/*" })) {
-            throw "archive is missing built dashboard assets"
+          if ($listing.Count -ne 1 -or $listing[0] -ne "repoyeti.exe") {
+            throw "archive must contain only repoyeti.exe"
           }
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}
-          path: out/${{ matrix.asset }}
+          path: out/*
 
   release:
     name: publish release
@@ -92,6 +80,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+      - name: Build checksums
+        shell: bash
+        run: |
+          find artifacts -type f -print0 | sort -z | xargs -0 sha256sum |
+            sed -E 's#  artifacts/[^/]+/#  #' > SHA256SUMS.txt
       # The release page gets the changelog entry for this tag, not just a compare link.
       # `generate_release_notes` alone summarises the COMMITS in the range, and this repo ships
       # one squashed commit per release, so on its own it produced a body containing nothing but
@@ -107,7 +100,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            SHA256SUMS.txt
           body_path: RELEASE_NOTES.md
           generate_release_notes: true
           fail_on_unmatched_files: true

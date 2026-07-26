@@ -424,6 +424,8 @@ test("updateAppearance pushes only when sync is enabled + connected", async () =
   // Enabled + connected: recorded locally AND pushed.
   const cfgOn = baseCfg({ cloudSync: { enabled: true } });
   await updateAppearance(cfgOn, OAUTH, { theme: "system" });
+  expect(server.docPostCalls).toBe(0);
+  await pushNow(cfgOn, OAUTH);
   expect(cfgOn.cloudSync?.appearance).toEqual({ theme: "system" });
   expect(server.docPostCalls).toBe(1);
   expect(server.settings.appearance).toEqual({ theme: "system" });

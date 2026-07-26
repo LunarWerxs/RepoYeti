@@ -5,46 +5,55 @@
  * dispatcher (src/cli/main.ts) and the git/agent verbs (src/cli/git.ts, src/cli/token.ts)
  * can live beside these without one giant entry file.
  */
-import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
+import { resolve } from "node:path";
 import qrcode from "qrcode-terminal";
+import { checkAiKeys } from "../ai-keycheck.ts";
+import { startAutoCommit, stopAutoCommit } from "../auto-commit.ts";
+import { setAutoUpdateHooks, startAutoUpdate, stopAutoUpdate } from "../auto-update.ts";
+import { broadcast } from "../bus.ts";
+import { startCollaborationSync, stopCollaborationSync } from "../collaboration.ts";
 import {
-  VERSION,
-  loadConfig,
-  saveConfig,
+  accessMode,
   addRoot,
   authEnforced,
-  accessMode,
-  tunnelStartProblem,
   hydrateSecrets,
+  loadConfig,
   type RepoYetiConfig,
+  saveConfig,
+  tunnelStartProblem,
+  VERSION,
 } from "../config.ts";
-import { initDb, upsertRepo, getRepo, getRepos, getWatchableRepos, getLastIdentityMergeSummary } from "../db.ts";
-import { discoverStream } from "../discovery.ts";
-import { createApp } from "../http/app.ts";
-import { initCloudSync, pullNow } from "../connections-sync.ts";
+import { flushPending, initCloudSync, pullNow } from "../connections-sync.ts";
 import {
-  coalescedRefresh,
-  refreshRepo,
-  startWatching,
-  watchOne,
-  stopWatching,
-} from "../service/index.ts";
-import { startRemoteSync, stopRemoteSync } from "../remote-sync.ts";
-import { startAutoCommit, stopAutoCommit } from "../auto-commit.ts";
-import { startAutoUpdate, stopAutoUpdate, setAutoUpdateHooks } from "../auto-update.ts";
-import { checkAiKeys } from "../ai-keycheck.ts";
-import { startCollaborationSync, stopCollaborationSync } from "../collaboration.ts";
-import { broadcast } from "../bus.ts";
-import { setServerPort, startManagedTunnel, stopManagedTunnel } from "../runtime.ts";
+  getLastIdentityMergeSummary,
+  getRepo,
+  getRepos,
+  getWatchableRepos,
+  initDb,
+  upsertRepo,
+} from "../db.ts";
+import { discoverStream } from "../discovery.ts";
+import { findFreePort } from "../find-free-port.mjs";
+import { createApp } from "../http/app.ts";
 import {
   clearInstanceInfo,
   clearShutdownRequest,
   findLiveInstance,
   writeInstanceInfo,
 } from "../instance.ts";
-import { findFreePort } from "../find-free-port.mjs";
+import { openUi } from "../open-ui.ts";
+import { startRemoteSync, stopRemoteSync } from "../remote-sync.ts";
+import { setServerPort, startManagedTunnel, stopManagedTunnel } from "../runtime.ts";
+import {
+  coalescedRefresh,
+  refreshRepo,
+  startWatching,
+  stopWatching,
+  watchOne,
+} from "../service/index.ts";
+import { cleanupStaleUpdateArtifacts } from "../updater.ts";
 
 // ── commands ──────────────────────────────────────────────────────────────────
 
@@ -100,11 +109,12 @@ function applyIdentityMergeToConfig(cfg: RepoYetiConfig): void {
 
 // ── daemon ────────────────────────────────────────────────────────────────────
 
-export async function start(rest: string[]): Promise<void> {
+export async function start(rest: string[], options: { openUi?: boolean } = {}): Promise<void> {
+  cleanupStaleUpdateArtifacts();
   const cfg = loadConfig();
 
   // flags
-  let port = cfg.port;
+  let port = Number(process.env.REPOYETI_PORT) || cfg.port;
   let wantTunnel = false;
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === "--root" && rest[i + 1]) {
@@ -129,6 +139,7 @@ export async function start(rest: string[]): Promise<void> {
     const live = await findLiveInstance();
     if (live) {
       console.log(`\nRepoYeti is already running → ${live.url}\nNot starting a second instance.\n`);
+      if (options.openUi) openUi(live.url);
       process.exit(0);
     }
   }
@@ -169,8 +180,8 @@ export async function start(rest: string[]): Promise<void> {
   // tray's "Rebuild & Restart" whenever roots happened to be empty.)
   if (liveCfg.roots.length === 0) {
     console.log(
-      "No scan roots configured — starting anyway. Use Scan for projects (whole computer or a\n" +
-        "specific folder) in the app, or add a watched root: repoyeti add-root <path>",
+      "First run: no watched folders yet. RepoYeti is ready; use Scan for projects (whole\n" +
+        "computer or a specific folder) in the dashboard, or run: repoyeti add-root <path>",
     );
   }
 
@@ -196,9 +207,20 @@ export async function start(rest: string[]): Promise<void> {
     stopAutoUpdate();
     stopCollaborationSync();
     stopWatching();
-    clearInstanceInfo();
-    server?.stop(true);
-    process.exit(0);
+    void Promise.race([
+      flushPending(liveCfg).catch((error) => {
+        console.error(
+          `repoyeti: final settings sync failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, 6_000)),
+    ]).finally(() => {
+      clearInstanceInfo();
+      server?.stop(true);
+      process.exit(0);
+    });
   };
 
   const app = createApp(liveCfg, { requestShutdown: shutdown });
@@ -240,6 +262,9 @@ export async function start(rest: string[]): Promise<void> {
   );
   if (authEnforced(liveCfg) && !liveCfg.oauth?.ownerSub && !liveCfg.oauth?.ownerEmail) {
     console.log("  owner:  unclaimed — the first Connections sign-in becomes the owner");
+  }
+  if (options.openUi && !openUi(url)) {
+    console.error(`Could not open a browser automatically. Open ${url} manually.`);
   }
 
   // 5) remote access — auto-managed by runtime.ts (also driven by the Settings toggle via

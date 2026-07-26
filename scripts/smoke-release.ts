@@ -2,24 +2,21 @@
 /**
  * Prove a release bundle works outside the source checkout before it is archived.
  *
- * The daemon reads the built PWA from `web/dist` beside the compiled executable. A release that
- * uploads only the executable can therefore pass compilation while serving a 503 at `/`. This
- * smoke test boots the staged executable with isolated state and a cwd outside the repository,
- * then checks health, the HTML shell, and one real content-addressed frontend asset.
+ * The daemon embeds the built PWA in the executable. This smoke test boots the staged executable
+ * with isolated state and a cwd outside the repository, then checks health, the HTML shell, and
+ * one real content-addressed frontend asset without any sidecar files.
  *
  * Usage: bun run scripts/smoke-release.ts <bundle-root>
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
-import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 
 const bundleRoot = resolve(process.argv[2] ?? "dist");
 const binary = join(bundleRoot, process.platform === "win32" ? "repoyeti.exe" : "repoyeti");
-const index = join(bundleRoot, "web", "dist", "index.html");
 
 if (!existsSync(binary)) throw new Error(`release smoke: missing executable at ${binary}`);
-if (!existsSync(index)) throw new Error(`release smoke: missing dashboard at ${index}`);
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -62,9 +59,16 @@ mkdirSync(cwd);
 
 const port = await freePort();
 const origin = `http://127.0.0.1:${port}`;
-const child = Bun.spawn([binary, "start", "--port", String(port)], {
+// No arguments exercises the exact double-click entrypoint. The test-only switch suppresses the
+// real browser handoff while leaving packaged default-command selection intact.
+const child = Bun.spawn([binary], {
   cwd,
-  env: { ...process.env, REPOYETI_HOME: stateDir },
+  env: {
+    ...process.env,
+    REPOYETI_HOME: stateDir,
+    REPOYETI_NO_OPEN: "1",
+    REPOYETI_PORT: String(port),
+  },
   stdin: "ignore",
   stdout: "pipe",
   stderr: "pipe",

@@ -21,7 +21,13 @@
  *
  * Off by default and additive: with `cfg.cloudSync.enabled` false (the default) nothing here runs.
  */
-import type { ConnectClient, ConnectStore, TokenSet, LockerClient } from "@cnct/connect";
+import type {
+  ConnectClient,
+  ConnectStore,
+  SettingsSync,
+  SettingsSyncStatus,
+  TokenSet,
+} from "@cnct/connect";
 import {
   saveConfig,
   type RepoYetiConfig,
@@ -32,13 +38,6 @@ import { getSecret, setSecret, deleteSecret, CONNECTIONS_REFRESH_TOKEN } from ".
 import { broadcast } from "./bus.ts";
 
 /** App-tier document we store (namespaced by the store itself as (sub, clientId), so no inner key). */
-interface SyncDoc {
-  /** Allowlisted daemon prefs (see PREF_KEYS). */
-  prefs?: Record<string, unknown>;
-  /** The web's portable appearance (theme/accent) — opaque to the daemon; the web reads/writes it. */
-  appearance?: Record<string, unknown>;
-}
-
 /**
  * The ONLY daemon-config keys that sync. Deliberately excludes machine-specific state (roots,
  * servers, port, maxDepth, maxRepos), the security-relevant access `mode`, unattended-action master
@@ -110,6 +109,8 @@ function storeFor(clientId: string): ConnectStore {
 
 let client: ConnectClient | null = null;
 let clientKey = "";
+let settingsSync: SettingsSync | null = null;
+let settingsSyncKey = "";
 // The SDK is import()-ed lazily so a daemon that never syncs (cloudSync disabled, the default)
 // never loads it — it only resolves on an actual sync/forget operation.
 async function connectFor(oauth: OAuthConfig): Promise<ConnectClient> {
@@ -180,20 +181,26 @@ export async function rememberTokens(
     expiresAt: tokens.access_token ? Date.now() + Math.max(0, (tokens.expires_in ?? 3600) - 60) * 1000 : 0,
   };
   await store.set(tokenKey, JSON.stringify(seed));
+  // A successful callback can replace credentials while a client/engine from an earlier
+  // signed-out or expired session is still memoized. Recreate both so the next operation reads
+  // the just-persisted token set instead of spending a stale in-memory refresh token.
+  settingsSync?.stop();
+  settingsSync = null;
+  settingsSyncKey = "";
+  client = null;
+  clientKey = "";
 }
 
 /** Forget the Connections connection entirely (memory + keychain). Used by "disconnect" / sign-out-all. */
 export async function clearTokens(): Promise<void> {
+  settingsSync?.stop();
+  settingsSync = null;
+  settingsSyncKey = "";
   memory = new Map();
   client = null;
   clientKey = "";
   keychainRefresh = null;
   await deleteSecret(CONNECTIONS_REFRESH_TOKEN);
-}
-
-async function lockerFor(oauth: OAuthConfig): Promise<LockerClient> {
-  const { createLocker } = await import("@cnct/connect");
-  return createLocker({ appId: oauth.clientId, getToken: async () => (await connectFor(oauth)).getAccessToken() });
 }
 
 // ── settings mapping (the allowlist) ─────────────────────────────────────────────
@@ -249,36 +256,71 @@ export function syncStatus(cfg: RepoYetiConfig): SyncStatus {
   };
 }
 
-/** Push the current allowlisted settings to the store (deep-merge — race-free per key). */
+function recordEngineStatus(cfg: RepoYetiConfig, status: SettingsSyncStatus): void {
+  const block = ensureBlock(cfg);
+  if (status.version !== null) block.version = status.version;
+  if (status.lastSyncedAt !== null) {
+    block.lastSyncedAt = new Date(status.lastSyncedAt).toISOString();
+  }
+  if (status.version !== null || status.lastSyncedAt !== null) saveConfig(cfg);
+}
+
+async function syncEngine(cfg: RepoYetiConfig, oauth: OAuthConfig): Promise<SettingsSync> {
+  const key = `${oauth.issuer.replace(/\/+$/, "")}|${oauth.clientId}`;
+  if (settingsSync && settingsSyncKey === key) return settingsSync;
+  settingsSync?.stop();
+  const { createSettingsSync } = await import("@cnct/connect");
+  const connectClient = await connectFor(oauth);
+  settingsSyncKey = key;
+  settingsSync = createSettingsSync(connectClient.locker(), {
+    // Preserve the existing { prefs, appearance } document used by real accounts.
+    keys: ["prefs", "appearance"],
+    read: () => {
+      const block = ensureBlock(cfg);
+      return {
+        prefs: collectPrefs(cfg),
+        ...(block.appearance ? { appearance: block.appearance } : {}),
+      };
+    },
+    write: (patch) => {
+      const block = ensureBlock(cfg);
+      const prefs =
+        patch.prefs && typeof patch.prefs === "object"
+          ? (patch.prefs as Record<string, unknown>)
+          : undefined;
+      applyPrefs(cfg, prefs);
+      if (patch.appearance && typeof patch.appearance === "object") {
+        block.appearance = patch.appearance as Record<string, unknown>;
+      }
+      saveConfig(cfg);
+      broadcast("settings_changed", { cloudSync: true });
+    },
+    onStatus: (status) => recordEngineStatus(cfg, status),
+  });
+  return settingsSync;
+}
+
+function requireSuccess(status: SettingsSyncStatus): SettingsSyncStatus {
+  if (status.state === "synced") return status;
+  if (status.state === "signed-out") {
+    const error = new Error("not_signed_in") as Error & { code?: string };
+    error.code = "not_signed_in";
+    throw error;
+  }
+  throw status.error ?? new Error(`settings sync ended in ${status.state}`);
+}
+
+/** Flush the current allowlisted settings immediately. */
 export async function pushNow(cfg: RepoYetiConfig, oauth: OAuthConfig): Promise<void> {
-  const b = ensureBlock(cfg);
-  const doc: SyncDoc = { prefs: collectPrefs(cfg) };
-  if (b.appearance) doc.appearance = b.appearance;
-  const res = await (await lockerFor(oauth)).merge(doc as Record<string, unknown>);
-  b.version = res.version;
-  b.lastSyncedAt = new Date().toISOString();
-  saveConfig(cfg);
+  requireSuccess(await (await syncEngine(cfg, oauth)).flush());
 }
 
 /** Pull the remote settings and apply the allowlisted subset locally. Returns whether anything was
  *  applied (a never-written remote doc has version 0 and applies nothing). */
 export async function pullNow(cfg: RepoYetiConfig, oauth: OAuthConfig): Promise<{ applied: boolean; version: number }> {
-  const b = ensureBlock(cfg);
-  const remote = await (await lockerFor(oauth)).get();
-  const data = (remote.settings ?? {}) as SyncDoc;
-  b.version = remote.version;
-  if (remote.version > 0) {
-    applyPrefs(cfg, data.prefs);
-    if (data.appearance && typeof data.appearance === "object") b.appearance = data.appearance;
-    b.lastSyncedAt = new Date().toISOString();
-    saveConfig(cfg);
-    // Tell every connected client to re-read status/appearance. Daemon runtime flags that are
-    // primed at boot pick up the pulled config on the next start; the appearance applies live.
-    broadcast("settings_changed", { cloudSync: true });
-    return { applied: true, version: remote.version };
-  }
-  saveConfig(cfg);
-  return { applied: false, version: remote.version };
+  const status = requireSuccess(await (await syncEngine(cfg, oauth)).pull());
+  const version = status.version ?? 0;
+  return { applied: version > 0, version };
 }
 
 /** Turn sync on: pull the remote doc (applying it) or, if the remote is empty, seed it from local. */
@@ -288,8 +330,7 @@ export async function enable(cfg: RepoYetiConfig, oauth: OAuthConfig, appearance
   if (appearance) b.appearance = appearance;
   saveConfig(cfg);
   if (hasConnection()) {
-    const pulled = await pullNow(cfg, oauth);
-    if (!pulled.applied) await pushNow(cfg, oauth); // remote empty → seed it with our current settings
+    requireSuccess(await (await syncEngine(cfg, oauth)).hydrate({ seedIfEmpty: true }));
   }
   return syncStatus(cfg);
 }
@@ -299,10 +340,11 @@ export async function enable(cfg: RepoYetiConfig, oauth: OAuthConfig, appearance
 export async function disable(cfg: RepoYetiConfig, oauth: OAuthConfig, opts: { forget?: boolean } = {}): Promise<SyncStatus> {
   const b = ensureBlock(cfg);
   b.enabled = false;
+  settingsSync?.stop();
   if (opts.forget) {
     if (hasConnection()) {
       try {
-        await (await lockerFor(oauth)).delete();
+        await (settingsSync ?? (await syncEngine(cfg, oauth))).locker.delete();
       } catch {
         /* best-effort remote wipe — local disconnect proceeds regardless */
       }
@@ -318,14 +360,23 @@ export async function disable(cfg: RepoYetiConfig, oauth: OAuthConfig, opts: { f
     delete b.appearance;
     delete b.lastSyncedAt;
   }
+  settingsSync = null;
+  settingsSyncKey = "";
   saveConfig(cfg);
   return syncStatus(cfg);
 }
 
-/** The web changed its appearance (theme/accent) while synced — record it and push (if enabled). */
+/** The web changed appearance; the SDK engine owns debounce/coalescing. */
 export async function updateAppearance(cfg: RepoYetiConfig, oauth: OAuthConfig, appearance: Record<string, unknown>): Promise<void> {
   const b = ensureBlock(cfg);
   b.appearance = appearance;
   saveConfig(cfg);
-  if (b.enabled && hasConnection()) await pushNow(cfg, oauth);
+  if (b.enabled && hasConnection()) (await syncEngine(cfg, oauth)).push();
+}
+
+/** Flush a pending debounce before daemon shutdown/relaunch. */
+export async function flushPending(cfg: RepoYetiConfig): Promise<void> {
+  if (cfg.cloudSync?.enabled && cfg.oauth && hasConnection()) {
+    requireSuccess(await (await syncEngine(cfg, cfg.oauth)).flushAndStop());
+  }
 }

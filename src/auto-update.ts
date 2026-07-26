@@ -1,10 +1,10 @@
 /**
  * Auto-update timer — "keep the app current for me, silently".
  *
- * A single daemon-wide timer that, each time it fires, asks the shared updater engine whether a
- * newer commit is on the update remote AND the working tree is clean (`canApply`). If so it applies
- * the update (git pull --ff-only + reinstall + rebuild — see src/updater.ts) and then SELF-RELAUNCHES
- * so the freshly-pulled code takes over. The tray (misc/RepoYeti-Tray.ps1) is a bare supervisor that
+ * A single daemon-wide timer asks src/updater.ts whether a newer version is available and
+ * applicable. Source checkouts fast-forward/rebuild; compiled releases download and verify the
+ * compressed platform archive. It then SELF-RELAUNCHES so the updated code takes over. The tray
+ * (misc/RepoYeti-Tray.ps1) is a bare supervisor that
  * does NOT relaunch the daemon on exit, so the daemon must relaunch itself; the concrete relaunch
  * (spawn a detached copy of our launch command, then gracefully shut down) is injected from
  * src/cli/lifecycle.ts, which owns the shutdown handle. The tray then finds the successor via
@@ -25,7 +25,7 @@
  * /api/settings; started/stopped in src/cli/lifecycle.ts.
  */
 import { broadcast } from "./bus.ts";
-import { checkForUpdate, applyUpdate } from "./updater.ts";
+import { applyUpdate, checkForUpdate } from "./updater.ts";
 
 /** Check cadence bounds (seconds): 15 min floor, 7 day ceiling, default 6 h. */
 export const AUTO_UPDATE_INTERVAL_MIN_S = 900;
