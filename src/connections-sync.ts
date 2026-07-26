@@ -377,6 +377,6 @@ export async function updateAppearance(cfg: RepoYetiConfig, oauth: OAuthConfig, 
 /** Flush a pending debounce before daemon shutdown/relaunch. */
 export async function flushPending(cfg: RepoYetiConfig): Promise<void> {
   if (cfg.cloudSync?.enabled && cfg.oauth && hasConnection()) {
-    requireSuccess(await (await syncEngine(cfg, cfg.oauth)).flushAndStop());
+    requireSuccess(await (await syncEngine(cfg, cfg.oauth)).flushAndStop({ timeoutMs: 5_000 }));
   }
 }

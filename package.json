@@ -49,7 +49,7 @@
     "build": "bun run scripts/build.ts"
   },
   "dependencies": {
-    "@cnct/connect": "^1.1.0",
+    "@cnct/connect": "^1.2.0",
     "hono": "^4.6.14",
     "jose": "^6.2.3",
     "qrcode-terminal": "^0.12.0",

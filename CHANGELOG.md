@@ -11,8 +11,9 @@ All notable changes to RepoYeti are documented here. The format is based on
 - **Windows releases are single-file again.** Ship an icon-bearing GUI executable alongside the
   compact ZIP consumed by automatic updates. The dashboard is embedded, so releases no longer
   contain loose `web` or `node_modules` directories.
-- **Connections sync is safer across devices and accounts.** Upgrade to the 1.1 engine, including
-  one-step first-account seeding, nested conflict-safe patches, and a final flush before shutdown.
+- **Connections sync is safer across devices and accounts.** Upgrade to the 1.2 engine, including
+  one-step first-account seeding, nested conflict-safe patches, and a five-second final flush that
+  cancels a stuck token or network request rather than delaying shutdown indefinitely.
 
 ### Fixed
 
