@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
-import { Ban, Check, ChevronRight, Copy, Eye, FolderOpen, Plus, SquarePen, Undo2 } from "@lucide/vue";
+import { Ban, Check, ChevronRight, Copy, Eye, FolderOpen, Minus, Plus, SquarePen, Undo2 } from "@lucide/vue";
 import type { DiffStat as DiffStatT, TreeNode } from "../types";
 import { fileVisual } from "@/lib/file-icons";
 import { fmtCount } from "@/lib/diffstat";
@@ -83,16 +83,53 @@ const emit = defineEmits<{
 // Shared collapsed-folder state (provided once by RepoCard; see @/lib/changes-tree).
 const collapse = useTreeCollapse();
 // Shared per-file selection (provided once by RepoCard; drives "Commit selected" — see
-// @/lib/changes-selection). Each file row owns a checkbox; folders are not selectable directly.
+// @/lib/changes-selection). Every row owns a checkbox: a file's ticks itself, a folder's ticks
+// every file beneath it (see folderState/toggleFolder).
 const selection = useTreeSelection();
 
 // While a search is active the tree is force-expanded so matches inside otherwise-collapsed
 // folders stay visible; otherwise we honour the per-folder collapse state.
 const isOpen = (path: string): boolean => props.forceExpand || !collapse.isCollapsed(path);
 
-// Pre-resolve each row's vscode-icons glyph once (colours are baked into the SVG).
+// ── folder selection ──────────────────────────────────────────────────────────
+// A folder's checkbox fans out over every FILE beneath it, recursively. It is never itself
+// "selected": the shared selection holds file paths only (that is what commit-selected takes),
+// so a folder's box reports, and edits, the state of its descendants. That also means a folder
+// with no files under it has nothing to tick, and its box is a no-op.
+function descendantFiles(n: TreeNode): string[] {
+  if (n.type === "file") return [n.path];
+  const out: string[] = [];
+  for (const c of n.children ?? []) out.push(...descendantFiles(c));
+  return out;
+}
+
+// none / some / all, where `some` renders the indeterminate dash. Reads the reactive selection,
+// so it re-evaluates when any descendant is ticked — including from a deeper folder's own box.
+function folderState(files: string[]): "none" | "some" | "all" {
+  if (!files.length) return "none";
+  let picked = 0;
+  for (const p of files) if (selection.isSelected(p)) picked++;
+  return picked === 0 ? "none" : picked === files.length ? "all" : "some";
+}
+
+// Clicking a folder's box selects ALL of its files unless they are already all selected, in
+// which case it clears them. So a PARTIAL selection fills up rather than clearing: the next
+// click is always predictable from what the box currently shows, and a half-ticked folder can
+// never silently throw away the files you had already picked by hand.
+function toggleFolder(files: string[]): void {
+  if (!files.length) return;
+  selection.setMany(files, folderState(files) !== "all");
+}
+
+// Pre-resolve each row's vscode-icons glyph once (colours are baked into the SVG), and, for a
+// folder, its descendant file paths. Walking the subtree here rather than in the template keeps
+// it to once per nodes-change instead of once per selection-change on every render.
 const rows = computed(() =>
-  props.nodes.map((node) => ({ node, icon: fileVisual(node.name, node.type === "dir") })),
+  props.nodes.map((node) => ({
+    node,
+    icon: fileVisual(node.name, node.type === "dir"),
+    files: node.type === "dir" ? descendantFiles(node) : [],
+  })),
 );
 
 // Clicking a file opens it in the read-only viewer drawer/sheet.
@@ -266,18 +303,21 @@ onBeforeUnmount(() => {
 <template>
   <!-- the top instance (depth undefined) marks the scope arrow-key nav + roving tabindex use -->
   <div ref="rootRef" :data-changes-root="depth === undefined ? '' : undefined" @focusin="onFocusIn">
-    <template v-for="{ node: n, icon } in rows" :key="n.path">
+    <template v-for="{ node: n, icon, files } in rows" :key="n.path">
       <!-- folder row — the whole row toggles its subtree open/closed.
            Right-click gets the same treatment as a file row. Every action here is path-based all
            the way down to the daemon (`git add <dir>`, a `/dir` .gitignore pattern, discard over a
            path), so a folder is a legitimate target for them — offering these only on files meant
            ignoring a build directory took one right-click per file inside it. Open / Open in
-           editor are deliberately absent: there is no folder to show in a diff viewer. -->
+           editor are deliberately absent: there is no folder to show in a diff viewer.
+           Wrapped in a relative div (like the file row) so the selection checkbox can be an
+           absolutely-positioned SIBLING: button-in-button is invalid HTML. -->
       <ContextMenu v-if="n.type === 'dir'">
         <ContextMenuTrigger as-child>
+          <div class="tree-row-cv group/dir relative">
       <button
         type="button"
-        class="tree-row-cv group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+        class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
         :class="dragOverPath === n.path && 'bg-primary/15 ring-1 ring-primary/40'"
         :style="{ paddingLeft: (depth ?? 0) * 14 + 8 + 'px' }"
         :title="n.path"
@@ -291,6 +331,11 @@ onBeforeUnmount(() => {
         @dragleave="dragOverPath = null"
         @drop.prevent="onFolderDrop($event, n)"
       >
+        <!-- leading checkbox column, reserved in-flow on EVERY row kind at EVERY depth so the
+             boxes line up in one gutter and disclosing one never reflows the row (the same
+             reserve-space convention the file row's chevron spacer already used). Dropped in a
+             read-only tree, which has no selection at all, so the pull preview keeps its indent. -->
+        <span v-if="!readOnly" class="w-3.5 shrink-0" aria-hidden="true" />
         <ChevronRight
           :size="14"
           class="shrink-0 text-muted-foreground/70 transition-transform duration-150"
@@ -299,6 +344,39 @@ onBeforeUnmount(() => {
         <component :is="icon" class="shrink-0 text-[15px]" />
         <span class="truncate text-[#93939f]">{{ n.name }}</span>
       </button>
+      <!-- folder selection checkbox: ticks every file beneath this folder at once, which is the
+           whole point of having it (ticking a build output folder used to be one click per file).
+           Tri-state: checked when all descendants are selected, a dash when only some are, so a
+           collapsed folder still tells you a selection exists inside it. Same disclosure rules as
+           the file box below — hidden at rest, shown on this row's hover/focus, on touch, or
+           whenever anything anywhere in the tree is selected. Nested one indent step per depth, so
+           a parent's box sits immediately left of its children's rather than on top of them. -->
+      <button
+        v-if="!readOnly && files.length"
+        type="button"
+        role="checkbox"
+        tabindex="-1"
+        :aria-checked="folderState(files) === 'all' ? 'true' : folderState(files) === 'some' ? 'mixed' : 'false'"
+        :aria-label="$t('repo.changes.select', { name: n.name })"
+        :title="$t('repo.changes.selectFolder')"
+        class="absolute top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded opacity-0 outline-none transition-opacity pointer-coarse:opacity-100 group-hover/dir:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
+        :class="(folderState(files) !== 'none' || selection.count.value > 0) && 'opacity-100'"
+        :style="{ left: (depth ?? 0) * 14 + 3 + 'px' }"
+        @click.stop="toggleFolder(files)"
+      >
+        <span
+          class="flex size-3.5 items-center justify-center rounded-[4px] border transition-colors"
+          :class="
+            folderState(files) !== 'none'
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-border/70 bg-card/70'
+          "
+        >
+          <Check v-if="folderState(files) === 'all'" :size="11" />
+          <Minus v-else-if="folderState(files) === 'some'" :size="11" />
+        </span>
+      </button>
+          </div>
         </ContextMenuTrigger>
         <ContextMenuContent class="w-52">
           <ContextMenuItem v-if="!isGuest" @select="emit('reveal', n.path)">
@@ -350,6 +428,10 @@ onBeforeUnmount(() => {
           @dragstart="onFileDragStart($event, n)"
           @dragend="onFileDragEnd"
         >
+          <!-- two reserved columns: the checkbox gutter (matches the folder row's, and dropped in
+               a read-only tree for the same reason), then the chevron column a folder occupies,
+               which keeps file icons aligned under folder icons. -->
+          <span v-if="!readOnly" class="w-3.5 shrink-0" aria-hidden="true" />
           <span class="w-3.5 shrink-0" aria-hidden="true" />
           <component :is="icon" class="shrink-0 text-[15px]" />
           <span
@@ -372,8 +454,8 @@ onBeforeUnmount(() => {
             }}</span>
           </span>
         </button>
-        <!-- per-file selection checkbox: sits over the (empty) chevron column on the left so it
-             never shifts the row (the row's `w-3.5` spacer above always reserves this space,
+        <!-- per-file selection checkbox: sits in the leading gutter column on the left so it
+             never shifts the row (the row's first `w-3.5` spacer above always reserves this space,
              whether or not the checkbox itself is visible). Toggling it adds/removes this file
              from the shared selection that drives RepoCard's "Commit selected (N)". A sibling
              (not nested) since the row is a <button>; tabindex -1 to stay out of the tree's

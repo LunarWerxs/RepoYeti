@@ -343,6 +343,7 @@
       "searchPlaceholder": "Search files…",
       "select": "Select {name} for commit",
       "selectFile": "Select file for commit",
+      "selectFolder": "Select every file in this folder",
       "stageAction": "Stage file",
       "staged": "File staged",
       "truncated": "Showing {shown} of {total} changed files",

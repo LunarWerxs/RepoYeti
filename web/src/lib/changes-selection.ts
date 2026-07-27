@@ -4,9 +4,10 @@
 // Like collapse state (see @/lib/changes-tree), ChangesTree is *self-recursive*, so the set of
 // selected files can't live in a single instance — it's created once by the owner (RepoCard) via
 // provideTreeSelection() and read by every node in the recursion via useTreeSelection(). State is a
-// reactive Set of selected *file* paths — the current UI selects files individually (folder rows
-// have no checkbox). setMany() is a bulk add/remove primitive kept for a future folder / select-all
-// affordance (a folder toggle would fan out to its descendant file paths); nothing wires it today.
+// reactive Set of selected *file* paths only, even though folder rows have a checkbox too: a
+// folder's box fans out over its descendant file paths through setMany(), and the folder itself is
+// never a member (commit-selected takes file paths, and a folder's tick state is always derivable
+// from its descendants — storing it as well would be a second source of truth that can disagree).
 //
 // Persisted to localStorage per repo (same pattern as collapse / changes-view height) so a partial
 // selection survives a reload — or the live-update re-render that re-creates the card on every SSE
