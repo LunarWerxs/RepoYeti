@@ -4,6 +4,17 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.3] - 2026-07-27
+
+### Added
+
+- **Tick a whole folder's files from one checkbox.** Folder rows in the changed-files tree had no
+  checkbox, so selecting a build output directory for "Commit selected" cost one click per file
+  inside it. A folder's box now covers every file beneath it, recursively, and is tri-state:
+  checked when all of them are selected, a dash when only some are, so a collapsed folder still
+  shows that a selection exists inside it. Clicking a partly-ticked folder fills it up rather than
+  clearing it, so a half-ticked folder can never quietly discard files you picked by hand.
+
 ## [0.15.2] - 2026-07-26
 
 ### Added
