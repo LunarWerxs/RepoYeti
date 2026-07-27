@@ -89,3 +89,9 @@ $RECYCLE.BIN/
 
 # wrangler local miniflare state (relay dev)
 relay/.wrangler/
+
+# Owner/AI session working docs. Handoffs are point-in-time scratch that goes
+# stale the moment the work lands; durable docs belong in docs/.
+/HANDOFF.md
+/*_HANDOFF.md
+/*-HANDOFF.md
