@@ -11,21 +11,25 @@ const MIN_LINE_COVERAGE = 78; // ~80% on CI (varies by platform + built assets);
 // vitest-only APIs like vi.stubGlobal + @vue/test-utils and are run separately via `bun run --cwd web test`).
 // --timeout 20000: git-heavy route tests (stash/discard/events) can exceed the 5s default on a
 // slow/loaded Windows CI runner; the extra headroom keeps CI from flaking on cold git spawns.
-// Some suites deliberately create process-wide database/config fixtures. Running files in distinct
-// workers is faster, but on Linux it can make Bun's coverage collector terminate abruptly while
-// it is merging those fixture-heavy files (without a failed assertion or coverage footer). Keep
-// the coverage gate deterministic: one isolated worker still exercises every test and produces
-// the one aggregate table that this script validates.
-const proc = Bun.spawnSync(["bun", "test", "tests", "--coverage", "--timeout", "20000", "--parallel=1"], {
+// Drain both pipes while the suite runs. Bun.spawnSync can exhaust its Linux output pipe once the
+// suite is large enough, terminating around the same test with no assertion failure or coverage
+// footer. The async process preserves Bun's normal test parallelism while avoiding that fixed-size
+// output ceiling; we still retain stdout so the aggregate coverage row can be validated below.
+const proc = Bun.spawn(["bun", "test", "tests", "--coverage", "--timeout", "20000"], {
   stdout: "pipe",
   stderr: "pipe",
 });
-const out = new TextDecoder().decode(proc.stdout) + new TextDecoder().decode(proc.stderr);
+const [stdout, stderr, exitCode] = await Promise.all([
+  new Response(proc.stdout).text(),
+  new Response(proc.stderr).text(),
+  proc.exited,
+]);
+const out = stdout + stderr;
 process.stdout.write(out);
 
-if (proc.exitCode !== 0) {
+if (exitCode !== 0) {
   console.error("✗ tests failed — see above");
-  process.exit(proc.exitCode || 1);
+  process.exit(exitCode || 1);
 }
 
 // Coverage table footer: " All files | <% funcs> | <% lines> | ..."
