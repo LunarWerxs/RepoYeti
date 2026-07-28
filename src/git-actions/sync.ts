@@ -83,7 +83,14 @@ export function classify(err: unknown, ctx?: ClassifyContext): ActionResult {
   ) {
     return fail("NON_FAST_FORWARD", "remote has diverged — resolve at your desk");
   }
-  if (low.includes("has no upstream branch") || low.includes("no upstream configured")) {
+  if (
+    low.includes("has no upstream branch") ||
+    low.includes("no upstream configured") ||
+    // What `git pull` says for the same state — a different sentence for "this branch tracks
+    // nothing", which without this line fell through to ERROR and put git's four-line lecture
+    // about `--set-upstream` in front of the owner instead of the one thing to do about it.
+    low.includes("no tracking information")
+  ) {
     return fail("NO_UPSTREAM", "branch has no upstream — set one at your desk");
   }
   // git asked a credential helper for a password and got nothing. On a headless daemon

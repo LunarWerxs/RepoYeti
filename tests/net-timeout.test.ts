@@ -73,8 +73,14 @@ test("a plain fatal with no progress noise is still reported verbatim", () => {
 test("a branch with nothing to push to is NO_UPSTREAM, not a remote or network verdict", () => {
   const r = classify(new Error("fatal: The current branch main has no upstream branch."));
   expect(r.code).toBe("NO_UPSTREAM");
-  const configured = classify(new Error("There is no tracking information for the current branch.\nfatal: no upstream configured for branch 'main'"));
+  const configured = classify(new Error("fatal: no upstream configured for branch 'main'"));
   expect(configured.code).toBe("NO_UPSTREAM");
+  // `git pull` words the same state differently, and used to fall through to a bare ERROR
+  // carrying git's four-line lecture about --set-upstream.
+  const pulling = classify(
+    new Error("There is no tracking information for the current branch.\nPlease specify which branch you want to merge with."),
+  );
+  expect(pulling.code).toBe("NO_UPSTREAM");
 });
 
 test("a credential failure names the account git asked for — and invents none when it can't", () => {
