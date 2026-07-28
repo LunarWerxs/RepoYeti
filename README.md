@@ -24,11 +24,19 @@
 RepoYeti runs a small daemon on your machine, finds every git repo you have, and serves a dashboard to your phone over a private tunnel. Fetch, commit, push, and read history and diffs from wherever you are. It runs on your machine, so your code stays there.
 
 <div align="center">
-  <img src=".github/screenshots/dashboard.png" width="31%" alt="Live repo grid: every repo's branch, dirty, ahead/behind at a glance" />
+  <img src=".github/screenshots/dashboard-mobile.png" width="31%" alt="Live repo grid on a phone: every repo's branch, dirty, ahead/behind at a glance" />
   &nbsp;&nbsp;
-  <img src=".github/screenshots/graph.png" width="31%" alt="Git-graph history with lanes and merges" />
+  <img src=".github/screenshots/graph-mobile.png" width="31%" alt="Git-graph history on a phone, with commit-activity chart, lanes and merges" />
   &nbsp;&nbsp;
-  <img src=".github/screenshots/diff.png" width="31%" alt="Monaco diff viewer" />
+  <img src=".github/screenshots/diff-mobile.png" width="31%" alt="Monaco diff viewer on a phone" />
+</div>
+
+<p align="center"><sub>…and the same thing on a desktop browser</sub></p>
+
+<div align="center">
+  <img src=".github/screenshots/graph-desktop.png" width="90%" alt="Git-graph history in a desktop browser: commit-activity chart above lanes, branches and a merge commit" />
+  <br /><br />
+  <img src=".github/screenshots/diff-desktop.png" width="90%" alt="Monaco diff viewer in a desktop browser, side by side with the repo list" />
 </div>
 
 ## What you get
