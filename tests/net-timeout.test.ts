@@ -14,7 +14,10 @@
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { classify } from "../src/git-actions/sync.ts";
+import { $ } from "bun";
+import { classify, classifyRemote, isSshUrl } from "../src/git-actions/sync.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
+import type { Identity } from "../src/db.ts";
 
 const BLOCK_TIMEOUT = new Error("block timeout reached");
 
@@ -50,9 +53,83 @@ test("git's real verdict survives the --progress output that now precedes it", (
   expect(r.message).not.toContain("Enumerating");
 });
 
+test("progress is skipped even when git's verdict carries no fatal/error prefix", () => {
+  const stderr = [
+    "Enumerating objects: 12, done.",
+    "Writing objects:  50% (6/12), 1.02 MiB | 900.00 KiB/s",
+    "Total 12 (delta 3), reused 0 (delta 0)",
+    " ! [rejected]        main -> main (stale info)",
+  ].join("\n");
+  expect(classify(new Error(stderr)).message).toBe("! [rejected]        main -> main (stale info)");
+});
+
 test("a plain fatal with no progress noise is still reported verbatim", () => {
   const r = classify(new Error("fatal: repository 'https://example.invalid/x.git' not found\n"));
   expect(r.message).toBe("fatal: repository 'https://example.invalid/x.git' not found");
+});
+
+// ── which transport was actually in play ────────────────────────────────────────────
+
+test("isSshUrl tells an SSH remote from every other transport", () => {
+  expect(isSshUrl("git@github.com:Lunarwerx/connections.git")).toBe(true);
+  expect(isSshUrl("ssh://git@github.com/Lunarwerx/connections.git")).toBe(true);
+  expect(isSshUrl("https://github.com/Lunarwerx/connections.git")).toBe(false);
+  expect(isSshUrl("http://example.invalid/x.git")).toBe(false);
+  expect(isSshUrl("file:///srv/repos/x.git")).toBe(false);
+  // A Windows path is not a scp-like URL, even though it also has a colon.
+  expect(isSshUrl("D:/PublicProjects/RepoYeti")).toBe(false);
+});
+
+/** A scratch repo whose `origin` points at `url` (never contacted — only its shape is read). */
+async function repoWithRemote(url: string): Promise<string> {
+  const dir = mkScratchDir("gm-net-");
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+  await $`git -C ${dir} remote add origin ${url}`.quiet();
+  return dir;
+}
+
+const WITH_KEY: Identity = {
+  id: "k",
+  displayName: "K",
+  gitUsername: "K",
+  gitEmail: "k@k.io",
+  sshKeyPath: "C:/does/not/need/to/exist",
+};
+
+test("a timeout on an https remote never blames the passphrase", async () => {
+  const dir = await repoWithRemote("https://github.com/Lunarwerx/connections.git");
+  expect((await classifyRemote(dir, null, BLOCK_TIMEOUT)).code).toBe("NETWORK_TIMEOUT");
+});
+
+test("a timeout on an SSH remote with no identity key CAN be a passphrase prompt", async () => {
+  const dir = await repoWithRemote("git@github.com:Lunarwerx/connections.git");
+  expect((await classifyRemote(dir, null, BLOCK_TIMEOUT)).code).toBe("SSH_PASSPHRASE_REQUIRED");
+});
+
+test("the same SSH remote with an identity key cannot: BatchMode makes ssh fail fast", async () => {
+  const dir = await repoWithRemote("git@github.com:Lunarwerx/connections.git");
+  expect((await classifyRemote(dir, WITH_KEY, BLOCK_TIMEOUT)).code).toBe("NETWORK_TIMEOUT");
+});
+
+test("a repo with no remote at all still classifies a timeout, it does not throw", async () => {
+  const dir = mkScratchDir("gm-net-bare-");
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+  expect((await classifyRemote(dir, null, BLOCK_TIMEOUT)).code).toBe("NETWORK_TIMEOUT");
+});
+
+test("a path that isn't a repo at all can't reveal a transport, so it stays a plain timeout", async () => {
+  expect((await classifyRemote(mkScratchDir("gm-net-norepo-"), null, BLOCK_TIMEOUT)).code).toBe(
+    "NETWORK_TIMEOUT",
+  );
+  // And a folder deleted out from under the daemon must not turn a timeout into a thrown error.
+  const gone = join(mkScratchDir("gm-net-gone-"), "vanished");
+  expect((await classifyRemote(gone, null, BLOCK_TIMEOUT)).code).toBe("NETWORK_TIMEOUT");
+});
+
+test("a non-timeout failure skips the transport lookup entirely", async () => {
+  const dir = await repoWithRemote("git@github.com:Lunarwerx/connections.git");
+  const r = await classifyRemote(dir, null, new Error("fatal: Authentication failed for 'x'"));
+  expect(r.code).toBe("SSH_AUTH_FAILED");
 });
 
 // ── the pairing that prevents the kill ──────────────────────────────────────────────

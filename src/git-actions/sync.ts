@@ -139,7 +139,7 @@ export function classify(err: unknown, ctx?: ClassifyContext): ActionResult {
 }
 
 /** Is this remote URL reached over SSH (`ssh://…` or the scp-like `git@host:owner/repo`)? */
-function isSshUrl(url: string): boolean {
+export function isSshUrl(url: string): boolean {
   const u = url.trim();
   if (/^ssh:\/\//i.test(u)) return true;
   if (/^(https?|git|file):\/\//i.test(u)) return false;
@@ -168,7 +168,11 @@ async function hasSshRemote(absPath: string): Promise<boolean> {
  * classify() for a remote op: on a timeout, establish whether an SSH passphrase prompt was even
  * possible before letting the classifier blame one. Everything else goes straight through.
  */
-async function classifyRemote(absPath: string, identity: Identity | null, err: unknown): Promise<ActionResult> {
+export async function classifyRemote(
+  absPath: string,
+  identity: Identity | null,
+  err: unknown,
+): Promise<ActionResult> {
   if (!isTimeout(err)) return classify(err);
   const couldPromptForPassphrase = !identity?.sshKeyPath && (await hasSshRemote(absPath));
   return classify(err, { couldPromptForPassphrase });
@@ -286,10 +290,9 @@ export async function gitClone(
     );
     return ok("cloned");
   } catch (err) {
-    // No repo exists yet to read remotes from, but the URL we were handed is the transport.
-    if (isTimeout(err)) {
-      return classify(err, { couldPromptForPassphrase: !identity?.sshKeyPath && isSshUrl(url) });
-    }
-    return classify(err);
+    // No repo exists yet to read remotes from, but the URL we were handed IS the transport — so
+    // unlike classifyRemote there's nothing to look up, and the context costs nothing to pass
+    // always (classify only consults it on a timeout).
+    return classify(err, { couldPromptForPassphrase: !identity?.sshKeyPath && isSshUrl(url) });
   }
 }
