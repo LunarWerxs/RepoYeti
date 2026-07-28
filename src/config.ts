@@ -23,7 +23,7 @@ import {
 } from "./secrets.ts";
 import { publicKeyFor } from "./relay.ts";
 
-export const VERSION = "0.15.3";
+export const VERSION = "0.16.0";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
@@ -313,6 +313,20 @@ export interface RepoYetiConfig {
    * src/diffstat.ts.
    */
   diffStats?: boolean;
+  /**
+   * Work-tree change totals as exact added/removed numbers or a proportional bar. Pure DISPLAY
+   * knob — unlike `diffStats` above, flipping this never changes what the daemon computes (the
+   * numbers are already read off `git status`/`git diff`; this only picks how the client renders
+   * them), so the PUT /api/settings handler must NOT call refreshAllRepos() for it. Absent =
+   * "numbers" (today's only behavior, kept exactly as-is for existing installs).
+   */
+  changesStatDisplay?: "numbers" | "bars";
+  /**
+   * Show the CHARACTER half (as opposed to just line counts) of each changed file's delta in the
+   * work tree. Also a pure DISPLAY knob for the same reason as `changesStatDisplay` — no daemon
+   * side effect, no refreshAllRepos(). Absent = true (today's only behavior).
+   */
+  changesChars?: boolean;
   /**
    * Allow editing & saving files through the viewer over the remote tunnel. Local (loopback)
    * edits are always allowed. Defaults to true (absent = enabled).

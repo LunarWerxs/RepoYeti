@@ -4,6 +4,27 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-07-28
+
+### Added
+
+- **The changed-files view is more informative and controllable.** Owners can switch totals between
+  numbers and proportional addition/deletion bars, choose whether character totals appear, and use
+  a compact view-options popover. File rows now distinguish live and resolved merge conflicts, and
+  safely offer deleting files or whole folders while refusing repository roots and nested checkouts.
+- **Commit assistance now sees new files.** Untracked text is included in scoped and whole-tree
+  commit diffs, within firm file and byte caps, so generated plans can describe newly created work
+  instead of treating it as an opaque filename.
+
+### Changed
+
+- **History gives the commit list more room while reading.** The activity overview collapses after
+  a deliberate downward scroll and returns on an upward scroll, while preserving keyboard focus and
+  reduced-motion behavior.
+- **Working-tree refreshes cover ordinary filesystem edits more reliably.** The watcher observes
+  relevant worktree changes as well as Git metadata, filters its own build churn, and coalesces
+  bursts into one refresh.
+
 ## [0.15.3] - 2026-07-27
 
 ### Added
