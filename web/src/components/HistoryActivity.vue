@@ -161,6 +161,15 @@ function averageMetricLabel(scale: HistoryActivityScale): string {
   return t("repo.history.activityAveragePerHour");
 }
 
+// Three hues, grouped by what the metric MEASURES, not five for five tiles: commit counts, people,
+// line churn. The two commit tiles are the same number over different ranges and the two churn
+// tiles likewise, so giving each its own colour implied five unrelated things and cost the row any
+// scannable structure. All three are the app's OWN semantic tokens — the previous purple and teal
+// came from the CHART palette, which is why the row looked like it belonged to a different product.
+const METRIC_COMMITS = "var(--primary)";
+const METRIC_PEOPLE = "var(--info)";
+const METRIC_CHURN = "var(--warning)";
+
 const metrics = computed(() => {
   const activity = props.activity;
   if (!activity) return [];
@@ -176,7 +185,7 @@ const metrics = computed(() => {
       value: compactCount(recentCommits),
       exact: String(recentCommits),
       icon: Clock3,
-      color: "var(--info)",
+      color: METRIC_COMMITS,
       partial: commitCountsPartial.value,
     },
     {
@@ -185,7 +194,7 @@ const metrics = computed(() => {
       value: compactCount(activity.commits),
       exact: String(safeCount(activity.commits)),
       icon: GitCommitHorizontal,
-      color: "var(--primary)",
+      color: METRIC_COMMITS,
       partial: commitCountsPartial.value,
     },
     {
@@ -194,7 +203,7 @@ const metrics = computed(() => {
       value: compactCount(activity.contributors),
       exact: String(safeCount(activity.contributors)),
       icon: UsersRound,
-      color: "var(--chart-4)",
+      color: METRIC_PEOPLE,
       partial: commitCountsPartial.value,
     },
     {
@@ -205,7 +214,7 @@ const metrics = computed(() => {
         ? t("repo.history.activityMinimumValue", { count: totalLines.value })
         : String(totalLines.value),
       icon: FileDiff,
-      color: "var(--warning)",
+      color: METRIC_CHURN,
       partial: changeStatsPartial.value,
     },
     {
@@ -218,7 +227,7 @@ const metrics = computed(() => {
           })
         : rateFormatter.value.format(averageLinesPerBucket.value),
       icon: Gauge,
-      color: "var(--chart-2)",
+      color: METRIC_CHURN,
       partial: changeStatsPartial.value,
     },
   ];
@@ -1198,39 +1207,37 @@ onBeforeUnmount(() => {
   color: color-mix(in oklab, var(--popover-foreground) 88%, var(--tooltip-color));
 }
 
+/*
+ * FLAT, and mostly neutral. These five tiles used to be vertical gradients washed in per-metric
+ * colour, with the big number tinted to match: four saturated hues (blue / green / purple / amber)
+ * stacked in a row, which read as the loudest thing on the card and was the only gradient anywhere
+ * in the app. Nothing else here paints that way — the rest of the UI states colour as a flat
+ * `bg-x/10` tint over a border.
+ *
+ * So the surface is now one flat step off the card and the VALUE is plain foreground. The metric's
+ * hue survives in exactly one place, the 16px icon chip, which is enough to tell the tiles apart at
+ * a glance without any of them competing with the number it labels.
+ */
 .activity-kpi {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--metric-color) 9%, transparent),
-      transparent 78%
-    ),
-    color-mix(in oklab, var(--background) 96%, var(--metric-color));
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--metric-color) 38%, transparent);
+  background: color-mix(in oklab, var(--background) 97%, var(--metric-color));
+  border: 1px solid color-mix(in oklab, var(--metric-color) 12%, var(--border));
   transition:
     background-color 140ms ease,
-    box-shadow 140ms ease;
+    border-color 140ms ease;
 }
 
 .activity-kpi:hover {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--metric-color) 14%, transparent),
-      transparent 82%
-    ),
-    color-mix(in oklab, var(--background) 94%, var(--metric-color));
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--metric-color) 58%, transparent);
+  background: color-mix(in oklab, var(--background) 93%, var(--metric-color));
+  border-color: color-mix(in oklab, var(--metric-color) 24%, var(--border));
 }
 
 .activity-kpi-icon {
-  color: color-mix(in oklab, var(--metric-color) 86%, var(--foreground));
-  background: color-mix(in oklab, var(--metric-color) 14%, transparent);
-  border: 1px solid color-mix(in oklab, var(--metric-color) 24%, transparent);
+  color: color-mix(in oklab, var(--metric-color) 70%, var(--muted-foreground));
+  background: color-mix(in oklab, var(--metric-color) 10%, transparent);
 }
 
 .activity-kpi-value {
-  color: color-mix(in oklab, var(--metric-color) 62%, var(--foreground));
+  color: var(--foreground);
 }
 
 .activity-value-slot,

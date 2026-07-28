@@ -166,6 +166,30 @@ export interface AccountsSnapshot {
   commitIdentity: { name: string; email: string };
 }
 
+/** Work-tree change totals as exact numbers or a proportional bar. Mirrors the daemon's
+ *  RepoYetiConfig.changesStatDisplay — a daemon setting, not a browser one, so it follows the
+ *  owner across devices like `diffStats` does. Absent on the wire = "numbers". */
+export type ChangesStatDisplay = "numbers" | "bars";
+
+/**
+ * Which unmerged porcelain pair a conflicted path is in (mirrors the daemon's ConflictKind in
+ * src/read/status.ts). X = index = "us"/ours, Y = worktree = "them"/theirs:
+ * UU both-modified · AA both-added · DD both-deleted · AU added-by-us · UA added-by-them ·
+ * DU deleted-by-us · UD deleted-by-them.
+ *
+ * The single letter "C" used to be everything the UI knew, so "both modified" and "they deleted
+ * the file you edited" looked identical — and a conflict you had already resolved reverted to a
+ * plain "M", making a half-finished merge indistinguishable from ordinary edits.
+ */
+export type ConflictKind =
+  | "both-modified"
+  | "both-added"
+  | "both-deleted"
+  | "added-by-us"
+  | "added-by-them"
+  | "deleted-by-us"
+  | "deleted-by-them";
+
 export interface ChangedFile {
   path: string;
   /** M · A · D · R · U · C */
@@ -173,6 +197,11 @@ export interface ChangedFile {
   staged: boolean;
   /** Per-file line/char delta — present only when the diff-stats setting is on. */
   stat?: DiffStat;
+  /** Set only while the path is STILL unmerged; pairs with status === "C". */
+  conflict?: ConflictKind;
+  /** Set when this path was conflicted in the in-progress merge/rebase/cherry-pick and has since
+   *  been resolved (staged). Mutually exclusive with `conflict`. */
+  resolved?: boolean;
 }
 
 export interface TreeNode {
@@ -185,6 +214,10 @@ export interface TreeNode {
   from?: string;
   /** File nodes only: per-file line/char delta (when the diff-stats setting is on). */
   stat?: DiffStat;
+  /** File nodes only: which unmerged pair this path is in (worktree lists during a merge). */
+  conflict?: ConflictKind;
+  /** File nodes only: a conflict from the in-progress merge that has since been resolved. */
+  resolved?: boolean;
   children?: TreeNode[];
 }
 
@@ -525,6 +558,7 @@ export type ApiErrorCode =
   | "STASH_EMPTY"
   | "DISCARD_FAILED"
   | "STAGE_FAILED"
+  | "DELETE_FAILED"
   | "EMPTY_PLAN"
   | "PLAN_PATHS_INVALID"
   | "PLAN_STALE"

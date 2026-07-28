@@ -350,12 +350,18 @@ onBeforeUnmount(() => {
                 @click.stop="toggleNotif"
               >
                 <Bell />
-                <!-- Red (destructive), NOT the brand green: the whole app leans on green for
-                     buttons / "remote access enabled" / etc., so a green notification dot vanished
-                     into it. Red is the universal unread-count colour and stands out hardest. -->
+                <!-- Blue (info), NOT red. Red is `destructive` everywhere else in this app — the
+                     failed-connection dot two rows up, the failing-repo chip, the Shut down
+                     button — so spending it on "you have notifications" said ERROR for what is
+                     usually a finished scan. Not the brand green either: the whole app leans on
+                     green for buttons / "remote access enabled", so a green count vanished into
+                     it. Blue is unused at this size and reads as information.
+                     Shaped as a real chip rather than a bare number: h-4 with rounded-full and a
+                     ring in the button's own background colour, so it sits ON the bell as a badge
+                     instead of colliding with the glyph. -->
                 <span
                   v-if="store.unreadCount"
-                  class="absolute top-1 right-1 grid min-w-4 place-items-center rounded-full bg-destructive px-1 text-[10px] leading-4 font-semibold text-destructive-foreground"
+                  class="absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-info px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-background"
                 >{{ store.unreadCount > 9 ? "9+" : store.unreadCount }}</span>
               </Button>
             </TooltipTrigger>

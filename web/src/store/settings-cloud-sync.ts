@@ -2,6 +2,7 @@ import { type Ref, ref, watch } from "vue";
 import { api, ApiError, type SyncStatus } from "../api";
 import { t } from "../i18n";
 import { useTheme, type ThemeMode } from "@/lib/theme";
+import type { ChangesStatDisplay } from "../types";
 
 /**
  * "Sync my settings with Connections" (opt-in cloud sync): status, enable/disable, manual
@@ -11,6 +12,8 @@ import { useTheme, type ThemeMode } from "@/lib/theme";
  */
 export function useSettingsCloudSync(prefs: {
   diffStatsEnabled: Ref<boolean>;
+  changesStatDisplay: Ref<ChangesStatDisplay>;
+  changesCharsEnabled: Ref<boolean>;
   remoteEditing: Ref<boolean>;
   diffPatchBytes: Ref<number>;
   diffPatchEnabled: Ref<boolean>;
@@ -26,6 +29,8 @@ export function useSettingsCloudSync(prefs: {
 }) {
   const {
     diffStatsEnabled,
+    changesStatDisplay,
+    changesCharsEnabled,
     remoteEditing,
     diffPatchBytes,
     diffPatchEnabled,
@@ -192,6 +197,8 @@ export function useSettingsCloudSync(prefs: {
   watch(
     [
       diffStatsEnabled,
+      changesStatDisplay,
+      changesCharsEnabled,
       remoteEditing,
       diffPatchBytes,
       diffPatchEnabled,

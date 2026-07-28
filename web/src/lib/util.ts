@@ -34,7 +34,17 @@ export function buildChangeTree(files: Array<ChangedFile & { from?: string }>): 
       let child = idx.get(key);
       if (!child) {
         child = isFile
-          ? { name: part, path: f.path, type: "file", status: f.status, staged: f.staged, from: f.from, stat: f.stat }
+          ? {
+              name: part,
+              path: f.path,
+              type: "file",
+              status: f.status,
+              staged: f.staged,
+              from: f.from,
+              stat: f.stat,
+              conflict: f.conflict,
+              resolved: f.resolved,
+            }
           : { name: part, path: parts.slice(0, i + 1).join("/"), type: "dir", children: [] };
         node.children.push(child);
         idx.set(key, child);

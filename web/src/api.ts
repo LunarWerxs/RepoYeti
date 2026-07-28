@@ -11,6 +11,7 @@ import type {
   AiSettings,
   BranchList,
   ChangedFile,
+  ChangesStatDisplay,
   CollaborationInvitePreview,
   CollaborationLink,
   CollaborationSnapshot,
@@ -149,6 +150,10 @@ export interface RuntimeStatus {
   relayError: string | null;
   /** Whether per-file/per-repo diff statistics are enabled (owner setting). */
   diffStats: boolean;
+  /** Work-tree change totals as exact numbers or a proportional bar (owner setting). */
+  changesStatDisplay: ChangesStatDisplay;
+  /** Whether the work tree shows the CHARACTER half of each file's delta (owner setting). */
+  changesChars: boolean;
   /** Min query length before "search content" greps — server-owned, so the UI can't drift. */
   minContentSearch: number;
   /** Whether editing/saving files is allowed over the remote tunnel (owner setting). */
@@ -411,6 +416,15 @@ export const api = {
   /** Toggle per-file/per-repo diff statistics (owner setting; persisted in config). */
   setDiffStats: (enabled: boolean) =>
     req<{ ok: boolean; diffStats: boolean }>("PUT", "/api/settings", { diffStats: enabled }),
+  /** Numbers or a proportional bar for work-tree change totals (owner setting; persisted).
+   *  Display-only, so unlike setDiffStats the daemon does NOT re-read every repo for it. */
+  setChangesStatDisplay: (display: ChangesStatDisplay) =>
+    req<{ ok: boolean; changesStatDisplay: ChangesStatDisplay }>("PUT", "/api/settings", {
+      changesStatDisplay: display,
+    }),
+  /** Toggle the work tree's character counts (owner setting; persisted). Display-only. */
+  setChangesChars: (enabled: boolean) =>
+    req<{ ok: boolean; changesChars: boolean }>("PUT", "/api/settings", { changesChars: enabled }),
   /** Toggle whether files can be edited over the remote tunnel (owner setting; persisted). */
   setRemoteEditing: (enabled: boolean) =>
     req<{ ok: boolean; remoteEditing: boolean }>("PUT", "/api/settings", { remoteEditing: enabled }),
@@ -710,6 +724,17 @@ export const api = {
       "POST",
       `/api/repos/${id}/discard`,
       { path },
+    ),
+  /** Delete one file from disk (destructive — confirm in the UI). NOT `discard`: discard restores
+   *  a file to its committed state, which for a tracked file puts it straight back. This removes
+   *  it and stages the deletion. Directories are refused by the daemon. */
+  deleteFile: (id: string, path: string, recursive = false) =>
+    req<{ ok: boolean; code: string; message?: string; path?: string; deleted?: number }>(
+      "POST",
+      `/api/repos/${id}/delete-file`,
+      // `recursive` is opt-in on the daemon too: without it a directory path is refused
+      // outright, so a bug here can never turn one file into a whole tree.
+      recursive ? { path, recursive: true } : { path },
     ),
   /** Stage one changed file's working-tree change into the index (non-destructive; doesn't
    *  commit — GitHub-Desktop-style per-file "Stage"). */

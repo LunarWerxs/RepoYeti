@@ -120,6 +120,23 @@ export interface VcsBackend {
   /** Discard ONE file's working-tree changes — restore it to its committed/absent state.
    *  DESTRUCTIVE (the UI gates it behind an explicit confirm); never touches HEAD. */
   discardFile(absPath: string, relPath: string): Promise<ActionResult>;
+  /** Delete ONE file from disk outright — the changes-tree "Delete" action. DIFFERS from
+   *  discardFile: discard restores a file to its committed/absent state (a no-op on an
+   *  untouched file); this one has no restore semantics — the file is just gone, whether or
+   *  not it had any working-tree changes. A tracked file's removal is also staged (so the
+   *  deletion shows up ready to commit); an untracked/new file is simply removed, same
+   *  visible outcome as discard but for a different reason.
+   *
+   *  `recursive` (opt-in) additionally allows `relPath` to name a DIRECTORY: every tracked file
+   *  under it is removed + staged (git: `git rm -r -f`), and any untracked/ignored leftover that
+   *  primitive doesn't touch is swept off disk afterward so the folder doesn't survive as a
+   *  husk. On a FILE path `recursive` is a no-op — same single-file behavior as omitting it.
+   *  Without `recursive`, a directory `relPath` is the CALLER's responsibility to reject before
+   *  calling this (src/service/actions.ts does — plus the repo-root and nested-repo/submodule
+   *  guards that must hold for the recursive case too; see that file's doc comment). The
+   *  `deleted` count is set only for the folder case (files actually removed), so the UI can
+   *  report a real number instead of a vague "deleted a folder". DESTRUCTIVE; never touches HEAD. */
+  deleteFile(absPath: string, relPath: string, recursive?: boolean): Promise<ActionResult & { deleted?: number }>;
   /** Stage ONE file's working-tree change into the index (the changes-tree per-file "Stage"
    *  action, GitHub-Desktop-style). Purely additive — never touches HEAD; safe to call
    *  redundantly. Does NOT commit; the owner still commits separately. */

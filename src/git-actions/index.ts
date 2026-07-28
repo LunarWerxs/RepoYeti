@@ -29,7 +29,7 @@ export type {
 } from "../contract.ts";
 
 export { gitFetch, gitPullFfOnly, gitPush, gitClone } from "./sync.ts";
-export { gitCommitAll, gitCommitGroups, gitDiscardFile, gitStageFile } from "./commit.ts";
+export { gitCommitAll, gitCommitGroups, gitDiscardFile, gitDeleteFile, gitStageFile } from "./commit.ts";
 export {
   collectCommitDiff,
   collectPathsDiff,

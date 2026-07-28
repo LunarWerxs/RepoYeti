@@ -79,7 +79,14 @@ async function boundedGit(absPath: string, args: string[], cap: number): Promise
  * yet errors/empties on `diff HEAD` — retry the same WITHOUT `HEAD` against the worktree. Pass
  * `paths=null` (or empty) for the whole tree (no pathspec); otherwise the pathspec is chunked so a
  * big group can't overflow the OS arg limit. `extraArgs` carries per-caller flags (e.g. -U0 -M).
- * Read-only. Extracted so the three diff collectors share ONE fallback path.
+ *
+ * `git diff HEAD` is BY DEFINITION tracked-only: an untracked file has no blob in the index for
+ * HEAD to diff against, so it can never appear here no matter what pathspec or flags are passed.
+ * Every caller of this function also wants new files' content (that's the whole point of a commit
+ * message covering them), so untrackedDiffs() appends their per-file `--no-index` diffs onto the
+ * SAME raw string, before the caller folds it — see untrackedDiffs() for why that ordering matters.
+ * Read-only (also of the untracked files themselves: `--no-index` never touches the index or HEAD,
+ * `git add -N` is not used). Extracted so the three diff collectors share ONE fallback path.
  */
 async function boundedDiff(
   absPath: string,
@@ -97,7 +104,98 @@ async function boundedDiff(
     return out.trim();
   };
   const withHead = await run(["diff", "HEAD", ...extraArgs]);
-  return withHead || (await run(["diff", ...extraArgs]));
+  const tracked = withHead || (await run(["diff", ...extraArgs]));
+  // A tracked diff big enough to fill the raw cap must NOT cost every new file its content. That
+  // is the same first-come-first-served failure the fold doctrine below exists to prevent, and
+  // returning early here would silently reproduce the original "only the first file" bug on any
+  // change-set containing one enormous tracked file. So new files keep a reserved floor of the
+  // budget no matter how much the tracked side ate; foldLargeFileDiffs then shares it out per
+  // file, and the msgTotal/planTotal cap bounds what is actually sent.
+  const untracked = await untrackedDiffs(
+    absPath,
+    paths,
+    Math.max(cap - tracked.length, Math.floor(cap * UNTRACKED_RESERVE_FRACTION)),
+  );
+  return untracked ? (tracked ? `${tracked}\n${untracked}` : untracked) : tracked;
+}
+
+/** Share of the raw read cap that untracked files keep even when the tracked diff has already
+ *  spent all of it (see boundedDiff). 15% of the 400k message cap is ~60k — comfortably more
+ *  than a normal batch of new source files needs, and still small enough that a genuinely huge
+ *  tracked diff keeps the lion's share. */
+const UNTRACKED_RESERVE_FRACTION = 0.15;
+
+/** Hard ceiling on how many untracked files get their own `git diff --no-index` child. Git's
+ *  `--no-index` diffs exactly two paths, so there is no way to batch many new files into one
+ *  call without staging them (`git add -N`), which is forbidden here — this module never
+ *  mutates the index (see file header). So this genuinely is one child per file, and a folder
+ *  full of hundreds of new files must not spawn hundreds of git children. Past this count the
+ *  remaining new files still show up in the caller's file list / status text (name + stat) —
+ *  only their DIFF CONTENT is silently dropped, the same trade the byte cap already makes for
+ *  one oversized file. 40 is generous for a real commit (the repro this fixes used 7) while
+ *  keeping the worst case bounded: ~30ms/child measured on this repo, so even a full 40 is
+ *  under 1.5s serial, well inside DIFF_TIMEOUT_MS. */
+const UNTRACKED_FILE_CAP = 40;
+
+/** Cap for reading back the untracked path list (`git ls-files -z`) itself — independent of
+ *  UNTRACKED_FILE_CAP above, since a repo can have thousands of untracked PATHS (e.g. a fresh
+ *  checkout before .gitignore narrows things down) even though only the first
+ *  UNTRACKED_FILE_CAP of them ever get diffed. A bare path list is tiny per entry, so this is
+ *  sized well above STATUS_CAP rather than reusing it. */
+const UNTRACKED_LIST_CAP = 256_000;
+
+/**
+ * Every untracked (brand-new, never-added) path under `paths` (or the whole tree when null),
+ * via `git ls-files --others --exclude-standard -z` — NOT `git status --porcelain`'s default
+ * `-unormal`, which collapses an entire new directory to one `?? dir/` line and hides every file
+ * inside it. `-z` NUL-delimits so a filename containing a newline can't be misparsed.
+ */
+async function listUntrackedFiles(absPath: string, paths: string[] | null): Promise<string[]> {
+  const base = ["ls-files", "--others", "--exclude-standard", "-z"];
+  const chunks = paths?.length ? chunkByBytes(paths) : [null];
+  const names: string[] = [];
+  for (const chunk of chunks) {
+    const out = await boundedGit(absPath, chunk ? [...base, "--", ...chunk] : base, UNTRACKED_LIST_CAP);
+    const records = out.split("\0");
+    // A cap hit cuts the stream mid-record, so the final fragment is half a filename. Harmless
+    // (git just errors on the bogus path and boundedGit ignores exit codes) but it wastes a child
+    // and reads as a real entry to anything downstream — drop it rather than diff a phantom.
+    if (out.length >= UNTRACKED_LIST_CAP) records.pop();
+    for (const raw of records) {
+      const p = raw.trim();
+      if (p) names.push(p);
+    }
+  }
+  return names;
+}
+
+/**
+ * Diff every untracked file's content against `/dev/null` and concatenate the chunks, shaped
+ * exactly like `git diff HEAD`'s own output (starts with `diff --git `) so foldLargeFileDiffs
+ * folds a huge new file with the same per-file fairness as a huge tracked one. MUST be called
+ * BEFORE folding, never after — folding a diff that's missing every new file's content can't
+ * un-hide them later, it can only shrink what's already there.
+ *
+ * `git diff --no-index` is the verified mechanism: it diffs two arbitrary paths entirely outside
+ * the index (untouched by GIT_OPTIONAL_LOCKS, no `git add -N`), and for a nonexistent left side
+ * it emits a well-formed "new file" chunk. It exits 1 ("differences found"), not 0 — boundedGit
+ * ignores exit codes for every read in this file (same as grepChangedContent's `git grep`), so
+ * that is not an error path here. Binary content is handled by git itself: a binary file becomes
+ * one short "Binary files /dev/null and b/<path> differ" line, never megabytes of bytes.
+ */
+async function untrackedDiffs(absPath: string, paths: string[] | null, cap: number): Promise<string> {
+  if (cap <= 0) return "";
+  const files = await listUntrackedFiles(absPath, paths);
+  let out = "";
+  for (let i = 0; i < files.length && i < UNTRACKED_FILE_CAP; i++) {
+    if (out.length >= cap) break;
+    out += await boundedGit(
+      absPath,
+      ["diff", "--no-index", "--no-color", "--", "/dev/null", files[i]!],
+      cap - out.length,
+    );
+  }
+  return out.trim();
 }
 
 /**
@@ -124,8 +222,11 @@ async function statusPlusFoldedDiff(
   // where a one-line edit's meaning lives.
   const raw = await boundedDiff(absPath, paths, ["--diff-algorithm=minimal"], MSG_RAW_CAP);
   const folded = foldLargeFileDiffs(raw, caps.perFile).diff;
+  // Untracked files now carry real diff content too (see untrackedDiffs), so this fallback is
+  // only reached by a genuinely diff-less status line: a mode-only change, or a rename git
+  // resolved from identical content.
   let combined =
-    `# git status --porcelain\n${status || "(clean)"}\n\n# git diff\n${folded || "(no textual diff — new/untracked files only)"}`;
+    `# git status --porcelain\n${status || "(clean)"}\n\n# git diff\n${folded || "(no textual diff)"}`;
   if (combined.length > caps.msgTotal) combined = `${combined.slice(0, caps.msgTotal)}\n…[truncated]`;
   return combined;
 }

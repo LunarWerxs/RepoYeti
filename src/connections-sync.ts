@@ -46,6 +46,8 @@ import { broadcast } from "./bus.ts";
  */
 const PREF_KEYS = [
   "diffStats",
+  "changesStatDisplay",
+  "changesChars",
   "remoteEditing",
   "diffPatchBytes",
   "diffPatchEnabled",

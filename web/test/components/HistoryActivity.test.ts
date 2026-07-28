@@ -161,7 +161,15 @@ describe("HistoryActivity.vue", () => {
     const kpis = wrapper.findAll("[data-activity-kpi]");
     expect(kpis).toHaveLength(5);
     expect(kpis.every((kpi) => kpi.find("[data-activity-kpi-icon]").exists())).toBe(true);
-    expect(new Set(kpis.map((kpi) => kpi.attributes("style"))).size).toBe(5);
+    // THREE hues across five tiles, on purpose: the metrics group into commits / people / churn,
+    // and one colour per tile implied five unrelated things while costing the row any structure.
+    // Asserting the grouping, not just the count, so a future "let's give each its own colour"
+    // has to argue with this test.
+    const hueOf = (i: number) => kpis[i]!.attributes("style");
+    expect(new Set(kpis.map((kpi) => kpi.attributes("style"))).size).toBe(3);
+    expect(hueOf(0)).toBe(hueOf(1)); // recent + window are both commit counts
+    expect(hueOf(3)).toBe(hueOf(4)); // lines + average are both line churn
+    expect(hueOf(2)).not.toBe(hueOf(0)); // contributors stands apart
 
     const authors = wrapper.findAll("[data-activity-author]");
     expect(authors).toHaveLength(2);

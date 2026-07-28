@@ -7,8 +7,8 @@
  * (e.g. an SSH key prompt). `behind` reflects the last fetch only — we never fetch
  * here, so a watch event never touches the network.
  */
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { stat, readFile } from "node:fs/promises";
+import { join, dirname, resolve, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import type { SimpleGit } from "simple-git";
 import { gitFor, currentGitOperation } from "../git.ts";
@@ -120,6 +120,11 @@ interface WorktreeStatusPath {
  * exact blob OIDs, so replacing the staged contents of the same `M` path also invalidates a
  * preview. Sorting keeps simple-git's output order out of the path/status portion; filenames and
  * object IDs never leave this SHA-256 digest.
+ *
+ * This also covers Conflict Concierge's resolve transition for free: `readChanges`'s `resolved`
+ * flag is derived from a path leaving the unmerged index/working-dir pair (e.g. `UU` → `M `
+ * after `git add`), and that pair is already part of `state` below — verified empirically
+ * (scratch repo, 2026-07-27) that resolving a conflict changes this hash without any extra input.
  */
 function worktreeStateHash(
   files: readonly WorktreeStatusPath[],
@@ -146,6 +151,17 @@ function worktreeStateHash(
     .digest("hex");
 }
 
+/** Which unmerged porcelain pair a conflicted path is in. X = index = "us"/ours,
+ *  Y = worktree = "them"/theirs. */
+export type ConflictKind =
+  | "both-modified" // UU
+  | "both-added" // AA
+  | "both-deleted" // DD
+  | "added-by-us" // AU
+  | "added-by-them" // UA
+  | "deleted-by-us" // DU
+  | "deleted-by-them"; // UD
+
 /** One changed file for the tree view: porcelain status collapsed to a single letter. */
 export interface ChangedFile {
   path: string;
@@ -157,6 +173,11 @@ export interface ChangedFile {
   from?: string;
   /** Per-file line/char delta — present only when the diff-stats setting is on. */
   stat?: DiffStat;
+  /** Set only while the path is STILL unmerged. Pairs with status === "C". */
+  conflict?: ConflictKind;
+  /** Set when this path was conflicted in the in-progress merge/rebase/cherry-pick and has
+   *  since been resolved (staged). Mutually exclusive with `conflict`. */
+  resolved?: boolean;
 }
 
 /** True when a porcelain index/working-dir letter pair marks an unmerged/conflicted path.
@@ -164,6 +185,79 @@ export interface ChangedFile {
  *  so both agree on exactly one definition. */
 function isConflictPair(x: string, y: string): boolean {
   return x === "U" || y === "U" || (x === "A" && y === "A") || (x === "D" && y === "D");
+}
+
+/** Which conflict an unmerged porcelain pair represents, per git-status(1)'s own "Unmerged"
+ *  table (DD/AU/UD/UA/DU/AA/UU) — the same 7 pairs isConflictPair() treats as conflicted, just
+ *  named instead of collapsed to a bare boolean. Kept as a separate function (rather than
+ *  changing isConflictPair's return type) because readStatus's aggregate `conflicted` flag and
+ *  readWorktreeStateHash only ever needed the boolean and must keep working unchanged. */
+function conflictKind(x: string, y: string): ConflictKind | undefined {
+  if (x === "D" && y === "D") return "both-deleted";
+  if (x === "A" && y === "A") return "both-added";
+  if (x === "U" && y === "U") return "both-modified";
+  if (x === "A" && y === "U") return "added-by-us";
+  if (x === "U" && y === "A") return "added-by-them";
+  if (x === "D" && y === "U") return "deleted-by-us";
+  if (x === "U" && y === "D") return "deleted-by-them";
+  return undefined;
+}
+
+/**
+ * Git-dir path for reading operation-scoped marker files (MERGE_MSG) straight off disk.
+ * Mirrors the `.git`-file (linked worktree/submodule) resolution in src/git.ts's private
+ * gitDirFor — that helper isn't exported, and this call site only ever runs while
+ * currentGitOperation() has already reported a merge/rebase/cherry-pick in progress (a rare,
+ * non-hot event), so it intentionally skips gitDirFor's LRU cache rather than duplicating it.
+ */
+async function gitMetaDir(absPath: string): Promise<string | null> {
+  const marker = join(absPath, ".git");
+  try {
+    const s = await stat(marker);
+    if (s.isDirectory()) return marker;
+    if (!s.isFile() || s.size > 16_384) return null;
+    const content = await readFile(marker, "utf8");
+    const target = /^gitdir:\s*(.+?)\s*$/im.exec(content)?.[1]?.trim();
+    if (!target) return null;
+    return isAbsolute(target) ? target : resolve(dirname(marker), target);
+  } catch {
+    return null; // no `.git` marker at all — can't locate MERGE_MSG
+  }
+}
+
+/**
+ * Paths listed in `.git/MERGE_MSG`'s "Conflicts:" block for the CURRENT in-progress
+ * merge/rebase/cherry-pick step — the one on-disk record of "what was conflicted a moment
+ * ago" once a path has been `git add`-ed and no longer shows as unmerged in porcelain status.
+ *
+ * Verified empirically in a scratch repo (2026-07-27) for all three operations: `git merge`,
+ * `git rebase` (each interactive pick), and `git cherry-pick` all write an identical
+ * `# Conflicts:\n#\t<path>\n...` block to MERGE_MSG — always LF-terminated, always a bare
+ * `#\t<path>` line with no "deleted by us:"-style prefix even for add/add or delete/modify
+ * conflicts — and it survives `git add` (resolution) until the step is committed/continued,
+ * at which point the NEXT step (or a clean MERGE_MSG-less repo) simply won't match this shape.
+ * A rebase's later picks overwrite MERGE_MSG with that pick's own conflicts only, which is
+ * exactly the "still relevant right now" set we want, not stale history from earlier picks.
+ */
+async function conflictedPathsFromMergeMsg(absPath: string): Promise<Set<string> | null> {
+  const gitDir = await gitMetaDir(absPath);
+  if (!gitDir) return null;
+  let content: string;
+  try {
+    content = await readFile(join(gitDir, "MERGE_MSG"), "utf8");
+  } catch {
+    return null; // no merge message — e.g. a rebase step with no conflicts to report
+  }
+  const lines = content.split("\n");
+  const start = lines.findIndex((line) => line.trim() === "# Conflicts:");
+  if (start === -1) return null;
+  const paths = new Set<string>();
+  for (let i = start + 1; i < lines.length; i++) {
+    const match = /^#\t(.+)$/.exec(lines[i] ?? "");
+    if (!match?.[1]) break;
+    paths.add(match[1]);
+  }
+  return paths;
 }
 
 /**
@@ -222,6 +316,12 @@ export async function readChanges(absPath: string, withStats = false): Promise<C
     for (const r of status.renamed ?? []) {
       if (r?.to) renameFrom.set(r.to, r.from);
     }
+    // The "resolved" marker needs "what was conflicted a moment ago", which only exists while a
+    // merge/rebase/cherry-pick is actually in progress. currentGitOperation is one filesystem
+    // stat/readdir and spawns no git subprocess (readStatus makes its own separate call — this
+    // is not shared with it), so a clean repo pays exactly that and never opens MERGE_MSG.
+    const gitOperation = await currentGitOperation(absPath);
+    const priorConflicts = gitOperation ? await conflictedPathsFromMergeMsg(absPath) : null;
     const files: ChangedFile[] = status.files.map((f) => {
       const x = f.index ?? " ";
       const y = f.working_dir ?? " ";
@@ -233,7 +333,18 @@ export async function readChanges(absPath: string, withStats = false): Promise<C
       else if (renameFrom.has(f.path)) letter = "R";
       else letter = (y !== " " ? y : x) || "M";
       const from = renameFrom.get(f.path);
-      return { path: f.path, status: letter, staged: !untracked && x !== " ", ...(from ? { from } : {}) };
+      // A path is "resolved" only once it's left the unmerged pair AND MERGE_MSG shows it was
+      // part of THIS operation's conflict set — otherwise an ordinary staged M/A on an unrelated
+      // path during a merge would be mislabeled as a just-resolved conflict.
+      const resolved = !conflicted && priorConflicts?.has(f.path) ? true : undefined;
+      return {
+        path: f.path,
+        status: letter,
+        staged: !untracked && x !== " ",
+        ...(from ? { from } : {}),
+        ...(conflicted ? { conflict: conflictKind(x, y) } : {}),
+        ...(resolved ? { resolved } : {}),
+      };
     });
     if (withStats && files.length > 0) {
       const untracked = files.filter((f) => f.status === "U").map((f) => f.path);

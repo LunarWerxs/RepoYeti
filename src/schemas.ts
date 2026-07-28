@@ -136,6 +136,11 @@ export const StashRefSchema = z.object({ index: z.number().int().min(0).optional
 // ── discard one file's working-tree changes ──────────────────────────────────────────
 export const DiscardSchema = z.object({ path: nonEmpty });
 
+// ── delete one file from disk outright (distinct from discard — no restore semantics) ─
+// `recursive` is OPT-IN: a directory `path` is refused unless the caller explicitly sets it, so
+// an older client (or a bug that forgets the flag) can never recurse into a folder by accident.
+export const DeleteFileSchema = z.object({ path: nonEmpty, recursive: z.boolean().optional() });
+
 // ── stage one file's working-tree change into the index ──────────────────────────────
 export const StageSchema = z.object({ path: nonEmpty });
 

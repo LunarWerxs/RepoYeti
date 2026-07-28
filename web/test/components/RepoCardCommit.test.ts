@@ -153,10 +153,27 @@ describe("RepoCardCommit default primary action", () => {
     expect(action).not.toHaveBeenCalled();
   });
 
-  it("makes the all-files scope explicit when files are selected", () => {
+  it("retargets the primary button at the SELECTION instead of announcing 'all'", () => {
+    // The old design left the primary button saying "Commit all" while a separate strip below the
+    // tree offered "Commit selected" — so the button you were looking at did the opposite of what
+    // you had just checked. The selection now owns the primary action; the whole-tree commands move
+    // into the dropdown and relabel themselves "all" there (see the menu items).
     defaultCommitAction.value = "sync";
     const wrapper = mountCommit("origin", ["src/a.ts"]);
 
-    expect(wrapper.get('[data-testid="primary-commit-action"]').text()).toBe("Commit all & Sync");
+    const primary = wrapper.get('[data-testid="primary-commit-action"]');
+    expect(primary.text()).toBe("Commit selected (1)");
+    expect(primary.attributes("data-commit-scope")).toBe("selected");
+    // …and the sync mode is still honoured, rather than silently dropped by ticking a box.
+    expect(primary.attributes("data-commit-mode")).toBe("sync");
+  });
+
+  it("leaves the primary button on the whole tree when nothing is selected", () => {
+    defaultCommitAction.value = "sync";
+    const wrapper = mountCommit("origin", []);
+
+    const primary = wrapper.get('[data-testid="primary-commit-action"]');
+    expect(primary.text()).toBe("Commit & Sync");
+    expect(primary.attributes("data-commit-scope")).toBe("all");
   });
 });

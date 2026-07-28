@@ -4,7 +4,7 @@
  * touch a remote, so none take `netGate` — but they share the same dirty/detached-HEAD guards
  * and identity attribution as the sync actions in ./sync.ts.
  */
-import { existsSync, lstatSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { gitFor, identityConfigArgs } from "../git.ts";
 import { readStatus } from "../read/status.ts";
@@ -165,6 +165,122 @@ export async function gitDiscardFile(absPath: string, relPath: string): Promise<
     return ok("discarded");
   } catch (e) {
     return fail("DISCARD_FAILED", e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Count of plain files (not dirs) anywhere under `dir`, walked ourselves rather than shelling
+ *  out — cheaper than parsing `git rm`'s per-line output (which only covers the TRACKED subset
+ *  anyway) and it's the one number that's true regardless of tracked/untracked/ignored. */
+function countFilesRecursive(dir: string): number {
+  let n = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    n += entry.isDirectory() ? countFilesRecursive(p) : 1;
+  }
+  return n;
+}
+
+/**
+ * VcsBackend.deleteFile's directory branch — delete a whole FOLDER outright (recursive:true on a
+ * directory path; see gitDeleteFile). Two-step, because `git rm -r` only ever touches what's
+ * TRACKED:
+ *  1. `git rm -r -f -- <dir>` removes every tracked file under it from disk AND stages the
+ *     removals in one step (-f past local modifications, same reasoning as the single-file case).
+ *     A folder with nothing tracked inside makes `git rm` fail outright rather than partially
+ *     succeed. That is the expected pure-untracked case, not a real error — so `git ls-files`
+ *     ASKS whether anything is tracked first, instead of running the command and pattern-matching
+ *     its English error prose. Matching /did not match any files/ was the first cut and it is a
+ *     latent bug: a localized or reworded git would send a genuine failure down the benign path
+ *     and delete the tree anyway, having silently skipped staging the removals.
+ *  2. Whatever step 1 didn't touch (untracked/ignored leftovers) would otherwise survive as a
+ *     non-empty husk, which isn't what "delete this folder" means — so the directory tree is
+ *     removed from disk directly afterward, unconditionally.
+ * The caller (service.deleteFile) has already confirmed `relPath` isn't the repo root, isn't
+ * inside the VCS marker dir, and isn't/doesn't directly contain a nested repo checkout.
+ */
+async function gitDeleteDirectory(absPath: string, relPath: string): Promise<ActionResult & { deleted?: number }> {
+  const abs = join(absPath, relPath);
+  let deleted = 0;
+  try {
+    deleted = countFilesRecursive(abs);
+  } catch (e) {
+    return fail("DELETE_FAILED", e instanceof Error ? e.message : String(e));
+  }
+  const git = gitFor(absPath);
+  try {
+    // -z so a filename with a newline can't fake an empty result; any output at all means git
+    // has something under this path to remove.
+    const tracked = await git.raw(["ls-files", "-z", "--", relPath]);
+    if (tracked.length > 0) await git.raw(["rm", "-r", "-f", "--", relPath]);
+  } catch (e) {
+    return fail("DELETE_FAILED", e instanceof Error ? e.message : String(e));
+  }
+  try {
+    if (existsSync(abs)) rmSync(abs, { recursive: true, force: true });
+  } catch (e) {
+    return fail("DELETE_FAILED", e instanceof Error ? e.message : String(e));
+  }
+  return { ok: true, code: "OK", message: `deleted ${deleted} file${deleted === 1 ? "" : "s"}`, deleted };
+}
+
+/**
+ * VcsBackend.deleteFile for git — delete ONE file from disk outright (the changes-tree "Delete"
+ * action). Distinct from gitDiscardFile: discard RESTORES a file to its committed/absent state;
+ * this one has no restore direction — the file is just gone. Same `inHead` split as discard, but
+ * the tracked branch uses a different primitive:
+ *  - tracked in HEAD (modified/deleted) → `git rm -f -- <path>` deletes the working file AND
+ *    stages the removal in one step. -f is required because git rm otherwise refuses a file with
+ *    local modifications ("you have local modifications; use --cached to keep it, or -f to force");
+ *    this action is explicitly destructive, so that safety check doesn't apply here.
+ *  - added/untracked (not in HEAD)      → nothing committed to preserve, so there's no `git rm`
+ *    target — remove the working file and drop any staged add, same as discard's untracked case.
+ * The caller (service.deleteFile) guarantees the path is repo-relative, resolved, and not inside
+ * the `.git` marker dir.
+ *
+ * `recursive:true` on a DIRECTORY path delegates to gitDeleteDirectory; on a FILE path it's a
+ * no-op (falls straight through to the ordinary single-file logic below) — recursive only ever
+ * WIDENS what's allowed, never changes single-file behavior.
+ */
+export async function gitDeleteFile(
+  absPath: string,
+  relPath: string,
+  recursive = false,
+): Promise<ActionResult & { deleted?: number }> {
+  if (recursive) {
+    let isDir = false;
+    try {
+      isDir = lstatSync(join(absPath, relPath)).isDirectory();
+    } catch {
+      /* nothing at the leaf — fall through; the single-file path below reports its own
+         not-found-shaped failure (an `inHead` miss + a no-op unlink is a harmless success today,
+         matching the pre-existing untracked-file behavior for a path that's already gone) */
+    }
+    if (isDir) return gitDeleteDirectory(absPath, relPath);
+  }
+  try {
+    const git = gitFor(absPath);
+    let inHead = false;
+    try {
+      await git.raw(["cat-file", "-e", `HEAD:${relPath}`]);
+      inHead = true;
+    } catch {
+      /* not in HEAD → newly added or untracked */
+    }
+    if (inHead) {
+      await git.raw(["rm", "-f", "--", relPath]);
+    } else {
+      const abs = join(absPath, relPath);
+      if (existsSync(abs) && lstatSync(abs).isFile()) unlinkSync(abs);
+      // Drop any staged "add" for this path. No-op (harmless throw) on an unborn HEAD.
+      try {
+        await git.raw(["reset", "-q", "--", relPath]);
+      } catch {
+        /* unborn HEAD or nothing staged */
+      }
+    }
+    return ok("deleted");
+  } catch (e) {
+    return fail("DELETE_FAILED", e instanceof Error ? e.message : String(e));
   }
 }
 

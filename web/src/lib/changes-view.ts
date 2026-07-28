@@ -72,3 +72,13 @@ export function setChangesDisplayMode(repoId: string, mode: ChangesDisplayMode):
   if (mode === "list") displayModes.value[repoId] = "list";
   else delete displayModes.value[repoId];
 }
+
+// ── per-file change totals: how they render ───────────────────────────────────
+// Deliberately NOT here. `changesStatDisplay` (numbers vs bars) and `changesChars` (show the
+// character half) are DAEMON settings — see src/config.ts and store/settings.ts — not the
+// browser-local pattern the rest of this file uses. They shipped as localStorage first, but a
+// preference the owner sets once should follow him to the phone and the remote tunnel, which
+// localStorage cannot do; they ride the same Connections prefs sync as `diffStats`.
+//
+// The everything-else-in-this-file rule still stands: heights, tree/list mode and collapse state
+// stay local, because those are per-screen ergonomics rather than a stated preference.

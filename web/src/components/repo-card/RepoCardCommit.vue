@@ -197,7 +197,7 @@ async function doCommit(mode: CommitMode = "commit"): Promise<void> {
 // Per-file staging: commit ONLY the checked files (the rest stay pending). Shares the same message
 // box as the normal commit; the store reloads the changed-file list afterward, and the prune watch
 // above drops the just-committed paths from the selection. A stale path comes back as PLAN_STALE.
-async function doCommitSelected(): Promise<void> {
+async function doCommitSelected(mode: CommitMode = "commit"): Promise<void> {
   const msg = commitMsg.value.trim();
   const paths = [...props.treeSelection.selected];
   if (!msg || !paths.length || committing.value) return;
@@ -210,6 +210,21 @@ async function doCommitSelected(): Promise<void> {
     }
     commitMsg.value = "";
     props.treeSelection.clear();
+    // Now that a selection drives the PRIMARY button, it inherits the owner's default commit mode.
+    // Dropping the sync silently would mean the same button quietly stops pushing the moment you
+    // tick a checkbox. Same pull-then-push order as doCommit, for the same NON_FAST_FORWARD reason.
+    if (mode === "sync") {
+      const pull = await store.doAction(props.repo.id, "pull");
+      if (!pull.ok) {
+        toast.error(friendly(pull.code) || pull.message || t("repo.actions.failed", { action: "pull" }));
+        return;
+      }
+      const push = await store.doAction(props.repo.id, "push");
+      if (!push.ok) {
+        toast.error(friendly(push.code) || push.message || t("repo.actions.failed", { action: "push" }));
+        return;
+      }
+    }
     void loadRecentMsgs();
     toast.success(t("repo.commit.selectedSuccess", { n: paths.length }));
   } finally {
@@ -297,20 +312,23 @@ defineExpose({ loadRecentMsgs, recentMsgs });
         <Button
           data-testid="primary-commit-action"
           :data-commit-mode="primaryCommitMode"
+          :data-commit-scope="selectedCount > 0 ? 'selected' : 'all'"
           class="h-9 rounded-r-none"
           :disabled="!commitMsg.trim() || committing"
-          @click="doCommit(primaryCommitMode)"
+          @click="selectedCount > 0 ? doCommitSelected(primaryCommitMode) : doCommit(primaryCommitMode)"
         >
           <Loader2 v-if="committing" class="animate-spin" />
           <RefreshCw v-else-if="primaryCommitMode === 'sync'" />
           <GitCommitHorizontal v-else />
+          <!-- A selection retargets the PRIMARY button rather than adding a second bar below the
+               tree. The old layout put "Commit selected (N)" in its own strip, which meant the
+               button you were already looking at said "Commit all" — the opposite of what you had
+               just asked for. The whole-tree actions stay one click away in the dropdown. -->
           <span>{{
-            primaryCommitMode === "sync"
-              ? selectedCount > 0
-                ? $t("repo.commit.commitAllSync")
-                : $t("repo.commit.commitSync")
-              : selectedCount > 0
-                ? $t("repo.commit.commitAll")
+            selectedCount > 0
+              ? $t("repo.commit.commitSelected", { n: selectedCount })
+              : primaryCommitMode === "sync"
+                ? $t("repo.commit.commitSync")
                 : $t("repo.commit.commit")
           }}</span>
         </Button>
@@ -326,9 +344,12 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" class="w-52">
+            <!-- These commit the WHOLE tree even while files are checked, so they say so — the
+                 primary button next to them is the selected-files action in that state, and two
+                 identically-labelled "Commit"s would be a trap. -->
             <DropdownMenuItem @select="doCommit('commit')">
               <GitCommitHorizontal :size="15" />
-              <span>{{ $t("repo.commit.commit") }}</span>
+              <span>{{ selectedCount > 0 ? $t("repo.commit.commitAll") : $t("repo.commit.commit") }}</span>
             </DropdownMenuItem>
             <DropdownMenuItem @select="doCommit('amend')">
               <Pencil :size="15" />
@@ -340,7 +361,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             </DropdownMenuItem>
             <DropdownMenuItem :disabled="!canSync" @select="doCommit('sync')">
               <RefreshCw :size="15" />
-              <span>{{ $t("repo.commit.commitSync") }}</span>
+              <span>{{ selectedCount > 0 ? $t("repo.commit.commitAllSync") : $t("repo.commit.commitSync") }}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -395,26 +416,9 @@ defineExpose({ loadRecentMsgs, recentMsgs });
     </div>
   </div>
 
-  <!-- per-file staging: appears only when ≥1 file is checked in the tree above. Commits ONLY
-       the selected files (reusing the message box), leaving everything else pending. -->
-  <div
-    v-if="st && st.dirty > 0 && selectedCount > 0"
-    class="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/[0.06] px-2 py-1.5"
-  >
-    <Button size="sm" :disabled="!commitMsg.trim() || committing" @click="doCommitSelected()">
-      <Loader2 v-if="committing" class="animate-spin" />
-      <GitCommitHorizontal v-else />
-      <span>{{ $t("repo.commit.commitSelected", { n: selectedCount }) }}</span>
-    </Button>
-    <button
-      type="button"
-      class="ml-auto shrink-0 rounded px-2 py-1 text-[11.5px] text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-      :title="$t('repo.commit.clearSelection')"
-      @click="treeSelection.clear()"
-    >
-      {{ $t("repo.commit.clearSelection") }}
-    </button>
-  </div>
+  <!-- The per-file "Commit selected" strip that used to live here is gone: a selection now
+       retargets the primary commit button above, and "Clear selection" moved into the changed-files
+       toolbar next to the search controls, where the selection itself is made. -->
 
   <!-- smart-commit plan editor (AI multi-commit splitter). v-if so each open mounts a fresh
        instance — keeps the drag-reorder binding wired to the freshly-mounted card list. -->

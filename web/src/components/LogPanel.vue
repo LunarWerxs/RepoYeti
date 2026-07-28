@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 import { computeGraph, type GraphCommit, type GraphLink } from "@/lib/git-graph";
 import { statusColor } from "@/lib/git-status-colors";
+import { churn, compactN } from "@/lib/diffstat";
 import { openFile, isViewing } from "@/lib/file-viewer";
 import { historyFilesView } from "@/lib/history-view";
 import {
@@ -43,7 +44,11 @@ import {
   historyChangesDisplay,
   historyGraphEnabled,
 } from "@/lib/history-appearance";
+import { useTooltipConfig } from "@/lib/tooltip-config";
+import { useAutoHideOnScroll } from "@/lib/auto-hide-scroll";
+import ViewOptions, { type ViewOptionRow } from "@/components/ui/ViewOptions.vue";
 import CommitFilesTree from "./CommitFilesTree.vue";
+import DiffBar from "./DiffBar.vue";
 import HistoryActivity from "./HistoryActivity.vue";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -69,6 +74,62 @@ const props = withDefaults(defineProps<{ repoId: string; active?: boolean }>(), 
 });
 const store = useStore();
 const { t } = useI18n();
+
+// ── History view options (the toolbar popover) ───────────────────────────────────────
+// These four are browser-local appearance prefs (see @/lib/history-appearance and
+// @/lib/history-view). They were MOVED out of Settings → Appearance rather than duplicated:
+// a switch that changes this panel belongs in this panel's toolbar, where it is discoverable
+// without knowing it exists. Settings keeps only the app-wide choices (theme, tooltips, …).
+const { enabled: tooltipsEnabled } = useTooltipConfig();
+const viewOptionRows = computed<ViewOptionRow[]>(() => [
+  {
+    key: "activity",
+    label: t("repo.history.optActivity"),
+    hint: t("repo.history.optActivityHint"),
+    kind: "toggle",
+    on: historyActivityEnabled.value,
+  },
+  {
+    key: "graph",
+    label: t("repo.history.optGraph"),
+    hint: t("repo.history.optGraphHint"),
+    kind: "toggle",
+    on: historyGraphEnabled.value,
+    // The graph is already suppressed while an author filter is active (see showGraph): its lanes
+    // describe the full commit set, so drawing them over a filtered subset would be a lie. Say so
+    // here rather than letting the switch look broken.
+    disabled: !!selectedAuthor.value,
+    disabledHint: t("repo.history.graphFilteredHint"),
+  },
+  {
+    key: "changes",
+    label: t("repo.history.optChanges"),
+    hint: t("repo.history.optChangesHint"),
+    kind: "choice",
+    active: historyChangesDisplay.value,
+    choices: [
+      { value: "numbers", label: t("common.numbers") },
+      { value: "bars", label: t("common.visualBars") },
+    ],
+  },
+  {
+    key: "files",
+    label: t("repo.history.optFiles"),
+    hint: t("repo.history.optFilesHint"),
+    kind: "choice",
+    active: historyFilesView.value,
+    choices: [
+      { value: "tree", label: t("common.asTree") },
+      { value: "list", label: t("common.asList") },
+    ],
+  },
+]);
+function onViewOption({ key, value }: { key: string; value: boolean | string }): void {
+  if (key === "activity") historyActivityEnabled.value = value as boolean;
+  else if (key === "graph") historyGraphEnabled.value = value as boolean;
+  else if (key === "changes") historyChangesDisplay.value = value as "numbers" | "bars";
+  else if (key === "files") historyFilesView.value = value as "tree" | "list";
+}
 const { friendly } = useRepoFeedback();
 
 type Scope = "all" | "local" | "head";
@@ -187,34 +248,16 @@ function hasStat(c: LogEntry): boolean {
   const s = c.stat;
   return !!s && (s.filesChanged > 0 || s.addedLines > 0 || s.removedLines > 0);
 }
-/** Compact count so the narrow column can't blow out: 1234 → "1.2k", 20500 → "21k". */
-function compactN(n: number): string {
-  return n < 1000 ? String(n) : `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-}
 /** Exact figures for the hover title, since the cell itself abbreviates. */
 function statTitle(c: LogEntry): string {
   const s = c.stat;
   if (!s) return "";
   return `${t("repo.history.filesChanged", { count: s.filesChanged }, s.filesChanged)} · ${t("repo.diffStat.lines", { added: s.addedLines, removed: s.removedLines })}`;
 }
-const changeChurn = (c: LogEntry): number =>
-  (c.stat?.addedLines ?? 0) + (c.stat?.removedLines ?? 0);
+/** The scale every bar in this column is drawn against (see DiffBar / lib/diffstat). */
 const maxChangeChurn = computed(() =>
-  Math.max(1, ...(logResult.value?.commits ?? []).map(changeChurn)),
+  Math.max(1, ...(logResult.value?.commits ?? []).map((c) => churn(c.stat?.addedLines ?? 0, c.stat?.removedLines ?? 0))),
 );
-/** Square-root scaling keeps small commits legible when one generated-file commit is enormous. */
-function changeBarWidth(c: LogEntry): string {
-  const total = changeChurn(c);
-  if (!total) return "0%";
-  return `${Math.max(7, Math.sqrt(total / maxChangeChurn.value) * 100)}%`;
-}
-function changeShare(c: LogEntry, kind: "added" | "removed"): string {
-  const s = c.stat;
-  const total = changeChurn(c);
-  if (!s || !total) return "0%";
-  const lines = kind === "added" ? s.addedLines : s.removedLines;
-  return `${(lines / total) * 100}%`;
-}
 
 // ── data loading + scope switching ───────────────────────────────────────────────────
 function failedActivity(message: string): HistoryActivityResult {
@@ -371,6 +414,7 @@ async function setAuthorFilter(author: HistoryActivityAuthor): Promise<void> {
   await reload(true);
   await nextTick();
   if (scrollEl.value) scrollEl.value.scrollTop = 0;
+  revealActivity(); // a jump to the top is an implicit "show me the overview again"
 }
 
 async function clearAuthorFilter(): Promise<void> {
@@ -409,6 +453,36 @@ async function loadMoreLog(): Promise<void> {
 // nears view (rootMargin), so there's no "Load more" button. Re-observes whenever the sentinel
 // mounts/unmounts (history opened AND more pages remain).
 const scrollEl = useTemplateRef<HTMLElement>("scrollEl");
+
+// ── auto-hiding activity overview ────────────────────────────────────────────────────
+// Collapses as you read down the commit list, returns on a committed pull up (or at the top).
+const activityWrapEl = useTemplateRef<HTMLElement>("activityWrapEl");
+const { hidden: activityHidden, reveal: revealActivity } = useAutoHideOnScroll(scrollEl);
+
+// How much vertical space the overview occupies, so the list can claim exactly that much when it
+// collapses. Measured rather than hard-coded, because the block's height moves with the metric
+// row's wrapping, the author chips and the loading state.
+//
+// Read at the INSTANT it is about to hide (`flush: "pre"`, so the DOM still holds the open height)
+// rather than from a ResizeObserver. The observer version silently produced 0 whenever it hadn't
+// fired yet — a background tab, a card expanded off-screen — and a 0 here means hiding buys the
+// list nothing, i.e. the feature quietly does half its job. This reads the one number needed at
+// the one moment it is guaranteed to be correct.
+const reclaimedPx = ref(0);
+watch(
+  activityHidden,
+  (isHidden) => {
+    if (!isHidden) return;
+    const h = activityWrapEl.value?.scrollHeight ?? 0;
+    if (h > 0) reclaimedPx.value = h;
+  },
+  { flush: "pre" },
+);
+
+// A reload jumps the list to the top, so the overview should be back when the new rows land.
+watch(historyActivityEnabled, (on) => {
+  if (on) revealActivity();
+});
 const sentinelEl = useTemplateRef<HTMLElement>("sentinelEl");
 watch([sentinelEl, () => props.active], ([el, active]) => {
   io?.disconnect();
@@ -819,11 +893,20 @@ watch(historyActivityScale, () => {
             {{ opt.label }}
           </button>
         </div>
+        <!-- How History looks, in History's own toolbar. These four used to be reachable only from
+             Settings → Appearance, where a switch about this panel is invisible from this panel. -->
+        <ViewOptions
+          class="ml-auto"
+          :label="$t('repo.history.viewOptions')"
+          :tooltips="tooltipsEnabled"
+          :rows="viewOptionRows"
+          @change="onViewOption"
+        />
         <Tooltip>
           <TooltipTrigger as-child>
             <button
               type="button"
-              class="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+              class="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
               :aria-label="$t('repo.history.refresh')"
               :disabled="loadingLog"
               @click="reload()"
@@ -835,16 +918,29 @@ watch(historyActivityScale, () => {
         </Tooltip>
       </div>
 
-      <HistoryActivity
+      <!-- The activity overview gets out of the way as you read down the commit list, and comes
+           back on a deliberate pull upward (see @/lib/auto-hide-scroll). `inert` while collapsed so
+           its scale buttons and author chips leave the tab order instead of being focusable inside
+           a zero-height box. -->
+      <div
         v-if="historyActivityEnabled"
-        class="mb-2"
-        :activity="activity"
-        :loading="loadingActivity"
-        :scale="historyActivityScale"
-        :selected-author="selectedAuthor"
-        @select-scale="setActivityScale"
-        @select-author="setAuthorFilter"
-      />
+        ref="activityWrapEl"
+        class="history-activity-collapse"
+        :class="activityHidden && 'history-activity-collapse--hidden'"
+        :inert="activityHidden || undefined"
+        :aria-hidden="activityHidden || undefined"
+        data-history-activity-wrap
+      >
+        <HistoryActivity
+          class="mb-2"
+          :activity="activity"
+          :loading="loadingActivity"
+          :scale="historyActivityScale"
+          :selected-author="selectedAuthor"
+          @select-scale="setActivityScale"
+          @select-author="setAuthorFilter"
+        />
+      </div>
 
       <Transition name="history-filter">
         <div
@@ -907,9 +1003,13 @@ watch(historyActivityScale, () => {
           </div>
         </div>
 
+        <!-- The collapsed overview's height is handed to the list, so hiding it actually buys
+             MORE history rather than just making the card shorter — which is the whole point of
+             hiding it. `max-h-104` stays the floor; the custom property adds to it. -->
         <div
           ref="scrollEl"
-          class="scroll-slim max-h-104 overflow-y-auto"
+          class="scroll-slim history-scroll overflow-y-auto"
+          :style="{ '--history-reclaimed': `${activityHidden ? reclaimedPx : 0}px` }"
           :data-refreshing="loadingLog ? 'true' : 'false'"
           :aria-busy="loadingLog"
           data-history-transition="rows"
@@ -1132,36 +1232,13 @@ watch(historyActivityScale, () => {
                     <template v-if="historyChangesDisplay === 'bars'">
                       <Tooltip v-if="hasStat(item.commit!)">
                         <TooltipTrigger as-child>
-                          <span
-                            class="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                            :aria-label="statTitle(item.commit!)"
-                            :title="statTitle(item.commit!)"
-                          >
-                            <span class="inline-flex w-7 shrink-0 items-center justify-end gap-0.5 text-muted-foreground/75">
-                              <Files :size="10" />{{ compactN(item.commit!.stat!.filesChanged) }}
-                            </span>
-                            <span class="flex h-2 w-16 shrink-0 overflow-hidden rounded-full bg-muted/55">
-                              <span
-                                class="flex h-full min-w-px overflow-hidden rounded-full"
-                                :style="{ width: changeChurn(item.commit!) ? changeBarWidth(item.commit!) : '7%' }"
-                              >
-                                <span
-                                  v-if="item.commit!.stat!.addedLines"
-                                  class="h-full bg-success/80"
-                                  :style="{ width: changeShare(item.commit!, 'added') }"
-                                />
-                                <span
-                                  v-if="item.commit!.stat!.removedLines"
-                                  class="h-full bg-destructive/75"
-                                  :style="{ width: changeShare(item.commit!, 'removed') }"
-                                />
-                                <span
-                                  v-if="!changeChurn(item.commit!)"
-                                  class="h-full w-full bg-muted-foreground/35"
-                                />
-                              </span>
-                            </span>
-                          </span>
+                          <DiffBar
+                            :added="item.commit!.stat!.addedLines"
+                            :removed="item.commit!.stat!.removedLines"
+                            :max="maxChangeChurn"
+                            :files="item.commit!.stat!.filesChanged"
+                            :label="statTitle(item.commit!)"
+                          />
                         </TooltipTrigger>
                         <TooltipContent>{{ statTitle(item.commit!) }}</TooltipContent>
                       </Tooltip>
@@ -1516,6 +1593,60 @@ watch(historyActivityScale, () => {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2em), transparent 100%);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2em), transparent 100%);
 }
+/* ── auto-hiding activity overview ───────────────────────────────────────────────
+ * Animating grid-template-rows lets the block collapse to and from its NATURAL height without
+ * pinning a pixel max-height that goes stale the moment the metric row rewraps.
+ *
+ * `minmax(0, …)` is load-bearing, not decoration. Plain `1fr`/`0fr` means `minmax(auto, 1fr)`, and
+ * that `auto` MINIMUM resolves to the item's content height — so `0fr` computed as 191px and the
+ * block never collapsed at all (measured: the class applied, the rule matched, the height did not
+ * budge). Stating the minimum as 0 is what actually lets the track close. `min-height: 0` plus
+ * `overflow: hidden` on the child is still wanted, for the item's own automatic minimum size.
+ * Collapsed it is also `visibility: hidden`, so nothing inside is hit-testable or readable while it
+ * is a zero-height sliver.
+ */
+/* One duration and one curve for BOTH the block and the list it hands space to. They animate two
+ * different properties on two different elements, and any drift between them shows up as the two
+ * edges sliding apart mid-transition — so the numbers live here once instead of being typed out
+ * three times. The curve is a symmetric ease-in-out: the old cubic-bezier(0.22, 1, 0.36, 1)
+ * decelerated hard and then crawled to a stop, which reads as a snap at 200ms. */
+.history-activity-collapse,
+.history-scroll {
+  --history-collapse-duration: 360ms;
+  --history-collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.history-activity-collapse {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  transition: grid-template-rows var(--history-collapse-duration) var(--history-collapse-ease);
+}
+.history-activity-collapse > * {
+  min-height: 0;
+  overflow: hidden;
+  transition:
+    /* Fades over most of the collapse rather than snapping out early: a quick fade under a slow
+       close looks like the content disappears and the empty box shuts afterwards. */
+    opacity calc(var(--history-collapse-duration) * 0.75) var(--history-collapse-ease),
+    /* Held until the very end, so nothing pops out of existence while the box is still moving. */
+    visibility var(--history-collapse-duration);
+}
+.history-activity-collapse--hidden {
+  grid-template-rows: minmax(0, 0fr);
+}
+.history-activity-collapse--hidden > * {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* The list's own cap, plus whatever the collapsed overview just gave back (see the inline
+ * --history-reclaimed). max-h-104 was the previous fixed value; keeping it as the base means the
+ * open state is byte-for-byte what it always was. */
+.history-scroll {
+  max-height: calc(26rem + var(--history-reclaimed, 0px));
+  transition: max-height var(--history-collapse-duration) var(--history-collapse-ease);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .commit-body,
   .history-row-enter-active,
@@ -1525,6 +1656,12 @@ watch(historyActivityScale, () => {
   }
   .history-filter-enter-active,
   .history-filter-leave-active {
+    transition: none;
+  }
+  /* The hide still happens — it is a layout preference, not decoration — it just doesn't slide. */
+  .history-activity-collapse,
+  .history-activity-collapse > *,
+  .history-scroll {
     transition: none;
   }
 }

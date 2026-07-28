@@ -1,14 +1,29 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
-import { Ban, Check, ChevronRight, Copy, Eye, FolderOpen, Minus, Plus, SquarePen, Undo2 } from "@lucide/vue";
-import type { DiffStat as DiffStatT, TreeNode } from "../types";
+import {
+  Ban,
+  Check,
+  CheckCheck,
+  ChevronRight,
+  Copy,
+  Eye,
+  FolderOpen,
+  GitMerge,
+  Minus,
+  Plus,
+  SquarePen,
+  Trash2,
+  Undo2,
+} from "@lucide/vue";
+import type { ChangesStatDisplay, DiffStat as DiffStatT, TreeNode } from "../types";
 import { fileVisual } from "@/lib/file-icons";
 import { fmtCount } from "@/lib/diffstat";
 import { openFile, isViewing } from "@/lib/file-viewer";
 import { useTreeCollapse } from "@/lib/changes-tree";
 import { useTreeSelection } from "@/lib/changes-selection";
-import { statusColor } from "@/lib/git-status-colors";
+import { RESOLVED_COLOR, statusColor } from "@/lib/git-status-colors";
+import DiffBar from "./DiffBar.vue";
 import DiffStat from "./DiffStat.vue";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
 import {
@@ -30,6 +45,18 @@ function diffTitle(s: DiffStatT): string {
   if (props.readOnly) return lines;
   return `${lines} · ${t("repo.diffStat.chars", { added: fmtCount(s.addedChars), removed: fmtCount(s.removedChars) })}`;
 }
+
+// Which halves of a file's delta the numeric renderer shows. The read-only (pre-pull) tree has no
+// character data at all (see diffTitle); otherwise the owner's "character counts" appearance
+// toggle decides. Hiding them is display-only — diffTitle still carries the exact figures to the
+// row's hover title, so the numbers are one hover away rather than gone.
+const statShow = computed<"lines" | "both">(() =>
+  props.readOnly || !props.showChars ? "lines" : "both",
+);
+// Numbers or a proportional bar, mirroring the History panel's own option (the owner asked for
+// the same choice here). Never in the read-only tree: the pull preview's bars would be scaled
+// against commits you don't have yet, which is a comparison with nothing to compare to.
+const asBars = computed(() => !props.readOnly && props.statDisplay === "bars");
 
 // Self-recursive component (renders <ChangesTree> for each subfolder). In `flat` (list-view)
 // mode the caller passes only file nodes — no folders — and each row shows the file's full
@@ -55,8 +82,18 @@ const props = withDefaults(
      *  stats in the client cache, so the tree would go on showing them until a reload. Gating
      *  the render as well makes the toggle take effect the moment it's flipped. */
     showStats?: boolean;
+    /** Show the CHARACTER half of each file's delta. Same reason showStats is a prop and not read
+     *  from the store here: this component is also mounted by the read-only pull preview and by
+     *  tests, and a daemon setting reaching in directly would make both of those lie. */
+    showChars?: boolean;
+    /** Numbers or a proportional bar for the per-file totals (the owner's appearance setting). */
+    statDisplay?: ChangesStatDisplay;
+    /** Largest per-file churn in the WHOLE tree — the scale every change bar is drawn against.
+     *  Computed once by the card that owns the flat file list, because a recursion level can
+     *  only see its own subtree and per-subtree scales would make sibling folders lie. */
+    maxChurn?: number;
   }>(),
-  { canControl: true, isGuest: false, readOnly: false, showStats: true },
+  { canControl: true, isGuest: false, readOnly: false, showStats: true, showChars: true, statDisplay: "numbers", maxChurn: 1 },
 );
 
 // Directory of a flat-list row WITHOUT the trailing slash, e.g. "src/components". Empty for a
@@ -78,7 +115,52 @@ const emit = defineEmits<{
   editor: [path: string];
   gitignore: [path: string];
   copyPath: [path: string];
+  /** Delete the file from disk outright — NOT "restore it to its committed state" (that is
+   *  `discard`). The owner's case: an untracked scratch file that discard would also remove, but
+   *  also a tracked file they simply want gone, where discard would put it straight back. */
+  deleteFile: [path: string];
+  /** Delete a whole FOLDER and everything under it. A separate event from `deleteFile` so the
+   *  card can confirm it separately — it needs to say how many files are about to go, which a
+   *  single-file confirm never has to. */
+  deleteFolder: [path: string];
 }>();
+
+// ── merge conflicts ───────────────────────────────────────────────────────────
+// A conflicted row shows WHICH conflict it is, and a resolved one says so, because the letter "C"
+// alone cannot tell "we both edited this" from "they deleted the file you were editing" — and a
+// resolved conflict used to revert to a plain "M", making a half-finished merge look like
+// ordinary edits. Both markers use the row's native `title` rather than a Tooltip instance, for
+// the same reason as everything else on these rows (see the checkbox comment below).
+// Spelled out as literal t() calls rather than a computed `repo.conflict.${kind}` key: the i18n
+// checker (web/scripts/i18n-check.mjs) only sees literal keys, so a composed one reports all seven
+// strings as dead and the next tidy-up deletes them. The switch is also exhaustive, so adding a
+// ConflictKind fails the build here instead of silently rendering nothing.
+function conflictLabel(n: TreeNode): string {
+  switch (n.conflict) {
+    case "both-modified":
+      return t("repo.conflict.bothModified");
+    case "both-added":
+      return t("repo.conflict.bothAdded");
+    case "both-deleted":
+      return t("repo.conflict.bothDeleted");
+    case "added-by-us":
+      return t("repo.conflict.addedByUs");
+    case "added-by-them":
+      return t("repo.conflict.addedByThem");
+    case "deleted-by-us":
+      return t("repo.conflict.deletedByUs");
+    case "deleted-by-them":
+      return t("repo.conflict.deletedByThem");
+    default:
+      return n.resolved ? t("repo.conflict.resolved") : "";
+  }
+}
+
+/** The row's hover text: its path, plus the conflict state when there is one. */
+function rowTitle(n: TreeNode): string {
+  const label = conflictLabel(n);
+  return label ? `${n.path} · ${label}` : n.path;
+}
 
 // Shared collapsed-folder state (provided once by RepoCard; see @/lib/changes-tree).
 const collapse = useTreeCollapse();
@@ -402,6 +484,12 @@ onBeforeUnmount(() => {
             <Undo2 :size="15" />
             <span>{{ $t("repo.changes.ctxDiscardFolder") }}</span>
           </ContextMenuItem>
+          <!-- Folder delete: same distinction as the file one (discard restores, delete removes),
+               just recursive. The card's confirm names the file count before anything happens. -->
+          <ContextMenuItem v-if="!isGuest" variant="destructive" @select="emit('deleteFolder', n.path)">
+            <Trash2 :size="15" />
+            <span>{{ $t("repo.deleteFile.actionFolder") }}</span>
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       <!-- file row — opens the read-only viewer (spacer keeps it aligned under folders).
@@ -419,7 +507,7 @@ onBeforeUnmount(() => {
           class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
           :class="[isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30', draggingPath === n.path && 'opacity-40']"
           :style="{ paddingLeft: (depth ?? 0) * 14 + 8 + 'px' }"
-          :title="n.path"
+          :title="rowTitle(n)"
           tabindex="-1"
           data-tree-row
           :data-depth="depth ?? 0"
@@ -447,11 +535,43 @@ onBeforeUnmount(() => {
                real buttons are absolutely-positioned siblings anchored to the row's right edge,
                on top of this slot (see below), matching the checkbox's reserve-space convention. -->
           <span class="mono ml-auto flex shrink-0 items-center gap-1.5">
-            <DiffStat v-if="n.stat && showStats" :stat="n.stat" :show="readOnly ? 'lines' : 'both'" :title="diffTitle(n.stat)" />
+            <!-- conflict state, ahead of the numbers: during a merge this is the only thing on the
+                 row that matters, and "still conflicted" vs "already resolved" is the one question
+                 the owner is scanning the list to answer. -->
+            <GitMerge
+              v-if="n.conflict"
+              :size="12"
+              class="shrink-0 text-warning"
+              :aria-label="conflictLabel(n)"
+              :title="conflictLabel(n)"
+            />
+            <CheckCheck
+              v-else-if="n.resolved"
+              :size="12"
+              class="shrink-0 text-success"
+              :aria-label="conflictLabel(n)"
+              :title="conflictLabel(n)"
+            />
+            <template v-if="n.stat && showStats">
+              <DiffBar
+                v-if="asBars"
+                :added="n.stat.addedLines"
+                :removed="n.stat.removedLines"
+                :max="maxChurn"
+                :label="diffTitle(n.stat)"
+                width="w-14"
+              />
+              <DiffStat v-else :stat="n.stat" :show="statShow" :title="diffTitle(n.stat)" />
+            </template>
             <span class="w-[84px] shrink-0" aria-hidden="true" />
-            <span class="pl-1 text-[11px] font-bold" :style="{ color: statusColor(n.status) }">{{
-              n.status
-            }}</span>
+            <!-- A resolved conflict keeps its ordinary staged letter (M/A/D) on purpose — the
+                 daemon never invents a letter for it, so nothing downstream that keys off `status`
+                 has to learn a new code. The green tint is what marks it. -->
+            <span
+              class="pl-1 text-[11px] font-bold"
+              :style="{ color: n.resolved ? RESOLVED_COLOR : statusColor(n.status) }"
+              >{{ n.status }}</span
+            >
           </span>
         </button>
         <!-- per-file selection checkbox: sits in the leading gutter column on the left so it
@@ -575,6 +695,14 @@ onBeforeUnmount(() => {
             <Undo2 :size="15" />
             <span>{{ $t("repo.discard.action") }}</span>
           </ContextMenuItem>
+          <!-- Delete supersedes discard rather than duplicating it: discard restores the file to
+               its committed state (a tracked file comes straight back), delete removes it from
+               disk and stages the deletion. Files only — a recursive folder delete is a different
+               blast radius and the daemon refuses a directory outright. -->
+          <ContextMenuItem v-if="!isGuest" variant="destructive" @select="emit('deleteFile', n.path)">
+            <Trash2 :size="15" />
+            <span>{{ $t("repo.deleteFile.action") }}</span>
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       <!-- children render only while this folder is expanded -->
@@ -588,6 +716,9 @@ onBeforeUnmount(() => {
           :is-guest="isGuest"
           :read-only="readOnly"
           :show-stats="showStats"
+          :show-chars="showChars"
+          :stat-display="statDisplay"
+          :max-churn="maxChurn"
           @discard="emit('discard', $event)"
           @stage="emit('stage', $event)"
           @reveal="emit('reveal', $event)"
@@ -595,6 +726,8 @@ onBeforeUnmount(() => {
           @editor="emit('editor', $event)"
           @gitignore="emit('gitignore', $event)"
           @copy-path="emit('copyPath', $event)"
+          @delete-file="emit('deleteFile', $event)"
+          @delete-folder="emit('deleteFolder', $event)"
         />
       </ExpandTransition>
     </template>

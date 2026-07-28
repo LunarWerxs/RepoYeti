@@ -31,7 +31,8 @@
     "openWith": "Open with",
     "openingIn": "Opening in {editor}…",
     "openingEditor": "Opening in your editor…",
-    "openFailed": "Couldn't open the editor"
+    "openFailed": "Couldn't open the editor",
+    "showSideBySide": "Show side-by-side"
   },
   "addRepo": {
     "cancel": "Cancel",
@@ -116,7 +117,11 @@
   "common": {
     "cancel": "Cancel",
     "close": "Close",
-    "save": "Save"
+    "save": "Save",
+    "numbers": "Numbers",
+    "visualBars": "Visual bars",
+    "asTree": "Tree",
+    "asList": "List"
   },
   "filters": {
     "anyIdentity": "Any identity",
@@ -348,7 +353,15 @@
       "staged": "File staged",
       "truncated": "Showing {shown} of {total} changed files",
       "viewAsList": "Switch to list view",
-      "viewAsTree": "Switch to tree view"
+      "viewAsTree": "Switch to tree view",
+      "viewOptions": "Changed-files view options",
+      "viewOptionsNeedStats": "Turn on \"Diff statistics\" in Settings first — there are no per-file totals to style yet.",
+      "viewOptionsCharsBars": "Bars draw one proportional bar from the line counts, so there is no character half to show.",
+      "optTotals": "Change totals",
+      "optTotalsHint": "How each changed file’s +/− totals are drawn: exact numbers, or a proportional bar scaled against the largest change in the same list.",
+      "optChars": "Character counts",
+      "optCharsHint": "Show the added/removed CHARACTER totals alongside the line totals in the Changes list. Off leaves the line counts alone; the exact character figures stay on each row’s hover tooltip either way.",
+      "clearSelectionCount": "Clear selection (1 file) | Clear selection ({n} files)"
     },
     "collapse": "Collapse",
     "diffStat": {
@@ -576,7 +589,17 @@
       "activityCommitCount": "{count} commit | {count} commits",
       "activityFileCount": "{count} file | {count} files",
       "activityBucketSummary": "{time}: {commits}, {files}, +{added}, −{removed}",
-      "activityBucketPartialStats": "line stats cover {covered} of {total} commits"
+      "activityBucketPartialStats": "line stats cover {covered} of {total} commits",
+      "viewOptions": "History view options",
+      "graphFilteredHint": "The commit graph is hidden while an author filter is on: its lanes describe every commit, so drawing them over a filtered subset would be misleading.",
+      "optActivity": "Activity overview",
+      "optActivityHint": "Show compact repository activity stats and an additions/deletions chart above History, with hourly, daily, and monthly ranges.",
+      "optGraph": "Branch map",
+      "optGraphHint": "Show colored branch and merge lanes beside commits. Turn this off for a simpler text-only history.",
+      "optChanges": "Change totals",
+      "optChangesHint": "Show exact added/removed numbers in each row, or compact proportional color bars with the exact values on hover.",
+      "optFiles": "Changed files",
+      "optFilesHint": "How an expanded commit's changed files are listed: a nested folder tree, like the Changes panel, or a flat list of full paths."
     },
     "stash": {
       "stash": "Stash",
@@ -596,6 +619,27 @@
       "body": "Discard all changes to {file}? This reverts it to the last commit and can't be undone.",
       "confirm": "Discard",
       "discarded": "Changes discarded"
+    },
+    "deleteFile": {
+      "action": "Delete file",
+      "title": "Delete file?",
+      "body": "Delete {file} from disk? This removes the file and stages the deletion. It can’t be undone.",
+      "confirm": "Delete",
+      "deleted": "File deleted",
+      "actionFolder": "Delete folder",
+      "titleFolder": "Delete folder?",
+      "bodyFolder": "Delete {folder} and everything in it? It holds no changed files. | Delete {folder} and everything in it? It holds 1 changed file, plus anything unchanged. | Delete {folder} and everything in it? It holds {count} changed files, plus anything unchanged.",
+      "deletedFolder": "Folder deleted"
+    },
+    "conflict": {
+      "bothModified": "Conflict: both modified",
+      "bothAdded": "Conflict: both added this file",
+      "bothDeleted": "Conflict: both deleted this file",
+      "addedByUs": "Conflict: added by us",
+      "addedByThem": "Conflict: added by them",
+      "deletedByUs": "Conflict: deleted by us",
+      "deletedByThem": "Conflict: deleted by them",
+      "resolved": "Conflict resolved"
     },
     "manage": {
       "title": "Remote & tags",
@@ -913,16 +957,6 @@
     "changesHeightHint": "In automatic mode, each changed-files list grows and shrinks with its visible files up to this height, then scrolls. Drag the grip to set an exact height for one repo; double-click it to return to automatic sizing.",
     "showTooltips": "Show tooltips",
     "showTooltipsHint": "Hover help on buttons and controls. Info icons like this one always stay on so settings remain explained.",
-    "historyActivity": "History activity overview",
-    "historyActivityHint": "Show compact repository activity stats and an additions/deletions chart above History, with hourly, daily, and monthly ranges.",
-    "historyGraph": "History branch map",
-    "historyGraphHint": "Show colored branch and merge lanes beside commits. Turn this off for a simpler text-only history.",
-    "historyChangesDisplay": "History change totals",
-    "historyChangesDisplayHint": "Show exact added/removed numbers in each row, or compact proportional color bars with the exact values on hover.",
-    "historyChangesNumbers": "Numbers",
-    "historyChangesBars": "Visual bars",
-    "historyFilesTree": "History files as folder tree",
-    "historyFilesTreeHint": "Show an expanded commit's changed files as a nested folder tree, like the Changes panel. Turn off for a flat list of full paths.",
     "portableWindow": "Portable window",
     "portableWindowHint": "Open the app in its own window (no tabs or address bar) instead of a browser tab. The desktop launcher/tray follows this too.",
     "portableWindowFailed": "Could not change portable window",
@@ -1030,7 +1064,9 @@
     "toastRemoved": "{name} removed",
     "updateNotify": "Auto-check for updates",
     "updateNotifyHint": "Check periodically and let you know when a newer version is available. Nothing is installed without your say-so.",
-    "updateNotifyFailed": "Couldn't change the update-notification setting"
+    "updateNotifyFailed": "Couldn't change the update-notification setting",
+    "changesStatDisplayFailed": "Could not change the work tree change totals",
+    "changesCharsFailed": "Could not change the character counts"
   },
   "shell": {
     "addRepository": "Add a repository",

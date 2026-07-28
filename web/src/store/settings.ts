@@ -8,7 +8,7 @@ import {
   type OpenResult,
   type PortableWindowResult,
 } from "../api";
-import type { ActionResult, PendingApproval, ShareViewer } from "../types";
+import type { ActionResult, ChangesStatDisplay, PendingApproval, ShareViewer } from "../types";
 import { useSettingsCloudSync } from "./settings-cloud-sync.ts";
 import { useSettingsNotifications } from "./settings-notifications.ts";
 
@@ -63,6 +63,8 @@ export function useSettings(deps: {
   relayAnnounced: Ref<boolean>;
   relayError: Ref<string | null>;
   diffStatsEnabled: Ref<boolean>;
+  changesStatDisplay: Ref<ChangesStatDisplay>;
+  changesCharsEnabled: Ref<boolean>;
   remoteEditing: Ref<boolean>;
   diffPatchBytes: Ref<number>;
   diffPatchEnabled: Ref<boolean>;
@@ -100,6 +102,8 @@ export function useSettings(deps: {
     relayAnnounced,
     relayError,
     diffStatsEnabled,
+    changesStatDisplay,
+    changesCharsEnabled,
     remoteEditing,
     diffPatchBytes,
     diffPatchEnabled,
@@ -226,6 +230,29 @@ export function useSettings(deps: {
       await api.setDiffStats(enabled);
     } catch (e) {
       diffStatsEnabled.value = !enabled; // roll back
+      throw e;
+    }
+  }
+
+  /** Numbers or bars for the work-tree change totals (optimistic; rolls back on failure). */
+  async function setChangesStatDisplay(display: ChangesStatDisplay): Promise<void> {
+    const prev = changesStatDisplay.value;
+    changesStatDisplay.value = display;
+    try {
+      await api.setChangesStatDisplay(display);
+    } catch (e) {
+      changesStatDisplay.value = prev; // roll back
+      throw e;
+    }
+  }
+
+  /** Toggle the work tree's character counts (optimistic; rolls back on failure). */
+  async function setChangesChars(enabled: boolean): Promise<void> {
+    changesCharsEnabled.value = enabled;
+    try {
+      await api.setChangesChars(enabled);
+    } catch (e) {
+      changesCharsEnabled.value = !enabled; // roll back
       throw e;
     }
   }
@@ -614,6 +641,8 @@ export function useSettings(deps: {
     applyAppearance,
   } = useSettingsCloudSync({
     diffStatsEnabled,
+    changesStatDisplay,
+    changesCharsEnabled,
     remoteEditing,
     diffPatchBytes,
     diffPatchEnabled,
@@ -672,6 +701,8 @@ export function useSettings(deps: {
     logout,
     leaveShare,
     setDiffStats,
+    setChangesStatDisplay,
+    setChangesChars,
     setRemoteEditing,
     setDiffPatchBytes,
     setDiffPatchEnabled,

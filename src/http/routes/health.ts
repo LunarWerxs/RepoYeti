@@ -19,6 +19,7 @@ import {
 import { openPortableWindow } from "../../portable-window.mjs";
 import { WINDOW_SIZE_HINT_PARAM, windowSizeHintFor } from "../../window-size.ts";
 import { dirname, join } from "node:path";
+import { jsonError } from "../../contract.ts";
 import { diffStatsEnabled, setDiffStatsEnabled } from "../../read/diffstat.ts";
 import {
   refreshAllRepos,
@@ -137,6 +138,11 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
         // refuses PUT /api/repos/:id/file outright), so the editor must render read-only.
         diffStats: diffStatsEnabled(),
         remoteEditing: false,
+        // Pure work-tree rendering knobs (numbers-vs-bars, char-delta on/off) — harmless to hand
+        // to a guest, unlike remoteEditing above which is pinned false because a guest genuinely
+        // cannot write files. Included so the guest's viewer renders identically to the owner's.
+        changesStatDisplay: cfg.changesStatDisplay ?? "numbers",
+        changesChars: cfg.changesChars !== false,
         diffPatchBytes: getDiffPatchBytes(),
         diffPatchEnabled: getDiffPatchEnabled(),
         minContentSearch: MIN_CONTENT_SEARCH,
@@ -168,6 +174,10 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       relayError: getRelayStatus().error,
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
+      // Work-tree display knobs — see the guest branch above for why these are safe to share.
+      // Absent-key defaults live here (single source of truth, matches the config.ts doc comment).
+      changesStatDisplay: cfg.changesStatDisplay ?? "numbers",
+      changesChars: cfg.changesChars !== false,
       // Large-file Diff threshold (bytes) — owner setting; the viewer compares file size to it.
       diffPatchBytes: getDiffPatchBytes(),
       // Whether large files may use the compact patch view at all (false = always side-by-side).
@@ -249,6 +259,29 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       saveConfig(cfg);
       broadcast("settings_changed", { diffStats: cfg.diffStats });
       refreshAllRepos();
+    }
+    // Work-tree display knobs. Pure rendering choices — the numbers/percentages and the
+    // char-delta are already computed by the read path regardless of these flags, so (unlike
+    // diffStats just above) there is nothing to recompute: no refreshAllRepos() call here.
+    if (b.changesStatDisplay === "numbers" || b.changesStatDisplay === "bars") {
+      cfg.changesStatDisplay = b.changesStatDisplay;
+      saveConfig(cfg);
+      broadcast("settings_changed", { changesStatDisplay: cfg.changesStatDisplay });
+    }
+    // Junk is not persisted (an unrecognized value would sit in config.json until some client
+    // happened to overwrite it) but it must NOT abort the request either. This handler's whole
+    // convention is independent, best-effort per-field blocks, and an early `return` here meant a
+    // body like {changesStatDisplay:"pie-chart", remoteEditing:false} silently dropped
+    // remoteEditing and every other key ordered after it — while keys ordered BEFORE it were
+    // already committed. Flag it, keep applying the rest, answer 400 at the end.
+    const badStatDisplay =
+      b.changesStatDisplay !== undefined &&
+      b.changesStatDisplay !== "numbers" &&
+      b.changesStatDisplay !== "bars";
+    if (typeof b.changesChars === "boolean") {
+      cfg.changesChars = b.changesChars;
+      saveConfig(cfg);
+      broadcast("settings_changed", { changesChars: cfg.changesChars });
     }
     if (typeof b.remoteEditing === "boolean") {
       cfg.remoteEditing = b.remoteEditing;
@@ -442,10 +475,17 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
         broadcast("settings_changed", { defaultEditor: cfg.defaultEditor ?? null });
       }
     }
+    // Every other field has now been applied (see the badStatDisplay comment above): the 400 says
+    // "this one value was rejected", not "nothing happened".
+    if (badStatDisplay) {
+      return jsonError(c, "BAD_REQUEST", 'changesStatDisplay must be "numbers" or "bars"');
+    }
     return c.json({
       ok: true,
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
+      changesStatDisplay: cfg.changesStatDisplay ?? "numbers",
+      changesChars: cfg.changesChars !== false,
       diffPatchBytes: getDiffPatchBytes(),
       diffPatchEnabled: getDiffPatchEnabled(),
       syncCheck: syncCheckEnabled(),

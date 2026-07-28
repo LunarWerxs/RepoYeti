@@ -4,12 +4,6 @@ import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { changesViewSize } from "@/lib/changes-view";
 import { defaultCommitAction } from "@/lib/commit-default";
-import {
-  historyActivityEnabled,
-  historyChangesDisplay,
-  historyGraphEnabled,
-} from "@/lib/history-appearance";
-import { historyFilesView } from "@/lib/history-view";
 import { useTheme } from "@/lib/theme";
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
@@ -40,19 +34,6 @@ async function onDiffStats(enabled: boolean): Promise<void> {
     await store.setDiffStats(enabled);
   } catch {
     toast.error(t("settings.diffStatsFailed"));
-  }
-}
-
-// (The large-file patch THRESHOLD moved to Advanced → Diffs — a byte-size tuning knob, not an
-// appearance choice. The user-facing switches stay here.)
-
-// "Always side-by-side" is the user-facing inverse of the server's compact-patch flag:
-// ON → never use the compact patch (diffPatchEnabled = false).
-async function onAlwaysSideBySide(always: boolean): Promise<void> {
-  try {
-    await store.setDiffPatchEnabled(!always);
-  } catch {
-    toast.error(t("settings.diffPatchAlwaysFailed"));
   }
 }
 
@@ -121,44 +102,12 @@ async function onHideTrayIcon(enabled: boolean): Promise<void> {
         <Switch v-model="tooltipsEnabled" :aria-label="$t('settings.showTooltips')" />
       </template>
     </SettingsRow>
-    <SettingsRow :label="$t('settings.historyActivity')">
-      <template #info><InfoHint :text="$t('settings.historyActivityHint')" /></template>
-      <template #control>
-        <Switch v-model="historyActivityEnabled" :aria-label="$t('settings.historyActivity')" />
-      </template>
-    </SettingsRow>
-    <SettingsRow :label="$t('settings.historyGraph')">
-      <template #info><InfoHint :text="$t('settings.historyGraphHint')" /></template>
-      <template #control>
-        <Switch v-model="historyGraphEnabled" :aria-label="$t('settings.historyGraph')" />
-      </template>
-    </SettingsRow>
-    <SettingsRow :label="$t('settings.historyChangesDisplay')">
-      <template #info><InfoHint :text="$t('settings.historyChangesDisplayHint')" /></template>
-      <template #control>
-        <Select v-model="historyChangesDisplay">
-          <SelectTrigger class="w-full max-w-36" :aria-label="$t('settings.historyChangesDisplay')">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="numbers">{{ $t("settings.historyChangesNumbers") }}</SelectItem>
-            <SelectItem value="bars">{{ $t("settings.historyChangesBars") }}</SelectItem>
-          </SelectContent>
-        </Select>
-      </template>
-    </SettingsRow>
-    <!-- History detail: changed files as a nested folder tree (default) or a flat path list.
-         Client-side view preference (localStorage) — see @/lib/history-view. -->
-    <SettingsRow :label="$t('settings.historyFilesTree')">
-      <template #info><InfoHint :text="$t('settings.historyFilesTreeHint')" /></template>
-      <template #control>
-        <Switch
-          :model-value="historyFilesView === 'tree'"
-          :aria-label="$t('settings.historyFilesTree')"
-          @update:model-value="(v: boolean) => (historyFilesView = v ? 'tree' : 'list')"
-        />
-      </template>
-    </SettingsRow>
+    <!-- The History panel's four display choices (activity graph, commit graph, change totals,
+         changed files as tree/list) and the work tree's two now live in those panels' OWN
+         toolbars — the sliders button beside each. They are not duplicated here on
+         purpose: a switch nobody can find from the panel it changes is a switch nobody uses, and
+         two homes for one preference is how they drift. This group keeps only what is genuinely
+         app-wide. -->
     <SettingsRow :label="$t('settings.portableWindow')">
       <template #info><InfoHint :text="$t('settings.portableWindowHint')" /></template>
       <template #control>
@@ -204,15 +153,9 @@ async function onHideTrayIcon(enabled: boolean): Promise<void> {
         />
       </template>
     </SettingsRow>
-    <SettingsRow :label="$t('settings.diffPatchAlways')">
-      <template #info><InfoHint :text="$t('settings.diffPatchAlwaysHint')" /></template>
-      <template #control>
-        <Switch
-          :model-value="!store.diffPatchEnabled"
-          :aria-label="$t('settings.diffPatchAlways')"
-          @update:model-value="(v: boolean) => onAlwaysSideBySide(v)"
-        />
-      </template>
-    </SettingsRow>
+    <!-- "Always side-by-side" moved to the file viewer's own ⋮ menu, and its "compact diff"
+         notice now carries a one-click way out. It is the setting that decides what you are
+         looking at, so it belongs on the thing it decides. The byte THRESHOLD stays in
+         Advanced → Diffs: that one is a tuning number, not a view choice. -->
   </SettingsGroup>
 </template>

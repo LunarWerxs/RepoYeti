@@ -2,8 +2,8 @@
  * Mutating VCS actions, each funnelled through `runAction` (core.ts) so it goes behind the
  * per-repo op-queue and re-broadcasts status afterward. Plus the bulk fetch-all helper.
  */
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getWatchableRepos } from "../db.ts";
 import { enqueue } from "../opqueue.ts";
@@ -175,6 +175,134 @@ export async function discardFile(repoId: string, relPath: string): Promise<Disc
     return { ok: true, code: "OK", path: r.clean };
   }
   return { ok: false, code: result.code === "ERROR" ? "ERROR" : "DISCARD_FAILED", message: result.message };
+}
+
+/** Result of deleting one file — or, with `recursive`, a whole folder — from disk (the
+ *  changes-tree "Delete" action). */
+export interface DeleteFileResult {
+  ok: boolean;
+  code: "OK" | "NOT_FOUND" | "ERROR" | "DELETE_FAILED" | "SUBMODULE_NOT_ACTIONABLE";
+  message?: string;
+  /** Repo-relative path that was deleted (normalised to forward slashes). */
+  path?: string;
+  /** Files actually removed — only set for a recursive folder delete (undefined, not 1, for the
+   *  single-file case), so the UI can toast a real count for the folder case specifically. */
+  deleted?: number;
+}
+
+/**
+ * Delete one file — or, with `recursive:true`, a whole DIRECTORY — from disk outright, the
+ * changes-tree "Delete" action the owner asked for as a strict superset of discard ("I know I
+ * could probably push discard and it'd probably get rid of it, but sometimes I just wanna delete
+ * it"). Unlike discardFile this has no restore direction:
+ * - untracked/new file → removed from disk (same visible outcome as discard, different intent).
+ * - tracked file        → removed from disk AND the deletion is staged (backend.deleteFile).
+ * - directory, `recursive` omitted/false → refused here, before the backend ever sees it (the
+ *   original behavior, kept as the default so an older client, or a bug that forgets the flag,
+ *   can never recurse by accident — `recursive` only ever WIDENS what's allowed).
+ * - directory, `recursive: true` → delegates to backend.deleteFile's directory branch (git:
+ *   `git rm -r -f` + a disk-level sweep of whatever that leaves behind; see gitDeleteDirectory in
+ *   git-actions/commit.ts), but only after the extra guards below all hold:
+ *    - repo ROOT refused outright. resolveRepoPath legitimately accepts "." (and any traversal
+ *      that collapses back to the root, e.g. "foo/..") as an in-bounds path — pathWithin() treats
+ *      the root as "within" itself, which is correct for confinement but WRONG for delete: without
+ *      this, recursive:true + path:"." would git-rm + rmSync the ENTIRE checkout. Compared as
+ *      resolved abs paths (not the `clean` string), so every spelling that collapses to root is
+ *      caught, not just the literal ".".
+ *    - a directory that IS, or directly CONTAINS, a nested VCS checkout (submodule / nested .git
+ *      or .lore) is refused — deleting another repo's checkout isn't "delete this folder". Only
+ *      the immediate-child marker is checked (one stat, always cheap); a submodule buried deeper
+ *      inside the tree is NOT detected — a full recursive scan would double the I/O of the common
+ *      no-nested-repo case just to rule out the rare one (see followUps).
+ * Untrusted-path safe (confined to the repo exactly like discardFile), behind the per-repo
+ * op-queue, and DESTRUCTIVE — the UI gates it behind an explicit confirm that states the count.
+ */
+/** VCS marker directories that mean "a DIFFERENT repository lives here". */
+const NESTED_REPO_MARKERS = new Set([".git", ".lore"]);
+
+/**
+ * Repo-relative path of a nested repository checkout anywhere under `dir`, or null.
+ *
+ * Checking only `dir`'s DIRECT children is not enough, and the gap is the worst bug this whole
+ * action could have had: a vendored checkout two levels down (`adir/sub/vendor-repo/.git`) passed
+ * a direct-child check and was then deleted along with its entire history. Caught by an
+ * adversarial review that reproduced it live (deleted:19, vendor-repo/.git gone), so this walks
+ * the FULL subtree and refuses before anything is mutated.
+ *
+ * A whole extra traversal is the honest cost, and it is small next to the delete itself, which
+ * already walks and unlinks every one of those entries. Iterative rather than recursive so a
+ * pathologically deep tree can't blow the stack, and `entry.isDirectory()` is lstat-based, so a
+ * directory SYMLINK is never followed — otherwise this walk could wander outside the repo it is
+ * supposed to be confined to.
+ */
+function findNestedRepo(dir: string): string | null {
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue; // unreadable subtree — the delete will report its own failure
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      // A `.git` FILE (a linked worktree's indirection) counts too — it still points at a real
+      // repository — but it is not a directory, so check the name on both entry kinds.
+      if (NESTED_REPO_MARKERS.has(entry.name)) return join(current, entry.name).slice(dir.length + 1);
+      stack.push(join(current, entry.name));
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (NESTED_REPO_MARKERS.has(entry.name)) return join(current, entry.name).slice(dir.length + 1);
+    }
+  }
+  return null;
+}
+
+export async function deleteFile(repoId: string, relPath: string, recursive = false): Promise<DeleteFileResult> {
+  const g = guardRepo<"SUBMODULE_NOT_ACTIONABLE">(repoId, "SUBMODULE_NOT_ACTIONABLE");
+  if (g.fail) return g.fail;
+  const repo = g.repo;
+  const r = resolveRepoPath(repo.absPath, relPath);
+  if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  const backend = backendFor(repo.vcs);
+  // Never reach into the VCS marker dir (.git / .lore) — deleting its internals is nonsense/unsafe.
+  if (r.clean.split("/").includes(backend.marker)) {
+    return { ok: false, code: "ERROR", message: `refusing to touch a ${backend.marker} directory` };
+  }
+  // Repo-root guard — see doc comment above. Must hold BEFORE the isDir/recursive branching
+  // below, and regardless of `recursive`: this is the worst-case failure mode of this whole
+  // feature (recurse into the checkout itself), not something the isDir check happens to catch.
+  const rootAbs = resolve(repo.absPath);
+  const atRoot = process.platform === "win32" ? r.abs.toLowerCase() === rootAbs.toLowerCase() : r.abs === rootAbs;
+  if (atRoot) {
+    return { ok: false, code: "ERROR", message: "refusing to delete the repository root" };
+  }
+  let isDir = false;
+  try {
+    isDir = lstatSync(r.abs).isDirectory();
+  } catch {
+    /* nothing at the leaf — let the backend report its own not-found-shaped failure */
+  }
+  if (isDir && !recursive) {
+    return { ok: false, code: "ERROR", message: "refusing to delete a directory" };
+  }
+  if (isDir) {
+    // Nested-repo guard (see doc comment above) — checked here, once, ahead of both backends,
+    // same reasoning as the marker-dir check above.
+    const nested = findNestedRepo(r.abs);
+    if (nested) {
+      return { ok: false, code: "ERROR", message: `refusing to delete a nested repository checkout (${nested})` };
+    }
+  }
+  const result = await enqueue(repoId, () => backend.deleteFile(repo.absPath, r.clean, recursive));
+  // Refresh AFTER the queue slot releases (refreshRepo enqueues again → would deadlock if nested).
+  if (result.ok) {
+    await refreshRepo(repo.id, repo.absPath);
+    return { ok: true, code: "OK", path: r.clean, deleted: result.deleted };
+  }
+  return { ok: false, code: result.code === "ERROR" ? "ERROR" : "DELETE_FAILED", message: result.message };
 }
 
 /** Result of staging one file's working-tree change (the changes-tree "Stage" action). */

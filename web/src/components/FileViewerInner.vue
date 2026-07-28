@@ -216,10 +216,32 @@ const editableSource = computed(() => (viewerMode.value === "content" ? content.
 
 // Identity of the request in flight — repo + path + mode. Re-fetches when any changes,
 // and lets a returning request bail if a newer open/toggle has superseded it.
+// Bumped to make the fetch below re-run for the SAME file and tab. The one case is the owner
+// flipping "always side-by-side" from this viewer's own menu: the DAEMON decides patch vs both
+// whole sides at request time (see getDiffPatchEnabled), so the answer for this exact file
+// changes without the file, the commit or the tab changing — and without this the notice would
+// keep saying "compact diff" until you closed and reopened the file.
+const reloadNonce = ref(0);
 const fetchKey = (): string | null =>
   props.target
-    ? `${props.target.repoId}::${props.target.path}::${props.target.commit ?? ""}::${viewerMode.value}`
+    ? `${props.target.repoId}::${props.target.path}::${props.target.commit ?? ""}::${viewerMode.value}::${reloadNonce.value}`
     : null;
+
+// ── patch vs side-by-side, from the viewer instead of Settings ────────────────────
+// This is the setting that decided what you are looking at RIGHT NOW, so it belongs on the thing
+// it decides — it used to be reachable only from Settings → Appearance, which nobody opens while
+// staring at a compact patch wondering how to see the real diff. A daemon setting (it follows the
+// owner across devices), hence async + a toast on failure. Owner-only: PUT /api/settings is not on
+// the guest allowlist, so a guest's click would just 403.
+const alwaysSideBySide = computed(() => !store.diffPatchEnabled);
+async function setAlwaysSideBySide(always: boolean): Promise<void> {
+  try {
+    await store.setDiffPatchEnabled(!always);
+    reloadNonce.value++; // the daemon's answer for this file just changed — ask again
+  } catch {
+    toast.error(t("settings.diffPatchAlwaysFailed"));
+  }
+}
 
 let contentController: AbortController | null = null;
 watch(
@@ -571,6 +593,17 @@ onBeforeUnmount(() => {
             <component :is="diffSplitView ? AlignJustify : Columns2" :size="14" />
             {{ diffSplitView ? $t("fileViewer.unifiedView") : $t("fileViewer.splitView") }}
           </DropdownMenuItem>
+          <!-- Deliberately NOT gated on diffEditable, unlike the three above: in patch mode
+               diffEditable is false, and patch mode is exactly when someone wants this. -->
+          <DropdownMenuItem
+            v-if="viewerMode === 'diff' && !store.isGuest"
+            :title="$t('settings.diffPatchAlwaysHint')"
+            @select.prevent="setAlwaysSideBySide(!alwaysSideBySide)"
+          >
+            <Columns2 :size="14" />
+            {{ $t("settings.diffPatchAlways") }}
+            <Check v-if="alwaysSideBySide" :size="14" class="ml-auto text-primary" />
+          </DropdownMenuItem>
           <template v-if="store.canContinueLocal && !store.isGuest">
             <DropdownMenuSeparator v-if="!binaryPreview" />
             <DropdownMenuItem @select="openWith()">
@@ -716,7 +749,20 @@ onBeforeUnmount(() => {
           v-if="patchMode || fromHead || truncated"
           class="shrink-0 border-b border-border/60 bg-secondary/40 px-3 py-1.5 text-[11.5px] text-muted-foreground sm:px-4"
         >
-          <span v-if="patchMode">{{ $t("fileViewer.compactDiff") }}</span>
+          <!-- The notice now carries its own way out. Reading "this is a compact diff" and having
+               no idea how to get the full one is the whole complaint this fixes. -->
+          <span v-if="patchMode" class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>{{ $t("fileViewer.compactDiff") }}</span>
+            <button
+              v-if="!store.isGuest"
+              type="button"
+              class="inline-flex items-center gap-1 rounded text-[11.5px] font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+              @click="setAlwaysSideBySide(true)"
+            >
+              <Columns2 :size="11" />
+              {{ $t("fileViewer.showSideBySide") }}
+            </button>
+          </span>
           <span v-else-if="fromHead">{{ $t("fileViewer.showingCommitted") }}</span>
           <span v-else>{{ $t("fileViewer.truncated") }}</span>
         </div>

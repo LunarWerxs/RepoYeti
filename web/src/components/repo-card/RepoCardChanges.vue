@@ -5,12 +5,14 @@
 // and the store, and runs its own git ops (discard) keyed by repo.id.
 import { computed, ref, useTemplateRef, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import { AlertTriangle, Check, ChevronsDownUp, ChevronsUpDown, Cloud, CloudOff, FileSearch, GripHorizontal, List, ListTree, Loader2, RefreshCw, Search, X } from "@lucide/vue";
+import { AlertTriangle, Check, ChevronsDownUp, ChevronsUpDown, Cloud, CloudOff, FileSearch, GripHorizontal, List, ListTree, ListX, Loader2, RefreshCw, Search, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
 import { buildChangeTree } from "@/lib/util";
+import { churn } from "@/lib/diffstat";
 import { provideTreeCollapse } from "@/lib/changes-tree";
+import { useTreeSelection } from "@/lib/changes-selection";
 import { cn } from "@/lib/utils";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 import {
@@ -27,6 +29,7 @@ import {
 import { shortcutsActive } from "@/lib/hotkeys";
 import { useGripDrag } from "@/lib/grip-drag";
 import { useTooltipConfig } from "@/lib/tooltip-config";
+import ViewOptions, { type ViewOptionRow } from "@/components/ui/ViewOptions.vue";
 import ChangesTree from "../ChangesTree.vue";
 import BranchPanel from "../BranchPanel.vue";
 import RepoCardMenu from "./RepoCardMenu.vue";
@@ -66,9 +69,72 @@ const { enabled: tooltipsEnabled } = useTooltipConfig();
 // ── collapse + changed-files tree ─────────────────────────────────────────────
 const changeTree = computed(() => buildChangeTree(store.changesByRepo[props.repo.id] ?? []));
 
+// The scale every change bar in this card is drawn against ("visual bars" appearance option).
+// Computed here, over the FLAT file list, because a recursion level of ChangesTree can only see
+// its own subtree — scaling per subtree would make two sibling folders' bars mean different
+// things. Deliberately not filtered by the search box: bar lengths that rescale as you type
+// would make the same file look bigger just because you filtered the list.
+const maxChurn = computed(() =>
+  Math.max(
+    1,
+    ...(store.changesByRepo[props.repo.id] ?? []).map((f) =>
+      churn(f.stat?.addedLines ?? 0, f.stat?.removedLines ?? 0),
+    ),
+  ),
+);
+
+// ── changed-files view options (the toolbar popover) ─────────────────────────
+// Both are daemon settings (they follow the owner across devices), so flipping one round-trips and
+// can fail — hence the toasts, unlike History's browser-local prefs. Disabled while diff
+// statistics are off entirely: there are no numbers to style, and a switch that silently does
+// nothing is worse than one that says why.
+const viewOptionRows = computed<ViewOptionRow[]>(() => [
+  {
+    key: "statDisplay",
+    label: t("repo.changes.optTotals"),
+    hint: t("repo.changes.optTotalsHint"),
+    kind: "choice",
+    active: store.changesStatDisplay,
+    choices: [
+      { value: "numbers", label: t("common.numbers") },
+      { value: "bars", label: t("common.visualBars") },
+    ],
+    disabled: !store.diffStatsEnabled,
+    disabledHint: t("repo.changes.viewOptionsNeedStats"),
+  },
+  {
+    key: "chars",
+    label: t("repo.changes.optChars"),
+    hint: t("repo.changes.optCharsHint"),
+    kind: "toggle",
+    on: store.changesCharsEnabled,
+    // Bars draw one proportional bar from the LINE counts, so there is no character half to show.
+    disabled: !store.diffStatsEnabled || store.changesStatDisplay === "bars",
+    disabledHint: !store.diffStatsEnabled
+      ? t("repo.changes.viewOptionsNeedStats")
+      : t("repo.changes.viewOptionsCharsBars"),
+  },
+]);
+async function onViewOption({ key, value }: { key: string; value: boolean | string }): Promise<void> {
+  try {
+    if (key === "statDisplay") await store.setChangesStatDisplay(value as "numbers" | "bars");
+    else if (key === "chars") await store.setChangesChars(value as boolean);
+  } catch {
+    // Two literal t() calls rather than t(cond ? a : b): the i18n checker only sees a literal
+    // first argument, so the ternary form reports both strings as dead and invites their deletion.
+    if (key === "chars") toast.error(t("settings.changesCharsFailed"));
+    else toast.error(t("settings.changesStatDisplayFailed"));
+  }
+}
+
 // Per-folder collapse state, shared with the recursive ChangesTree via provide/inject
 // (persisted per repo — see @/lib/changes-tree).
 const treeCollapse = provideTreeCollapse(props.repo.id);
+
+// The shared per-file selection RepoCard provides (the same one ChangesTree's checkboxes drive).
+// Clearing it belongs HERE, beside the search controls, because this is where the selection is
+// made — it used to sit in a strip under the commit box, a whole panel away from the checkboxes.
+const treeSelection = useTreeSelection();
 
 function collectDirPaths(nodes: TreeNode[], acc: string[] = []): string[] {
   for (const n of nodes) {
@@ -320,6 +386,59 @@ async function confirmDiscard(): Promise<void> {
   toastResult(await store.discardFile(props.repo.id, path), t("repo.discard.discarded"));
 }
 
+// ── delete one file from disk (confirm-gated) ─────────────────────────────────
+// Distinct from discard, which restores a file to its committed state — for a TRACKED file that
+// puts it straight back, which is the opposite of what "delete this" means. This removes it and
+// stages the deletion. Same confirm-then-serialize shape as discard above.
+const deleteTarget = ref<string | null>(null);
+const deleteOpen = computed({
+  get: () => deleteTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) deleteTarget.value = null;
+  },
+});
+function askDelete(path: string): void {
+  deleteTarget.value = path;
+}
+async function confirmDelete(): Promise<void> {
+  const path = deleteTarget.value;
+  deleteTarget.value = null;
+  if (!path) return;
+  if (store.gitOpBusy[props.repo.id]) return;
+  toastResult(await store.deleteFile(props.repo.id, path), t("repo.deleteFile.deleted"));
+}
+
+// ── delete a whole folder (confirm-gated, and the confirm counts first) ───────
+// Recursive delete is the one action here where "how much am I about to lose?" is not obvious
+// from the row you right-clicked — a collapsed folder can hide fifty files. So the confirm says
+// the number, counted from the same changed-file list the tree is built from.
+const deleteFolderTarget = ref<string | null>(null);
+const deleteFolderOpen = computed({
+  get: () => deleteFolderTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) deleteFolderTarget.value = null;
+  },
+});
+/** CHANGED files under the folder. Deliberately named as such in the copy: the daemon deletes
+ *  every file in the folder, including clean ones this list never mentions, so promising an
+ *  exact total here would be a lie the UI cannot back up. */
+const deleteFolderCount = computed(() => {
+  const dir = deleteFolderTarget.value;
+  if (!dir) return 0;
+  const prefix = `${dir}/`;
+  return (store.changesByRepo[props.repo.id] ?? []).filter((f) => f.path.startsWith(prefix)).length;
+});
+function askDeleteFolder(path: string): void {
+  deleteFolderTarget.value = path;
+}
+async function confirmDeleteFolder(): Promise<void> {
+  const path = deleteFolderTarget.value;
+  deleteFolderTarget.value = null;
+  if (!path) return;
+  if (store.gitOpBusy[props.repo.id]) return;
+  toastResult(await store.deleteFile(props.repo.id, path, true), t("repo.deleteFile.deletedFolder"));
+}
+
 // ── drag-to-move: a file row dropped on a folder row moves it there (bubbled from ChangesTree) ──
 async function onMove(payload: { from: string; toDir: string }): Promise<void> {
   // Serialize with the other per-repo git ops (matches discard): don't fire a move while one is
@@ -447,7 +566,7 @@ async function onCopyPath(path: string): Promise<void> {
           type="text"
           :placeholder="$t('repo.changes.searchPlaceholder')"
           :aria-label="$t('repo.changes.searchPlaceholder')"
-          class="h-6 w-full rounded bg-transparent pr-14 pl-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
+          class="h-6 w-full rounded bg-transparent pr-20 pl-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
         />
         <!-- right cluster: clear (only with a query) + the "search inside files" toggle -->
         <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">
@@ -464,6 +583,25 @@ async function onCopyPath(path: string): Promise<void> {
               </button>
             </TooltipTrigger>
             <TooltipContent>{{ $t("repo.changes.searchClear") }}</TooltipContent>
+          </Tooltip>
+          <!-- clear the per-file selection. Only present while something IS selected, and tinted
+               toward destructive so it reads as "this throws something away" rather than as one
+               more neutral toolbar icon — it is next to two icons that only filter. -->
+          <Tooltip v-if="treeSelection.count.value > 0">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                :aria-label="$t('repo.commit.clearSelection')"
+                :title="tooltipsEnabled ? undefined : $t('repo.commit.clearSelection')"
+                class="flex size-6 items-center justify-center rounded bg-destructive/10 text-destructive/85 outline-none transition-colors hover:bg-destructive/20 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40"
+                @click="treeSelection.clear()"
+              >
+                <ListX :size="13" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {{ $t("repo.changes.clearSelectionCount", { n: treeSelection.count.value }) }}
+            </TooltipContent>
           </Tooltip>
           <!-- greps inside the changed files (fires at ≥ min chars); highlighted while on,
                spinner while a search is in flight. Tooltip replaces the old text label. -->
@@ -536,6 +674,16 @@ async function onCopyPath(path: string): Promise<void> {
           }}
         </TooltipContent>
       </Tooltip>
+      <!-- How this list looks, in the list's own toolbar. Moved out of Settings → Appearance for
+           the same reason as History's: a display choice about the changed files is undiscoverable
+           from anywhere but here. The tree ⇄ list button above stays a first-class control (it is
+           the one people reach for constantly) rather than being folded in here. -->
+      <ViewOptions
+        :label="$t('repo.changes.viewOptions')"
+        :tooltips="tooltipsEnabled"
+        :rows="viewOptionRows"
+        @change="onViewOption"
+      />
     </div>
     <div
       ref="treeScroll"
@@ -571,6 +719,9 @@ async function onCopyPath(path: string): Promise<void> {
         :can-control="store.canControl"
         :is-guest="store.isGuest"
         :show-stats="store.diffStatsEnabled"
+        :show-chars="store.changesCharsEnabled"
+        :stat-display="store.changesStatDisplay"
+        :max-churn="maxChurn"
         @discard="askDiscard"
         @stage="onStage"
         @reveal="onReveal"
@@ -578,6 +729,8 @@ async function onCopyPath(path: string): Promise<void> {
         @editor="onEditor"
         @gitignore="onGitignore"
         @copy-path="onCopyPath"
+        @delete-file="askDelete"
+        @delete-folder="askDeleteFolder"
       />
       <!-- Server capped an oversized changed-file list (MAX_CHANGED_FILES) — say so. -->
       <div
@@ -641,6 +794,44 @@ async function onCopyPath(path: string): Promise<void> {
       <DialogFooter class="gap-2 sm:gap-2">
         <Button variant="secondary" @click="discardOpen = false">{{ $t("common.cancel") }}</Button>
         <Button variant="destructive" @click="confirmDiscard">{{ $t("repo.discard.confirm") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <!-- confirm before deleting a file from disk (destructive, and unlike discard there is no
+       committed copy to fall back on for an untracked file) -->
+  <Dialog v-model:open="deleteOpen">
+    <DialogContent class="sm:max-w-sm">
+      <DialogHeader>
+        <DialogTitle>{{ $t("repo.deleteFile.title") }}</DialogTitle>
+        <DialogDescription>{{ $t("repo.deleteFile.body", { file: deleteTarget ?? "" }) }}</DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="gap-2 sm:gap-2">
+        <Button variant="secondary" @click="deleteOpen = false">{{ $t("common.cancel") }}</Button>
+        <Button variant="destructive" @click="confirmDelete">{{ $t("repo.deleteFile.confirm") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <!-- confirm before deleting a FOLDER and everything under it. Says how many changed files it
+       holds, because a collapsed folder gives no clue how much is about to go. -->
+  <Dialog v-model:open="deleteFolderOpen">
+    <DialogContent class="sm:max-w-sm">
+      <DialogHeader>
+        <DialogTitle>{{ $t("repo.deleteFile.titleFolder") }}</DialogTitle>
+        <DialogDescription>
+          {{
+            $t(
+              "repo.deleteFile.bodyFolder",
+              { folder: deleteFolderTarget ?? "", count: deleteFolderCount },
+              deleteFolderCount,
+            )
+          }}
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="gap-2 sm:gap-2">
+        <Button variant="secondary" @click="deleteFolderOpen = false">{{ $t("common.cancel") }}</Button>
+        <Button variant="destructive" @click="confirmDeleteFolder">{{ $t("repo.deleteFile.confirm") }}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

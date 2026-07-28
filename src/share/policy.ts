@@ -51,6 +51,10 @@ export interface RoutePolicy {
  * Deliberately NOT here, and why (each was considered and refused for v1):
  *   PUT  /api/repos/:id/file      — editing the owner's working tree is not "commit and sync".
  *   POST /api/repos/:id/discard   — irreversibly destroys the owner's uncommitted work.
+ *   POST /api/repos/:id/delete-file — worse: destroys the FILE, with no committed copy to
+ *                                     recover an untracked one from. `recursive: true` extends
+ *                                     this to a whole FOLDER — strictly more destructive still,
+ *                                     so it stays behind the same owner-only gate as the route.
  *   POST /api/repos/:id/move|gitignore — filesystem writes beyond the sync loop.
  *   POST /api/repos/:id/checkout|branch|stash — mutates the working state the owner is mid-flight in.
  *   POST /api/repos/:id/remote    — re-points where pushes go; a MITM primitive, not a git op.
@@ -212,6 +216,10 @@ export const OWNER_ONLY: readonly string[] = [
   // preview. Move it to GUEST_ROUTES at `control` if that's ever wanted.
   "GET /api/repos/:id/incoming",
   "POST /api/repos/:id/discard",
+  // Strictly more destructive than discard: it removes the file itself, and for an untracked
+  // one there is no committed copy anywhere to get it back from. Same route also backs the
+  // recursive folder-delete (opt-in `recursive: true` body flag) — still just this one entry.
+  "POST /api/repos/:id/delete-file",
   "POST /api/repos/:id/move",
   "POST /api/repos/:id/gitignore",
   "POST /api/repos/:id/checkout",

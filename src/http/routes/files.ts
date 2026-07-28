@@ -2,9 +2,10 @@ import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Deps } from "../deps.ts";
 import { jsonError, statusForCode, type ApiErrorCode } from "../../contract.ts";
-import { parseBody, DiscardSchema, StageSchema, GitignoreAddSchema } from "../../schemas.ts";
+import { parseBody, DiscardSchema, DeleteFileSchema, StageSchema, GitignoreAddSchema } from "../../schemas.ts";
 import {
   discardFile,
+  deleteFile,
   stageFile,
   addToGitignore,
   getChanges,
@@ -223,6 +224,25 @@ export function register(app: Hono, { cfg }: Deps): void {
     const p = await parseBody(c, DiscardSchema);
     if (!p.ok) return p.res;
     const result = await discardFile(id, p.data.path);
+    if (result.ok) return c.json(result);
+    const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
+    return c.json(result, status);
+  });
+
+  // Delete one file from disk outright (the changes-tree "Delete" action). Supersedes discard
+  // for the "I just wanna delete it" case — no restore semantics, and a tracked file's removal
+  // is staged too. Destructive → same remote-editing gate as discard.
+  // `recursive: true` extends this to a whole FOLDER (opt-in — see DeleteFileSchema); the
+  // response gains `deleted` (files actually removed) so the UI can toast a real count instead
+  // of a vague "deleted the folder".
+  app.post("/api/repos/:id/delete-file", async (c) => {
+    const id = requireId(c);
+    if (id instanceof Response) return id;
+    const blocked = remoteEditingBlocked(c, cfg);
+    if (blocked) return blocked;
+    const p = await parseBody(c, DeleteFileSchema);
+    if (!p.ok) return p.res;
+    const result = await deleteFile(id, p.data.path, p.data.recursive);
     if (result.ok) return c.json(result);
     const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
     return c.json(result, status);

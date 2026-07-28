@@ -25,7 +25,7 @@
  *   git fetch             → (none; Lore is centralized) → fetch() is a benign no-op
  *   git stash             → (none)                       → UNSUPPORTED
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { sdkStatus, sdkBranches, sdkLog } from "./lore-sdk.ts";
 import { join } from "node:path";
 import type { Identity, RepoStatus } from "../db.ts";
@@ -500,6 +500,75 @@ export async function loreDiscardFile(
   return { ok: true };
 }
 
+/** Count of plain files (not dirs) anywhere under `dir` — see the git-actions/commit.ts twin of
+ *  this helper for why it's a self-walk rather than parsed CLI output. */
+function countFilesRecursive(dir: string): number {
+  let n = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    n += entry.isDirectory() ? countFilesRecursive(p) : 1;
+  }
+  return n;
+}
+
+/**
+ * Delete ONE file from disk outright (the changes-tree "Delete" action) — distinct from
+ * loreDiscardFile, which restores a path to its committed/absent state. This one has no restore
+ * direction: the file is just gone, whether or not it had any working-tree changes.
+ *
+ * Lore's CLI has no documented `rm` subcommand (see the file header's git→lore mapping table, and
+ * this backend is still dormant/unwired — REPOYETI_LORE=1 only), so this composes two primitives
+ * instead of one: unlink the working file, then `lore stage <path>` — the same call loreStageFile
+ * uses for ordinary edits — to record the removal in the index. This mirrors how `git add -A`
+ * (gitStageFile's primitive) stages a deletion exactly as readily as a modification. If the path
+ * was never tracked there's nothing for `lore stage` to record, so it's a harmless no-op, same as
+ * gitDeleteFile's untracked branch.
+ *
+ * `recursive:true` on a DIRECTORY extends the same "no dedicated primitive" workaround: unlink
+ * every file under the folder ourselves (there's no bulk `lore rm -r` either), then ONE
+ * `lore stage --scan .` — the same bulk primitive the mapping table uses for `git add -A` — sweeps
+ * the whole tree to record every removal at once, rather than one `lore stage` call per file
+ * (which could overflow the CLI's arg list on a big folder, the same concern chunkByBytes solves
+ * for git's per-group staging in git-actions/commit.ts). On a FILE path `recursive` is a no-op.
+ */
+export async function loreDeleteFile(
+  absPath: string,
+  relPath: string,
+  recursive = false,
+): Promise<{ ok: boolean; message?: string; deleted?: number }> {
+  const abs = join(absPath, relPath);
+  if (recursive) {
+    let isDir = false;
+    try {
+      isDir = statSync(abs).isDirectory();
+    } catch {
+      /* nothing at the leaf — fall through to the single-file path below */
+    }
+    if (isDir) {
+      let deleted = 0;
+      try {
+        deleted = countFilesRecursive(abs);
+        rmSync(abs, { recursive: true, force: true });
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+      const run = await runLore(absPath, ["stage", "--scan", "."]);
+      if (run.spawnError) return { ok: false, message: "lore CLI not available" };
+      if (run.code !== 0) return { ok: false, message: classifyLore(run).message };
+      return { ok: true, deleted };
+    }
+  }
+  try {
+    if (existsSync(abs) && statSync(abs).isFile()) unlinkSync(abs);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
+  const run = await runLore(absPath, ["stage", relPath]);
+  if (run.spawnError) return { ok: false, message: "lore CLI not available" };
+  if (run.code !== 0) return { ok: false, message: classifyLore(run).message };
+  return { ok: true };
+}
+
 /** Stage ONE file's working-tree change (`lore stage <path>`) — the changes-tree per-file
  *  "Stage" action, mirroring gitStageFile. Purely additive; never commits. */
 export async function loreStageFile(
@@ -665,6 +734,10 @@ export const loreBackend: VcsBackend = {
   discardFile: async (absPath, relPath): Promise<ActionResult> => {
     const lr = await loreDiscardFile(absPath, relPath);
     return lr.ok ? ok("discarded") : fail("DISCARD_FAILED", lr.message ?? "lore reset failed");
+  },
+  deleteFile: async (absPath, relPath, recursive): Promise<ActionResult & { deleted?: number }> => {
+    const lr = await loreDeleteFile(absPath, relPath, recursive);
+    return lr.ok ? { ok: true, code: "OK", message: "deleted", deleted: lr.deleted } : fail("DELETE_FAILED", lr.message ?? "lore delete failed");
   },
   stageFile: async (absPath, relPath): Promise<ActionResult> => {
     const lr = await loreStageFile(absPath, relPath);

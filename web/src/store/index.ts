@@ -5,6 +5,7 @@ import { api, ApiError, type AccessMode, type TunnelStatus, type RelayStatus } f
 import type {
   ActionName,
   ActionResult,
+  ChangesStatDisplay,
   PendingApproval,
   Repo,
   CollaborationSnapshot,
@@ -108,6 +109,10 @@ export const useStore = defineStore("repoyeti", () => {
   // Owner setting: show added/removed line + char counts per file and per repo. Sourced
   // from /api/status and kept live via the `settings_changed` SSE event. Off by default.
   const diffStatsEnabled = ref(false);
+  // Work-tree appearance. Daemon settings (not localStorage) so they follow the owner across
+  // devices like diffStatsEnabled does — the defaults here match config.ts's absent-key ones.
+  const changesStatDisplay = ref<ChangesStatDisplay>("numbers");
+  const changesCharsEnabled = ref(true);
   // Owner setting: allow editing/saving files over the remote tunnel (local edits always on).
   const remoteEditing = ref(true);
   // Owner setting: changed files larger than this (bytes, either side) open as a compact
@@ -276,6 +281,7 @@ export const useStore = defineStore("repoyeti", () => {
     stashPop,
     stashDrop,
     discardFile,
+    deleteFile,
     stageFile,
     moveFile,
     addToGitignore,
@@ -400,6 +406,8 @@ export const useStore = defineStore("repoyeti", () => {
     logout,
     leaveShare,
     setDiffStats,
+    setChangesStatDisplay,
+    setChangesChars,
     setRemoteEditing,
     setDiffPatchBytes,
     setDiffPatchEnabled,
@@ -481,6 +489,8 @@ export const useStore = defineStore("repoyeti", () => {
     relayAnnounced,
     relayError,
     diffStatsEnabled,
+    changesStatDisplay,
+    changesCharsEnabled,
     remoteEditing,
     diffPatchBytes,
     diffPatchEnabled,
@@ -630,6 +640,8 @@ export const useStore = defineStore("repoyeti", () => {
       relayAnnounced.value = s.relayAnnounced === true;
       relayError.value = s.relayError ?? null;
       diffStatsEnabled.value = s.diffStats;
+      changesStatDisplay.value = s.changesStatDisplay ?? "numbers";
+      changesCharsEnabled.value = s.changesChars ?? true;
       remoteEditing.value = s.remoteEditing;
       diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
       diffPatchEnabled.value = s.diffPatchEnabled ?? true;
@@ -809,6 +821,10 @@ export const useStore = defineStore("repoyeti", () => {
           if (payload.relay) relayConfig.value = payload.relay as RelayStatus;
         } else if (event.value === "settings_changed") {
           if (typeof payload.diffStats === "boolean") diffStatsEnabled.value = payload.diffStats;
+          if (payload.changesStatDisplay === "numbers" || payload.changesStatDisplay === "bars") {
+            changesStatDisplay.value = payload.changesStatDisplay;
+          }
+          if (typeof payload.changesChars === "boolean") changesCharsEnabled.value = payload.changesChars;
           if (typeof payload.remoteEditing === "boolean") remoteEditing.value = payload.remoteEditing;
           if (typeof payload.diffPatchBytes === "number") diffPatchBytes.value = payload.diffPatchBytes;
           if (typeof payload.diffPatchEnabled === "boolean") diffPatchEnabled.value = payload.diffPatchEnabled;
@@ -942,6 +958,7 @@ export const useStore = defineStore("repoyeti", () => {
     stashPop,
     stashDrop,
     discardFile,
+    deleteFile,
     stageFile,
     moveFile,
     addToGitignore,
@@ -1015,8 +1032,12 @@ export const useStore = defineStore("repoyeti", () => {
     relayAnnounced,
     relayError,
     diffStatsEnabled,
+    changesStatDisplay,
+    changesCharsEnabled,
     contentSearchMin,
     setDiffStats,
+    setChangesStatDisplay,
+    setChangesChars,
     remoteEditing,
     setRemoteEditing,
     diffPatchBytes,

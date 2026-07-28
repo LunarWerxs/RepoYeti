@@ -14,3 +14,13 @@ export const STATUS_COLOR: Record<string, string> = {
 
 /** Colour for a status letter, falling back to a neutral grey for anything unknown/absent. */
 export const statusColor = (s?: string): string => (s ? (STATUS_COLOR[s] ?? "#9aa0a6") : "#9aa0a6");
+
+// ── merge conflicts ───────────────────────────────────────────────────────────
+// A conflicted file used to render as a bare orange "C", which says a conflict exists but not
+// what KIND — and "both of us edited this" and "they deleted the file you were editing" need
+// completely different responses from the owner. Worse, once a conflict was staged (resolved)
+// the file silently reverted to a plain "M", so a half-finished merge was indistinguishable from
+// ordinary edits and it was easy to commit a merge with conflicts still outstanding.
+
+/** Green — this one is DONE, and the point of showing it is that it no longer needs attention. */
+export const RESOLVED_COLOR = "#73c991";

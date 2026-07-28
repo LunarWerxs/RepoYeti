@@ -106,3 +106,69 @@ describe("FileViewerInner rich previews", () => {
     );
   });
 });
+
+// ── "always side-by-side", moved out of Settings into this viewer ──
+// The point of the move is that someone staring at a compact patch can get the real diff without
+// knowing a Settings row exists. Two things must hold: the notice offers the way out, and taking
+// it RE-FETCHES — the daemon decides patch vs whole sides per request, so flipping the setting
+// alone would leave the same patch on screen.
+describe("FileViewerInner compact-diff escape hatch", () => {
+  beforeEach(() => {
+    viewerMode.value = "diff";
+    vi.spyOn(api, "editors").mockResolvedValue({
+      platform: "test",
+      defaultEditor: null,
+      effectiveDefault: "",
+      editors: [],
+    });
+  });
+  afterEach(() => {
+    viewerMode.value = "content";
+    vi.restoreAllMocks();
+  });
+
+  async function mountPatched() {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const diff = vi.spyOn(api, "fileDiff").mockResolvedValue({
+      ok: true,
+      code: "OK",
+      path: "big.ts",
+      mode: "patch",
+      patch: "@@ -1 +1 @@\n-a\n+b\n",
+      original: "",
+      modified: "",
+    } as Awaited<ReturnType<typeof api.fileDiff>>);
+    const wrapper = shallowMount(FileViewerInner, {
+      props: { target: { repoId: "repo-1", path: "big.ts", status: "M" } },
+      global: { plugins: [pinia, i18n] },
+    });
+    await flushPromises();
+    return { wrapper, diff };
+  }
+
+  it("offers a way out of the compact-diff notice", async () => {
+    const { wrapper } = await mountPatched();
+    expect(wrapper.text()).toContain("Show side-by-side");
+  });
+
+  it("re-fetches the file after flipping the setting, not just flips it", async () => {
+    const { wrapper, diff } = await mountPatched();
+    expect(diff).toHaveBeenCalledTimes(1);
+
+    const setDiffPatchEnabled = vi
+      .spyOn(wrapper.vm.store, "setDiffPatchEnabled")
+      .mockResolvedValue(undefined);
+    const wayOut = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Show side-by-side"));
+    expect(wayOut).toBeDefined();
+    await wayOut!.trigger("click");
+    await flushPromises();
+
+    // false = "don't use the compact patch", i.e. always side-by-side.
+    expect(setDiffPatchEnabled).toHaveBeenCalledWith(false);
+    // …and the viewer asked the daemon again, which is the half that actually changes the screen.
+    expect(diff).toHaveBeenCalledTimes(2);
+  });
+});

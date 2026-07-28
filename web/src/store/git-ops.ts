@@ -281,6 +281,21 @@ export function useGitOps(
     }
   }
 
+  /** Delete one file from disk and stage the deletion (destructive — the card confirms first).
+   *  Distinct from discardFile, which restores a file to its committed state. */
+  async function deleteFile(repoId: string, path: string, recursive = false): Promise<ActionResult> {
+    gitOpBusy[repoId] = "delete";
+    try {
+      const r = await api.deleteFile(repoId, path, recursive);
+      await loadChanges(repoId);
+      return { ok: r.ok, code: r.code, message: r.message ?? "deleted" };
+    } catch (e) {
+      return asResult(e);
+    } finally {
+      delete gitOpBusy[repoId];
+    }
+  }
+
   /** Stage one changed file's working-tree change into the index (non-destructive; doesn't
    *  commit — the changes-tree per-file "Stage" action, GitHub-Desktop-style). */
   async function stageFile(repoId: string, path: string): Promise<ActionResult> {
@@ -429,6 +444,7 @@ export function useGitOps(
     stashPop,
     stashDrop,
     discardFile,
+    deleteFile,
     stageFile,
     moveFile,
     addToGitignore,
