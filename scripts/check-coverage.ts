@@ -1,4 +1,8 @@
 #!/usr/bin/env bun
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 /**
  * Global coverage gate (zero-dependency). bun's built-in `coverageThreshold` is PER-FILE, which
  * is too brittle for this repo (the integration entrypoints daemon.ts / index.ts are legitimately
@@ -24,46 +28,74 @@ async function runSuite(args: string[]): Promise<{ out: string; exitCode: number
 }
 
 const baseArgs = ["bun", "test", "tests", "--coverage", "--timeout", "20000"];
-// Bun 1.3.14 on Linux reproducibly terminates the aggregate coverage process as it enters the
-// git-heavy activity suite after roughly 900 successful tests. The same file passes by itself
-// under coverage, and the full aggregate passes on macOS and Windows. Give that file a fresh Linux
-// process; the main coverage percentage is conservative because it no longer receives the
-// activity suite's unusually high line coverage.
-const aggregateArgs =
-  process.platform === "linux"
-    ? [...baseArgs, "--path-ignore-patterns", "**/activity.test.ts"]
-    : baseArgs;
-const { out, exitCode } = await runSuite(aggregateArgs);
 
-if (exitCode !== 0) {
-  console.error("✗ tests failed — see above");
-  process.exit(exitCode || 1);
-}
-
-if (process.platform === "linux") {
-  const activity = await runSuite([
-    "bun",
-    "test",
-    "tests/activity.test.ts",
-    "--coverage",
-    "--timeout",
-    "20000",
-  ]);
-  if (activity.exitCode !== 0) {
-    console.error("✗ isolated activity coverage tests failed — see above");
-    process.exit(activity.exitCode || 1);
+function mergedLcovLineCoverage(reports: string[]): number {
+  const hits = new Map<string, number>();
+  for (const report of reports) {
+    let source = "";
+    for (const line of report.split(/\r?\n/)) {
+      if (line.startsWith("SF:")) {
+        source = line.slice(3);
+        continue;
+      }
+      if (!source || !line.startsWith("DA:")) continue;
+      const [lineNumber, count] = line.slice(3).split(",", 2);
+      if (!lineNumber || count === undefined) continue;
+      const key = `${source}\0${lineNumber}`;
+      hits.set(key, (hits.get(key) ?? 0) + Number(count));
+    }
   }
+  if (hits.size === 0) throw new Error("no DA records found in LCOV reports");
+  let covered = 0;
+  for (const count of hits.values()) if (count > 0) covered++;
+  return (covered / hits.size) * 100;
 }
 
-// Coverage table footer: " All files | <% funcs> | <% lines> | ..."
-const m = out.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
-if (!m) {
-  console.error("✗ could not parse the coverage summary (no 'All files' row)");
-  process.exit(1);
+let lineCoverage: number;
+if (process.platform === "linux") {
+  // Bun 1.3.14's Linux coverage process reproducibly terminates after enough fixture-heavy files,
+  // with no failed assertion or coverage footer. Two native Bun shards stay below that limit.
+  // Merge their LCOV DA records so the gate still measures one exact, repository-wide line ratio.
+  const coverageRoot = mkdtempSync(join(tmpdir(), "repoyeti-coverage-"));
+  const reports: string[] = [];
+  try {
+    for (let shard = 1; shard <= 2; shard++) {
+      const coverageDir = join(coverageRoot, `shard-${shard}`);
+      const result = await runSuite([
+        ...baseArgs,
+        `--shard=${shard}/2`,
+        "--coverage-reporter=text",
+        "--coverage-reporter=lcov",
+        `--coverage-dir=${coverageDir}`,
+      ]);
+      if (result.exitCode !== 0) {
+        console.error(`✗ coverage shard ${shard}/2 failed — see above`);
+        rmSync(coverageRoot, { recursive: true, force: true });
+        process.exit(result.exitCode || 1);
+      }
+      reports.push(readFileSync(join(coverageDir, "lcov.info"), "utf8"));
+    }
+    lineCoverage = mergedLcovLineCoverage(reports);
+  } finally {
+    rmSync(coverageRoot, { recursive: true, force: true });
+  }
+} else {
+  const { out, exitCode } = await runSuite(baseArgs);
+  if (exitCode !== 0) {
+    console.error("✗ tests failed — see above");
+    process.exit(exitCode || 1);
+  }
+  // Coverage table footer: " All files | <% funcs> | <% lines> | ..."
+  const match = out.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
+  if (!match) {
+    console.error("✗ could not parse the coverage summary (no 'All files' row)");
+    process.exit(1);
+  }
+  lineCoverage = parseFloat(match[2]!);
 }
-const lineCoverage = parseFloat(m[2]!);
+
 if (lineCoverage < MIN_LINE_COVERAGE) {
   console.error(`✗ overall line coverage ${lineCoverage}% is below the ${MIN_LINE_COVERAGE}% floor`);
   process.exit(1);
 }
-console.log(`✓ overall line coverage ${lineCoverage}% ≥ ${MIN_LINE_COVERAGE}% floor`);
+console.log(`✓ overall line coverage ${lineCoverage.toFixed(2)}% ≥ ${MIN_LINE_COVERAGE}% floor`);
