@@ -31,7 +31,7 @@ const baseArgs = ["bun", "test", "tests", "--coverage", "--timeout", "20000"];
 // activity suite's unusually high line coverage.
 const aggregateArgs =
   process.platform === "linux"
-    ? [...baseArgs, "--path-ignore-patterns", "activity\\.test\\.ts$"]
+    ? [...baseArgs, "--path-ignore-patterns", "**/activity.test.ts"]
     : baseArgs;
 const { out, exitCode } = await runSuite(aggregateArgs);
 
