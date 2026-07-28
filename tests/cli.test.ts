@@ -1,6 +1,4 @@
 import { test, expect } from "bun:test";
-import { createApp } from "../src/http/app.ts";
-import type { RepoYetiConfig } from "../src/config.ts";
 import { setRepoStatus, type RepoStatus } from "../src/db.ts";
 import { resolveBaseUrl, resolveRepo, get, ApiError } from "../src/cli/client.ts";
 import { runGitVerb } from "../src/cli/git.ts";
@@ -8,26 +6,7 @@ import type { RepoView } from "../src/db.ts";
 import { clearInstanceInfo } from "../src/instance.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
-
-// Local mode (no OIDC) → /api/* is not gated, so the CLI client can hit the daemon directly.
-const minimalConfig = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
-
-/** Spin a real daemon on an ephemeral port, point REPOYETI_BASE_URL at it, run `fn`, then tear
- *  down — restoring the env var no matter what. */
-async function withDaemon(fn: (origin: string) => Promise<void>): Promise<void> {
-  const prev = process.env.REPOYETI_BASE_URL;
-  const app = createApp(minimalConfig());
-  const server = Bun.serve({ port: 0, fetch: app.fetch });
-  const origin = `http://127.0.0.1:${server.port}`;
-  process.env.REPOYETI_BASE_URL = origin;
-  try {
-    await fn(origin);
-  } finally {
-    server.stop(true);
-    if (prev === undefined) delete process.env.REPOYETI_BASE_URL;
-    else process.env.REPOYETI_BASE_URL = prev;
-  }
-}
+import { withDaemon } from "./helpers/daemon.ts";
 
 const status = (over: Partial<RepoStatus>): RepoStatus => ({
   branch: "main",
