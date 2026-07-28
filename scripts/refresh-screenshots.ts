@@ -122,12 +122,35 @@ children.push(
 await waitFor(`http://127.0.0.1:${WEB_PORT}/`, "dev server");
 
 // ── 5. shoot ──────────────────────────────────────────────────────────────────────────
-console.log("[shots] capturing…");
+console.log("[shots] capturing stills…");
 execFileSync(
   "node",
   [join(REPO, "web", "scripts", "shoot-screenshots.mjs"), "--url", `http://127.0.0.1:${WEB_PORT}`],
   { cwd: join(REPO, "web"), stdio: "inherit" },
 );
+
+// ── 6. the hero loop ──────────────────────────────────────────────────────────────────
+// Skippable, because it needs ffmpeg on PATH and takes appreciably longer than the stills.
+if (!process.argv.includes("--no-gif")) {
+  console.log("[shots] recording the hero GIF…");
+  execFileSync(
+    "node",
+    [
+      join(REPO, "web", "scripts", "shoot-demo-gif.mjs"),
+      "--url", `http://127.0.0.1:${WEB_PORT}`,
+      "--out", join(REPO, "site", "demo.gif"),
+    ],
+    { cwd: join(REPO, "web"), stdio: "inherit" },
+  );
+}
+
+// ── 7. banner ─────────────────────────────────────────────────────────────────────────
+// Composed from the still captured above, so it can never drift from the real UI.
+console.log("[shots] composing the README banner…");
+execFileSync("node", [join(REPO, "web", "scripts", "shoot-banner.mjs")], {
+  cwd: join(REPO, "web"),
+  stdio: "inherit",
+});
 
 shutdown();
 console.log("[shots] done — daemon and dev server stopped.");

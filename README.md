@@ -24,16 +24,22 @@
 RepoYeti runs a small daemon on your machine, finds every git repo you have, and serves a dashboard to your phone over a private tunnel. Fetch, commit, push, and read history and diffs from wherever you are. It runs on your machine, so your code stays there.
 
 <!-- A table, not three loose <img> tags: GitHub collapses whitespace between images, so the
-     phones ended up shoulder to shoulder. Table cells give them real gutters and captions. -->
+     phones ended up shoulder to shoulder. GitHub also sizes table columns to their content and
+     drops most width/style attributes, so percentage widths do nothing. The gutters have to be
+     real empty cells with a transparent spacer image holding them open. -->
 <table align="center">
   <tr>
-    <td width="33%" align="center"><img src=".github/screenshots/dashboard-mobile.png" width="250" alt="Live repo grid on a phone: every repo's branch, dirty, ahead/behind at a glance" /></td>
-    <td width="33%" align="center"><img src=".github/screenshots/graph-mobile.png" width="250" alt="Git-graph history on a phone, with commit-activity chart, lanes and merges" /></td>
-    <td width="33%" align="center"><img src=".github/screenshots/diff-mobile.png" width="250" alt="Monaco diff viewer on a phone" /></td>
+    <td align="center"><img src=".github/screenshots/dashboard-mobile.png" width="230" alt="Live repo grid on a phone: every repo's branch, dirty, ahead/behind at a glance" /></td>
+    <td><img src=".github/spacer.png" width="34" height="1" alt="" /></td>
+    <td align="center"><img src=".github/screenshots/graph-mobile.png" width="230" alt="Git-graph history on a phone, with commit-activity chart, lanes and merges" /></td>
+    <td><img src=".github/spacer.png" width="34" height="1" alt="" /></td>
+    <td align="center"><img src=".github/screenshots/diff-mobile.png" width="230" alt="Monaco diff viewer on a phone" /></td>
   </tr>
   <tr>
     <td align="center"><sub>Every repo at a glance</sub></td>
-    <td align="center"><sub>Commit graph with lanes and merges</sub></td>
+    <td></td>
+    <td align="center"><sub>Commit graph, lanes and merges</sub></td>
+    <td></td>
     <td align="center"><sub>Real Monaco diffs</sub></td>
   </tr>
 </table>

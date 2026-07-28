@@ -253,7 +253,10 @@ defineExpose({ loadRecentMsgs, recentMsgs });
   <!-- commit: auto-growing message box with an inline AI draft button, then a
        split Commit button whose chevron opens the other commit modes. Items align
        to the top so the buttons stay put as the textarea grows downward. -->
-  <div v-if="st && st.dirty > 0" class="flex items-start gap-2">
+  <!-- Stacks on a phone. Side by side, the Commit and Auto split-buttons take ~200px of a 400px
+       screen, leaving the message box about 100px — narrow enough that the placeholder wrapped to
+       four characters a line and the field read as broken. -->
+  <div v-if="st && st.dirty > 0" class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start">
     <div class="relative min-w-0 flex-1">
       <!-- field-sizing-content grows the textarea to fit wrapped/multi-line text
            (min one row, capped at max-h-40 then scrolls). Enter inserts a newline;
@@ -307,7 +310,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
       </div>
     </div>
 
-    <div class="flex shrink-0 items-start gap-1.5">
+    <div class="flex shrink-0 items-start justify-end gap-1.5">
       <div class="flex">
         <Button
           data-testid="primary-commit-action"

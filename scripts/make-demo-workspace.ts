@@ -676,7 +676,27 @@ function main(): void {
   }
 
   if (existsSync(target)) {
-    rmSync(target, { recursive: true, force: true });
+    // Retry the wipe. The previous run's demo daemon had this tree indexed and Windows can hold
+    // handles open for a moment after the process exits, so a single rmSync loses a race with
+    // its own teardown and fails the whole pipeline with a confusing EBUSY.
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        rmSync(target, { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
+        lastErr = undefined;
+        break;
+      } catch (err) {
+        lastErr = err;
+        Bun.sleepSync(500);
+      }
+    }
+    if (lastErr) {
+      throw new Error(
+        `could not clear ${target} (something still has it open — a demo daemon from a previous run?): ${
+          lastErr instanceof Error ? lastErr.message : String(lastErr)
+        }`,
+      );
+    }
   }
   mkdirSync(target, { recursive: true });
 
