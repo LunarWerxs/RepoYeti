@@ -11,25 +11,48 @@ const MIN_LINE_COVERAGE = 78; // ~80% on CI (varies by platform + built assets);
 // vitest-only APIs like vi.stubGlobal + @vue/test-utils and are run separately via `bun run --cwd web test`).
 // --timeout 20000: git-heavy route tests (stash/discard/events) can exceed the 5s default on a
 // slow/loaded Windows CI runner; the extra headroom keeps CI from flaking on cold git spawns.
-// Drain both pipes while the suite runs. Bun.spawnSync can exhaust its Linux output pipe once the
-// suite is large enough, terminating around the same test with no assertion failure or coverage
-// footer. The async process preserves Bun's normal test parallelism while avoiding that fixed-size
-// output ceiling; we still retain stdout so the aggregate coverage row can be validated below.
-const proc = Bun.spawn(["bun", "test", "tests", "--coverage", "--timeout", "20000"], {
-  stdout: "pipe",
-  stderr: "pipe",
-});
-const [stdout, stderr, exitCode] = await Promise.all([
-  new Response(proc.stdout).text(),
-  new Response(proc.stderr).text(),
-  proc.exited,
-]);
-const out = stdout + stderr;
-process.stdout.write(out);
+async function runSuite(args: string[]): Promise<{ out: string; exitCode: number }> {
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  const out = stdout + stderr;
+  process.stdout.write(out);
+  return { out, exitCode };
+}
+
+const baseArgs = ["bun", "test", "tests", "--coverage", "--timeout", "20000"];
+// Bun 1.3.14 on Linux reproducibly terminates the aggregate coverage process as it enters the
+// git-heavy activity suite after roughly 900 successful tests. The same file passes by itself
+// under coverage, and the full aggregate passes on macOS and Windows. Give that file a fresh Linux
+// process; the main coverage percentage is conservative because it no longer receives the
+// activity suite's unusually high line coverage.
+const aggregateArgs =
+  process.platform === "linux"
+    ? [...baseArgs, "--path-ignore-patterns", "activity\\.test\\.ts$"]
+    : baseArgs;
+const { out, exitCode } = await runSuite(aggregateArgs);
 
 if (exitCode !== 0) {
   console.error("✗ tests failed — see above");
   process.exit(exitCode || 1);
+}
+
+if (process.platform === "linux") {
+  const activity = await runSuite([
+    "bun",
+    "test",
+    "tests/activity.test.ts",
+    "--coverage",
+    "--timeout",
+    "20000",
+  ]);
+  if (activity.exitCode !== 0) {
+    console.error("✗ isolated activity coverage tests failed — see above");
+    process.exit(activity.exitCode || 1);
+  }
 }
 
 // Coverage table footer: " All files | <% funcs> | <% lines> | ..."
