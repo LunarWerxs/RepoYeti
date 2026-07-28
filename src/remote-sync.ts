@@ -177,6 +177,24 @@ async function tick(): Promise<void> {
   if (newly.length > 0) broadcast("repo_behind", { repos: newly });
 }
 
+/**
+ * Run one check round right now: the same fetch → detect-newly-behind → broadcast the timer runs.
+ *
+ * Exported because the round is otherwise unreachable from anywhere but the timer, whose cadence
+ * floor is 30s — so the part of this module that actually does something could not be tested at
+ * all, only its pure helpers. A caller already mid-round is answered with that round rather than a
+ * second concurrent pass over every repo.
+ */
+export async function runSyncCheckNow(): Promise<void> {
+  if (ticking) return;
+  ticking = true;
+  try {
+    await tick();
+  } finally {
+    ticking = false;
+  }
+}
+
 function schedule(): void {
   timer = setTimeout(() => void runTick(), intervalSecs * 1000);
 }

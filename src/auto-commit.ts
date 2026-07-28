@@ -340,6 +340,28 @@ async function tick(): Promise<{ done: AutoCommittedRepo[]; blocked: AutoCommitB
   return { done, blocked };
 }
 
+/**
+ * Run one auto-commit round right now: the same pass over every opted-in repo the timer makes,
+ * with every safety gate in place (git-only, on a branch, not conflicted or mid-operation).
+ *
+ * Exported because the round is otherwise reachable only from the timer, whose cadence floor is
+ * 60s — leaving the code that commits to the owner's repositories unattended as the least
+ * testable thing in the daemon. A caller arriving mid-round gets an empty result rather than a
+ * second concurrent pass that would race the first for the same working trees.
+ */
+export async function runAutoCommitNow(): Promise<{
+  done: AutoCommittedRepo[];
+  blocked: AutoCommitBlockedRepo[];
+}> {
+  if (ticking) return { done: [], blocked: [] };
+  ticking = true;
+  try {
+    return await tick();
+  } finally {
+    ticking = false;
+  }
+}
+
 // ── timer plumbing (mirrors remote-sync.ts) ─────────────────────────────────────────────────
 function nextDelayMs(): number {
   return mode === "daily" ? msUntilDailyAt(dailyAt, Date.now()) : intervalSecs * 1000;
