@@ -9,12 +9,20 @@ import { join } from "node:path";
  * low-coverage by design). Instead we run the suite with coverage and gate on the OVERALL line
  * coverage. Run: `bun run check:coverage` (CI uses this in place of a bare `bun test`).
  */
-const MIN_TEXT_LINE_COVERAGE = 78; // ~89% on CI; floor with margin to catch silent regressions
+// The single-pass floor, used on Windows + macOS. macOS is the binding one of the two: it measured
+// 85.66% against Windows' 91.79% on the same commit, because the Windows-only tray/service/launcher
+// branches are dead there. Keep the floor under macOS, not under Windows.
+const MIN_TEXT_LINE_COVERAGE = 83;
 // The sharded LCOV path now measures the same denominator the single-pass text reporter does (see
 // mergedLcovLineCoverage), so this is no longer a second, incomparable scale. It stays a separate
-// constant only because Linux genuinely covers less than Windows/macOS: the Windows-only branches
-// are dead there. Tighten it toward the observed Linux baseline once that number settles.
-const MIN_LCOV_LINE_COVERAGE = 74;
+// constant only because Linux genuinely covers less than Windows/macOS: more of the
+// platform-specific code is dead there than on macOS.
+//
+// Both numbers sit ~2-3 points under the measured baseline (Linux 82.35%, macOS 85.66%). That gap
+// is the whole design: wide enough that ordinary work doesn't trip it, narrow enough that a
+// feature landing untested does. If a run fails here, the fix is tests in that commit — moving
+// the floor down to meet the code defeats the only thing this gate does.
+const MIN_LCOV_LINE_COVERAGE = 80;
 
 // Scope to `tests/` so bun's runner never picks up the web/ Vitest suite (web/test/*.test.ts use
 // vitest-only APIs like vi.stubGlobal + @vue/test-utils and are run separately via `bun run --cwd web test`).
