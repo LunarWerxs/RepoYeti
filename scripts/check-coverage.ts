@@ -11,7 +11,15 @@ const MIN_LINE_COVERAGE = 78; // ~80% on CI (varies by platform + built assets);
 // vitest-only APIs like vi.stubGlobal + @vue/test-utils and are run separately via `bun run --cwd web test`).
 // --timeout 20000: git-heavy route tests (stash/discard/events) can exceed the 5s default on a
 // slow/loaded Windows CI runner; the extra headroom keeps CI from flaking on cold git spawns.
-const proc = Bun.spawnSync(["bun", "test", "tests", "--coverage", "--timeout", "20000"], { stdout: "pipe", stderr: "pipe" });
+// Some suites deliberately create process-wide database/config fixtures. Running files in distinct
+// workers is faster, but on Linux it can make Bun's coverage collector terminate abruptly while
+// it is merging those fixture-heavy files (without a failed assertion or coverage footer). Keep
+// the coverage gate deterministic: one isolated worker still exercises every test and produces
+// the one aggregate table that this script validates.
+const proc = Bun.spawnSync(["bun", "test", "tests", "--coverage", "--timeout", "20000", "--parallel=1"], {
+  stdout: "pipe",
+  stderr: "pipe",
+});
 const out = new TextDecoder().decode(proc.stdout) + new TextDecoder().decode(proc.stderr);
 process.stdout.write(out);
 
