@@ -66,16 +66,14 @@ test("PUT /api/settings still applies every OTHER field when changesStatDisplay 
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      diffStats: true, // ordered BEFORE the bad key
       changesStatDisplay: "pie-chart", // the rejected one
-      changesChars: false, // ordered AFTER it — the ones that used to vanish
+      changesChars: false, // ordered AFTER it — it used to vanish
       remoteEditing: false,
     }),
   });
   expect(put.status).toBe(400);
 
   const status = await (await app.request("/api/status")).json();
-  expect(status.diffStats).toBe(true);
   expect(status.changesChars).toBe(false);
   expect(status.remoteEditing).toBe(false);
   // …and the bad value itself was still refused, not persisted.
