@@ -44,18 +44,6 @@ RepoYeti runs a small daemon on your machine, finds every git repo you have, and
   </tr>
 </table>
 
-<p align="center"><sub>…and the same thing in a desktop browser</sub></p>
-
-<div align="center">
-  <img src=".github/screenshots/graph-desktop.png" width="88%" alt="Git-graph history in a desktop browser: commit-activity chart above lanes, branches and a merge commit" />
-</div>
-
-<br />
-
-<div align="center">
-  <img src=".github/screenshots/diff-desktop.png" width="88%" alt="Monaco diff viewer in a desktop browser, side by side with the repo list" />
-</div>
-
 ## What you get
 
 - 📡 &nbsp;**Live repo grid.** Branch / dirty / ahead / behind for every repo, updated the moment it changes. Fetch all in one tap.
@@ -66,6 +54,11 @@ RepoYeti runs a small daemon on your machine, finds every git repo you have, and
 - 🤖 &nbsp;**Smart Commit (AI).** Split a messy working tree into clean, scoped commits. Bring your own key.
 - 🪪 &nbsp;**Per-repo identities.** The right git identity for each repo, no `--amend --author` afterthoughts.
 - 🏠 &nbsp;**Self-hosted.** Nothing runs in someone else's cloud. Uninstall it and your repos are untouched.
+
+<div align="center">
+  <img src=".github/screenshots/graph-desktop.png" width="88%" alt="Git-graph history in a desktop browser: commit-activity chart above lanes, branches and a merge commit" />
+  <br /><sub>The same history, opened in a desktop browser</sub>
+</div>
 
 ## Quick start
 
@@ -97,6 +90,11 @@ Smart Commit and AI commit messages are bring-your-own-key (there's no bundled k
 3. In the app, open **Settings → AI**, expand **Groq**, and paste it in.
 
 "Generate" lights up right away. Prefer OpenAI / Claude / Gemini / OpenRouter / DeepSeek? Add that key in the same place instead; your key never leaves the daemon (it's kept in your OS keychain).
+
+<div align="center">
+  <img src=".github/screenshots/diff-desktop.png" width="88%" alt="Monaco diff viewer in a desktop browser, side by side with the repo list" />
+  <br /><sub>Real Monaco, side by side with the repo list</sub>
+</div>
 
 ## The rules
 
