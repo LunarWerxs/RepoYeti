@@ -54,38 +54,64 @@ async function settle(page, ms = 900) {
  * viewport a short page leaves half the image as dead background — which reads as an app with
  * nothing in it. Clip to what is actually drawn instead of shipping the padding.
  */
-async function contentHeight(page, viewportHeight) {
+async function contentBox(page, viewport) {
   const measured = await page
     .evaluate(() => {
       // Only real content anchors. Measuring `main` or `#app > *` is useless: those are
-      // viewport-height containers, so the max is always the full viewport and nothing is trimmed.
+      // viewport-sized containers, so the result is always the full viewport and nothing is
+      // trimmed. Repo cards are the app's actual content column.
       const cards = [...document.querySelectorAll("[id^='repo-card-']")];
       const footer = [...document.querySelectorAll("footer")];
-      const bottom = [...cards, ...footer].reduce((max, el) => {
-        const r = el.getBoundingClientRect();
-        return r.height > 0 ? Math.max(max, r.bottom) : max;
-      }, 0);
-      return Math.ceil(bottom);
+      // The file viewer is an <aside> teleported to <body>, OUTSIDE the card column. Measuring
+      // cards alone cropped the diff pane clean off the diff screenshot — the one thing it exists
+      // to show — so anything docked on screen has to count as content too.
+      const panels = [...document.querySelectorAll("aside")];
+      const els = [...cards, ...footer, ...panels].filter(
+        (el) => el.getBoundingClientRect().height > 0 && el.getBoundingClientRect().width > 0,
+      );
+      if (!els.length) return null;
+      return els.reduce(
+        (acc, el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            left: Math.min(acc.left, r.left),
+            right: Math.max(acc.right, r.right),
+            bottom: Math.max(acc.bottom, r.bottom),
+          };
+        },
+        { left: Infinity, right: 0, bottom: 0 },
+      );
     })
-    .catch(() => 0);
-  if (!measured) return viewportHeight;
-  return Math.max(320, Math.min(viewportHeight, measured + 28));
+    .catch(() => null);
+
+  if (!measured) return { x: 0, y: 0, width: viewport.width, height: viewport.height };
+
+  // The app is a centred column, so on a desktop viewport roughly a third of the frame is empty
+  // background on each side. Cropping to the column makes the UI render far larger for the same
+  // on-page width — the difference between a readable screenshot and a decorative one.
+  const pad = 24;
+  const x = Math.max(0, Math.floor(measured.left - pad));
+  const right = Math.min(viewport.width, Math.ceil(measured.right + pad));
+  const height = Math.max(320, Math.min(viewport.height, Math.ceil(measured.bottom) + pad));
+  return { x, y: 0, width: Math.max(320, right - x), height };
 }
 
 async function shoot(page, name, viewport, opts = {}) {
   mkdirSync(OUT_README, { recursive: true });
   const file = join(OUT_README, `${name}-${viewport.name}.png`);
   await settle(page);
-  // fullViewport: the shot was deliberately scrolled to frame something, so measuring content
-  // from the top of the document would clip to the wrong region.
-  const height = opts.fullViewport
-    ? viewport.height
-    : await contentHeight(page, viewport.height);
-  await page.screenshot({
-    path: file,
-    clip: { x: 0, y: 0, width: viewport.width, height },
-  });
-  console.log(`  shot ${name}-${viewport.name}.png (${viewport.width}x${height})`);
+  // Phone shots are NEVER trimmed: they sit three-across in the README, and a short one
+  // (the repo grid) next to two tall ones made the row look broken. Uniform height beats a
+  // tighter crop, and at 400px wide there is no dead margin to reclaim anyway.
+  let clip = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+  if (viewport.name !== "mobile") {
+    const box = await contentBox(page, viewport);
+    // fullViewport: the shot was deliberately scrolled to frame something, so the vertical
+    // measurement would clip to the wrong region — but the horizontal crop still applies.
+    clip = opts.fullViewport ? { ...box, y: 0, height: viewport.height } : box;
+  }
+  await page.screenshot({ path: file, clip });
+  console.log(`  shot ${name}-${viewport.name}.png (${clip.width}x${clip.height})`);
   return file;
 }
 

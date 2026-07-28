@@ -23,20 +23,31 @@
 
 RepoYeti runs a small daemon on your machine, finds every git repo you have, and serves a dashboard to your phone over a private tunnel. Fetch, commit, push, and read history and diffs from wherever you are. It runs on your machine, so your code stays there.
 
+<!-- A table, not three loose <img> tags: GitHub collapses whitespace between images, so the
+     phones ended up shoulder to shoulder. Table cells give them real gutters and captions. -->
+<table align="center">
+  <tr>
+    <td width="33%" align="center"><img src=".github/screenshots/dashboard-mobile.png" width="250" alt="Live repo grid on a phone: every repo's branch, dirty, ahead/behind at a glance" /></td>
+    <td width="33%" align="center"><img src=".github/screenshots/graph-mobile.png" width="250" alt="Git-graph history on a phone, with commit-activity chart, lanes and merges" /></td>
+    <td width="33%" align="center"><img src=".github/screenshots/diff-mobile.png" width="250" alt="Monaco diff viewer on a phone" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Every repo at a glance</sub></td>
+    <td align="center"><sub>Commit graph with lanes and merges</sub></td>
+    <td align="center"><sub>Real Monaco diffs</sub></td>
+  </tr>
+</table>
+
+<p align="center"><sub>…and the same thing in a desktop browser</sub></p>
+
 <div align="center">
-  <img src=".github/screenshots/dashboard-mobile.png" width="31%" alt="Live repo grid on a phone: every repo's branch, dirty, ahead/behind at a glance" />
-  &nbsp;&nbsp;
-  <img src=".github/screenshots/graph-mobile.png" width="31%" alt="Git-graph history on a phone, with commit-activity chart, lanes and merges" />
-  &nbsp;&nbsp;
-  <img src=".github/screenshots/diff-mobile.png" width="31%" alt="Monaco diff viewer on a phone" />
+  <img src=".github/screenshots/graph-desktop.png" width="88%" alt="Git-graph history in a desktop browser: commit-activity chart above lanes, branches and a merge commit" />
 </div>
 
-<p align="center"><sub>…and the same thing on a desktop browser</sub></p>
+<br />
 
 <div align="center">
-  <img src=".github/screenshots/graph-desktop.png" width="90%" alt="Git-graph history in a desktop browser: commit-activity chart above lanes, branches and a merge commit" />
-  <br /><br />
-  <img src=".github/screenshots/diff-desktop.png" width="90%" alt="Monaco diff viewer in a desktop browser, side by side with the repo list" />
+  <img src=".github/screenshots/diff-desktop.png" width="88%" alt="Monaco diff viewer in a desktop browser, side by side with the repo list" />
 </div>
 
 ## What you get
