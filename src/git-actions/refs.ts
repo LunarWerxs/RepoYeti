@@ -234,15 +234,21 @@ export async function gitStashPop(absPath: string, index = 0): Promise<ActionRes
     return fail("DIRTY_WORKING_TREE", "working tree has uncommitted changes — commit or stash them first");
   }
   try {
-    await gitFor(absPath).raw(["stash", "pop", stashRef(index)]);
+    const git = gitFor(absPath);
+    await git.raw(["stash", "pop", stashRef(index)]);
+    // A conflicting pop does NOT arrive here as a thrown error: git reports the conflict on
+    // STDOUT and exits 1 with an empty stderr, and simple-git fails a task only on a non-zero
+    // exit *with* stderr (isTaskError). So the call above resolves and, without this check, the
+    // owner would be told "stash popped" about a tree that is now full of conflict markers.
+    // Ask the index instead — an unmerged entry is the durable, unlocalised fact.
+    if ((await git.raw(["ls-files", "--unmerged"])).trim()) {
+      return fail("STASH_CONFLICT", "stash applied with conflicts — resolve at your desk (the stash was kept)");
+    }
     return ok("stash popped");
   } catch (err) {
     const low = err instanceof Error ? err.message.toLowerCase() : String(err);
     if (low.includes("no stash entries") || low.includes("is not a valid reference") || low.includes("does not exist")) {
       return fail("STASH_EMPTY", "no such stash entry");
-    }
-    if (low.includes("conflict")) {
-      return fail("STASH_CONFLICT", "stash applied with conflicts — resolve at your desk (the stash was kept)");
     }
     return classify(err);
   }

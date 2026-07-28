@@ -221,6 +221,48 @@ test("stash drop removes an entry and reports empty afterwards", async () => {
   expect((await gitStashDrop(dir, 0)).code).toBe("STASH_EMPTY");
 });
 
+test("a stash pop that conflicts keeps the entry and says so", async () => {
+  const dir = await repo();
+  // The unhappy ending of the stash → pull → pop escape hatch: while the change was stashed the
+  // same file moved underneath it, so the apply can't land cleanly.
+  writeFileSync(join(dir, "seed.txt"), "stashed\n");
+  await gitStashSave(dir, ID);
+  writeFileSync(join(dir, "seed.txt"), "incoming\n");
+  await $`git -C ${dir} -c user.name=T -c user.email=t@t.io commit -q -am incoming`.quiet();
+
+  const pop = await gitStashPop(dir, 0);
+  expect(pop.ok).toBe(false);
+  expect(pop.code).toBe("STASH_CONFLICT");
+  // git only drops a stash on a CLEAN apply, so nothing was lost — and the message must say
+  // that, because "conflict" alone reads like the work is gone.
+  expect(pop.message).toContain("the stash was kept");
+  expect((await readStashes(dir)).stashes.length).toBe(1);
+});
+
+test("a stash that git itself refuses is classified, not thrown", async () => {
+  // No initial commit yet: there is a dirty tree to stash, but nothing to stash it against.
+  const dir = mkScratchDir("gm-branch-unborn-");
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+  writeFileSync(join(dir, "new.txt"), "untracked\n");
+
+  const r = await gitStashSave(dir, ID);
+  expect(r.ok).toBe(false);
+  expect(r.message.toLowerCase()).toContain("initial commit");
+});
+
+test("dropping a stash somewhere that isn't a repo is classified, not thrown", async () => {
+  const r = await gitStashDrop(mkScratchDir("gm-branch-norepo-"), 0);
+  expect(r.ok).toBe(false);
+  expect(r.code).not.toBe("STASH_EMPTY"); // the entry isn't missing — the repo is
+});
+
+test("deleting a branch that was never there returns NOT_FOUND", async () => {
+  const dir = await repo();
+  const r = await gitDeleteBranch(dir, "never-existed");
+  expect(r.ok).toBe(false);
+  expect(r.code).toBe("NOT_FOUND");
+});
+
 // ── discard (service layer, needs the repo in the DB) ───────────────────────────────
 
 test("discardFile restores a modified tracked file to HEAD", async () => {
