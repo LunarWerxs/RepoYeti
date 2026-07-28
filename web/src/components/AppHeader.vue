@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
-import { RefreshCw, Plus, Settings, Cloud, CloudOff, CircleUser, Check, DownloadCloud, FolderSearch, FolderX, ListChecks, Loader2, MoreVertical, Power, Bell, ArrowDownToLine, Download } from "@lucide/vue";
+import { RefreshCw, Plus, Settings, Cloud, CloudOff, CircleUser, Check, DownloadCloud, FolderSearch, FolderX, ListChecks, Loader2, MoreVertical, Power, Bell, ArrowDownToLine, Download, Code } from "@lucide/vue";
 import type { SortMode } from "../store/repo";
 import type { BehindRepo } from "../store/settings";
 import { useI18n } from "vue-i18n";
@@ -18,6 +18,9 @@ import {
 import { useStore } from "../store";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 import { startSelecting } from "@/lib/repo-selection";
+
+/** Where this app comes from. Canonical owner/repo casing — see docs/STABLE_ADDRESS.md. */
+const SOURCE_URL = "https://github.com/LunarWerxs/RepoYeti";
 
 defineProps<{ connected: boolean; repoCount: number }>();
 const emit = defineEmits<{
@@ -604,6 +607,19 @@ onBeforeUnmount(() => {
               <Settings />
               <span>{{ $t("header.settings") }}</span>
             </button>
+            <!-- Deliberately NOT gated on `isGuest`: a guest is the most likely person to want to
+                 know what this thing is and where it comes from. -->
+            <a
+              role="menuitem"
+              :href="SOURCE_URL"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              @click="actionsOpen = false"
+            >
+              <Code />
+              <span>{{ $t("header.sourceCode") }}</span>
+            </a>
             <div class="-mx-1 my-1 h-px bg-border" />
             <button
               v-if="!store.isGuest"
