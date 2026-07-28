@@ -19,6 +19,7 @@ test("statusForCode maps every code family to the right HTTP status", () => {
   expect(statusForCode("SUBMODULE_NOT_ACTIONABLE")).toBe(409);
   expect(statusForCode("SSH_AUTH_FAILED")).toBe(502);
   expect(statusForCode("SSH_PASSPHRASE_REQUIRED")).toBe(504);
+  expect(statusForCode("NETWORK_TIMEOUT")).toBe(504);
   expect(statusForCode("ERROR")).toBe(500);
 });
 

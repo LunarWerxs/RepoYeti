@@ -10,6 +10,8 @@ import {
   identityConfigArgs,
   credentialConfigArgs,
   credentialEnv,
+  NET_BLOCK_MS,
+  PROGRESS_ARG,
   type GitHubAuth,
 } from "../git.ts";
 import { readStatus } from "../read/status.ts";
@@ -17,8 +19,48 @@ import { netGate } from "../gitgate.ts";
 import type { Identity } from "../db.ts";
 import { ok, fail, type ActionResult } from "../contract.ts";
 
+/** Was this failure our own idle-timeout kill (or a transport timeout) rather than a git verdict? */
+function isTimeout(err: unknown): boolean {
+  const low = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return low.includes("timed out") || low.includes("timeout") || low.includes("block timeout");
+}
+
+/**
+ * The first line of git's output that is an actual diagnosis rather than transfer progress.
+ *
+ * Network ops run with `--progress` (see NET_BLOCK_MS in git.ts), so stderr now OPENS with a wall
+ * of "Writing objects:  43% (…)". Taking line 1 blindly would report a progress bar as the error.
+ * Prefer git's own diagnostic prefixes, then the first line that isn't progress.
+ */
+function diagnosisLine(raw: string): string {
+  const lines = raw
+    .split(/[\r\n]+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const isProgress = (l: string): boolean =>
+    /\d+% \(\d+\/\d+\)/.test(l) ||
+    /^(remote: )?(Enumerating|Counting|Compressing|Writing|Receiving|Resolving|Unpacking|Total|Cloning into) /i.test(l);
+  return (
+    lines.find((l) => /^(remote: )?(fatal|error):/i.test(l)) ??
+    lines.find((l) => !isProgress(l)) ??
+    lines[0] ??
+    "git error"
+  );
+}
+
+/** What the caller knows that makes a timeout diagnosable. */
+export interface ClassifyContext {
+  /**
+   * True ONLY when git could genuinely have blocked on an interactive SSH passphrase prompt: an
+   * SSH transport reached WITHOUT our own `-o BatchMode=yes`. Whenever an identity supplies a key
+   * we set BatchMode (see sshCommandFor), and ssh then fails fast instead of prompting — so a hang
+   * on that path is never a passphrase, and saying so sends the owner after a phantom.
+   */
+  couldPromptForPassphrase?: boolean;
+}
+
 /** Map a thrown git error (simple-git surfaces stderr in the message) to a code. */
-export function classify(err: unknown): ActionResult {
+export function classify(err: unknown, ctx?: ClassifyContext): ActionResult {
   const raw = err instanceof Error ? err.message : String(err);
   const low = raw.toLowerCase();
 
@@ -69,10 +111,20 @@ export function classify(err: unknown): ActionResult {
   ) {
     return fail("SSH_AUTH_FAILED", "authentication failed — check this repo's identity / SSH key");
   }
-  if (low.includes("timed out") || low.includes("timeout") || low.includes("block timeout")) {
+  // We killed git for going silent (or the transport itself timed out). This used to be reported
+  // as SSH_PASSPHRASE_REQUIRED unconditionally — which named a cause that, on an https remote or a
+  // passphrase-free key, cannot exist. Only claim the passphrase when the caller confirms git could
+  // actually have been sitting at a prompt; otherwise say plainly that it stopped responding.
+  if (isTimeout(err)) {
+    if (ctx?.couldPromptForPassphrase) {
+      return fail(
+        "SSH_PASSPHRASE_REQUIRED",
+        "git stopped responding, and this remote's SSH key can prompt for a passphrase — load it into ssh-agent, or use a passphrase-free key",
+      );
+    }
     return fail(
-      "SSH_PASSPHRASE_REQUIRED",
-      "git timed out — the SSH key may need a passphrase; use ssh-agent or a passphrase-free key",
+      "NETWORK_TIMEOUT",
+      `git sent no output for ${Math.round(NET_BLOCK_MS / 1000)}s and was stopped — the remote or the network is not responding`,
     );
   }
   if (
@@ -83,7 +135,43 @@ export function classify(err: unknown): ActionResult {
   ) {
     return fail("NO_REMOTE", "no remote configured for this repo");
   }
-  return fail("ERROR", raw.split("\n")[0]?.slice(0, 300) ?? "git error");
+  return fail("ERROR", diagnosisLine(raw).slice(0, 300));
+}
+
+/** Is this remote URL reached over SSH (`ssh://…` or the scp-like `git@host:owner/repo`)? */
+function isSshUrl(url: string): boolean {
+  const u = url.trim();
+  if (/^ssh:\/\//i.test(u)) return true;
+  if (/^(https?|git|file):\/\//i.test(u)) return false;
+  return /^[^\s/@]+@[^\s/:]+:/.test(u);
+}
+
+/**
+ * Whether ANY remote of this repo is reached over SSH. Best-effort, message-only (never control
+ * flow), local (no network), and run solely on the timeout path — so it costs nothing in the
+ * ordinary case. `--get-regexp` exits 1 with no matches, which lands in the catch as "can't tell".
+ */
+async function hasSshRemote(absPath: string): Promise<boolean> {
+  try {
+    const out = await gitFor(absPath, 5_000).raw(["config", "--get-regexp", "^remote\\..*\\.url$"]);
+    return out
+      .split("\n")
+      .map((line) => line.trim().split(/\s+/)[1] ?? "")
+      .filter(Boolean)
+      .some(isSshUrl);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * classify() for a remote op: on a timeout, establish whether an SSH passphrase prompt was even
+ * possible before letting the classifier blame one. Everything else goes straight through.
+ */
+async function classifyRemote(absPath: string, identity: Identity | null, err: unknown): Promise<ActionResult> {
+  if (!isTimeout(err)) return classify(err);
+  const couldPromptForPassphrase = !identity?.sshKeyPath && (await hasSshRemote(absPath));
+  return classify(err, { couldPromptForPassphrase });
 }
 
 export async function gitFetch(
@@ -92,13 +180,19 @@ export async function gitFetch(
   auth?: GitHubAuth | null,
 ): Promise<ActionResult> {
   try {
-    const git = gitFor(absPath, undefined, credentialEnv(auth ?? null));
+    const git = gitFor(absPath, NET_BLOCK_MS, credentialEnv(auth ?? null));
     await netGate.run(() =>
-      git.raw([...identityConfigArgs(identity), ...credentialConfigArgs(auth ?? null), "fetch", "--prune"]),
+      git.raw([
+        ...identityConfigArgs(identity),
+        ...credentialConfigArgs(auth ?? null),
+        "fetch",
+        "--prune",
+        PROGRESS_ARG,
+      ]),
     );
     return ok("fetched");
   } catch (err) {
-    return classify(err);
+    return classifyRemote(absPath, identity, err);
   }
 }
 
@@ -119,13 +213,19 @@ export async function gitPullFfOnly(
     return fail("DETACHED_HEAD", "detached HEAD — resolve at your desk");
   }
   try {
-    const git = gitFor(absPath, undefined, credentialEnv(auth ?? null));
+    const git = gitFor(absPath, NET_BLOCK_MS, credentialEnv(auth ?? null));
     await netGate.run(() =>
-      git.raw([...identityConfigArgs(identity), ...credentialConfigArgs(auth ?? null), "pull", "--ff-only"]),
+      git.raw([
+        ...identityConfigArgs(identity),
+        ...credentialConfigArgs(auth ?? null),
+        "pull",
+        "--ff-only",
+        PROGRESS_ARG,
+      ]),
     );
     return ok("pulled (fast-forward)");
   } catch (err) {
-    return classify(err);
+    return classifyRemote(absPath, identity, err);
   }
 }
 
@@ -140,21 +240,22 @@ export async function gitPush(
     return fail("DETACHED_HEAD", "detached HEAD — cannot push");
   }
   try {
-    const git = gitFor(absPath, undefined, credentialEnv(auth ?? null));
+    const git = gitFor(absPath, NET_BLOCK_MS, credentialEnv(auth ?? null));
     // Plain push of the current branch to its upstream. No `--force`, ever.
     await netGate.run(() =>
-      git.raw([...identityConfigArgs(identity), ...credentialConfigArgs(auth ?? null), "push"]),
+      git.raw([...identityConfigArgs(identity), ...credentialConfigArgs(auth ?? null), "push", PROGRESS_ARG]),
     );
     return ok("pushed");
   } catch (err) {
-    return classify(err);
+    return classifyRemote(absPath, identity, err);
   }
 }
 
 // ── clone ───────────────────────────────────────────────────────────────────────────
 
-/** A clone can pull a large history — give it far more headroom than a normal op (which is
- *  capped at 30s). Still bounded so a hung transport can't wedge a net slot forever. */
+/** A clone can pull a large history — give it more headroom than an ordinary network op
+ *  (NET_BLOCK_MS). Like all of them this is an IDLE budget, not a total one, so `--progress` below
+ *  is what keeps it honest; it stays bounded so a hung transport can't wedge a net slot forever. */
 const CLONE_TIMEOUT_MS = 300_000;
 
 /**
@@ -177,6 +278,7 @@ export async function gitClone(
         ...identityConfigArgs(identity),
         ...credentialConfigArgs(auth ?? null),
         "clone",
+        PROGRESS_ARG,
         "--",
         url,
         name,
@@ -184,6 +286,10 @@ export async function gitClone(
     );
     return ok("cloned");
   } catch (err) {
+    // No repo exists yet to read remotes from, but the URL we were handed is the transport.
+    if (isTimeout(err)) {
+      return classify(err, { couldPromptForPassphrase: !identity?.sshKeyPath && isSshUrl(url) });
+    }
     return classify(err);
   }
 }

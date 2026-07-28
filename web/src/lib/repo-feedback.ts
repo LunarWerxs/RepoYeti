@@ -32,6 +32,7 @@ export function useRepoFeedback(): {
       SSH_AUTH_FAILED: t("repo.err.sshAuthFailed"),
       GH_ACCOUNT_NOT_AUTHORIZED: t("repo.err.ghAccountNotAuthorized"),
       SSH_PASSPHRASE_REQUIRED: t("repo.err.sshPassphraseRequired"),
+      NETWORK_TIMEOUT: t("repo.err.networkTimeout"),
       BRANCH_EXISTS: t("repo.err.branchExists"),
       INVALID_REF_NAME: t("repo.err.invalidRefName"),
       UNMERGED_BRANCH: t("repo.err.unmergedBranch"),

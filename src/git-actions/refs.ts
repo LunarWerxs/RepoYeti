@@ -3,7 +3,7 @@
  * local config/ref writes (remotes, branch create/delete, stash) with one network exception —
  * a tag push — which reuses the same identity + `netGate` seam as ./sync.ts.
  */
-import { gitFor, identityConfigArgs } from "../git.ts";
+import { gitFor, identityConfigArgs, NET_BLOCK_MS, PROGRESS_ARG } from "../git.ts";
 import { readStatus } from "../read/status.ts";
 import { netGate } from "../gitgate.ts";
 import type { Identity } from "../db.ts";
@@ -73,7 +73,16 @@ export async function gitTagCreate(
   }
   if (push) {
     try {
-      await netGate.run(() => gitFor(absPath).raw([...identityConfigArgs(identity), "push", "origin", name]));
+      // A remote op: the network idle budget + `--progress`, same pairing as sync.ts (see NET_BLOCK_MS).
+      await netGate.run(() =>
+        gitFor(absPath, NET_BLOCK_MS).raw([
+          ...identityConfigArgs(identity),
+          "push",
+          PROGRESS_ARG,
+          "origin",
+          name,
+        ]),
+      );
     } catch (err) {
       const c = classify(err);
       return fail(c.code, `tag created locally, but push failed: ${c.message}`);

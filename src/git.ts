@@ -47,6 +47,30 @@ export function safeGitEnv(): Record<string, string> {
   return env;
 }
 
+/**
+ * The idle budget for a NETWORK git op, and the flag that makes it correct. These two are a pair —
+ * shipping either one alone is the bug this pair exists to prevent.
+ *
+ * `simple-git`'s `timeout.block` is an IDLE timer, not a total budget: it is re-armed by every
+ * chunk the child writes to stdout/stderr and fires only after `block` ms of complete silence.
+ * Git, though, suppresses transfer progress whenever stderr is not a TTY — and a daemon's child
+ * process never has one. So without `--progress`, a perfectly healthy push of a large repository
+ * writes NOTHING for the whole enumerate/compress/write stretch, the idle timer never re-arms, and
+ * simple-git kills a transfer that was working. (Measured on this repo: a piped bare clone emits
+ * 148 bytes of stderr without `--progress` and 19 KB with it.)
+ *
+ * `--progress` forces that stream back on, so the timer measures real idleness: a hung transport
+ * still trips it, a slow-but-advancing transfer never does. Passing it also means git's stderr now
+ * OPENS with a progress bar, which is why the classifier picks the diagnosis line rather than the
+ * first one (see diagnosisLine in git-actions/sync.ts).
+ *
+ * Env-overridable (`REPOYETI_NET_TIMEOUT_MS`) for a link slow enough that even the progress stream
+ * gaps, matching LORE_TIMEOUT_MS in vcs/lore.ts.
+ */
+export const NET_BLOCK_MS = Number(process.env.REPOYETI_NET_TIMEOUT_MS) || 120_000;
+/** Always pass this on any op that talks to a remote — see NET_BLOCK_MS. */
+export const PROGRESS_ARG = "--progress";
+
 export function gitFor(absPath: string, blockMs = 30_000, extraEnv?: Record<string, string>): SimpleGit {
   // simple-git also gates `-c credential.helper` behind an opt-in. Enable it ONLY for the
   // invocations actually carrying a token (credentialEnv put it here), so a stray

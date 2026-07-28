@@ -542,6 +542,7 @@ export type ApiErrorCode =
   | "GH_ACCOUNT_NOT_AUTHORIZED"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
+  | "NETWORK_TIMEOUT"
   | "NOT_FOUND"
   | "NOT_A_REPO"
   | "EXISTS"

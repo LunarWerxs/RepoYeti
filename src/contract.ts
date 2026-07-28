@@ -29,6 +29,7 @@ export type ApiErrorCode =
   | "GH_ACCOUNT_NOT_AUTHORIZED"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
+  | "NETWORK_TIMEOUT"
   // ── repo / service ──
   | "NOT_FOUND"
   | "NOT_A_REPO"
@@ -191,6 +192,7 @@ export function statusForCode(code: ApiCode): ContentfulStatusCode {
       return 502;
     // 504 — an upstream hung past our timeout.
     case "SSH_PASSPHRASE_REQUIRED":
+    case "NETWORK_TIMEOUT":
     case "AI_UNREACHABLE":
       return 504;
     default:

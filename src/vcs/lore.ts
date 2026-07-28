@@ -55,7 +55,7 @@ import type { VcsBackend } from "./types.ts";
 /** The Lore binary. Overridable for tests / non-PATH installs (e.g. a downloaded release). */
 const LORE_BIN = process.env.LORE_BIN ?? "lore";
 /**
- * Per-op timeout. Far more generous than git's 30s: Lore operations routinely touch the
+ * Per-op timeout. Far more generous than git's 30s local default: Lore operations routinely touch the
  * server (commit/push/sync/clone) and move multi-GB assets — VERIFIED that even a trivial
  * commit against a local server took ~30s here (a localhost-QUIC handshake stall), which a
  * 30s cap killed mid-write. Env-overridable for very large-asset repos.

@@ -276,8 +276,8 @@ to the allowlisted routes in `src/share/policy.ts`, on repos their link covers. 
 
 Every git operation returns a **structured result**: `{ ok, code, message }`. Error codes are
 first-class (`DIRTY_WORKING_TREE`, `NON_FAST_FORWARD`, `SSH_AUTH_FAILED`, `SSH_PASSPHRASE_REQUIRED`,
-`DETACHED_HEAD`, `TUNNEL_DOWN`, `AUTH_WRONG_OWNER`, `OIDC_VERIFY_FAILED`) so the UI can render the
-right state.
+`NETWORK_TIMEOUT`, `DETACHED_HEAD`, `TUNNEL_DOWN`, `AUTH_WRONG_OWNER`, `OIDC_VERIFY_FAILED`) so the
+UI can render the right state.
 
 > **The surface has grown well past the table above** (60+ routes: branches, log, stash, tags,
 > remotes, files/diff, AI/smart-commit, servers, settings, …). Rather than enumerate them all here,
@@ -465,9 +465,16 @@ These were not in the original briefs; they will bite if ignored.
 1. **`keytar` × `bun --compile` native-addon compatibility is the #1 technical unknown.** Run a
    **Phase-1 spike** on Mac arm64, Windows x64, Linux x64 *before* committing. If it fails on a
    platform, the AES-256-GCM file becomes the *primary* there, not a fallback.
-2. **SSH passphrase blocking.** Always pass `-o BatchMode=yes`; additionally put a **30s timeout** on
-   every `simple-git` op and return **504 `SSH_PASSPHRASE_REQUIRED`** ("use ssh-agent or a
-   passphrase-free key") if it hangs. Spec this as a first-class failure mode, not a footnote.
+2. **SSH passphrase blocking.** Always pass `-o BatchMode=yes` (`sshCommandFor`), and bound every
+   `simple-git` op with a timeout. **Do not report that timeout as `SSH_PASSPHRASE_REQUIRED`**;
+   the original spec said to, and it was wrong twice over. (a) `timeout.block` is an **idle** timer
+   that git's own silence trips: git suppresses transfer progress on a non-TTY stderr, so a healthy
+   push of a large repo went quiet and got killed mid-flight. Every network op therefore passes
+   `--progress`; the flag and the budget are one unit, see `NET_BLOCK_MS` in `src/git.ts`. (b) A
+   timeout is not evidence of a passphrase: with `BatchMode=yes` ssh fails fast instead of
+   prompting, and an https remote has no key in play at all. `SSH_PASSPHRASE_REQUIRED` is now
+   emitted only when a prompt was genuinely reachable (SSH remote **and** no identity key, so no
+   BatchMode); everything else is **504 `NETWORK_TIMEOUT`**, which says only what we know.
 3. **"Behind" requires a network fetch.** **Never auto-fetch on a watch event.** "Behind" is
    stale-by-design (from last fetch); label it with a timestamp. Watch events only recompute
    local state (branch, dirty, ahead).
