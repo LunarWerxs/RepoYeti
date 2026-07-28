@@ -9,7 +9,11 @@ import { join } from "node:path";
  * low-coverage by design). Instead we run the suite with coverage and gate on the OVERALL line
  * coverage. Run: `bun run check:coverage` (CI uses this in place of a bare `bun test`).
  */
-const MIN_LINE_COVERAGE = 78; // ~80% on CI (varies by platform + built assets); floor with margin to catch silent regressions
+const MIN_TEXT_LINE_COVERAGE = 78; // ~89% on CI; floor with margin to catch silent regressions
+// Bun's LCOV reporter counts a broader set of instrumented lines than its text reporter. The
+// sharded Linux baseline is 74.93% for the same commit whose text summary is 89.30%; keep the LCOV
+// floor close to that measured baseline instead of comparing two different coverage denominators.
+const MIN_LCOV_LINE_COVERAGE = 74;
 
 // Scope to `tests/` so bun's runner never picks up the web/ Vitest suite (web/test/*.test.ts use
 // vitest-only APIs like vi.stubGlobal + @vue/test-utils and are run separately via `bun run --cwd web test`).
@@ -52,6 +56,7 @@ function mergedLcovLineCoverage(reports: string[]): number {
 }
 
 let lineCoverage: number;
+let minimumCoverage: number;
 if (process.platform === "linux") {
   // Bun 1.3.14's Linux coverage process reproducibly terminates after enough fixture-heavy files,
   // with no failed assertion or coverage footer. Two native Bun shards stay below that limit.
@@ -76,6 +81,7 @@ if (process.platform === "linux") {
       reports.push(readFileSync(join(coverageDir, "lcov.info"), "utf8"));
     }
     lineCoverage = mergedLcovLineCoverage(reports);
+    minimumCoverage = MIN_LCOV_LINE_COVERAGE;
   } finally {
     rmSync(coverageRoot, { recursive: true, force: true });
   }
@@ -92,10 +98,11 @@ if (process.platform === "linux") {
     process.exit(1);
   }
   lineCoverage = parseFloat(match[2]!);
+  minimumCoverage = MIN_TEXT_LINE_COVERAGE;
 }
 
-if (lineCoverage < MIN_LINE_COVERAGE) {
-  console.error(`✗ overall line coverage ${lineCoverage}% is below the ${MIN_LINE_COVERAGE}% floor`);
+if (lineCoverage < minimumCoverage) {
+  console.error(`✗ overall line coverage ${lineCoverage}% is below the ${minimumCoverage}% floor`);
   process.exit(1);
 }
-console.log(`✓ overall line coverage ${lineCoverage.toFixed(2)}% ≥ ${MIN_LINE_COVERAGE}% floor`);
+console.log(`✓ overall line coverage ${lineCoverage.toFixed(2)}% ≥ ${minimumCoverage}% floor`);
