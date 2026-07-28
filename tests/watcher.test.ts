@@ -305,39 +305,42 @@ test("a burst touching both .git and the working tree fires exactly one onChange
   }
 });
 
-test("a filtered-out working-tree event never arms the timer", async () => {
-  const dir = await gitRepo();
-  const listeners: Array<(eventType?: string, filename?: string | null) => void> = [];
-  const paths: string[] = [];
-  const factory: WatchFactory = (path, _opts, listener) => {
-    const handle = new EventEmitter() as FSWatcher;
-    handle.close = () => {};
-    handle.ref = () => handle;
-    handle.unref = () => handle;
-    paths.push(path);
-    listeners.push(listener);
-    return handle;
-  };
-  let changes = 0;
-  const watcher = watchRepo(dir, () => changes++, ".git", 40, undefined, factory);
-  try {
-    const worktreeIndex = paths.indexOf(dir);
-    expect(worktreeIndex).toBeGreaterThanOrEqual(0); // the injected factory installs it on every platform
-    const fire = listeners[worktreeIndex]!;
-    // Nested build dirs, not just root-level ones: this repo has web/node_modules alongside the
-    // root one, and a first-segment-only filter let every write in there through.
-    fire("change", "node_modules/x/index.js");
-    fire("change", "web/node_modules/x/index.js");
-    fire("change", "services/api/dist/bundle.js");
-    fire("change", ".git/index");
-    await Bun.sleep(700);
-    expect(changes).toBe(0);
+test.skipIf(!WORKTREE_WATCH_SUPPORTED)(
+  "a filtered-out working-tree event never arms the timer",
+  async () => {
+    const dir = await gitRepo();
+    const listeners: Array<(eventType?: string, filename?: string | null) => void> = [];
+    const paths: string[] = [];
+    const factory: WatchFactory = (path, _opts, listener) => {
+      const handle = new EventEmitter() as FSWatcher;
+      handle.close = () => {};
+      handle.ref = () => handle;
+      handle.unref = () => handle;
+      paths.push(path);
+      listeners.push(listener);
+      return handle;
+    };
+    let changes = 0;
+    const watcher = watchRepo(dir, () => changes++, ".git", 40, undefined, factory);
+    try {
+      const worktreeIndex = paths.indexOf(dir);
+      expect(worktreeIndex).toBeGreaterThanOrEqual(0); // the injected factory installs it on every platform
+      const fire = listeners[worktreeIndex]!;
+      // Nested build dirs, not just root-level ones: this repo has web/node_modules alongside the
+      // root one, and a first-segment-only filter let every write in there through.
+      fire("change", "node_modules/x/index.js");
+      fire("change", "web/node_modules/x/index.js");
+      fire("change", "services/api/dist/bundle.js");
+      fire("change", ".git/index");
+      await Bun.sleep(700);
+      expect(changes).toBe(0);
 
-    // A null filename can't be classified, so it is treated conservatively and DOES refresh.
-    fire("change", null);
-    await Bun.sleep(700);
-    expect(changes).toBe(1);
-  } finally {
-    watcher.close();
-  }
-});
+      // A null filename can't be classified, so it is treated conservatively and DOES refresh.
+      fire("change", null);
+      await Bun.sleep(700);
+      expect(changes).toBe(1);
+    } finally {
+      watcher.close();
+    }
+  },
+);
