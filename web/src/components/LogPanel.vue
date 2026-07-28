@@ -45,7 +45,6 @@ import {
   historyGraphEnabled,
 } from "@/lib/history-appearance";
 import { useTooltipConfig } from "@/lib/tooltip-config";
-import { useAutoHideOnScroll } from "@/lib/auto-hide-scroll";
 import ViewOptions, { type ViewOptionRow } from "@/components/ui/ViewOptions.vue";
 import CommitFilesTree from "./CommitFilesTree.vue";
 import DiffBar from "./DiffBar.vue";
@@ -414,7 +413,6 @@ async function setAuthorFilter(author: HistoryActivityAuthor): Promise<void> {
   await reload(true);
   await nextTick();
   if (scrollEl.value) scrollEl.value.scrollTop = 0;
-  revealActivity(); // a jump to the top is an implicit "show me the overview again"
 }
 
 async function clearAuthorFilter(): Promise<void> {
@@ -454,35 +452,6 @@ async function loadMoreLog(): Promise<void> {
 // mounts/unmounts (history opened AND more pages remain).
 const scrollEl = useTemplateRef<HTMLElement>("scrollEl");
 
-// ── auto-hiding activity overview ────────────────────────────────────────────────────
-// Collapses as you read down the commit list, returns on a committed pull up (or at the top).
-const activityWrapEl = useTemplateRef<HTMLElement>("activityWrapEl");
-const { hidden: activityHidden, reveal: revealActivity } = useAutoHideOnScroll(scrollEl);
-
-// How much vertical space the overview occupies, so the list can claim exactly that much when it
-// collapses. Measured rather than hard-coded, because the block's height moves with the metric
-// row's wrapping, the author chips and the loading state.
-//
-// Read at the INSTANT it is about to hide (`flush: "pre"`, so the DOM still holds the open height)
-// rather than from a ResizeObserver. The observer version silently produced 0 whenever it hadn't
-// fired yet — a background tab, a card expanded off-screen — and a 0 here means hiding buys the
-// list nothing, i.e. the feature quietly does half its job. This reads the one number needed at
-// the one moment it is guaranteed to be correct.
-const reclaimedPx = ref(0);
-watch(
-  activityHidden,
-  (isHidden) => {
-    if (!isHidden) return;
-    const h = activityWrapEl.value?.scrollHeight ?? 0;
-    if (h > 0) reclaimedPx.value = h;
-  },
-  { flush: "pre" },
-);
-
-// A reload jumps the list to the top, so the overview should be back when the new rows land.
-watch(historyActivityEnabled, (on) => {
-  if (on) revealActivity();
-});
 const sentinelEl = useTemplateRef<HTMLElement>("sentinelEl");
 watch([sentinelEl, () => props.active], ([el, active]) => {
   io?.disconnect();
@@ -918,30 +887,6 @@ watch(historyActivityScale, () => {
         </Tooltip>
       </div>
 
-      <!-- The activity overview gets out of the way as you read down the commit list, and comes
-           back on a deliberate pull upward (see @/lib/auto-hide-scroll). `inert` while collapsed so
-           its scale buttons and author chips leave the tab order instead of being focusable inside
-           a zero-height box. -->
-      <div
-        v-if="historyActivityEnabled"
-        ref="activityWrapEl"
-        class="history-activity-collapse"
-        :class="activityHidden && 'history-activity-collapse--hidden'"
-        :inert="activityHidden || undefined"
-        :aria-hidden="activityHidden || undefined"
-        data-history-activity-wrap
-      >
-        <HistoryActivity
-          class="mb-2"
-          :activity="activity"
-          :loading="loadingActivity"
-          :scale="historyActivityScale"
-          :selected-author="selectedAuthor"
-          @select-scale="setActivityScale"
-          @select-author="setAuthorFilter"
-        />
-      </div>
-
       <Transition name="history-filter">
         <div
           v-if="selectedAuthor"
@@ -1003,17 +948,27 @@ watch(historyActivityScale, () => {
           </div>
         </div>
 
-        <!-- The collapsed overview's height is handed to the list, so hiding it actually buys
-             MORE history rather than just making the card shorter — which is the whole point of
-             hiding it. `max-h-104` stays the floor; the custom property adds to it. -->
         <div
           ref="scrollEl"
           class="scroll-slim history-scroll overflow-y-auto"
-          :style="{ '--history-reclaimed': `${activityHidden ? reclaimedPx : 0}px` }"
           :data-refreshing="loadingLog ? 'true' : 'false'"
           :aria-busy="loadingLog"
           data-history-transition="rows"
         >
+          <!-- The activity overview is ordinary content at the top of the list, so it scrolls out
+               of sight as you read down and is back when you return to the top. It used to sit
+               above the scroller and fake that with a gesture-driven collapse, which meant it
+               could vanish or reappear while you were only trying to read. -->
+          <HistoryActivity
+            v-if="historyActivityEnabled"
+            class="mb-2"
+            :activity="activity"
+            :loading="loadingActivity"
+            :scale="historyActivityScale"
+            :selected-author="selectedAuthor"
+            @select-scale="setActivityScale"
+            @select-author="setAuthorFilter"
+          />
           <TransitionGroup
             name="history-row"
             tag="div"
@@ -1593,58 +1548,12 @@ watch(historyActivityScale, () => {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2em), transparent 100%);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2em), transparent 100%);
 }
-/* ── auto-hiding activity overview ───────────────────────────────────────────────
- * Animating grid-template-rows lets the block collapse to and from its NATURAL height without
- * pinning a pixel max-height that goes stale the moment the metric row rewraps.
- *
- * `minmax(0, …)` is load-bearing, not decoration. Plain `1fr`/`0fr` means `minmax(auto, 1fr)`, and
- * that `auto` MINIMUM resolves to the item's content height — so `0fr` computed as 191px and the
- * block never collapsed at all (measured: the class applied, the rule matched, the height did not
- * budge). Stating the minimum as 0 is what actually lets the track close. `min-height: 0` plus
- * `overflow: hidden` on the child is still wanted, for the item's own automatic minimum size.
- * Collapsed it is also `visibility: hidden`, so nothing inside is hit-testable or readable while it
- * is a zero-height sliver.
- */
-/* One duration and one curve for BOTH the block and the list it hands space to. They animate two
- * different properties on two different elements, and any drift between them shows up as the two
- * edges sliding apart mid-transition — so the numbers live here once instead of being typed out
- * three times. The curve is a symmetric ease-in-out: the old cubic-bezier(0.22, 1, 0.36, 1)
- * decelerated hard and then crawled to a stop, which reads as a snap at 200ms. */
-.history-activity-collapse,
+/* The history viewport. The activity overview now lives INSIDE this scroller as its first child,
+ * so it simply scrolls away as you read down and is there again at the top. The extra 10rem over
+ * the old 26rem cap is the space the overview used to occupy above the scroller, kept so the panel
+ * is about as tall as it was rather than shrinking by the height of the chart. */
 .history-scroll {
-  --history-collapse-duration: 360ms;
-  --history-collapse-ease: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.history-activity-collapse {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  transition: grid-template-rows var(--history-collapse-duration) var(--history-collapse-ease);
-}
-.history-activity-collapse > * {
-  min-height: 0;
-  overflow: hidden;
-  transition:
-    /* Fades over most of the collapse rather than snapping out early: a quick fade under a slow
-       close looks like the content disappears and the empty box shuts afterwards. */
-    opacity calc(var(--history-collapse-duration) * 0.75) var(--history-collapse-ease),
-    /* Held until the very end, so nothing pops out of existence while the box is still moving. */
-    visibility var(--history-collapse-duration);
-}
-.history-activity-collapse--hidden {
-  grid-template-rows: minmax(0, 0fr);
-}
-.history-activity-collapse--hidden > * {
-  opacity: 0;
-  visibility: hidden;
-}
-
-/* The list's own cap, plus whatever the collapsed overview just gave back (see the inline
- * --history-reclaimed). max-h-104 was the previous fixed value; keeping it as the base means the
- * open state is byte-for-byte what it always was. */
-.history-scroll {
-  max-height: calc(26rem + var(--history-reclaimed, 0px));
-  transition: max-height var(--history-collapse-duration) var(--history-collapse-ease);
+  max-height: 36rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1656,12 +1565,6 @@ watch(historyActivityScale, () => {
   }
   .history-filter-enter-active,
   .history-filter-leave-active {
-    transition: none;
-  }
-  /* The hide still happens — it is a layout preference, not decoration — it just doesn't slide. */
-  .history-activity-collapse,
-  .history-activity-collapse > *,
-  .history-scroll {
     transition: none;
   }
 }
