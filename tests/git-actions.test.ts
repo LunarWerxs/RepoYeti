@@ -1,10 +1,10 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { gitPullFfOnly, gitCommitAll } from "../src/git-actions.ts";
-import { safeGitEnv, sshCommandFor } from "../src/git.ts";
+import { currentGitOperation, gitRawWithInput, safeGitEnv, sshCommandFor } from "../src/git.ts";
 import type { Identity } from "../src/db.ts";
 
 const ID: Identity = {
@@ -138,6 +138,49 @@ test("git environment strips ambient per-process config injection", () => {
       else process.env[name] = value;
     }
   }
+});
+
+// ── git.ts: the repo-metadata lookup behind every status read ───────────────────────
+// gitDirFor short-circuits the common `.git/` directory, so the layouts that DON'T take that
+// path (a bare repo, a pointer whose target is gone) are the ones that can regress unnoticed.
+
+test("a bare repository is resolved through the rev-parse fallback, then served from cache", async () => {
+  const bare = mkdtempSync(join(tmpdir(), "gm-bare-"));
+  await $`git -c init.defaultBranch=main init -q --bare ${bare}`.quiet();
+
+  // No `.git` marker at all → the stat-based fast paths miss and git itself is asked.
+  expect(await currentGitOperation(bare)).toBeNull();
+  // Second call answers from the cached git dir; it must resolve to the same place, so a marker
+  // that appeared in the meantime is still seen.
+  mkdirSync(join(bare, "rebase-apply"));
+  expect(await currentGitOperation(bare)).toBe("rebase-apply");
+});
+
+test("a .git pointer whose target is gone reports no operation instead of throwing", async () => {
+  // What a deleted worktree leaves behind: the pointer file outlives the gitdir it names. A
+  // status refresh must survive it — this runs on every repo in the list.
+  const dir = mkdtempSync(join(tmpdir(), "gm-ptr-"));
+  writeFileSync(join(dir, ".git"), `gitdir: ${join(dir, "gone").replace(/\\/g, "/")}\n`);
+
+  expect(await currentGitOperation(dir)).toBeNull();
+});
+
+test("gitRawWithInput surfaces git's own stderr rather than an empty result", async () => {
+  const notARepo = mkdtempSync(join(tmpdir(), "gm-stdin-"));
+  await expect(gitRawWithInput(notARepo, ["diff-tree", "--stdin"], "\n")).rejects.toThrow(
+    /not a git repository/i,
+  );
+});
+
+test("a commit git refuses is classified, not thrown", async () => {
+  // Nothing to amend yet: the failure comes back from git, through classify(), as a result.
+  const dir = mkdtempSync(join(tmpdir(), "gm-amend-"));
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+  writeFileSync(join(dir, "a.txt"), "a\n");
+
+  const r = await gitCommitAll(dir, ID, "amended", true);
+  expect(r.ok).toBe(false);
+  expect(r.message.toLowerCase()).toContain("amend");
 });
 
 test("sshCommandFor validates and quotes identity key paths", () => {

@@ -28,3 +28,16 @@ export function scratchRoot(): string {
 export function mkScratchDir(prefix: string): string {
   return mkdtempSync(join(ROOT, prefix));
 }
+
+/**
+ * A cross-platform `file://` URL that git can actually clone/fetch/push: `file:///tmp/x` on POSIX
+ * (the path already starts with `/`) and `file://C:/x` on Windows (git rejects the `file:///C:/x`
+ * form — it reads the path as `/C:/x`). So just prefix the forward-slashed path with `file://`.
+ *
+ * Worth the URL rather than a plain path: git only takes the LOCAL-clone shortcut (hardlinks, no
+ * transfer) for a bare path. `file://` puts the real transport in play, which is what makes a
+ * scratch remote exercise the same code — and the same `--progress` output — as a network one.
+ */
+export function fileUrl(p: string): string {
+  return `file://${p.replace(/\\/g, "/")}`;
+}

@@ -40,6 +40,12 @@ test("gitRemoteSet adds origin, updates it, and gitRemoteRemove drops it", async
   expect((await gitRemoteRemove(dir, "origin")).code).toBe("NO_REMOTE"); // already gone
 });
 
+test("setting a remote somewhere that isn't a repo is classified, not thrown", async () => {
+  const r = await gitRemoteSet(mkScratchDir("gm-rt-norepo-"), "origin", "https://example.com/a.git");
+  expect(r.ok).toBe(false);
+  expect(r.message.toLowerCase()).toContain("not a git repository");
+});
+
 // ── tags (read-only) ─────────────────────────────────────────────────────────────
 
 test("readTags lists tags newest-first; empty when there are none", async () => {

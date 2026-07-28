@@ -6,7 +6,7 @@ import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { cloneRepo } from "../src/service/index.ts";
 import { getRepos } from "../src/db.ts";
-import { mkScratchDir } from "./helpers/scratch.ts";
+import { mkScratchDir, fileUrl } from "./helpers/scratch.ts";
 
 const localCfg = (roots: string[] = []): RepoYetiConfig => ({ roots, port: 7171, maxDepth: 6, maxRepos: 200 });
 const J = (body: unknown) => ({
@@ -22,13 +22,6 @@ async function sourceRepo(): Promise<string> {
   await $`git -C ${dir} -c user.name=S -c user.email=s@s.io add -A`.quiet();
   await $`git -C ${dir} -c user.name=S -c user.email=s@s.io commit -q -m init`.quiet();
   return dir;
-}
-
-/** A cross-platform file:// URL that git can actually clone: `file:///tmp/x` on POSIX (the
- *  path already starts with `/`) and `file://C:/x` on Windows (git rejects the `file:///C:/x`
- *  form — it reads the path as `/C:/x`). So just prefix the forward-slashed path with `file://`. */
-function fileUrl(p: string): string {
-  return `file://${p.replace(/\\/g, "/")}`;
 }
 
 test("cloneRepo clones a repo and indexes it", async () => {
