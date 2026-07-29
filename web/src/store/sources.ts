@@ -1,6 +1,6 @@
 import { ref, type Ref } from "vue";
 import { api } from "../api";
-import type { FetchAllResult, LoreServer, Repo } from "../types";
+import type { BuzzCommunity, BuzzPreflight, FetchAllResult, LoreServer, Repo } from "../types";
 
 /**
  * Scan roots / registered Lore servers / bulk fetch / add-or-clone-repo / drag-reorder /
@@ -24,6 +24,9 @@ export function useSources(
   // default for owners who don't use Lore). From /api/status, kept live via `settings_changed`;
   // true until status loads so the section doesn't flash collapsed-then-open for existing users.
   const loreServersEnabled = ref(true);
+  // Experimental Buzz is opt-in and stays false until its owner-only config is loaded.
+  const buzzEnabled = ref(false);
+  const buzzCommunities = ref<BuzzCommunity[]>([]);
   // True while a bulk "fetch all" is running (drives the header button spinner).
   const fetchingAll = ref(false);
 
@@ -93,6 +96,43 @@ export function useSources(
     return repo;
   }
 
+  // ── Buzz Git compatibility ──────────────────────────────────────────────────
+  async function loadBuzzConfig(): Promise<void> {
+    const config = await api.buzzConfig();
+    buzzEnabled.value = config.enabled;
+    buzzCommunities.value = config.communities;
+  }
+  async function setBuzzEnabled(enabled: boolean): Promise<void> {
+    const previous = buzzEnabled.value;
+    buzzEnabled.value = enabled;
+    try {
+      const result = await api.setBuzzEnabled(enabled);
+      buzzEnabled.value = result.config.enabled;
+      buzzCommunities.value = result.config.communities;
+    } catch (error) {
+      buzzEnabled.value = previous;
+      throw error;
+    }
+  }
+  async function addBuzzCommunity(input: {
+    name?: string;
+    url: string;
+    gitUrl?: string;
+  }): Promise<BuzzCommunity> {
+    const result = await api.addBuzzCommunity(input);
+    buzzEnabled.value = result.config.enabled;
+    buzzCommunities.value = result.config.communities;
+    return result.community;
+  }
+  async function removeBuzzCommunity(id: string): Promise<void> {
+    const result = await api.deleteBuzzCommunity(id);
+    buzzEnabled.value = result.config.enabled;
+    buzzCommunities.value = result.config.communities;
+  }
+  async function runBuzzPreflight(communityId?: string): Promise<BuzzPreflight> {
+    return api.buzzPreflight(communityId);
+  }
+
   /** Fetch every repo with a remote. Returns a summary the caller toasts. */
   async function fetchAll(): Promise<FetchAllResult> {
     fetchingAll.value = true;
@@ -160,6 +200,8 @@ export function useSources(
     roots,
     servers,
     loreServersEnabled,
+    buzzEnabled,
+    buzzCommunities,
     fetchingAll,
     loadRoots,
     addScanRoot,
@@ -171,6 +213,11 @@ export function useSources(
     removeServer,
     setLoreServersEnabled,
     cloneFromServer,
+    loadBuzzConfig,
+    setBuzzEnabled,
+    addBuzzCommunity,
+    removeBuzzCommunity,
+    runBuzzPreflight,
     fetchAll,
     cleanupMissingRepos,
     shutdown,

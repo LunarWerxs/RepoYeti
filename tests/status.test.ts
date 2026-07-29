@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { $ } from "bun";
-import { readStatus, resolveHistoryRefsHash } from "../src/read/status.ts";
+import { parsePorcelainV2, readStatus, resolveHistoryRefsHash } from "../src/read/status.ts";
 import { currentGitOperation, gitFor } from "../src/git.ts";
 
 async function gitRepo(prefix = "gm-status-"): Promise<string> {
@@ -12,6 +12,37 @@ async function gitRepo(prefix = "gm-status-"): Promise<string> {
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;
 }
+
+test("porcelain v2 parser keeps NUL-delimited paths and rename sources unambiguous", () => {
+  const oid = "a".repeat(40);
+  const raw = [
+    `# branch.oid ${oid}`,
+    "# branch.head main",
+    "# branch.upstream origin/main",
+    "# branch.ab +3 -2",
+    `1 .M N... 100644 100644 100644 ${oid} ${oid} path with spaces.txt`,
+    `2 R. N... 100644 100644 100644 ${oid} ${oid} R100 renamed\npath.txt`,
+    "old path.txt",
+    `u UU N... 100644 100644 100644 100644 ${oid} ${oid} ${oid} conflict.txt`,
+    "? untracked\nfile.txt",
+    "",
+  ].join("\0");
+
+  expect(parsePorcelainV2(raw)).toEqual({
+    branch: "main",
+    detached: false,
+    headOid: oid,
+    upstream: "origin/main",
+    ahead: 3,
+    behind: 2,
+    files: [
+      { path: "path with spaces.txt", index: " ", working_dir: "M" },
+      { path: "renamed\npath.txt", from: "old path.txt", index: "R", working_dir: " " },
+      { path: "conflict.txt", index: "U", working_dir: "U" },
+      { path: "untracked\nfile.txt", index: "?", working_dir: "?" },
+    ],
+  });
+});
 
 test("readStatus resolves the origin remote URL", async () => {
   const dir = await gitRepo();

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { createSemaphore } from "./gitgate.ts";
+import { readTextStreamLimited } from "./process-output.ts";
 
 export type DetectedIdentitySource =
   | "git-global"
@@ -58,20 +59,31 @@ async function run(args: string[], timeoutMs = 1500): Promise<RunResult> {
   return identityDetectionGate.run(async () => {
     try {
       const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-      const timer = setTimeout(() => {
+      let limited = false;
+      const kill = (): void => {
         try {
           proc.kill();
         } catch {
           /* process already exited */
         }
-      }, timeoutMs);
-      const [stdout, code] = await Promise.all([
-        new Response(proc.stdout).text(),
-        proc.exited,
-        new Response(proc.stderr).text(),
-      ]);
-      clearTimeout(timer);
-      return { ok: code === 0, stdout: stdout.trim() };
+      };
+      const timer = setTimeout(kill, timeoutMs);
+      try {
+        const onLimit = (): void => {
+          limited = true;
+          kill();
+        };
+        const [stdout, , code] = await Promise.all([
+          readTextStreamLimited(proc.stdout, 1024 * 1024, onLimit),
+          readTextStreamLimited(proc.stderr, 256 * 1024, onLimit),
+          proc.exited,
+        ]);
+        return { ok: code === 0 && !limited, stdout: stdout.text.trim() };
+      } finally {
+        clearTimeout(timer);
+        kill();
+        await proc.exited.catch(() => undefined);
+      }
     } catch {
       return { ok: false, stdout: "" };
     }

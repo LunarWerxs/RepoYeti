@@ -185,6 +185,13 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/servers",
   "DELETE /api/servers/:id",
   "POST /api/servers/clone",
+  // Buzz diagnostics/configuration can reach an owner-selected relay and expose saved community
+  // metadata. Buzz Git operations themselves still use the ordinary owner-only repo routes.
+  "GET /api/buzz",
+  "PUT /api/buzz",
+  "POST /api/buzz/communities",
+  "DELETE /api/buzz/communities/:id",
+  "POST /api/buzz/preflight",
   // identities / accounts
   "GET /api/identities",
   "GET /api/identities/detected",

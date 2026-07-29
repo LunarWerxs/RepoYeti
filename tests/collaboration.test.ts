@@ -19,8 +19,10 @@ import {
   readAcceptedCollaborationDiff,
   readAcceptedCollaborationStatus,
   readCollaborationSnapshots,
+  MAX_PRESENCE_BYTES,
   REMOTE_COMMIT_IDLE_MS,
   receiveCollaborationSnapshot,
+  stopCollaborationSync,
   type CollaborationSnapshot,
 } from "../src/collaboration.ts";
 import {
@@ -211,6 +213,52 @@ test("the owner accepts only fresh, correctly addressed snapshots from a live co
   } finally {
     removeListener(listener);
   }
+});
+
+test("presence retention has a global byte budget and is cleared when sync stops", () => {
+  initDb();
+  const largeChanges = Array.from({ length: 900 }, (_, i) => ({
+    path: `folder/${String(i).padStart(4, "0")}-${"x".repeat(180)}.txt`,
+    status: "M",
+    staged: false,
+  }));
+  for (let i = 0; i < 14; i++) {
+    const token = `bounded-presence-${i}-${crypto.randomUUID()}`;
+    createShare(hashToken(token), {
+      label: `bounded peer ${i}`,
+      perm: "view",
+      collaborative: true,
+      scopeAll: true,
+      repoIds: [],
+      expiresAt: null,
+      token,
+    });
+    const live: CollaborationSnapshot = {
+      ...snapshot,
+      participantId: i.toString(16).padStart(32, "0"),
+      repoId: `bounded-repo-${i}`,
+      changes: largeChanges,
+      diff: null,
+      updatedAt: Date.now(),
+    };
+    expect(
+      receiveCollaborationSnapshot(
+        token,
+        collaborationChannel(token),
+        live.participantId,
+        encryptSnapshot(token, live),
+      ),
+    ).toBe(true);
+  }
+
+  const retained = readCollaborationSnapshots();
+  expect(retained.length).toBeLessThan(14);
+  expect(Buffer.byteLength(JSON.stringify(retained))).toBeLessThanOrEqual(
+    MAX_PRESENCE_BYTES + 1024,
+  );
+
+  stopCollaborationSync();
+  expect(readCollaborationSnapshots()).toEqual([]);
 });
 
 test("the public presence route requires the bearer secret and keeps owner reads owner-side", async () => {

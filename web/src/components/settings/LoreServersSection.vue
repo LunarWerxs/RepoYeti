@@ -1,18 +1,13 @@
 <script setup lang="ts">
-// Advanced-tab section: the Lore server registry (servers RepoYeti can clone from). Split out
-// of DiscoverySection when the Advanced tab landed — scan folders are an everyday General
-// concern; a clone-registry for self-hosted Lore servers is not.
+// Expandable Lore server-registry body hosted by ExperimentalServersSection.
 import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Trash2, Plus, Loader2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
-import SettingsGroup from "@/shell/SettingsGroup.vue";
-import SettingsRow from "@/shell/SettingsRow.vue";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 
 /** Whether the parent Settings sheet is open — drives the on-open refresh below. */
 const props = defineProps<{ open: boolean }>();
@@ -62,35 +57,11 @@ async function removeServer(id: string): Promise<void> {
     toast.error(t("settings.serversRemoveFailed"));
   }
 }
-// Master switch: collapses the whole section down to just its header when off (Y5),
-// same pattern as AutoCommitSection's master switch + ExpandTransition body.
-async function onLoreServersEnabled(enabled: boolean): Promise<void> {
-  try {
-    await store.setLoreServersEnabled(enabled);
-  } catch {
-    toast.error(t("settings.loreServersEnableFailed"));
-  }
-}
 </script>
 
 <template>
-  <!-- Lore servers (clone-from-server registry) ─────────────────────────── -->
-  <SettingsGroup :label="$t('settings.cardServers')">
-    <!-- Both the section blurb and the IP tip live behind the one info icon. -->
-    <template #description>{{ $t("settings.serversHint") }} {{ $t("settings.serversIpHint") }}</template>
-    <!-- master switch: collapses the whole section to just this row when off, since owners
-         who never use Lore shouldn't pay rent on an always-open add-server form. -->
-    <SettingsRow :label="$t('settings.loreServersEnable')">
-      <template #control>
-        <Switch
-          :model-value="store.loreServersEnabled"
-          :aria-label="$t('settings.loreServersEnable')"
-          @update:model-value="(v: boolean) => onLoreServersEnabled(v)"
-        />
-      </template>
-    </SettingsRow>
-    <ExpandTransition :open="store.loreServersEnabled">
-      <div class="flex flex-col gap-2.5 px-3.5 py-3">
+  <ExpandTransition :open="store.loreServersEnabled">
+    <div class="flex flex-col gap-2.5 px-3.5 py-3">
         <p v-if="!store.servers.length" class="text-[12.5px] text-muted-foreground">
           {{ $t("settings.serversEmpty") }}
         </p>
@@ -136,7 +107,6 @@ async function onLoreServersEnabled(enabled: boolean): Promise<void> {
             </Button>
           </div>
         </form>
-      </div>
-    </ExpandTransition>
-  </SettingsGroup>
+    </div>
+  </ExpandTransition>
 </template>

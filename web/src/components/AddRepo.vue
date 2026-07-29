@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { FolderGit2, FolderPlus, DownloadCloud, Server, FolderSearch, Loader2 } from "@lucide/vue";
+import { FolderGit2, FolderPlus, DownloadCloud, Server, FolderSearch, Loader2, Radio } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
 import {
@@ -22,13 +22,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { buildBuzzCloneUrl, hasBuzzCloneSource } from "@/lib/buzz";
 
 const { t } = useI18n();
 
 const open = defineModel<boolean>("open", { required: true });
 const store = useStore();
 
-type Mode = "register" | "create" | "clone" | "lore";
+type Mode = "register" | "create" | "clone" | "lore" | "buzz";
 const mode = ref<Mode>("register");
 const path = ref(""); // register / create
 
@@ -44,6 +45,12 @@ const loreRepoPath = ref(""); // repo path on the server, appended to the server
 const loreName = ref("");
 const loreParent = ref("");
 
+// Buzz fields. The resulting URL is still handed to cloneRepo(), i.e. the ordinary Git backend.
+const buzzCommunityUrl = ref("");
+const buzzRepoPath = ref("");
+const buzzName = ref("");
+const buzzParent = ref("");
+
 const busy = ref(false);
 
 // Load scan roots when the dialog opens so the clone destination can default to one.
@@ -51,6 +58,7 @@ watch(open, (isOpen) => {
   if (isOpen) {
     if (!store.roots.length) void store.loadRoots();
     if (!store.servers.length) void store.loadServers();
+    void store.loadBuzzConfig();
   }
 });
 watch(
@@ -59,9 +67,25 @@ watch(
     if (rs.length) {
       if (!cloneParent.value) cloneParent.value = rs[0]!;
       if (!loreParent.value) loreParent.value = rs[0]!;
+      if (!buzzParent.value) buzzParent.value = rs[0]!;
     }
   },
   { immediate: true },
+);
+watch(
+  () => store.buzzCommunities,
+  (communities) => {
+    if (!communities.some((community) => community.url === buzzCommunityUrl.value)) {
+      buzzCommunityUrl.value = communities[0]?.url ?? "";
+    }
+  },
+  { immediate: true },
+);
+watch(
+  () => store.buzzEnabled,
+  (enabled) => {
+    if (!enabled && mode.value === "buzz") mode.value = "clone";
+  },
 );
 watch(
   () => store.servers,
@@ -76,6 +100,9 @@ const canSubmit = computed(() => {
   if (mode.value === "clone") return cloneUrl.value.trim().length > 0 && cloneParent.value.trim().length > 0;
   if (mode.value === "lore")
     return loreServerUrl.value.length > 0 && loreRepoPath.value.trim().length > 0 && loreParent.value.trim().length > 0;
+  if (mode.value === "buzz") {
+    return hasBuzzCloneSource(buzzCommunityUrl.value, buzzRepoPath.value) && buzzParent.value.trim().length > 0;
+  }
   return path.value.trim().length > 0;
 });
 
@@ -89,6 +116,10 @@ function selectMode(v: unknown): void {
 function openScan(): void {
   open.value = false;
   store.scanOpen = true;
+}
+
+function buzzCloneUrl(): string {
+  return buildBuzzCloneUrl(buzzCommunityUrl.value, buzzRepoPath.value);
 }
 
 async function submit(): Promise<void> {
@@ -116,6 +147,16 @@ async function submit(): Promise<void> {
       toast.success(t("addRepo.toastLoreCloned", { name: repo.name }));
       loreRepoPath.value = "";
       loreName.value = "";
+    } else if (mode.value === "buzz") {
+      const repo = await store.cloneRepo({
+        url: buzzCloneUrl(),
+        parentPath: buzzParent.value.trim(),
+        name: buzzName.value.trim() || undefined,
+        identityId: null,
+      });
+      toast.success(t("addRepo.toastBuzzCloned", { name: repo.name }));
+      buzzRepoPath.value = "";
+      buzzName.value = "";
     } else {
       const repo = await store.addRepo(mode.value, path.value.trim());
       toast.success(
@@ -159,6 +200,9 @@ async function submit(): Promise<void> {
         </ToggleGroupItem>
         <ToggleGroupItem value="lore" class="justify-center gap-1.5">
           <Server :size="14" /> {{ $t("addRepo.modeLore") }}
+        </ToggleGroupItem>
+        <ToggleGroupItem v-if="store.buzzEnabled" value="buzz" class="justify-center gap-1.5">
+          <Radio :size="14" /> {{ $t("addRepo.modeBuzz") }}
         </ToggleGroupItem>
       </ToggleGroup>
 
@@ -243,11 +287,40 @@ async function submit(): Promise<void> {
         </div>
       </template>
 
+      <!-- Buzz: construct a standard Smart HTTP clone URL, then use the normal Git clone path. -->
+      <template v-else-if="mode === 'buzz'">
+        <p class="text-[12.5px] text-muted-foreground">{{ $t("addRepo.hintBuzz") }}</p>
+        <div v-if="store.buzzCommunities.length" class="flex flex-col gap-1.5">
+          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelBuzzCommunity") }}</label>
+          <Select v-model="buzzCommunityUrl">
+            <SelectTrigger class="w-full" :aria-label="$t('addRepo.labelBuzzCommunity')"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="community in store.buzzCommunities" :key="community.id" :value="community.url">
+                {{ community.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <p v-else class="text-[12.5px] text-muted-foreground">{{ $t("addRepo.buzzNoCommunities") }}</p>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelBuzzRepo") }}</label>
+          <Input v-model="buzzRepoPath" class="mono" :placeholder="$t('addRepo.placeholderBuzzRepo')" @keyup.enter="submit" />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelParent") }}</label>
+          <Input v-model="buzzParent" class="mono" :placeholder="$t('addRepo.placeholderParent')" />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelName") }}</label>
+          <Input v-model="buzzName" class="mono" :placeholder="$t('addRepo.placeholderName')" @keyup.enter="submit" />
+        </div>
+      </template>
+
       <DialogFooter>
         <Button variant="ghost" @click="open = false">{{ $t("addRepo.cancel") }}</Button>
         <Button :disabled="!canSubmit" @click="submit">
           <Loader2 v-if="busy" class="animate-spin" />
-          {{ mode === "create" ? $t("addRepo.submitCreate") : mode === "clone" ? $t("addRepo.submitClone") : mode === "lore" ? $t("addRepo.submitLore") : $t("addRepo.submitAdd") }}
+          {{ mode === "create" ? $t("addRepo.submitCreate") : mode === "clone" ? $t("addRepo.submitClone") : mode === "lore" ? $t("addRepo.submitLore") : mode === "buzz" ? $t("addRepo.submitBuzz") : $t("addRepo.submitAdd") }}
         </Button>
       </DialogFooter>
     </DialogContent>

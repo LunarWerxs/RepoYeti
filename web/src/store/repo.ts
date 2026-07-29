@@ -10,6 +10,7 @@ export type StatusKey = "dirty" | "ahead" | "behind" | "clean" | "error";
  *  and never touch `sort_order`, so switching back to "manual" always restores the owner's
  *  last drag arrangement. */
 export type SortMode = "manual" | "name" | "recent";
+export const MAX_RETAINED_CHANGE_REPOS = 12;
 
 // Client-only display preference (like desktopNotify); no daemon/API involvement, so
 // switching sort mode can never disturb the drag-persisted `sort_order` column.
@@ -67,6 +68,21 @@ export function useRepoActions(
   // Only ACTIVE reads occupy this map. Clearing a repo deletes its token, so a late response is
   // ignored without retaining one generation counter forever for every repo ever encountered.
   const changesRequests = new Map<string, symbol>();
+  const changesCacheLru = new Map<string, true>();
+
+  function touchChangesCache(repoId: string): void {
+    changesCacheLru.delete(repoId);
+    changesCacheLru.set(repoId, true);
+    while (changesCacheLru.size > MAX_RETAINED_CHANGE_REPOS) {
+      const oldest = changesCacheLru.keys().next().value as string | undefined;
+      if (!oldest) break;
+      changesCacheLru.delete(oldest);
+      changesRequests.delete(oldest);
+      delete changesByRepo[oldest];
+      delete changesLoading[oldest];
+      delete changesMeta[oldest];
+    }
+  }
 
   // Status hydration and live SSE can patch thousands of repos in quick succession. A linear
   // `find()` for every patch made that O(n²) on a large scan. The array is replaced on full
@@ -247,10 +263,12 @@ export function useRepoActions(
       changesByRepo[repoId] = res.files ?? [];
       if (res.truncated) changesMeta[repoId] = { total: res.total ?? res.files.length, truncated: true };
       else delete changesMeta[repoId];
+      touchChangesCache(repoId);
     } catch {
       if (changesRequests.get(repoId) !== request || !findRepo(repoId)) return;
       changesByRepo[repoId] = [];
       delete changesMeta[repoId];
+      touchChangesCache(repoId);
     } finally {
       if (changesRequests.get(repoId) === request) {
         changesRequests.delete(repoId);
@@ -390,6 +408,7 @@ export function useRepoActions(
 
   /** Release changed-file state when a repository is removed or leaves a shared scope. */
   function clearRepoCache(repoId: string): void {
+    changesCacheLru.delete(repoId);
     changesRequests.delete(repoId);
     repoLookup.delete(repoId);
     delete changesByRepo[repoId];
@@ -405,6 +424,7 @@ export function useRepoActions(
       ...Object.keys(changesLoading),
       ...Object.keys(changesMeta),
       ...changesRequests.keys(),
+      ...changesCacheLru.keys(),
     ]);
     for (const repoId of cachedIds) {
       if (!liveRepoIds.has(repoId)) clearRepoCache(repoId);

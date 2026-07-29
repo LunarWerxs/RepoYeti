@@ -100,16 +100,16 @@ test("clampSyncInterval bounds the cadence and defaults a bad value", () => {
   expect(clampSyncInterval(Number.NaN)).toBe(SYNC_INTERVAL_DEFAULT_S);
 });
 
-test("GET /api/status defaults syncCheck on at 120s; PUT /api/settings toggles + clamps", async () => {
+test("GET /api/status defaults syncCheck off at 300s; PUT /api/settings toggles + clamps", async () => {
   const app = createApp(localCfg());
 
   const before = await (await app.request("/api/status")).json();
-  expect(before.syncCheck).toBe(true);
+  expect(before.syncCheck).toBe(false);
   expect(before.syncIntervalSecs).toBe(SYNC_INTERVAL_DEFAULT_S);
   expect(before.keepInSync).toBe(false); // auto-pull is opt-in
 
-  // Disable the check + ask for an out-of-range cadence (5s → clamped to the floor) + opt into
-  // keep-in-sync.
+  // Keep the check disabled + ask for an out-of-range cadence (5s → clamped to the floor) +
+  // opt into keep-in-sync.
   const put = await app.request("/api/settings", {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -130,6 +130,6 @@ test("GET /api/status defaults syncCheck on at 120s; PUT /api/settings toggles +
   await app.request("/api/settings", {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ syncCheck: true, syncIntervalSecs: SYNC_INTERVAL_DEFAULT_S, keepInSync: false }),
+    body: JSON.stringify({ syncCheck: false, syncIntervalSecs: SYNC_INTERVAL_DEFAULT_S, keepInSync: false }),
   });
 });

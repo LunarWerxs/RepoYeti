@@ -79,14 +79,18 @@ const IGNORED_WORKTREE_DIRS = new Set([
   ".venv",
   ".turbo",
   ".cache",
+  ".testtmp",
+  ".tmp",
+  "tmp",
+  "temp",
 ]);
 
 // A build/checkout can touch hundreds of working-tree files within tens of milliseconds, and
 // editors commonly write-then-rename (temp file + rename lands as two events ~50-150ms apart).
-// 500ms — 2x the .git debounce — comfortably folds a whole burst into one refresh while still
-// landing well inside the "feels live" ~1s window, and nowhere close to the 30s poll fallback.
-// It is a per-EVENT delay on the shared timer (see trigger below), not a second timer.
-const WORKTREE_DEBOUNCE_MS = 500;
+// 1.5s keeps autosave/build bursts from launching one status command every second while someone
+// is actively typing, yet still lands promptly after the edit stream becomes quiet. It is a
+// per-EVENT delay on the shared timer (see trigger below), not a second timer.
+const WORKTREE_DEBOUNCE_MS = 1_500;
 
 const WORKTREE_WATCH_SUPPORTED_PLATFORMS = new Set(["win32", "darwin"]);
 
@@ -182,9 +186,10 @@ export function watchRepo(
    *
    * Deliberately not a timer each. Every interesting git operation — checkout, merge, pull,
    * stash pop — touches .git AND rewrites a pile of working-tree files, so two independent
-   * timers each fire their own onChange: one at 250ms, a second at 500ms. coalescedRefresh()
+   * timers each fire their own onChange: one at 250ms, a second after the worktree quiet delay.
+   * coalescedRefresh()
    * (src/service/watch.ts) folds a second call only while the first is still in flight, so once
-   * the 250ms refresh finishes the 500ms one runs the whole status read again — the bonus watch
+   * the metadata refresh can finish before the later one runs the whole status read again — the bonus watch
    * would have doubled the cost of every branch switch. A single timer, reset by whichever event
    * arrives last, is the actual debounce the two sources want.
    */

@@ -19,11 +19,24 @@ import type { Identity, RepoView } from "../db.ts";
 /** Per-repo last-status signature (sans timestamp) so a no-op read doesn't emit. */
 export const lastStatusSig = new Map<string, string>();
 
-/** Read a repo's status behind its op-queue; persist + push over SSE only on change. */
-export async function refreshRepo(id: string, absPath: string, markFetched = false): Promise<void> {
+/**
+ * Read a repo's status behind its op-queue; persist + push over SSE only on change.
+ *
+ * A successful fetch changes remote refs but cannot change HEAD, the index, or working-tree
+ * contents. Its caller can therefore reuse the previous diff aggregate instead of re-reading a
+ * potentially enormous dirty tree just to update ahead/behind.
+ */
+export async function refreshRepo(
+  id: string,
+  absPath: string,
+  markFetched = false,
+  reuseDiff = false,
+): Promise<void> {
   const previous = getRepo(id)?.status;
   const backend = backendFor(getRepo(id)?.vcs ?? "git");
-  const status = await enqueue(id, () => backend.readStatus(absPath, diffStatsEnabled()));
+  const wantsDiff = diffStatsEnabled();
+  const status = await enqueue(id, () => backend.readStatus(absPath, wantsDiff && !reuseDiff));
+  if (reuseDiff && wantsDiff) status.diff = previous?.diff ?? null;
   if (markFetched) status.fetchedAt = Date.now();
   else status.fetchedAt = previous?.fetchedAt ?? null;
   const { updatedAt: _omit, ...sig } = status;
@@ -79,6 +92,7 @@ export async function runAction(
   markFetched = false,
   syncAccount = false,
   precondition?: VcsPrecondition,
+  reuseDiffAfter = false,
 ): Promise<ActionOutcome> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found", repoId };
@@ -101,7 +115,7 @@ export async function runAction(
     return blocked ?? action(backend, repo.absPath, identity, auth);
   });
   // Reflect the new reality (ahead/behind/dirty) to all clients.
-  await refreshRepo(repoId, repo.absPath, markFetched && result.ok);
+  await refreshRepo(repoId, repo.absPath, markFetched && result.ok, reuseDiffAfter && result.ok);
   return { ...result, repoId };
 }
 

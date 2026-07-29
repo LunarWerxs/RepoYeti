@@ -115,6 +115,15 @@ export const ServerCloneSchema = z.object({
   name: z.string().trim().optional(),
 });
 
+// ── Buzz (experimental Git Smart HTTP compatibility; public metadata only) ────────
+export const BuzzSettingsSchema = z.object({ enabled: z.boolean() });
+export const BuzzCommunitySchema = z.object({
+  name: z.string().trim().max(100).optional(),
+  url: z.string().trim().min(1).max(2048),
+  gitUrl: z.string().trim().max(2048).optional(),
+});
+export const BuzzPreflightSchema = z.object({ communityId: z.string().trim().max(128).optional() });
+
 export const ReorderSchema = z.object({ order: z.array(z.string()).max(10_000) });
 
 export const CommitSchema = z.object({

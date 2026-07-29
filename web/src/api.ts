@@ -10,6 +10,9 @@ import type {
   AiProviderId,
   AiSettings,
   BranchList,
+  BuzzCommunity,
+  BuzzConfig,
+  BuzzPreflight,
   ChangedFile,
   ChangesStatDisplay,
   CollaborationInvitePreview,
@@ -385,6 +388,20 @@ export const api = {
   deleteServer: (id: string) => req<{ ok: boolean; servers: LoreServer[] }>("DELETE", `/api/servers/${id}`),
   cloneFromServer: (input: { url: string; parentPath: string; name?: string }) =>
     req<{ repo: Repo }>("POST", "/api/servers/clone", input).then((r) => r.repo),
+  // ── Buzz (experimental Git Smart HTTP compatibility) ────────────────────────
+  buzzConfig: () => req<{ config: BuzzConfig }>("GET", "/api/buzz").then((r) => r.config),
+  setBuzzEnabled: (enabled: boolean) =>
+    req<{ ok: boolean; config: BuzzConfig }>("PUT", "/api/buzz", { enabled }),
+  addBuzzCommunity: (input: { name?: string; url: string; gitUrl?: string }) =>
+    req<{ ok: boolean; community: BuzzCommunity; config: BuzzConfig }>(
+      "POST",
+      "/api/buzz/communities",
+      input,
+    ),
+  deleteBuzzCommunity: (id: string) =>
+    req<{ ok: boolean; config: BuzzConfig }>("DELETE", `/api/buzz/communities/${id}`),
+  buzzPreflight: (communityId?: string) =>
+    req<BuzzPreflight>("POST", "/api/buzz/preflight", communityId ? { communityId } : {}),
   /** Fetch every repo that has a remote; returns a per-repo summary. */
   fetchAll: () => req<FetchAllResult>("POST", "/api/repos/fetch-all"),
   /** Remove every repo entry (any source) whose local path no longer exists on disk. */

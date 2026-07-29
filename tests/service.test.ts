@@ -15,10 +15,12 @@ import {
   stopWatching,
   unwatchOne,
   watcherHealth,
+  MAX_ACTIVE_REPO_WATCHES,
   MAX_CHANGED_FILES,
 } from "../src/service/index.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { setDiffStatsEnabled } from "../src/read/diffstat.ts";
 
 const tmp = (): string => mkScratchDir("gm-svc-");
 
@@ -49,6 +51,31 @@ test("refreshRepo preserves fetchedAt on non-fetch refreshes", async () => {
   await refreshRepo(id, dir);
 
   expect(getRepo(id)?.status?.fetchedAt).toBe(12345);
+});
+
+test("a fetch refresh reuses the existing working-tree diff", async () => {
+  const dir = await gitRepo("gm-svc-fetch-diff-");
+  const path = join(dir, "dirty.txt");
+  writeFileSync(path, "original\n");
+  await $`git -C ${dir} add dirty.txt`.quiet();
+  await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m tracked`.quiet();
+  writeFileSync(path, "changed\n");
+  const id = mustUpsertRepo(dir, "repo-fetch-diff", "auto", false);
+
+  setDiffStatsEnabled(true);
+  try {
+    await refreshRepo(id, dir);
+    const before = getRepo(id)?.status?.diff;
+    expect(before).not.toBeNull();
+
+    // Fetch cannot alter HEAD/index/worktree, so this mode updates refs/ahead/behind without
+    // reopening every dirty/untracked file merely to recompute the identical aggregate.
+    await refreshRepo(id, dir, true, true);
+    expect(getRepo(id)?.status?.diff).toEqual(before);
+    expect(getRepo(id)?.status?.fetchedAt).toBeGreaterThan(0);
+  } finally {
+    setDiffStatsEnabled(false);
+  }
 });
 
 test("refreshRepo broadcasts a clean external commit when counters remain unchanged", async () => {
@@ -316,6 +343,19 @@ test("background refresh scheduling bounds pending promise chains across repos",
   }
   expect(refreshQueueHealth()).toEqual({ active: 0, queued: 0 });
   for (const id of ids) unwatchOne(id);
+});
+
+test("repository watcher retention is capped when a broad scan finds thousands of repos", () => {
+  stopWatching();
+  const installer = () => ({ watching: true, close: () => {} });
+  for (let i = 0; i < MAX_ACTIVE_REPO_WATCHES + 17; i++) {
+    watchOne(`watch-cap-${i}`, `D:/deferred/${i}`, installer);
+  }
+
+  const health = watcherHealth();
+  expect(health.watched).toBe(MAX_ACTIVE_REPO_WATCHES);
+  expect(health.deferred).toBe(17);
+  stopWatching();
 });
 
 // NOTE: stopWatching() here clears the global watch registry, so this must stay LAST.

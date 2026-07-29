@@ -109,6 +109,8 @@ Cloud sign-in and settings sync are entirely optional and off by default; core g
 ## More
 
 - **AI agents (MCP):** `repoyeti mcp` exposes local repos plus accepted collaboration status/diffs and guarded remote commit+sync; the full HTTP surface is at `GET /api/openapi.json`.
+- **Buzz (experimental, Advanced):** opt-in Git Smart HTTP compatibility, saved communities, and
+  daemon-safe preflight diagnostics. [Setup and security boundaries](docs/BUZZ.md).
 - **Architecture, remote access, config:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **Contributing & tests:** [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 

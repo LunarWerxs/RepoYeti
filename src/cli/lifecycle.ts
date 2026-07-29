@@ -284,13 +284,15 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   // 6) progressive background hydration — readGate (see gitgate.ts) bounds the git fanout
   //    so this never floods the machine with children, and each repo broadcasts its status
   //    over SSE as it lands, so the dashboard fills in live without blocking startup.
-  void hydrateInitialStatuses(known);
+  const initialHydration = hydrateInitialStatuses(known);
+  void initialHydration;
 
   // 6b) start the background remote-sync check (if enabled in config). It periodically fetches
   //     every repo so the dashboard can warn when one falls behind its remote, broadcasting
-  //     `repo_behind` on a fresh fall-behind. Started here — after hydration is kicked off — so
-  //     the first network fetch happens one interval later, not in the boot stampede.
-  startRemoteSync();
+  //     `repo_behind` on a fresh fall-behind. Arm it only AFTER initial hydration drains: merely
+  //     kicking hydration off was insufficient for a huge dirty repo, where the first timed fetch
+  //     arrived while startup Git reads were still running and doubled the process fan-out.
+  void initialHydration.then(() => startRemoteSync());
 
   // 6c) start the auto-commit timer (if enabled in config). For each repo the owner opted in, it
   //     Smart-Commits uncommitted changes on a schedule and — configurably — pulls + pushes. Like

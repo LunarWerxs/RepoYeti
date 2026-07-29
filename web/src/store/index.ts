@@ -123,10 +123,10 @@ export const useStore = defineStore("repoyeti", () => {
   // side-by-side). From /api/status, kept live via `settings_changed`; on until status loads.
   const diffPatchEnabled = ref(true);
   // Owner setting: run a periodic background fetch so the dashboard can warn when a repo falls
-  // behind its remote. From /api/status, kept live via `settings_changed`; on until status loads.
-  const syncCheckEnabled = ref(true);
-  // How often that background check runs, in seconds. From /api/status; 120 until status loads.
-  const syncIntervalSecs = ref(120);
+  // behind its remote. From /api/status, kept live via `settings_changed`; off until status loads.
+  const syncCheckEnabled = ref(false);
+  // How often that background check runs, in seconds. From /api/status; 300 until status loads.
+  const syncIntervalSecs = ref(300);
   // Owner setting: after the check, auto fast-forward repos that can safely take new commits.
   // From /api/status, kept live via `settings_changed`; off until status loads (opt-in).
   const keepInSync = ref(false);
@@ -327,6 +327,8 @@ export const useStore = defineStore("repoyeti", () => {
     roots,
     servers,
     loreServersEnabled,
+    buzzEnabled,
+    buzzCommunities,
     fetchingAll,
     loadRoots,
     addScanRoot,
@@ -338,6 +340,11 @@ export const useStore = defineStore("repoyeti", () => {
     removeServer,
     setLoreServersEnabled,
     cloneFromServer,
+    loadBuzzConfig,
+    setBuzzEnabled,
+    addBuzzCommunity,
+    removeBuzzCommunity,
+    runBuzzPreflight,
     fetchAll,
     cleanupMissingRepos,
     shutdown,
@@ -645,8 +652,8 @@ export const useStore = defineStore("repoyeti", () => {
       remoteEditing.value = s.remoteEditing;
       diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
       diffPatchEnabled.value = s.diffPatchEnabled ?? true;
-      syncCheckEnabled.value = s.syncCheck ?? true;
-      syncIntervalSecs.value = s.syncIntervalSecs ?? 120;
+      syncCheckEnabled.value = s.syncCheck ?? false;
+      syncIntervalSecs.value = s.syncIntervalSecs ?? 300;
       keepInSync.value = s.keepInSync ?? false;
       autoCommit.value = s.autoCommit ?? false;
       autoCommitMode.value = s.autoCommitMode ?? "interval";
@@ -678,9 +685,16 @@ export const useStore = defineStore("repoyeti", () => {
   }
 
   // ── live updates (SSE) ──────────────────────────────────────────────────────
+  let closeEventSource: (() => void) | null = null;
+  let stopEventWatches: Array<() => void> = [];
+
   function connect(): void {
+    // AppShell can be remounted during auth/navigation transitions. One Pinia store outlives
+    // those component instances, so connecting twice must not leave duplicate EventSources and
+    // permanent Vue watchers processing every event twice.
+    if (closeEventSource) return;
     void loadCollaborations();
-    const { status, event, data } = useEventSource(
+    const { status, event, data, close } = useEventSource(
       "/api/events",
       [
         "hello",
@@ -713,8 +727,10 @@ export const useStore = defineStore("repoyeti", () => {
       ],
       { autoReconnect: { retries: -1, delay: 2500 } },
     );
-    watch(status, (s) => (connected.value = s === "OPEN"));
-    watch(data, (raw) => {
+    closeEventSource = close;
+    stopEventWatches = [
+      watch(status, (s) => (connected.value = s === "OPEN"), { immediate: true }),
+      watch(data, (raw) => {
       if (!raw || !event.value) return;
       try {
         const payload = JSON.parse(raw);
@@ -906,7 +922,15 @@ export const useStore = defineStore("repoyeti", () => {
       } catch {
         /* ignore malformed frame */
       }
-    });
+      }),
+    ];
+  }
+
+  function disconnect(): void {
+    for (const stop of stopEventWatches.splice(0)) stop();
+    closeEventSource?.();
+    closeEventSource = null;
+    connected.value = false;
   }
 
   return {
@@ -965,6 +989,8 @@ export const useStore = defineStore("repoyeti", () => {
     roots,
     servers,
     loreServersEnabled,
+    buzzEnabled,
+    buzzCommunities,
     fetchingAll,
     loadRoots,
     addScanRoot,
@@ -982,6 +1008,11 @@ export const useStore = defineStore("repoyeti", () => {
     removeServer,
     setLoreServersEnabled,
     cloneFromServer,
+    loadBuzzConfig,
+    setBuzzEnabled,
+    addBuzzCommunity,
+    removeBuzzCommunity,
+    runBuzzPreflight,
     fetchAll,
     cleanupMissingRepos,
     shutdown,
@@ -1154,6 +1185,7 @@ export const useStore = defineStore("repoyeti", () => {
     leaveShare,
     loadAll,
     connect,
+    disconnect,
     doAction,
     commit,
     commitSelected,

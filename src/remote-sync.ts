@@ -30,7 +30,7 @@ import type { RepoStatus } from "./db.ts";
 /** Cadence bounds (seconds): fast enough to be useful, slow enough to be a courteous poll. */
 export const SYNC_INTERVAL_MIN_S = 30;
 export const SYNC_INTERVAL_MAX_S = 3600;
-export const SYNC_INTERVAL_DEFAULT_S = 120;
+export const SYNC_INTERVAL_DEFAULT_S = 300;
 
 /** Clamp a requested cadence into [MIN, MAX]; a non-finite value falls back to the default. */
 export function clampSyncInterval(secs: number): number {
@@ -39,7 +39,9 @@ export function clampSyncInterval(secs: number): number {
 }
 
 // ── runtime state (mirrors cfg.syncCheck / cfg.syncIntervalSecs; set at boot + on the toggle) ──
-let enabled = true; // absent config = on (matches `cfg.syncCheck !== false` in daemon.ts)
+// Network polling spawns Git/transport helpers for every repository with a remote. Keep that
+// expensive behavior opt-in; watchers still provide immediate local state updates.
+let enabled = false;
 // "Keep in sync": after the check, auto fast-forward repos that can safely take new commits.
 // Off by default — auto-pulling mutates the working copy, so it's strictly opt-in.
 let keepInSync = false;

@@ -1205,8 +1205,9 @@ watch(historyActivityScale, () => {
                       :title="statTitle(item.commit!)"
                     >
                       <template v-if="hasStat(item.commit!)">
-                        <span class="text-success">+{{ compactN(item.commit!.stat!.addedLines) }}</span>
-                        <span class="text-destructive">−{{ compactN(item.commit!.stat!.removedLines) }}</span>
+                        <!-- a zero half is noise, not information — drop it rather than print "−0" -->
+                        <span v-if="item.commit!.stat!.addedLines" class="text-success">+{{ compactN(item.commit!.stat!.addedLines) }}</span>
+                        <span v-if="item.commit!.stat!.removedLines" class="text-destructive">−{{ compactN(item.commit!.stat!.removedLines) }}</span>
                         <span class="inline-flex items-center gap-0.5 text-muted-foreground/70">
                           <Files :size="9" />{{ compactN(item.commit!.stat!.filesChanged) }}
                         </span>
@@ -1261,8 +1262,8 @@ watch(historyActivityScale, () => {
                     <!-- no room for a column here, so the totals ride on the meta line instead -->
                     <template v-if="hasStat(item.commit!)">
                       ·
-                      <span class="mono text-success">+{{ compactN(item.commit!.stat!.addedLines) }}</span>
-                      <span class="mono text-destructive">−{{ compactN(item.commit!.stat!.removedLines) }}</span>
+                      <span v-if="item.commit!.stat!.addedLines" class="mono text-success">+{{ compactN(item.commit!.stat!.addedLines) }}</span>
+                      <span v-if="item.commit!.stat!.removedLines" class="mono text-destructive">−{{ compactN(item.commit!.stat!.removedLines) }}</span>
                       <span class="mono inline-flex items-center gap-0.5 text-muted-foreground/70">
                         <Files :size="9" />{{ compactN(item.commit!.stat!.filesChanged) }}
                       </span>

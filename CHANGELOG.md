@@ -4,6 +4,25 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-07-29
+
+### Added
+
+- **Buzz Git compatibility is available as an Advanced experimental integration.** Owners can opt
+  in, save public Buzz community URLs, run non-interactive Git/helper/relay/authentication
+  diagnostics, and clone from Buzz through the existing Git backend without storing a Nostr key.
+  Buzz and Lore now share one clean Experimental servers card with independent support toggles.
+
+### Fixed
+
+- **Large dirty repositories no longer make the daemon consume gigabytes of RAM or flood Windows
+  with Git processes.** Diff parsing and untracked-file reads now have stable native-memory bounds,
+  child output, collaboration/SSE queues, browser caches, and native watchers are byte/count capped;
+  broad scans honor the configured repository budget; ignored temp trees do not retrigger refreshes;
+  and the opt-in periodic all-repo fetch runs as a low-impact serial sweep. Porcelain-v2 status
+  hydration also reuses one ref snapshot, cutting an ordinary refresh from four Git commands to
+  two. Background network polling is now off by default; local watcher updates remain event-driven.
+
 ## [0.16.0] - 2026-07-28
 
 ### Added

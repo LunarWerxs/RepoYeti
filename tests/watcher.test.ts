@@ -99,23 +99,24 @@ test.skipIf(!WORKTREE_WATCH_SUPPORTED)(
       expect(worktreeListener).toBeDefined();
       worktreeListener?.("change", ".git\\index"); // already covered by the required .git watch
       worktreeListener?.("change", "node_modules\\pkg\\index.js"); // gitignored, can't affect status
-      // Give the 500ms worktree debounce a chance to fire if it was (wrongly) armed by either
+      worktreeListener?.("change", ".testtmp\\generated-repo\\objects\\pack"); // test scratch churn
+      // Give the worktree debounce a chance to fire if it was (wrongly) armed by either
       // filtered event above, before asserting neither reached onChange.
-      await Bun.sleep(700);
+      await Bun.sleep(1_700);
       expect(changes).toBe(0);
 
       worktreeListener?.("rename", undefined); // filename unknown — treated conservatively
-      await waitFor(() => changes > 0, 2_000);
+      await waitFor(() => changes > 0, 3_000);
       expect(changes).toBe(1); // a change we can't identify is NOT dropped
 
       worktreeListener?.("change", "src\\app.ts"); // an ordinary working-tree edit
-      await waitFor(() => changes > 1, 2_000);
+      await waitFor(() => changes > 1, 3_000);
       expect(changes).toBe(2);
     } finally {
       watcher.close();
     }
   },
-  6_000,
+  9_000,
 );
 
 test("nested loose tag create, move, and delete each trigger the recursive watcher", async () => {
@@ -248,7 +249,7 @@ test.skipIf(!WORKTREE_WATCH_SUPPORTED)(
 );
 
 test.skipIf(!WORKTREE_WATCH_SUPPORTED)(
-  "after: deleting a file with plain fs (no git command) fires onChange within ~1s",
+  "after: deleting a file with plain fs (no git command) fires after the quiet debounce",
   async () => {
     const dir = await gitRepo();
     const file = join(dir, "plain.txt");
@@ -266,7 +267,7 @@ test.skipIf(!WORKTREE_WATCH_SUPPORTED)(
       await waitFor(() => changes > before, 3_000);
       const elapsedMs = Date.now() - start;
       console.log(`worktree delete -> onChange latency: ${elapsedMs}ms`); // measured, not asserted-away
-      expect(elapsedMs).toBeLessThan(1_000);
+      expect(elapsedMs).toBeLessThan(2_500);
     } finally {
       watcher.close();
     }
@@ -276,7 +277,7 @@ test.skipIf(!WORKTREE_WATCH_SUPPORTED)(
 
 // ── the two sources share ONE debounce timer ──
 // Every interesting git operation touches .git AND rewrites a pile of working-tree files. With a
-// timer per source that is two onChange calls per checkout (one at 250ms, one at 500ms), and
+// timer per source that is two onChange calls per checkout (one at 250ms, another later), and
 // coalescedRefresh only folds the second while the first is still in flight — so the bonus watch
 // would have doubled the cost of every branch switch. Driven through an injected factory so the
 // assertion is about the debounce, not about how many fs events an OS chooses to deliver.
@@ -298,7 +299,7 @@ test("a burst touching both .git and the working tree fires exactly one onChange
     // exactly as a checkout would. The worktree listener needs a non-ignored filename to pass
     // its filter; the .git listeners ignore their arguments entirely.
     for (const fire of listeners) fire("change", "src/app.ts");
-    await Bun.sleep(700); // past BOTH the 40ms .git debounce and the 500ms worktree one
+    await Bun.sleep(1_700); // past BOTH the 40ms .git debounce and the worktree one
     expect(changes).toBe(1);
   } finally {
     watcher.close();
@@ -331,13 +332,15 @@ test.skipIf(!WORKTREE_WATCH_SUPPORTED)(
       fire("change", "node_modules/x/index.js");
       fire("change", "web/node_modules/x/index.js");
       fire("change", "services/api/dist/bundle.js");
+      fire("change", ".testtmp/generated-repo/index");
+      fire("change", "tmp/generated.log");
       fire("change", ".git/index");
-      await Bun.sleep(700);
+      await Bun.sleep(1_700);
       expect(changes).toBe(0);
 
       // A null filename can't be classified, so it is treated conservatively and DOES refresh.
       fire("change", null);
-      await Bun.sleep(700);
+      await Bun.sleep(1_700);
       expect(changes).toBe(1);
     } finally {
       watcher.close();

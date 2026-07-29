@@ -51,6 +51,7 @@ import {
   type RefScope,
 } from "../read/inspect.ts";
 import type { VcsBackend } from "./types.ts";
+import { readTextStreamLimited } from "../process-output.ts";
 
 /** The Lore binary. Overridable for tests / non-PATH installs (e.g. a downloaded release). */
 const LORE_BIN = process.env.LORE_BIN ?? "lore";
@@ -95,14 +96,38 @@ async function runLore(absPath: string, args: string[]): Promise<LoreRun> {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const killer = setTimeout(() => proc.kill(), LORE_TIMEOUT_MS);
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout as ReadableStream<Uint8Array>).text(),
-      new Response(proc.stderr as ReadableStream<Uint8Array>).text(),
-      proc.exited,
-    ]);
-    clearTimeout(killer);
-    return { code, stdout, stderr, spawnError: false };
+    let limited = false;
+    const kill = (): void => {
+      try {
+        proc.kill();
+      } catch {
+        /* already exited */
+      }
+    };
+    const onLimit = (): void => {
+      limited = true;
+      kill();
+    };
+    const killer = setTimeout(kill, LORE_TIMEOUT_MS);
+    try {
+      const [stdout, stderr, code] = await Promise.all([
+        readTextStreamLimited(proc.stdout as ReadableStream<Uint8Array>, 8 * 1024 * 1024, onLimit),
+        readTextStreamLimited(proc.stderr as ReadableStream<Uint8Array>, 1024 * 1024, onLimit),
+        proc.exited,
+      ]);
+      return {
+        code: limited ? -1 : code,
+        stdout: stdout.text,
+        stderr: limited
+          ? `${stderr.text}\nlore output exceeded the daemon limit`.trim()
+          : stderr.text,
+        spawnError: false,
+      };
+    } finally {
+      clearTimeout(killer);
+      kill();
+      await proc.exited.catch(() => undefined);
+    }
   } catch (e) {
     return { code: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e), spawnError: true };
   }

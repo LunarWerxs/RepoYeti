@@ -44,6 +44,7 @@ import { effectiveGuest } from "../../auth.ts";
 const GUEST_AI_WINDOW_MS = 60_000;
 const GUEST_AI_MAX_PER_WINDOW = 10;
 const GUEST_AI_MAX_CONCURRENT = 2;
+const GUEST_AI_USAGE_MAX = 1_000;
 
 interface GuestAiUsage {
   windowStartedAt: number;
@@ -64,6 +65,18 @@ export function register(app: Hono, { cfg }: Deps): void {
   const runtimeFor = (id: AiProviderId): { baseUrl?: string } =>
     id === "compatible" ? { baseUrl: resolveAiBaseUrl(cfg, id) ?? undefined } : {};
   const guestAiUsage = new Map<string, GuestAiUsage>();
+  const pruneGuestAiUsage = (now: number): void => {
+    for (const [id, usage] of guestAiUsage) {
+      if (usage.active === 0 && now - usage.windowStartedAt >= GUEST_AI_WINDOW_MS * 2) {
+        guestAiUsage.delete(id);
+      }
+    }
+    while (guestAiUsage.size >= GUEST_AI_USAGE_MAX) {
+      const idle = [...guestAiUsage].find(([, usage]) => usage.active === 0);
+      if (!idle) break;
+      guestAiUsage.delete(idle[0]);
+    }
+  };
   const guestAiErrorMessage = (code: ApiErrorCode): string => {
     switch (code) {
       case "AI_AUTH_FAILED":
@@ -85,7 +98,11 @@ export function register(app: Hono, { cfg }: Deps): void {
       return jsonError(c, "FORBIDDEN", "AI commit generation is disabled by the owner", 403);
     }
     const now = Date.now();
+    pruneGuestAiUsage(now);
     let usage = guestAiUsage.get(guest.id);
+    if (!usage && guestAiUsage.size >= GUEST_AI_USAGE_MAX) {
+      return jsonError(c, "AI_RATE_LIMITED", "too many guest AI sessions are active; retry shortly");
+    }
     if (!usage || now - usage.windowStartedAt >= GUEST_AI_WINDOW_MS) {
       usage = { windowStartedAt: now, used: 0, active: 0 };
       guestAiUsage.set(guest.id, usage);

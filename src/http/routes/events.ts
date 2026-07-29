@@ -6,15 +6,49 @@ import { addListener, removeListener } from "../../bus.ts";
 import { effectiveGuest } from "../../auth.ts";
 import { guestEventData } from "../../share/events.ts";
 
-const MAX_SSE_QUEUE = 500;
+export const MAX_SSE_QUEUE = 500;
+export const MAX_SSE_QUEUE_BYTES = 2 * 1024 * 1024;
+
+interface QueuedSseEvent {
+  event: string;
+  data: string;
+}
+
+/** Per-client queue bounded by both event count and retained UTF-8 bytes. */
+export class BoundedSseQueue {
+  readonly items: QueuedSseEvent[] = [];
+  bytes = 0;
+
+  push(message: QueuedSseEvent): boolean {
+    const bytes = Buffer.byteLength(message.event) + Buffer.byteLength(message.data);
+    // One oversized state snapshot cannot be made safe by evicting smaller messages. Tell the
+    // caller to close this slow stream; EventSource will reconnect without retaining the payload.
+    if (bytes > MAX_SSE_QUEUE_BYTES) return false;
+    this.items.push(message);
+    this.bytes += bytes;
+    while (this.items.length > MAX_SSE_QUEUE || this.bytes > MAX_SSE_QUEUE_BYTES) {
+      const removed = this.items.shift();
+      if (!removed) break;
+      this.bytes -= Buffer.byteLength(removed.event) + Buffer.byteLength(removed.data);
+    }
+    return true;
+  }
+
+  drain(): QueuedSseEvent[] {
+    const batch = this.items.splice(0);
+    this.bytes = 0;
+    return batch;
+  }
+}
 
 export function register(app: Hono, { cfg }: Deps): void {
   // ── SSE stream ─────────────────────────────────────────────────────────────
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
-      const queue: Array<{ event: string; data: string }> = [];
+      const queue = new BoundedSseQueue();
       let wake: (() => void) | null = null;
       let aborted = false;
+      let overloaded = false;
 
       // Resolved ONCE, at connect: this is a long-lived stream, so re-reading the cookie per event
       // would be pointless (the cookie can't change mid-stream). Revocation still bites — every
@@ -30,11 +64,10 @@ export function register(app: Hono, { cfg }: Deps): void {
         if (share) {
           const projected = guestEventData(share, event, payload);
           if (projected === null) return;
-          queue.push(projected);
+          if (!queue.push(projected)) overloaded = true;
         } else {
-          queue.push({ event, data });
+          if (!queue.push({ event, data })) overloaded = true;
         }
-        if (queue.length > MAX_SSE_QUEUE) queue.splice(0, queue.length - MAX_SSE_QUEUE);
         wake?.();
         wake = null;
       };
@@ -46,28 +79,35 @@ export function register(app: Hono, { cfg }: Deps): void {
         wake = null;
       });
 
-      await stream.writeSSE({ event: "hello", data: JSON.stringify({ ok: true, version: VERSION }) });
+      try {
+        await stream.writeSSE({ event: "hello", data: JSON.stringify({ ok: true, version: VERSION }) });
 
-      while (!aborted) {
-        if (queue.length === 0) {
-          const { promise, resolve } = Promise.withResolvers<void>();
-          wake = resolve;
-          const timeout = setTimeout(resolve, 25_000);
-          await promise;
-          clearTimeout(timeout);
-          if (aborted) break;
-          if (queue.length === 0) {
-            await stream.writeSSE({ event: "ping", data: String(Date.now()) });
-            continue;
+        while (!aborted && !overloaded) {
+          if (queue.items.length === 0) {
+            const { promise, resolve } = Promise.withResolvers<void>();
+            wake = resolve;
+            const timeout = setTimeout(resolve, 25_000);
+            await promise;
+            clearTimeout(timeout);
+            if (aborted || overloaded) break;
+            if (queue.items.length === 0) {
+              await stream.writeSSE({ event: "ping", data: String(Date.now()) });
+              continue;
+            }
+          }
+          while (queue.items.length > 0 && !aborted && !overloaded) {
+            const batch = queue.drain();
+            for (const m of batch) {
+              if (aborted || overloaded) break;
+              await stream.writeSSE({ event: m.event, data: m.data });
+            }
           }
         }
-        while (queue.length > 0 && !aborted) {
-          const batch = queue.splice(0);
-          for (const m of batch) {
-            if (aborted) break;
-            await stream.writeSSE({ event: m.event, data: m.data });
-          }
-        }
+      } finally {
+        // Also runs on write errors and byte-budget overload, not just a browser abort.
+        removeListener(listener);
+        wake?.();
+        wake = null;
       }
     }),
   );

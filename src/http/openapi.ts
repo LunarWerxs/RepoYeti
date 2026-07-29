@@ -33,6 +33,9 @@ import {
   RootPathSchema,
   ServerAddSchema,
   ServerCloneSchema,
+  BuzzSettingsSchema,
+  BuzzCommunitySchema,
+  BuzzPreflightSchema,
   IdentityCreateSchema,
   IdentityUpdateSchema,
   AssignIdentitySchema,
@@ -219,6 +222,13 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/servers": { summary: "Register a Lore server (URL + display name).", body: ServerAddSchema, tags: ["servers"] },
   "DELETE /api/servers/:id": { summary: "Remove a registered Lore server.", tags: ["servers"] },
   "POST /api/servers/clone": { summary: "Clone a Lore repo from a server into a folder under a scan root.", body: ServerCloneSchema, tags: ["servers"] },
+
+  // ── Buzz Git compatibility (experimental; owner-only) ────────────────────────
+  "GET /api/buzz": { summary: "Read the non-secret Buzz configuration.", tags: ["buzz"] },
+  "PUT /api/buzz": { summary: "Enable or disable experimental Buzz support.", body: BuzzSettingsSchema, tags: ["buzz"] },
+  "POST /api/buzz/communities": { summary: "Save public metadata for a Buzz community.", body: BuzzCommunitySchema, tags: ["buzz"] },
+  "DELETE /api/buzz/communities/:id": { summary: "Remove a saved Buzz community.", tags: ["buzz"] },
+  "POST /api/buzz/preflight": { summary: "Run daemon-safe Git, helper, relay, and authentication checks.", body: BuzzPreflightSchema, tags: ["buzz"] },
 
   // ── identities ─────────────────────────────────────────────────────────────────
   "GET /api/identities": { summary: "List commit identities.", tags: ["identities"] },

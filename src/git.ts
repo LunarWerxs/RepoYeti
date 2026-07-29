@@ -19,6 +19,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { Identity } from "./db.ts";
+import { readTextStreamLimited } from "./process-output.ts";
 
 export function safeGitEnv(): Record<string, string> {
   const env: Record<string, string> = {};
@@ -103,6 +104,8 @@ export async function gitRawWithInput(
   input: string,
   blockMs = 30_000,
 ): Promise<string> {
+  const stdoutMax = 8 * 1024 * 1024;
+  const stderrMax = 1024 * 1024;
   const proc = Bun.spawn(["git", ...args], {
     cwd: absPath,
     env: safeGitEnv(),
@@ -118,21 +121,30 @@ export async function gitRawWithInput(
     }
   };
   const timer = setTimeout(kill, blockMs);
+  let outputLimited = false;
+  const limit = (): void => {
+    outputLimited = true;
+    kill();
+  };
   try {
     proc.stdin.write(input);
     proc.stdin.end();
     const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
+      readTextStreamLimited(proc.stdout, stdoutMax, limit),
+      readTextStreamLimited(proc.stderr, stderrMax, limit),
       proc.exited,
     ]);
-    if (code !== 0) {
-      throw new Error(stderr.trim() || `git ${args[0] ?? "command"} failed with exit code ${code}`);
+    if (outputLimited || stdout.truncated || stderr.truncated) {
+      throw new Error(`git ${args[0] ?? "command"} output exceeded the daemon limit`);
     }
-    return stdout;
+    if (code !== 0) {
+      throw new Error(stderr.text.trim() || `git ${args[0] ?? "command"} failed with exit code ${code}`);
+    }
+    return stdout.text;
   } finally {
     clearTimeout(timer);
     kill();
+    await proc.exited.catch(() => undefined);
   }
 }
 

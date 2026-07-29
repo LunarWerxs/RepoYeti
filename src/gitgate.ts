@@ -9,9 +9,11 @@
  *   • readGate — local reads: `git status`, changed-files, diff collection.
  *   • netGate  — remote network ops: fetch / pull / push.
  *
- * Gates are taken only around a SINGLE git invocation and released immediately, and a
- * remote op's preflight read finishes (releasing readGate) before it takes netGate — so
- * the two pools are never held nested and can't deadlock regardless of pool size.
+ * Local read transactions may need a few sequential Git invocations, but they hold one read
+ * slot for the whole transaction. Keeping those inner calls sequential is important on Windows:
+ * one logical Git command commonly appears as a wrapper git.exe + worker git.exe + conhost.exe,
+ * so parallelising four commands inside four "bounded" repos still produced dozens of processes.
+ * A remote op's preflight read finishes before it takes netGate, so the pools are never nested.
  */
 export interface Semaphore {
   /** Run `fn` once a slot is free; releases the slot when it settles (even on throw). */
@@ -75,7 +77,11 @@ const envConcurrency = (name: string, def: number): number => {
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : def;
 };
 
-/** Local git reads (status / changed-files / diff). Override: REPOYETI_GIT_READ_CONCURRENCY. */
-export const readGate = createSemaphore(envConcurrency("REPOYETI_GIT_READ_CONCURRENCY", 8));
+/**
+ * Local git reads (status / changed-files / diff). Two keeps one slow disk from monopolising the
+ * daemon while limiting the visible Git-for-Windows process tree to a small, predictable pool.
+ * Override: REPOYETI_GIT_READ_CONCURRENCY.
+ */
+export const readGate = createSemaphore(envConcurrency("REPOYETI_GIT_READ_CONCURRENCY", 2));
 /** Remote git network ops (fetch / pull / push). Override: REPOYETI_GIT_NET_CONCURRENCY. */
-export const netGate = createSemaphore(envConcurrency("REPOYETI_GIT_NET_CONCURRENCY", 4));
+export const netGate = createSemaphore(envConcurrency("REPOYETI_GIT_NET_CONCURRENCY", 2));

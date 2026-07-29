@@ -54,7 +54,7 @@ describe("ChangesTree conflict state", () => {
 
 describe("ChangesTree delete actions", () => {
   it("bubbles deleteFile separately from discard", async () => {
-    const w = mountTree([{ name: "a.ts", path: "a.ts", type: "file", status: "U", staged: false }]);
+    const w = mountTree([{ name: "a.ts", path: "a.ts", type: "file", status: "N", staged: false }]);
     // The context menu mounts lazily on right-click, so drive the emit directly: the contract that
     // matters to RepoCardChanges is that delete and discard are two different events.
     w.vm.$emit("deleteFile", "a.ts");

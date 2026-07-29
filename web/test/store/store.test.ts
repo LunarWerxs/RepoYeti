@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { useStore } from "@/store";
 import { api } from "@/api";
-import { MAX_RETAINED_LOG_COMMITS } from "@/store/git-ops";
+import {
+  MAX_RETAINED_GIT_REPO_CACHES,
+  MAX_RETAINED_LOG_COMMITS,
+} from "@/store/git-ops";
+import { MAX_RETAINED_CHANGE_REPOS } from "@/store/repo";
 import type { ChangedFile, LogEntry, LogResult } from "@/types";
 
 // Minimal Response-like for the api.ts `req()` helper (it reads .ok/.status and awaits .text()).
@@ -55,6 +59,29 @@ describe("store (smoke)", () => {
     store.repos.push({ id: "repo-2" } as never);
     await store.loadChanges("repo-2");
     expect(store.changesByRepo["repo-2"]).toEqual([]);
+  });
+
+  it("bounds heavy per-repo caches even when many live cards have been opened", async () => {
+    vi.spyOn(api, "changes").mockImplementation(async (id) => ({
+      files: [{ path: `${id}.txt`, status: "M", staged: false }],
+    }));
+    vi.spyOn(api, "log").mockImplementation(async (id) => logRes([entry(String(id))]));
+    const store = useStore();
+    const count = Math.max(MAX_RETAINED_CHANGE_REPOS, MAX_RETAINED_GIT_REPO_CACHES) + 3;
+    for (let i = 0; i < count; i++) {
+      store.repos.push({ id: `cache-${i}` } as never);
+    }
+    for (let i = 0; i < count; i++) {
+      await store.loadChanges(`cache-${i}`);
+      await store.loadLog(`cache-${i}`);
+    }
+
+    expect(Object.keys(store.changesByRepo)).toHaveLength(MAX_RETAINED_CHANGE_REPOS);
+    expect(Object.keys(store.logByRepo)).toHaveLength(MAX_RETAINED_GIT_REPO_CACHES);
+    expect(store.changesByRepo["cache-0"]).toBeUndefined();
+    expect(store.logByRepo["cache-0"]).toBeUndefined();
+    expect(store.changesByRepo[`cache-${count - 1}`]).toBeDefined();
+    expect(store.logByRepo[`cache-${count - 1}`]).toBeDefined();
   });
 
   it("URL-encodes exact author identities in the History log query", async () => {

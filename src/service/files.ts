@@ -10,6 +10,7 @@ import { pathWithin, normalizeRelPath } from "../paths.ts";
 import { getRepo } from "../db.ts";
 import { gitFor, safeGitEnv } from "../git.ts";
 import { backendFor } from "../vcs/index.ts";
+import { readBytesStreamLimited, readTextStreamLimited } from "../process-output.ts";
 
 /** A single file's contents for the read-only source-control viewer. */
 export interface FileContentResult {
@@ -339,17 +340,39 @@ async function readPreviewBlobAtRev(absPath: string, rev: string, clean: string)
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [buffer, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).arrayBuffer(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (exitCode !== 0) throw new Error(stderr.trim() || "could not read preview blob");
-    const bytes = new Uint8Array(buffer);
-    if (bytes.length > MAX_BINARY_PREVIEW_BYTES) {
-      throw new RangeError(`file exceeds the ${MAX_BINARY_PREVIEW_BYTES}-byte preview limit`);
+    let limited = false;
+    const kill = (): void => {
+      try {
+        proc.kill();
+      } catch {
+        /* already exited */
+      }
+    };
+    const onLimit = (): void => {
+      limited = true;
+      kill();
+    };
+    const timer = setTimeout(kill, 30_000);
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        readBytesStreamLimited(proc.stdout, MAX_BINARY_PREVIEW_BYTES + 1, onLimit),
+        readTextStreamLimited(proc.stderr, 256 * 1024, onLimit),
+        proc.exited,
+      ]);
+      if (limited || stdout.truncated || stderr.truncated) {
+        throw new RangeError(`file exceeds the ${MAX_BINARY_PREVIEW_BYTES}-byte preview limit`);
+      }
+      if (exitCode !== 0) throw new Error(stderr.text.trim() || "could not read preview blob");
+      const bytes = new Uint8Array(stdout.bytes);
+      if (bytes.length > MAX_BINARY_PREVIEW_BYTES) {
+        throw new RangeError(`file exceeds the ${MAX_BINARY_PREVIEW_BYTES}-byte preview limit`);
+      }
+      return { bytes, size: bytes.length };
+    } finally {
+      clearTimeout(timer);
+      kill();
+      await proc.exited.catch(() => undefined);
     }
-    return { bytes, size: bytes.length };
   } catch (e) {
     if (e instanceof RangeError) throw e;
     return null;

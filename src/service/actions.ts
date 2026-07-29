@@ -24,7 +24,8 @@ import { resolveRepoPath } from "./files.ts";
 import { normalizeRelPath } from "../paths.ts";
 import { collaborationFingerprint } from "../collaboration.ts";
 
-export const fetchRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.fetch(p, idn, auth), true, true);
+export const fetchRepo = (id: string): Promise<ActionOutcome> =>
+  runAction(id, (b, p, idn, auth) => b.fetch(p, idn, auth), true, true, undefined, true);
 export const pullRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.pull(p, idn, auth), true, true);
 export const pushRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.push(p, idn, auth), false, true);
 export const commitRepo = (
@@ -105,8 +106,11 @@ export interface FetchAllResult {
 }
 
 /**
- * Fetch every repo that has a remote. The small outer worker pool bounds pending async state;
- * each worker still goes through `fetchRepo` → the per-repo queue and `netGate` (default 4).
+ * Fetch every repo that has a remote, serially. `netGate` bounds the fetch command itself, but
+ * credential/account resolution happens before that gate and can run its own Git probes. An outer
+ * pool of eight therefore still produced a large process burst every background sync round. One
+ * worker makes the daemon-wide sweep low-impact; a user-initiated single-repo operation can still
+ * use the other netGate slot between repositories.
  * Repos with no remote are skipped (not failures).
  */
 export async function fetchAllRepos(): Promise<FetchAllResult> {
@@ -114,7 +118,7 @@ export async function fetchAllRepos(): Promise<FetchAllResult> {
   const failedByIndex = new Array<FetchAllResult["failed"][number] | undefined>(repos.length);
   let ok = 0;
   let next = 0;
-  const workers = Math.min(8, repos.length);
+  const workers = Math.min(1, repos.length);
   await Promise.all(
     Array.from({ length: workers }, async () => {
       while (true) {

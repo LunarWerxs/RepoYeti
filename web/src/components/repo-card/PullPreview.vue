@@ -298,9 +298,13 @@ function pullFromMenu(): void {
             >
               <span class="mono shrink-0 text-[11px] text-info/80">{{ c.shortHash }}</span>
               <span class="min-w-0 flex-1 truncate" :title="c.subject">{{ c.subject }}</span>
-              <span v-if="c.stat" class="mono shrink-0 text-[10.5px]">
-                <span class="text-success">+{{ c.stat.addedLines }}</span>
-                <span class="ml-1 text-destructive">−{{ c.stat.removedLines }}</span>
+              <!-- a zero half is noise, not information — drop it rather than print "−0" -->
+              <span
+                v-if="c.stat && (c.stat.addedLines || c.stat.removedLines)"
+                class="mono shrink-0 text-[10.5px]"
+              >
+                <span v-if="c.stat.addedLines" class="text-success">+{{ c.stat.addedLines }}</span>
+                <span v-if="c.stat.removedLines" class="ml-1 text-destructive">−{{ c.stat.removedLines }}</span>
               </span>
               <span class="shrink-0 text-[10.5px] whitespace-nowrap text-muted-foreground">{{ fromNow(c.date) }}</span>
             </div>
@@ -315,8 +319,8 @@ function pullFromMenu(): void {
           <div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             {{ $t("repo.preview.filesHeading", { count: result!.stat.filesChanged }, result!.stat.filesChanged) }}
             <span class="mono ml-auto normal-case">
-              <span class="text-success">+{{ result!.stat.addedLines }}</span>
-              <span class="ml-1 text-destructive">−{{ result!.stat.removedLines }}</span>
+              <span v-if="result!.stat.addedLines" class="text-success">+{{ result!.stat.addedLines }}</span>
+              <span v-if="result!.stat.removedLines" class="ml-1 text-destructive">−{{ result!.stat.removedLines }}</span>
             </span>
           </div>
           <div class="scroll-slim max-h-56 overflow-y-auto rounded-md border border-border p-1">

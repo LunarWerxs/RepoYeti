@@ -41,7 +41,7 @@ const { enabled: tooltipsEnabled } = useTooltipConfig();
 function statusVariant(letter: string | undefined): "success" | "warning" | "destructive" | "info" | "secondary" {
   switch (letter) {
     case "A":
-    case "U":
+    case "N":
       return "success";
     case "D":
       return "destructive";

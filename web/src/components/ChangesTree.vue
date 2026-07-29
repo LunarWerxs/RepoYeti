@@ -156,6 +156,32 @@ function conflictLabel(n: TreeNode): string {
   }
 }
 
+/**
+ * Plain-English name for the one-letter status badge. A bare letter is only legible if you
+ * already know the scheme — "N" vs "M" gives no hint that one means "git has never seen this
+ * file" and the other "this file changed" — so every badge carries its own hover label.
+ * Literal t() keys for the same reason conflictLabel uses them (see above).
+ */
+function statusLabel(n: TreeNode): string {
+  if (n.resolved || n.conflict) return conflictLabel(n);
+  switch (n.status) {
+    case "N":
+      return t("repo.changes.statusNew");
+    case "M":
+      return t("repo.changes.statusModified");
+    case "A":
+      return t("repo.changes.statusAdded");
+    case "D":
+      return t("repo.changes.statusDeleted");
+    case "R":
+      return t("repo.changes.statusRenamed");
+    case "C":
+      return t("repo.changes.statusConflicted");
+    default:
+      return "";
+  }
+}
+
 /** The row's hover text: its path, plus the conflict state when there is one. */
 function rowTitle(n: TreeNode): string {
   const label = conflictLabel(n);
@@ -570,6 +596,7 @@ onBeforeUnmount(() => {
             <span
               class="pl-1 text-[11px] font-bold"
               :style="{ color: n.resolved ? RESOLVED_COLOR : statusColor(n.status) }"
+              :title="statusLabel(n)"
               >{{ n.status }}</span
             >
           </span>

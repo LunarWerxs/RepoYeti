@@ -25,4 +25,28 @@ describe("DiffStat.vue", () => {
     expect(text).toContain("+3");
     expect(text).not.toContain("40"); // chars suppressed
   });
+
+  it("drops a zero half instead of printing −0", () => {
+    // A pure append: nothing removed on either axis. Intra-line char counting makes this the
+    // common case, and a file list full of "−0" reads like a list of errors.
+    const append = { addedLines: 9, removedLines: 0, addedChars: 120, removedChars: 0 };
+    const text = mount(DiffStat, { props: { stat: append } }).text();
+    expect(text).toContain("+9");
+    expect(text).toContain("+120");
+    expect(text).not.toContain("−");
+  });
+
+  it("drops a whole pair when both its halves are zero", () => {
+    // Whitespace-only reflow: lines move, characters don't. The char pair (and its glyph) goes.
+    const reflow = { addedLines: 2, removedLines: 2, addedChars: 0, removedChars: 0 };
+    const wrapper = mount(DiffStat, { props: { stat: reflow } });
+    expect(wrapper.text()).toBe("+2−2");
+    // Both glyphs are gone too — they only exist to tell two rendered pairs apart.
+    expect(wrapper.findAll("svg")).toHaveLength(0);
+  });
+
+  it("renders nothing at all when every count is zero", () => {
+    const empty = { addedLines: 0, removedLines: 0, addedChars: 0, removedChars: 0 };
+    expect(mount(DiffStat, { props: { stat: empty } }).find("span").exists()).toBe(false);
+  });
 });

@@ -636,6 +636,38 @@ export interface LoreServer {
   url: string;
 }
 
+/** Public metadata for one saved Buzz community (mirrors src/config.ts). */
+export interface BuzzCommunity {
+  id: string;
+  name: string;
+  url: string;
+  /** Optional real repository URL used by the non-interactive auth preflight. */
+  gitUrl?: string;
+}
+
+export interface BuzzConfig {
+  enabled: boolean;
+  communities: BuzzCommunity[];
+}
+
+export type BuzzCheckStatus = "pass" | "fail" | "skip";
+export interface BuzzCheck {
+  status: BuzzCheckStatus;
+  code: string;
+  message: string;
+  version?: string;
+}
+
+export interface BuzzPreflight {
+  ok: boolean;
+  checkedAt: string;
+  git: BuzzCheck;
+  credentialHelper: BuzzCheck;
+  useHttpPath: BuzzCheck;
+  relay: BuzzCheck;
+  authentication: BuzzCheck;
+}
+
 export interface AiModel {
   id: string;
   label: string;

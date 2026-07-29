@@ -18,6 +18,7 @@
  * why per-repo sync could not be built without it, and what is done to keep the blast radius small.
  */
 import { createSemaphore } from "./gitgate.ts";
+import { readTextStreamLimited } from "./process-output.ts";
 
 interface RunResult {
   /** The binary was found and launched (false ⇒ e.g. `gh` not on PATH). */
@@ -50,20 +51,38 @@ async function run(
         stderr: "pipe",
         ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
       });
-      const timer = setTimeout(() => {
+      let limited = false;
+      const kill = (): void => {
         try {
           proc.kill();
         } catch {
           /* already exited */
         }
-      }, timeoutMs);
-      const [stdout, stderr, code] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ]);
-      clearTimeout(timer);
-      return { spawned: true, ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() };
+      };
+      const timer = setTimeout(kill, timeoutMs);
+      try {
+        const onLimit = (): void => {
+          limited = true;
+          kill();
+        };
+        const [stdout, stderr, code] = await Promise.all([
+          readTextStreamLimited(proc.stdout, 4 * 1024 * 1024, onLimit),
+          readTextStreamLimited(proc.stderr, 1024 * 1024, onLimit),
+          proc.exited,
+        ]);
+        return {
+          spawned: true,
+          ok: code === 0 && !limited,
+          stdout: stdout.text.trim(),
+          stderr: limited
+            ? `${stderr.text}\ncommand output exceeded the daemon limit`.trim()
+            : stderr.text.trim(),
+        };
+      } finally {
+        clearTimeout(timer);
+        kill();
+        await proc.exited.catch(() => undefined);
+      }
     } catch {
       // Bun.spawn throws synchronously when the executable can't be found.
       return { spawned: false, ok: false, stdout: "", stderr: "" };

@@ -40,6 +40,39 @@ describe("store daemon_status reconciliation", () => {
     vi.restoreAllMocks();
   });
 
+  it("keeps one SSE connection and releases its watches on disconnect", async () => {
+    const status = ref<"OPEN" | "CONNECTING" | "CLOSED">("CLOSED");
+    const event = ref<string | null>(null);
+    const data = ref<string | null>(null);
+    const close = vi.fn();
+    vi.mocked(useEventSource).mockReturnValue({
+      status,
+      event,
+      data,
+      error: ref(null),
+      close,
+      open: vi.fn(),
+    });
+    vi.spyOn(api, "collaborationSnapshots").mockResolvedValue({ snapshots: [] });
+
+    const store = useStore();
+    store.connect();
+    store.connect();
+    expect(useEventSource).toHaveBeenCalledOnce();
+
+    status.value = "OPEN";
+    await nextTick();
+    expect(store.connected).toBe(true);
+
+    store.disconnect();
+    expect(close).toHaveBeenCalledOnce();
+    expect(store.connected).toBe(false);
+
+    status.value = "OPEN";
+    await nextTick();
+    expect(store.connected).toBe(false);
+  });
+
   it("keeps a healthy tunnel URL when a later relay-only patch reports an error", async () => {
     const status = ref<"OPEN" | "CONNECTING" | "CLOSED">("CLOSED");
     const event = ref<string | null>(null);

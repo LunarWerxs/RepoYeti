@@ -55,6 +55,7 @@ import * as repos from "./routes/repos.ts";
 import * as roots from "./routes/roots.ts";
 import * as scan from "./routes/scan.ts";
 import * as servers from "./routes/servers.ts";
+import * as buzz from "./routes/buzz.ts";
 import * as identities from "./routes/identities.ts";
 import * as identityRules from "./routes/identity-rules.ts";
 import * as accounts from "./routes/accounts.ts";
@@ -89,10 +90,10 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   if (cfg.diffPatchBytes != null) setDiffPatchBytes(cfg.diffPatchBytes);
   // Sync the compact-diff on/off flag (absent = on; false = always side-by-side).
   if (typeof cfg.diffPatchEnabled === "boolean") setDiffPatchEnabled(cfg.diffPatchEnabled);
-  // Sync the background remote-sync check (absent = on) + its cadence (absent = built-in default).
+  // Sync the background remote-sync check (opt-in) + its cadence (absent = built-in default).
   // The timer itself only starts once the daemon has booted (startRemoteSync in index.ts), so
   // this just primes the runtime flags — createApp() in tests never spins a real timer.
-  setSyncCheckEnabled(cfg.syncCheck !== false);
+  setSyncCheckEnabled(cfg.syncCheck === true);
   setSyncIntervalSecs(cfg.syncIntervalSecs ?? SYNC_INTERVAL_DEFAULT_S);
   // "Keep in sync" (auto fast-forward) is opt-in → absent/false = off.
   setKeepInSync(cfg.keepInSync === true);
@@ -157,6 +158,7 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   roots.register(app, deps);
   scan.register(app, deps);
   servers.register(app, deps);
+  buzz.register(app, deps);
   identities.register(app, deps);
   identityRules.register(app, deps);
   accounts.register(app, deps);

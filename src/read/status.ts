@@ -1,11 +1,11 @@
 /**
  * Read a repo's current state via the system git binary (simple-git).
  *
- * One `git status` call gives branch, ahead/behind, and the dirty file set; a
- * `rev-parse` records HEAD's exact object id and the remote URL is resolved (usually
- * from the config-keyed cache). A 30s block timeout guards against a hung child
- * (e.g. an SSH key prompt). `behind` reflects the last fetch only — we never fetch
- * here, so a watch event never touches the network.
+ * One porcelain-v2 `git status` call gives branch, HEAD, upstream, ahead/behind,
+ * and the dirty file set. The existing `for-each-ref` history-invalidation pass
+ * also resolves the upstream object id, so an ordinary refresh needs two Git
+ * processes instead of four. The remote URL is resolved from a config-keyed cache.
+ * `behind` reflects the last fetch only — a watch event never touches the network.
  */
 import { stat, readFile } from "node:fs/promises";
 import { join, dirname, resolve, isAbsolute } from "node:path";
@@ -71,16 +71,11 @@ async function resolveRemote(git: SimpleGit, absPath: string): Promise<string | 
   return remote;
 }
 
-/** Full ref identity for invalidation. An unborn/missing ref has no object yet. */
-async function resolveOid(git: SimpleGit, ref: string): Promise<string | null> {
-  try {
-    const oid = (await git.revparse(["--verify", ref])).trim();
-    // Git repositories may use SHA-1 (40 hex) or SHA-256 (64 hex). Refuse any diagnostic
-    // text rather than letting an unexpected command response become an unstable signal.
-    return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(oid) ? oid.toLowerCase() : null;
-  } catch {
-    return null;
-  }
+const OID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+
+interface RefSnapshot {
+  hash: string;
+  oids: Map<string, string>;
 }
 
 /**
@@ -91,7 +86,7 @@ async function resolveOid(git: SimpleGit, ref: string): Promise<string | null> {
  * this value is itself the cache-invalidation key, so caching it behind filesystem metadata
  * would reintroduce the stale-ref edge case it exists to prevent.
  */
-export async function resolveHistoryRefsHash(git: SimpleGit): Promise<string> {
+async function resolveHistoryRefs(git: SimpleGit): Promise<RefSnapshot> {
   const refs = await git.raw([
     "for-each-ref",
     "--sort=refname",
@@ -102,7 +97,17 @@ export async function resolveHistoryRefsHash(git: SimpleGit): Promise<string> {
     "refs/remotes",
     "refs/tags",
   ]);
-  return createHash("sha256").update(refs, "utf8").digest("hex");
+  const oids = new Map<string, string>();
+  for (const record of refs.split("\n")) {
+    if (!record) continue;
+    const [refname, oid] = record.split("\0");
+    if (refname && oid && OID_RE.test(oid)) oids.set(refname, oid.toLowerCase());
+  }
+  return { hash: createHash("sha256").update(refs, "utf8").digest("hex"), oids };
+}
+
+export async function resolveHistoryRefsHash(git: SimpleGit): Promise<string> {
+  return (await resolveHistoryRefs(git)).hash;
 }
 
 interface WorktreeStatusPath {
@@ -110,6 +115,114 @@ interface WorktreeStatusPath {
   from?: string;
   index: string;
   working_dir: string;
+}
+
+interface PorcelainStatus {
+  branch: string | null;
+  detached: boolean;
+  headOid: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  files: WorktreeStatusPath[];
+}
+
+/**
+ * Parse `git status --porcelain=v2 --branch -z`.
+ *
+ * `-z` makes every record and path unambiguous even when a filename contains a
+ * newline. Type-2 rename records consume the following NUL-delimited source path.
+ * Only fields used by RepoYeti are retained; object ids for the staged-state hash
+ * still come from the dedicated, conditional raw-diff call below.
+ */
+export function parsePorcelainV2(raw: string): PorcelainStatus {
+  let branch: string | null = null;
+  let detached = false;
+  let headOid: string | null = null;
+  let upstream: string | null = null;
+  let ahead = 0;
+  let behind = 0;
+  const files: WorktreeStatusPath[] = [];
+  const records = raw.split("\0");
+
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i] ?? "";
+    if (!record) continue;
+    if (record.startsWith("# branch.oid ")) {
+      const oid = record.slice(13).trim();
+      headOid = OID_RE.test(oid) ? oid.toLowerCase() : null;
+      continue;
+    }
+    if (record.startsWith("# branch.head ")) {
+      const head = record.slice(14);
+      detached = head === "(detached)";
+      branch = detached ? null : head;
+      continue;
+    }
+    if (record.startsWith("# branch.upstream ")) {
+      upstream = record.slice(18);
+      continue;
+    }
+    if (record.startsWith("# branch.ab ")) {
+      const match = /^\+(\d+) -(\d+)$/.exec(record.slice(12));
+      if (match) {
+        ahead = Number(match[1]);
+        behind = Number(match[2]);
+      }
+      continue;
+    }
+
+    const type = record[0];
+    if (type === "?" && record[1] === " ") {
+      files.push({ path: record.slice(2), index: "?", working_dir: "?" });
+      continue;
+    }
+    if (type !== "1" && type !== "2" && type !== "u") continue;
+
+    // Ordinary records have eight fixed fields before path, rename records nine,
+    // and unmerged records ten. Limit the split so spaces remain part of the path.
+    const fixedFields = type === "1" ? 8 : type === "2" ? 9 : 10;
+    let cursor = 0;
+    const fields: string[] = [];
+    for (let field = 0; field < fixedFields; field++) {
+      const separator = record.indexOf(" ", cursor);
+      if (separator === -1) break;
+      fields.push(record.slice(cursor, separator));
+      cursor = separator + 1;
+    }
+    if (fields.length !== fixedFields) continue;
+    const xy = fields[1] ?? "..";
+    const index = xy[0] === "." ? " " : (xy[0] ?? " ");
+    const workingDir = xy[1] === "." ? " " : (xy[1] ?? " ");
+    const path = record.slice(cursor);
+    const entry: WorktreeStatusPath = {
+      path,
+      index,
+      working_dir: workingDir,
+    };
+    if (type === "2") entry.from = records[++i] ?? "";
+    files.push(entry);
+  }
+
+  return { branch, detached, headOid, upstream, ahead, behind, files };
+}
+
+async function readPorcelainStatus(git: SimpleGit): Promise<PorcelainStatus> {
+  return parsePorcelainV2(
+    await git.raw(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]),
+  );
+}
+
+function upstreamOid(upstream: string | null, refs: Map<string, string>): string | null {
+  if (!upstream) return null;
+  const candidates = upstream.startsWith("refs/")
+    ? [upstream]
+    : [`refs/remotes/${upstream}`, `refs/heads/${upstream}`];
+  for (const ref of candidates) {
+    const oid = refs.get(ref);
+    if (oid) return oid;
+  }
+  return null;
 }
 
 /**
@@ -328,7 +441,9 @@ export async function readChanges(absPath: string, withStats = false): Promise<C
       const untracked = x === "?" || y === "?";
       const conflicted = isConflictPair(x, y);
       let letter: string;
-      if (untracked) letter = "U";
+      // "N" for a file git has never seen, not VS Code's "U": next to "M" for modified, a "U"
+      // badge reads as "updated" (the owner's words) and says the opposite of what it means.
+      if (untracked) letter = "N";
       else if (conflicted) letter = "C";
       else if (renameFrom.has(f.path)) letter = "R";
       else letter = (y !== " " ? y : x) || "M";
@@ -347,7 +462,7 @@ export async function readChanges(absPath: string, withStats = false): Promise<C
       };
     });
     if (withStats && files.length > 0) {
-      const untracked = files.filter((f) => f.status === "U").map((f) => f.path);
+      const untracked = files.filter((f) => f.status === "N").map((f) => f.path);
       const { perFile } = await computeDiffStats(absPath, untracked);
       for (const f of files) {
         const s = perFile.get(f.path);
@@ -371,16 +486,13 @@ export async function readStatus(absPath: string, withDiff = false): Promise<Rep
     // boot hydration and SSE bursts can't fan out into hundreds of concurrent git children.
     return await readGate.run(async () => {
       const git = gitFor(absPath);
-      const status = await git.status();
-      const [remote, headOid, upstreamOid, historyRefsHash] = await Promise.all([
-        resolveRemote(git, absPath),
-        resolveOid(git, "HEAD"),
-        resolveOid(git, "@{u}"),
-        resolveHistoryRefsHash(git),
-      ]);
+      const status = await readPorcelainStatus(git);
+      // Keep the commands inside one read-gate transaction sequential. On Git for Windows each
+      // logical command can occupy a wrapper process, a worker process, and a conhost; the old
+      // Promise.all multiplied the repo-level gate by four and routinely showed 20-40 children.
+      const remote = await resolveRemote(git, absPath);
+      const refs = await resolveHistoryRefs(git);
       const statusStateHash = await readWorktreeStateHash(git, status.files);
-      const detached =
-        Boolean(status.detached) || status.current === "HEAD" || status.current === null;
       let diff: DiffStat | null = null;
       if (withDiff && status.files.length > 0) {
         const untracked = status.files
@@ -394,11 +506,11 @@ export async function readStatus(absPath: string, withDiff = false): Promise<Rep
       const conflicted = status.files.some((f) => isConflictPair(f.index ?? " ", f.working_dir ?? " "));
       const gitOperation = await currentGitOperation(absPath);
       return {
-        branch: status.current ?? null,
-        detached,
-        headOid,
-        upstreamOid,
-        historyRefsHash,
+        branch: status.branch,
+        detached: status.detached,
+        headOid: status.headOid,
+        upstreamOid: upstreamOid(status.upstream, refs.oids),
+        historyRefsHash: refs.hash,
         worktreeStateHash: statusStateHash,
         dirty: status.files.length,
         ahead: status.ahead ?? 0,

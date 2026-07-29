@@ -26,7 +26,9 @@ const BackgroundSyncSection = defineAsyncComponent(() => import("./settings/Back
 const AgentSafetySection = defineAsyncComponent(() => import("./settings/AgentSafetySection.vue"));
 const IdentityFirewallSection = defineAsyncComponent(() => import("./settings/IdentityFirewallSection.vue"));
 const AiProvidersSection = defineAsyncComponent(() => import("./settings/AiProvidersSection.vue"));
-const LoreServersSection = defineAsyncComponent(() => import("./settings/LoreServersSection.vue"));
+const ExperimentalServersSection = defineAsyncComponent(
+  () => import("./settings/ExperimentalServersSection.vue"),
+);
 
 const open = defineModel<boolean>("open", { required: true });
 const props = withDefaults(
@@ -43,7 +45,7 @@ const store = useStore();
 
 // The panel groups its sections into tabs so the everyday knobs (General) aren't
 // buried under the power-user ones — which now live on their own Advanced tab (firewall,
-// agent rail, Lore servers). Accounts and Access merged into one tab: GitHub accounts,
+// agent rail, experimental servers). Accounts and Access merged into one tab: GitHub accounts,
 // git identities, the Connections account, remote access, and sharing are all "who am I
 // and who gets in", and splitting them made each half look incomplete.
 type TabId = "general" | "access" | "automation" | "advanced";
@@ -153,7 +155,7 @@ watch(
       </div>
 
       <!-- Advanced: power tuning (editor, shortcuts, diff threshold) + the sharp,
-           rarely-touched tools — ⭐ Agent Safety Rail, ⭐ Identity Firewall, Lore servers ── -->
+           rarely-touched tools — ⭐ Agent Safety Rail, ⭐ Identity Firewall, experimental servers ── -->
       <div
         v-if="visitedTabs.includes('advanced')"
         v-show="tab === 'advanced'"
@@ -167,7 +169,7 @@ watch(
         <!-- The Firewall pins a REQUIRED identity per path glob — meaningless (and unbuildable:
              every rule needs an identity to point at) until identities are in play at all. -->
         <IdentityFirewallSection v-if="store.identitiesRelevant" :open="open" />
-        <LoreServersSection :open="open" />
+        <ExperimentalServersSection :open="open" />
       </div>
     </div>
   </SettingsPanel>

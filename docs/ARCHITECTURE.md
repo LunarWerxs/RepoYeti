@@ -101,7 +101,8 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
   This is a **Phase 1 architectural primitive**, not a later optimization — it is what prevents the
   forbidden mid-merge race.
 - **Status:** branch, dirty count, **ahead (local)**, **behind (from last fetch only, timestamped)**,
-  remote URL — via `git status --porcelain`, `git rev-parse`, `git rev-list @{u}..HEAD`.
+  remote URL, and exact HEAD/upstream identities — via `git status --porcelain=v2 --branch -z`
+  plus one `for-each-ref` invalidation snapshot.
 - **SSE:** `GET /api/events` streaming `repo_state_changed` + `daemon_status`; session-gated; client
   uses `EventSource` (auto-reconnect).
 - **REST git actions:** fetch, **pull (fast-forward only, dirty-tree preflight)**, **push (no `--force`,
@@ -606,6 +607,7 @@ repoyeti/
 │  │  ├─ index.ts · types.ts #   registry + interface
 │  │  ├─ git.ts              #   git backend (default)
 │  │  └─ lore.ts · lore-sdk.ts  # Epic's Lore (experimental, REPOYETI_LORE=1)
+│  ├─ buzz.ts · buzz-url.ts # Buzz Git discovery/preflight + public URL boundaries (uses git)
 │  ├─ mcp/                  # hand-rolled MCP server (zero new deps; JSON-RPC 2.0 + MCP)
 │  │  ├─ core.ts             #   transport-agnostic dispatch (initialize/ping/tools.list/tools.call)
 │  │  ├─ tools.ts            #   the 14-tool catalog (readOnly vs MUTATES)

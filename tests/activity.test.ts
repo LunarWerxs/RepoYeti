@@ -703,7 +703,11 @@ test("Git shortstat activity counts add-only, delete-only, pure rename, and bina
 
 test("Git activity filters and buckets commits by the author date shown in History", async () => {
   const dir = mkScratchDir("ry-activity-author-date-");
-  const until = Date.now();
+  // Pinned to a mid-evening local wall time, not Date.now(). Daily buckets are local-day aligned
+  // (localDayStart in src/read/activity.ts), so with a live clock `until - 2h` and `until - 1h`
+  // straddle midnight for the hour after it — the recent commit lands in today's bucket while the
+  // assertion below looks in yesterday's, and the test fails once a day.
+  const until = new Date(2026, 6, 24, 18, 30).getTime();
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
 
   writeFileSync(join(dir, "rebased.txt"), "old authored work\n");

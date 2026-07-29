@@ -123,7 +123,10 @@ function onWindowFocus(): void {
   if (store.authenticated) return;
   void store.loadAuth();
 }
-onBeforeUnmount(() => window.removeEventListener("focus", onWindowFocus));
+onBeforeUnmount(() => {
+  window.removeEventListener("focus", onWindowFocus);
+  store.disconnect();
+});
 </script>
 
 <template>

@@ -17,6 +17,7 @@ import type {
  * visible. Five hundred commits is ten normal pages and still a generous interactive window.
  */
 export const MAX_RETAINED_LOG_COMMITS = 500;
+export const MAX_RETAINED_GIT_REPO_CACHES = 12;
 
 /** Branches / history / stash / tags / remotes / discard — lazily loaded per repo when the
  *  relevant card section opens. `loadChanges` and `asResult` are shared with the rest of the
@@ -39,6 +40,27 @@ export function useGitOps(
   /** repoId → a secondary git op in flight (branch switch / stash / discard …), for spinners
    *  and to disable the relevant control. Distinct from `busy` (the primary fetch/pull/push). */
   const gitOpBusy = reactive<Record<string, string | undefined>>({});
+  const repoCacheLru = new Map<string, true>();
+
+  function hasRepoCache(repoId: string): boolean {
+    return (
+      Object.hasOwn(branchesByRepo, repoId) ||
+      Object.hasOwn(logByRepo, repoId) ||
+      Object.hasOwn(stashesByRepo, repoId) ||
+      Object.hasOwn(tagsByRepo, repoId) ||
+      Object.hasOwn(incomingByRepo, repoId)
+    );
+  }
+
+  function touchRepoCache(repoId: string): void {
+    repoCacheLru.delete(repoId);
+    repoCacheLru.set(repoId, true);
+    while (repoCacheLru.size > MAX_RETAINED_GIT_REPO_CACHES) {
+      const oldest = repoCacheLru.keys().next().value as string | undefined;
+      if (!oldest) break;
+      clearRepoCache(oldest);
+    }
+  }
 
   // Latest-request tokens make late responses harmless (repo removed, scope changed, refresh
   // superseded) without keeping one generation counter forever for every removed repo. Entries
@@ -60,6 +82,7 @@ export function useGitOps(
     if (reads?.get(kind) !== token) return;
     reads.delete(kind);
     if (reads.size === 0) activeReads.delete(repoId);
+    if (isRepoLive(repoId) && hasRepoCache(repoId)) touchRepoCache(repoId);
   }
 
   async function loadBranches(repoId: string): Promise<void> {
@@ -394,6 +417,7 @@ export function useGitOps(
 
   /** Release every lazily-loaded Git view for a repo that left the dashboard. */
   function clearRepoCache(repoId: string): void {
+    repoCacheLru.delete(repoId);
     activeReads.delete(repoId);
     delete branchesByRepo[repoId];
     delete logByRepo[repoId];
@@ -415,6 +439,7 @@ export function useGitOps(
       ...Object.keys(incomingLoading),
       ...Object.keys(gitOpBusy),
       ...activeReads.keys(),
+      ...repoCacheLru.keys(),
     ]);
     for (const repoId of cachedIds) {
       if (!liveRepoIds.has(repoId)) clearRepoCache(repoId);

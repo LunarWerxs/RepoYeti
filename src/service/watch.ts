@@ -17,6 +17,15 @@ const watchHandles = new Map<string, WatchHandle>();
 const pollHandles = new Map<string, ReturnType<typeof setTimeout>>();
 // Repo ids whose live watch is unhealthy (watch failed → polling). For diagnostics.
 const unhealthyWatch = new Set<string>();
+// A whole-machine scan may index thousands of historical checkouts. Native watcher objects carry
+// OS handles/buffers, so never let repository count turn directly into unbounded resident memory.
+// Overflow repos remain indexed and refresh through explicit actions/background sync; when a slot
+// is freed, the oldest deferred repo is promoted automatically.
+export const MAX_ACTIVE_REPO_WATCHES = Math.max(
+  1,
+  Math.min(2_000, Number(process.env.REPOYETI_MAX_WATCHED_REPOS) || 256),
+);
+const deferredWatch = new Map<string, string>();
 
 // Watcher/poll refreshes are fire-and-forget and bursty; collapse them per repo to at most
 // one in-flight + one trailing pass, so a flurry of fs events (or refreshes piling up behind
@@ -107,7 +116,11 @@ export function watchOne(
   absPath: string,
   installWatch: WatchInstaller = watchRepo,
 ): void {
-  if (watchHandles.has(repoId)) return;
+  if (watchHandles.has(repoId) || deferredWatch.has(repoId)) return;
+  if (watchHandles.size >= MAX_ACTIVE_REPO_WATCHES) {
+    deferredWatch.set(repoId, absPath);
+    return;
+  }
   // Watch the VCS's marker dir (.git / .lore) so a Lore repo's metadata changes still tick.
   const marker = backendFor(getRepo(repoId)?.vcs ?? "git").marker;
   const handle = installWatch(
@@ -120,8 +133,18 @@ export function watchOne(
   watchHandles.set(repoId, handle);
   if (!handle.watching) startPollFallback(repoId, absPath);
 }
+
+function promoteDeferredWatch(): void {
+  if (watchHandles.size >= MAX_ACTIVE_REPO_WATCHES) return;
+  const entry = deferredWatch.entries().next().value as [string, string] | undefined;
+  if (!entry) return;
+  deferredWatch.delete(entry[0]);
+  watchOne(entry[0], entry[1]);
+}
+
 /** Tear down a single repo's watcher/poll/registries (used when a scan root is removed). */
 export function unwatchOne(repoId: string): void {
+  deferredWatch.delete(repoId);
   const h = watchHandles.get(repoId);
   if (h) {
     h.close();
@@ -137,6 +160,7 @@ export function unwatchOne(repoId: string): void {
   refreshPending.delete(repoId);
   lastStatusSig.delete(repoId);
   forgetQueue(repoId); // drop the op-queue chain too, so `chains` doesn't leak per removed repo
+  promoteDeferredWatch();
 }
 export function startWatching(repos: Array<{ id: string; absPath: string }>): void {
   for (const r of repos) watchOne(r.id, r.absPath);
@@ -147,16 +171,27 @@ export function stopWatching(): void {
   for (const t of pollHandles.values()) clearTimeout(t);
   pollHandles.clear();
   unhealthyWatch.clear();
+  deferredWatch.clear();
   refreshAgain.clear();
   refreshPending.clear();
 }
 
 /** Watcher health snapshot for diagnostics/tests: how many repos are watched live vs
  *  degraded to polling, and which ids are degraded. */
-export function watcherHealth(): { watched: number; polling: number; unhealthy: string[] } {
+export function watcherHealth(): {
+  watched: number;
+  polling: number;
+  deferred: number;
+  unhealthy: string[];
+} {
   let watched = 0;
   for (const handle of watchHandles.values()) {
     if (handle.watching) watched++;
   }
-  return { watched, polling: pollHandles.size, unhealthy: [...unhealthyWatch] };
+  return {
+    watched,
+    polling: pollHandles.size,
+    deferred: deferredWatch.size,
+    unhealthy: [...unhealthyWatch],
+  };
 }

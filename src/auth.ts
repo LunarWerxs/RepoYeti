@@ -118,6 +118,7 @@ function jwks(uri: string) {
 // ── PKCE transactions ──────────────────────────────────────────────────────────
 /** @internal exported for security tests only — not part of the public API. */
 export const txs = new Map<string, { verifier: string; ts: number }>();
+export const MAX_OAUTH_TRANSACTIONS = 256;
 function pkce(): { verifier: string; challenge: string } {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -126,6 +127,11 @@ function pkce(): { verifier: string; challenge: string } {
 function gcTx(): void {
   const now = Date.now();
   for (const [k, v] of txs) if (now - v.ts > TX_TTL_MS) txs.delete(k);
+  while (txs.size > MAX_OAUTH_TRANSACTIONS) {
+    const oldest = txs.keys().next().value as string | undefined;
+    if (!oldest) break;
+    txs.delete(oldest);
+  }
 }
 
 /** @internal exported for security tests only — not part of the public API. */

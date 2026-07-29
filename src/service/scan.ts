@@ -40,20 +40,17 @@ const PROGRESS_EVERY = 10;
 // spend the entire budget on the first drive and never reach the next. Tuned to finish a typical
 // machine well inside the budget while never hanging the daemon.
 //
-// The repo cap here is intentionally NOT the same field as the owner-configured `cfg.maxRepos`
-// (that knob guards the inotify/fs-watch budget for a single explicit root; see discoverRoot).
-// A whole-machine/folder sweep needs its own much higher floor so a large machine isn't silently
-// truncated; `effectiveMaxRepos` lets an owner who deliberately raises `cfg.maxRepos` above this
-// floor actually get the larger cap everywhere, instead of the two limits silently diverging.
-const MACHINE_MAX_REPOS_FLOOR = 5000;
-const FOLDER_MAX_REPOS_FLOOR = 5000;
 const MACHINE = { maxDepth: 12, budgetMs: 45_000, concurrency: 48 } as const;
 const FOLDER = { maxDepth: 16, budgetMs: 30_000, concurrency: 24 } as const;
 
-/** cfg.maxRepos if the owner raised it above the built-in floor, else the floor itself. */
-function effectiveMaxRepos(floor: number): number {
+/**
+ * Respect the same repository budget for explicit roots and broad scans. The old 5,000-repo
+ * minimum defeated the owner's default 200-repo cap, then installed watchers and queued a status
+ * hydration for every result. Owners who genuinely need more can still raise `maxRepos`.
+ */
+function effectiveMaxRepos(): number {
   const configured = loadConfig().maxRepos;
-  return Number.isFinite(configured) && configured > floor ? configured : floor;
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 200;
 }
 
 export interface ScanSummary {
@@ -121,7 +118,7 @@ async function runScan(scope: string, roots: string[], limits: ScanLimits): Prom
 export function rescanMachine(): Promise<ScanSummary> {
   return runScan("machine", machineScanRoots(), {
     ...MACHINE,
-    maxRepos: effectiveMaxRepos(MACHINE_MAX_REPOS_FLOOR),
+    maxRepos: effectiveMaxRepos(),
   });
 }
 
@@ -129,6 +126,6 @@ export function rescanMachine(): Promise<ScanSummary> {
 export function rescanFolder(folder: string): Promise<ScanSummary> {
   return runScan("folder", [resolve(folder)], {
     ...FOLDER,
-    maxRepos: effectiveMaxRepos(FOLDER_MAX_REPOS_FLOOR),
+    maxRepos: effectiveMaxRepos(),
   });
 }

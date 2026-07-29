@@ -1,12 +1,16 @@
 /**
- * VS Code-style git-status colours for the one-letter M/A/U/D/R/C badges — the single shared map
+ * VS Code-style git-status colours for the one-letter M/A/N/D/R/C badges — the single shared map
  * (ChangesTree, FileViewerInner, LogPanel, SmartCommitCommitDiff all render the same letters, and
  * per-component copies had already drifted once).
+ *
+ * Untracked is "N" (new), not VS Code's "U": sitting next to "M" for modified, a "U" badge reads
+ * as "updated", which is the opposite of what it means. Commit-side letters come straight from
+ * git's name-status and never include it.
  */
 export const STATUS_COLOR: Record<string, string> = {
   M: "#e2c08d", // modified
-  A: "#73c991", // added
-  U: "#73c991", // untracked
+  A: "#73c991", // added (staged)
+  N: "#73c991", // new — untracked, git has never seen this path
   D: "#f14c4c", // deleted
   R: "#6cb6ff", // renamed
   C: "#d18616", // copied/conflicted

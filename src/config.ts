@@ -22,8 +22,9 @@ import {
   RELAY_PRIVATE_KEY,
 } from "./secrets.ts";
 import { publicKeyFor } from "./relay.ts";
+import { normalizeBuzzCommunities } from "./buzz-url.ts";
 
-export const VERSION = "0.16.0";
+export const VERSION = "0.17.0";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
@@ -234,6 +235,31 @@ export interface LoreServer {
 }
 
 /**
+ * Non-secret metadata for one Buzz community. `url` is the public community/relay URL.
+ * `gitUrl` is optional and names a real public Git Smart HTTP repository used only by the
+ * preflight's non-interactive authentication probe. Authentication itself remains entirely in
+ * the user's system Git credential-helper chain.
+ */
+export interface BuzzCommunity {
+  id: string;
+  name: string;
+  url: string;
+  gitUrl?: string;
+}
+
+/**
+ * Experimental Buzz Git compatibility. This is deliberately configuration around the ordinary
+ * Git backend, not a VCS backend of its own. It may contain public URLs only — never a Nostr nsec,
+ * signed event, authorization header, or credential-helper output.
+ */
+export interface BuzzConfig {
+  /** Opt-in master switch. Absent/false keeps Buzz inert and hidden from Add Repository. */
+  enabled?: boolean;
+  /** Saved public community metadata for diagnostics and clone UX. */
+  communities?: BuzzCommunity[];
+}
+
+/**
  * Remote-access tunnel config. Absent (the default) = a free, ephemeral cloudflared **quick
  * tunnel** → a rotating `*.trycloudflare.com` URL. Set `hostname` + `token` to run a **named**
  * Cloudflare tunnel instead: a STABLE public host (e.g. "app.repoyeti.com") that doesn't rotate
@@ -299,6 +325,8 @@ export interface RepoYetiConfig {
    * false (see health.ts's GET /api/status). Once explicitly set, that value sticks.
    */
   loreServersEnabled?: boolean;
+  /** Advanced, experimental Buzz Git compatibility. Off by default and non-secret. */
+  buzz?: BuzzConfig;
   /** Preferred HTTP port (auto-increments if taken). */
   port: number;
   /** Max BFS depth when discovering repos under a root. */
@@ -347,13 +375,14 @@ export interface RepoYetiConfig {
   diffPatchEnabled?: boolean;
   /**
    * Background remote-sync check: periodically fetch every repo so the dashboard can warn the
-   * owner when a repo falls behind its remote. Absent = ON (a fresh install gets the check);
-   * set false to disable. The cadence is `syncIntervalSecs`. See src/remote-sync.ts.
+   * owner when a repo falls behind its remote. Absent/false = OFF because each network check
+   * starts Git/transport helpers across the repo list; owners opt in explicitly. The cadence is
+   * `syncIntervalSecs`. See src/remote-sync.ts.
    */
   syncCheck?: boolean;
   /**
    * How often the background sync check fetches, in seconds. Clamped to [30, 3600] on read;
-   * absent = the built-in default (120s). Owner setting (the Settings UI writes it).
+   * absent = the built-in default (300s). Owner setting (the Settings UI writes it).
    */
   syncIntervalSecs?: number;
   /**
@@ -854,16 +883,29 @@ export function loadConfig(): RepoYetiConfig {
  * silently lost; `secrets.ts` has already warned once in that case.
  */
 function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
-  if (!keychainAvailable()) return cfg; // degraded host → keep plaintext (no regression)
   const clone = JSON.parse(JSON.stringify(cfg)) as RepoYetiConfig;
-  if (clone.ai?.providers) {
-    for (const p of Object.values(clone.ai.providers)) {
-      if (p) delete p.apiKey;
+  // A degraded keychain host retains the existing plaintext fallback for actual RepoYeti
+  // credentials. Buzz is different: RepoYeti never owns a Buzz credential, so its config is
+  // ALWAYS reduced to the public allowlist below, independent of keychain availability.
+  if (keychainAvailable()) {
+    if (clone.ai?.providers) {
+      for (const p of Object.values(clone.ai.providers)) {
+        if (p) delete p.apiKey;
+      }
     }
+    if (clone.oauth) delete clone.oauth.clientSecret;
+    if (clone.tunnel) delete clone.tunnel.token;
+    delete clone.apiToken;
   }
-  if (clone.oauth) delete clone.oauth.clientSecret;
-  if (clone.tunnel) delete clone.tunnel.token;
-  delete clone.apiToken;
+  // Buzz config is intentionally a strict public-metadata projection. Besides documenting the
+  // boundary in the type, rebuild it here so an unknown/legacy field named `nsec`, `privateKey`,
+  // `authorization`, etc. can never hitch a ride into config.json.
+  if (clone.buzz) {
+    clone.buzz = {
+      enabled: clone.buzz.enabled === true,
+      communities: normalizeBuzzCommunities(clone.buzz.communities),
+    };
+  }
   return clone;
 }
 

@@ -3,8 +3,14 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
-import { parsePatchStats, computeDiffStats } from "../src/read/diffstat.ts";
+import {
+  parsePatchStats,
+  computeDiffStats,
+  createPatchStatParser,
+  PATCH_LINE_BUFFER_CHARS,
+} from "../src/read/diffstat.ts";
 import { readStatus, readChanges } from "../src/read/status.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 
@@ -77,8 +83,10 @@ test("parsePatchStats treats in-hunk lines starting with --/++ as content, not h
   // removed: "-- old comment" and "---"; added: "+- new comment" and "+++"
   expect(s.removedLines).toBe(2);
   expect(s.addedLines).toBe(2);
-  expect(s.removedChars).toBe("- old comment".length + "--".length);
-  expect(s.addedChars).toBe("- new comment".length + "++".length);
+  // Chars are intra-line: "old"→"new" is 3 each, "--"→"++" is 2 each. The shared "- " prefix
+  // and " comment" suffix aren't charged to either side.
+  expect(s.removedChars).toBe("old".length + "--".length);
+  expect(s.addedChars).toBe("new".length + "++".length);
 });
 
 test("parsePatchStats ignores hunk headers and the no-newline marker", () => {
@@ -93,7 +101,73 @@ test("parsePatchStats ignores hunk headers and the no-newline marker", () => {
     "",
   ].join("\n");
   const s = parsePatchStats(patch).get("f")!;
-  expect(s).toEqual({ addedLines: 1, removedLines: 1, addedChars: 2, removedChars: 1 });
+  // "a" → "ab" appends one character; the shared "a" is charged to neither side.
+  expect(s).toEqual({ addedLines: 1, removedLines: 1, addedChars: 1, removedChars: 0 });
+});
+
+test("parsePatchStats charges only the edited middle of a long line", () => {
+  // The reported case: one character flipped on an 800-char JSON line used to read as
+  // "+800 −800 characters" because both whole lines were charged.
+  const long = (mid: string) => `  "_doc": "${"x".repeat(400)}${mid}${"y".repeat(400)}",`;
+  const patch = [
+    "diff --git a/p.json b/p.json",
+    "--- a/p.json",
+    "+++ b/p.json",
+    "@@ -1 +1 @@",
+    `-${long("—")}`,
+    `+${long("-")}`,
+    "",
+  ].join("\n");
+  const s = parsePatchStats(patch).get("p.json")!;
+  expect(s).toEqual({ addedLines: 1, removedLines: 1, addedChars: 1, removedChars: 1 });
+});
+
+test("parsePatchStats charges unpaired lines in full", () => {
+  // 1 removed, 3 added: the first added line pairs with it, the other two are genuinely new
+  // text and must count every character.
+  const patch = [
+    "diff --git a/g b/g",
+    "--- a/g",
+    "+++ b/g",
+    "@@ -1 +1,3 @@",
+    "-alpha",
+    "+alpaca",
+    "+bravo",
+    "+charlie",
+    "",
+  ].join("\n");
+  const s = parsePatchStats(patch).get("g")!;
+  expect(s.removedLines).toBe(1);
+  expect(s.addedLines).toBe(3);
+  // "alpha" → "alpaca": shared "alp" prefix and "a" suffix leave "h" vs "ac".
+  expect(s.removedChars).toBe(1);
+  expect(s.addedChars).toBe(2 + "bravo".length + "charlie".length);
+});
+
+test("streaming parser bounds a newline-free minified patch line", () => {
+  const parser = createPatchStatParser();
+  parser.push("diff --git a/min.json b/min.json\n--- a/min.json\n+++ b/min.json\n@@ -1 +1 @@\n-");
+  const chunk = "x".repeat(128_000);
+  const chunks = 32;
+  for (let i = 0; i < chunks; i++) {
+    parser.push(chunk);
+    expect(parser.retainedChars()).toBeLessThanOrEqual(PATCH_LINE_BUFFER_CHARS);
+  }
+  parser.push("\n+");
+  for (let i = 0; i < chunks; i++) {
+    parser.push(chunk);
+    expect(parser.retainedChars()).toBeLessThanOrEqual(PATCH_LINE_BUFFER_CHARS);
+  }
+  parser.push("\n");
+
+  // The line count remains exact. Once a line crosses the memory bound, character stats
+  // deliberately fall back to whole-line accounting instead of retaining both giant bodies.
+  expect(parser.finish().get("min.json")).toEqual({
+    addedLines: 1,
+    removedLines: 1,
+    addedChars: chunk.length * chunks,
+    removedChars: chunk.length * chunks,
+  });
 });
 
 // ── against a real repo ───────────────────────────────────────────────────────────
@@ -125,6 +199,89 @@ test("computeDiffStats sums tracked edits + untracked files", async () => {
   expect(total.addedLines).toBe(a.addedLines + b.addedLines);
   expect(total.removedLines).toBe(a.removedLines);
 });
+
+// ── past the old buffer caps ──────────────────────────────────────────────────────
+// This used to concatenate the whole patch into one string behind a 5 MB cap, and to read
+// untracked files behind a 1 MB-per-file / 2 MB-total cap. Every file past a cap simply got
+// no stat — rendered as blank, indistinguishable from "unchanged". Counting is streamed now,
+// so the assertions below are deliberately on the LAST file and on an untracked file that the
+// old per-file cap would have skipped outright.
+const BIG_FILES = 6;
+const BIG_LINES = 5_000;
+const UNTRACKED_LINES = 20_000;
+/** A 99-character line; the modified copy appends one char, so every line reads as changed. */
+const bigLine = (n: number) => `${String(n).padStart(6, "0")}${"x".repeat(93)}`;
+const bigBody = (suffix: string) =>
+  `${Array.from({ length: BIG_LINES }, (_, i) => bigLine(i) + suffix).join("\n")}\n`;
+
+async function seedBigRepo(): Promise<string> {
+  const dir = mkScratchDir("gm-diffstat-big-");
+  await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+  for (let f = 0; f < BIG_FILES; f++) writeFileSync(join(dir, `big${f}.txt`), bigBody(""));
+  await $`git -C ${dir} add -A`.quiet();
+  await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m init`.quiet();
+  for (let f = 0; f < BIG_FILES; f++) writeFileSync(join(dir, `big${f}.txt`), bigBody("!"));
+  // ~2 MB — comfortably over the 1 MB single-file cap the untracked reader used to enforce.
+  writeFileSync(
+    join(dir, "untracked.txt"),
+    `${Array.from({ length: UNTRACKED_LINES }, (_, i) => bigLine(i)).join("\n")}\n`,
+  );
+  return dir;
+}
+
+test("computeDiffStats counts every file of a multi-megabyte patch", async () => {
+  const dir = await seedBigRepo();
+  const { perFile, total, truncated } = await computeDiffStats(dir, ["untracked.txt"]);
+
+  // 6 files × 5000 changed lines × ~100 chars × both sides ≈ 6 MB of patch text.
+  expect(truncated).toBe(false);
+  expect(perFile.size).toBe(BIG_FILES + 1);
+  for (let f = 0; f < BIG_FILES; f++) {
+    expect(perFile.get(`big${f}.txt`)).toEqual({
+      addedLines: BIG_LINES,
+      removedLines: BIG_LINES,
+      addedChars: BIG_LINES, // every line pairs; each gained exactly the one "!"
+      removedChars: 0,
+    });
+  }
+  expect(perFile.get("untracked.txt")).toEqual({
+    addedLines: UNTRACKED_LINES,
+    removedLines: 0,
+    addedChars: UNTRACKED_LINES * 100, // 99 content chars + the newline
+    removedChars: 0,
+  });
+  expect(total.addedLines).toBe(BIG_FILES * BIG_LINES + UNTRACKED_LINES);
+  expect(total.removedLines).toBe(BIG_FILES * BIG_LINES);
+}, 60_000);
+
+test.skipIf(process.platform !== "win32")(
+  "repeated untracked-file stats keep native RSS bounded",
+  async () => {
+    // Production reproduction: pap3r has ~12k untracked paths. Bun.file().stream() retained a
+    // native allocation per opened file, so every refresh permanently added ~220 MB even though
+    // heapUsed stayed flat. Hundreds of moderate files reproduce that allocator leak quickly.
+    const dir = mkScratchDir("gm-diffstat-rss-");
+    await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
+    await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
+    const paths = Array.from({ length: 800 }, (_, i) => `generated-${i}.txt`);
+    const body = `${"x".repeat(16_000)}\n`;
+    for (const rel of paths) writeFileSync(join(dir, rel), body);
+
+    await computeDiffStats(dir, paths); // warm the runtime/allocator before measuring
+    Bun.gc(true);
+    const before = process.memoryUsage().rss;
+    let counted = 0;
+    for (let i = 0; i < 6; i++) {
+      counted += (await computeDiffStats(dir, paths)).perFile.size;
+      Bun.gc(true);
+    }
+    const growth = process.memoryUsage().rss - before;
+
+    expect(counted).toBe(paths.length * 6);
+    expect(growth).toBeLessThan(96 * 1024 * 1024);
+  },
+  60_000,
+);
 
 test("readChanges attaches per-file stats only when asked", async () => {
   const dir = await seedRepo();

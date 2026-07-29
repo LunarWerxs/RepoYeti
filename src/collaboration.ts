@@ -52,6 +52,8 @@ const PUBLISH_INTERVAL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const SNAPSHOT_MAX_BYTES = 350_000;
 const SNAPSHOT_FRESH_MS = 30_000;
+export const MAX_PRESENCE_ENTRIES = 100;
+export const MAX_PRESENCE_BYTES = 2 * 1024 * 1024;
 /** A remote dirty tree must remain byte-for-byte unchanged under observation for this long before
  *  an MCP agent may commit it. This is in addition to the normal MCP approval gate and the remote
  *  share's control permission. */
@@ -969,16 +971,26 @@ interface Presence {
   tokenHash: string;
   snapshot: CollaborationSnapshot;
   receivedAt: number;
+  bytes: number;
 }
 
 const presence = new Map<string, Presence>();
+let presenceBytes = 0;
 let presenceExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function deletePresence(key: string): boolean {
+  const entry = presence.get(key);
+  if (!entry) return false;
+  presence.delete(key);
+  presenceBytes = Math.max(0, presenceBytes - entry.bytes);
+  return true;
+}
 
 function prunePresence(now = Date.now()): boolean {
   let changed = false;
   for (const [key, entry] of presence) {
     if (now - entry.receivedAt > SNAPSHOT_FRESH_MS) {
-      presence.delete(key);
+      deletePresence(key);
       changed = true;
     }
   }
@@ -1037,18 +1049,33 @@ export function receiveCollaborationSnapshot(
     return false;
   }
   prunePresence();
+  const key = `${share.id}:${participantId}`;
+  deletePresence(key);
   const shareEntries = [...presence.entries()]
     .filter(([, entry]) => entry.shareId === share.id)
     .sort((a, b) => a[1].receivedAt - b[1].receivedAt);
   while (shareEntries.length >= MAX_PEERS) {
-    presence.delete(shareEntries.shift()![0]);
+    deletePresence(shareEntries.shift()![0]);
   }
-  presence.set(`${share.id}:${participantId}`, {
+  const bytes = Buffer.byteLength(JSON.stringify(snapshot));
+  const oldest = (): string | undefined =>
+    [...presence.entries()].sort((a, b) => a[1].receivedAt - b[1].receivedAt)[0]?.[0];
+  while (
+    presence.size >= MAX_PRESENCE_ENTRIES ||
+    presenceBytes + bytes > MAX_PRESENCE_BYTES
+  ) {
+    const victim = oldest();
+    if (!victim) break;
+    deletePresence(victim);
+  }
+  presence.set(key, {
     shareId: share.id,
     tokenHash,
     snapshot,
     receivedAt: Date.now(),
+    bytes,
   });
+  presenceBytes += bytes;
   broadcastCollaborationSnapshots();
   schedulePresenceExpiry();
   return true;
@@ -1106,4 +1133,6 @@ export function stopCollaborationSync(): void {
   timer = null;
   if (presenceExpiryTimer) clearTimeout(presenceExpiryTimer);
   presenceExpiryTimer = null;
+  presence.clear();
+  presenceBytes = 0;
 }

@@ -42,7 +42,9 @@ vi.mock("@/components/settings/HotkeysSection.vue", () => lazySections.module("h
 vi.mock("@/components/settings/DiffTuningSection.vue", () => lazySections.module("diff-tuning"));
 vi.mock("@/components/settings/AgentSafetySection.vue", () => lazySections.module("agent-safety"));
 vi.mock("@/components/settings/IdentityFirewallSection.vue", () => lazySections.module("identity-firewall"));
-vi.mock("@/components/settings/LoreServersSection.vue", () => lazySections.module("lore-servers"));
+vi.mock("@/components/settings/ExperimentalServersSection.vue", () =>
+  lazySections.module("experimental-servers"),
+);
 
 async function settleAsyncSections(): Promise<void> {
   await vi.dynamicImportSettled();
@@ -126,6 +128,24 @@ describe("Settings lazy tabs", () => {
       "background-sync": 1,
       "ai-providers": 1,
     });
+
+    wrapper.unmount();
+  });
+
+  it("keeps experimental servers behind the lazy Advanced tab", async () => {
+    const wrapper = mount(Settings, {
+      props: { open: true },
+      global: { plugins: [i18n] },
+      attachTo: document.body,
+    });
+    await settleAsyncSections();
+    expect(lazySections.mounts["experimental-servers"]).toBeUndefined();
+
+    tabButton(i18n.global.t("settings.tabs.advanced"))!.click();
+    await settleAsyncSections();
+
+    expect(document.body.querySelector('[data-settings-tab="advanced"]')).not.toBeNull();
+    expect(lazySections.mounts["experimental-servers"]).toBe(1);
 
     wrapper.unmount();
   });
