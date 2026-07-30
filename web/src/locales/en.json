@@ -615,7 +615,11 @@
       "optChanges": "Change totals",
       "optChangesHint": "Show exact added/removed numbers in each row, or compact proportional color bars with the exact values on hover.",
       "optFiles": "Changed files",
-      "optFilesHint": "How an expanded commit's changed files are listed: a nested folder tree, like the Changes panel, or a flat list of full paths."
+      "optFilesHint": "How an expanded commit's changed files are listed: a nested folder tree, like the Changes panel, or a flat list of full paths.",
+      "gripAria": "Resize history list",
+      "gripAriaResized": "Resize history list: custom height, press Delete to reset to the default height",
+      "gripTitle": "Drag or ↑/↓ to resize",
+      "gripTitleResized": "Drag or ↑/↓ to resize · double-click to reset to the default height"
     },
     "stash": {
       "stash": "Stash",
@@ -989,7 +993,7 @@
       "commit": "Commit the current message",
       "viewerClose": "Close the file viewer",
       "viewerSave": "Save the file you're editing",
-      "treeResize": "Resize the changed-files list"
+      "treeResize": "Resize a list (changed files, history)"
     },
     "defaultCommitAction": "Default commit button",
     "defaultCommitActionHint": "Choose what the main commit button does. Commit & Sync pulls then pushes after committing; repositories without a sync target safely fall back to Commit.",

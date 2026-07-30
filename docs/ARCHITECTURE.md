@@ -1178,6 +1178,14 @@ plumbing.
 - **Colours go through semantic tokens** (`success` / `warning` / `info` / `primary` / `destructive`),
   never raw Tailwind palette classes.
 - **Deliberately bespoke, leave alone:** `web/src/components/FileViewer.vue` (resizable Monaco).
+- **Resize grips go through `web/src/lib/grip-drag.ts`, never hand-rolled window listeners.**
+  `useGripDrag` layers every drag-end signal (pointerup / pointercancel / `lostpointercapture` /
+  a per-move buttons-mask check / blur / unmount) because a naive drag *stuck* in production: a
+  swallowed pointerup left the resize tracking the cursor after release. `useGripGlide` is the
+  reset half. Double-click drops the pinned px height, and since CSS cannot transition px to
+  `auto`, it holds the exact height the element is about to settle at (`releasedHeight`) for the
+  length of the transition, so the reset glides instead of snapping. Consumers: the changed-files
+  tree grip, the History viewport grip, and the file-viewer edge grip.
 - **AI is bring-your-own-key** — no bundled key (Groq revokes any key committed to a public repo, so a
   shipped one is dead on arrival). Owners add their own in Settings → AI; Groq is the *suggested*
   provider (`AI_CATALOG` `suggested` flag). Keys live in the OS keychain, never in `config.json`.

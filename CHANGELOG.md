@@ -4,6 +4,25 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-07-30
+
+### Added
+
+- **The commit history can be dragged taller, so a big screen shows more than a screenful of
+  commits.** A grip under the list sets the height you want; the panel keeps it until you
+  double-click the grip to go back to the default. The height is remembered across restarts and
+  applies to every repo card, because how much screen the history deserves is a preference rather
+  than something that differs per repository. Keyboard works too: ↑/↓ nudge it, Delete resets it.
+
+### Changed
+
+- **Double-clicking a resize grip now eases back to the default size instead of jumping.** Both the
+  history grip and the changed-files grip animate the reset. This needed more than a CSS rule:
+  releasing a dragged height hands the element back to `height: auto`, which browsers cannot
+  animate to, so the reset had always landed as an instant snap. The grip now holds the exact
+  height the panel is about to settle at for the length of the transition. Respects
+  `prefers-reduced-motion`, where the reset simply lands.
+
 ## [0.17.0] - 2026-07-29
 
 ### Added

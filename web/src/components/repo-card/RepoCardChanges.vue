@@ -27,7 +27,7 @@ import {
   MIN_CHANGES_PX,
 } from "@/lib/changes-view";
 import { shortcutsActive } from "@/lib/hotkeys";
-import { useGripDrag } from "@/lib/grip-drag";
+import { releasedHeight, useGripDrag, useGripGlide } from "@/lib/grip-drag";
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import ViewOptions, { type ViewOptionRow } from "@/components/ui/ViewOptions.vue";
 import ChangesTree from "../ChangesTree.vue";
@@ -283,14 +283,21 @@ const treeContent = useTemplateRef<HTMLElement>("treeContent");
 // Live px while a drag is in flight; persisted once on release so we don't thrash
 // localStorage (the deep useLocalStorage watcher serialises on every mutation).
 const dragHeight = ref<number | null>(null);
+const glide = useGripGlide();
 const resized = computed(() => hasChangesOverride(props.repo.id));
 // In automatic mode, explicitly mirror the rendered content height. CSS `height:auto` normally
 // does this, but a capped overflow viewport can occasionally keep its former smaller used height
 // when a live tree gains rows. Observing the inner content makes both directions deterministic.
 const autoContentHeight = ref<number | null>(null);
 const treeStyle = computed(() => {
+  // A live drag is a bare height: the preset must NOT come along as a max-height, or the grip
+  // would refuse to travel past it on a card that has no override yet.
   if (dragHeight.value != null) return { height: `${dragHeight.value}px` };
   const base = changesTreeStyle(props.repo.id);
+  // A reset glide is the opposite: the override is already released, so the preset cap it is
+  // handing back to belongs on the element for the whole animation — then releasing the held
+  // height changes nothing but the height itself. The glide never targets above the cap.
+  if (glide.height.value != null) return { ...base, height: `${glide.height.value}px` };
   if (resized.value || autoContentHeight.value == null) return base;
   const presetMax = CHANGES_SIZE_PX[changesViewSize.value];
   return {
@@ -337,6 +344,8 @@ const onGripDown = useGripDrag({
     if (!treeScroll.value) return false;
     dragStartY = e.clientY;
     dragStartH = treeScroll.value.clientHeight;
+    dragHeight.value = dragStartH; // pin before cancelling, so no frame renders the untouched style
+    glide.cancel();
   },
   onMove: (e) => {
     // A manual resize is an exact workspace height, not another content cap. Let the grip move
@@ -351,8 +360,17 @@ const onGripDown = useGripDrag({
   },
 });
 function resetTreeHeight(): void {
+  const el = treeScroll.value;
   dragHeight.value = null;
-  clearChangesOverride(props.repo.id);
+  // Where the released tree will settle: the preset is a content-fitting cap, so it lands on the
+  // content height unless that overflows. autoContentHeight is that number already measured;
+  // releasedHeight derives it from the DOM when the observer hasn't reported yet.
+  const presetMax = CHANGES_SIZE_PX[changesViewSize.value];
+  const target =
+    autoContentHeight.value != null
+      ? Math.min(autoContentHeight.value, presetMax)
+      : releasedHeight(el, presetMax);
+  glide.glideTo(el?.clientHeight, target, () => clearChangesOverride(props.repo.id));
 }
 // Keyboard: ↑/↓ nudge the height in 24px steps from the current rendered size.
 function nudgeHeight(delta: number): void {

@@ -25,6 +25,7 @@ import {
   MessageSquareText,
   Mail,
   UserRound,
+  GripHorizontal,
   X,
 } from "@lucide/vue";
 import { toast } from "vue-sonner";
@@ -37,7 +38,17 @@ import { computeGraph, type GraphCommit, type GraphLink } from "@/lib/git-graph"
 import { statusColor } from "@/lib/git-status-colors";
 import { churn, compactN } from "@/lib/diffstat";
 import { openFile, isViewing } from "@/lib/file-viewer";
-import { historyFilesView } from "@/lib/history-view";
+import {
+  clearHistoryOverride,
+  hasHistoryOverride,
+  historyFilesView,
+  historyScrollStyle,
+  HISTORY_HEIGHT_PX,
+  MIN_HISTORY_PX,
+  setHistoryOverride,
+} from "@/lib/history-view";
+import { releasedHeight, useGripDrag, useGripGlide } from "@/lib/grip-drag";
+import { shortcutsActive } from "@/lib/hotkeys";
 import {
   historyActivityEnabled,
   historyActivityScale,
@@ -451,6 +462,68 @@ async function loadMoreLog(): Promise<void> {
 // nears view (rootMargin), so there's no "Load more" button. Re-observes whenever the sentinel
 // mounts/unmounts (history opened AND more pages remain).
 const scrollEl = useTemplateRef<HTMLElement>("scrollEl");
+
+// ── drag-to-resize the history viewport ──────────────────────────────────────────────
+// The grip under the list pins an explicit height so a tall screen can show many more commits
+// than the default cap; double-click it (or press Delete) to hand the height back to that cap.
+// The stored height is global, not per-repo — see @/lib/history-view for why.
+// Live px while a drag is in flight, committed once on release so the localStorage watcher isn't
+// re-serialising on every pointermove.
+const dragHeight = ref<number | null>(null);
+const glide = useGripGlide();
+const historyResized = computed(() => hasHistoryOverride());
+const historyStyle = computed<Record<string, string>>(() => {
+  // A drag outranks a reset glide (grabbing the grip mid-animation takes over cleanly), and both
+  // outrank the stored height, which is already released by the time a glide is holding a number.
+  const held = dragHeight.value ?? glide.height.value;
+  if (held != null) return { height: `${held}px`, maxHeight: "none" };
+  return historyScrollStyle();
+});
+
+// All the release/stuck-drag handling (button filtering, capture loss, swallowed pointerup, blur,
+// unmount) lives in useGripDrag — see @/lib/grip-drag.
+let dragStartY = 0;
+let dragStartH = 0;
+const onGripDown = useGripDrag({
+  onStart: (e) => {
+    const el = scrollEl.value;
+    if (!el) return false;
+    dragStartY = e.clientY;
+    dragStartH = el.clientHeight;
+    dragHeight.value = dragStartH; // pin before cancelling, so no frame renders the untouched style
+    glide.cancel();
+  },
+  onMove: (e) => {
+    // An explicit resize is a workspace height, not another content cap: let the grip travel past
+    // the list's own scrollHeight and keep the empty room, exactly like the changed-files grip.
+    dragHeight.value = Math.max(MIN_HISTORY_PX, Math.round(dragStartH + (e.clientY - dragStartY)));
+  },
+  onEnd: () => {
+    if (dragHeight.value == null) return;
+    setHistoryOverride(dragHeight.value);
+    dragHeight.value = null;
+  },
+});
+
+/** Back to the default cap, gliding rather than snapping (see useGripGlide). */
+function resetHistoryHeight(): void {
+  const el = scrollEl.value;
+  dragHeight.value = null;
+  // Where the released viewport will settle: its content height, or the cap once that overflows —
+  // which is nearly always, since the list pages in more commits as you scroll.
+  glide.glideTo(el?.clientHeight, releasedHeight(el, HISTORY_HEIGHT_PX), clearHistoryOverride);
+}
+
+/** Keyboard: ↑/↓ nudge the height in 24px steps from the current rendered size. */
+function nudgeHistoryHeight(delta: number): void {
+  const base = scrollEl.value?.clientHeight;
+  if (base) setHistoryOverride(base + delta);
+}
+
+/** The grip's ↑/↓/Del resize only fires when shortcuts are on (shared with the tree grip). */
+function gripKey(action: () => void): void {
+  if (shortcutsActive()) action();
+}
 
 const sentinelEl = useTemplateRef<HTMLElement>("sentinelEl");
 watch([sentinelEl, () => props.active], ([el, active]) => {
@@ -951,6 +1024,8 @@ watch(historyActivityScale, () => {
         <div
           ref="scrollEl"
           class="scroll-slim history-scroll overflow-y-auto"
+          :class="dragHeight != null && 'history-scroll--dragging'"
+          :style="historyStyle"
           :data-refreshing="loadingLog ? 'true' : 'false'"
           :aria-busy="loadingLog"
           data-history-transition="rows"
@@ -1474,6 +1549,29 @@ watch(historyActivityScale, () => {
             </div>
           </TransitionGroup>
         </div>
+        <!-- resize grip: drag (or ↑/↓) to set an explicit height; double-click / Delete to reset -->
+        <button
+          type="button"
+          :aria-label="historyResized ? $t('repo.history.gripAriaResized') : $t('repo.history.gripAria')"
+          :title="historyResized ? $t('repo.history.gripTitleResized') : $t('repo.history.gripTitle')"
+          class="group/grip flex h-5 w-full cursor-ns-resize touch-none items-center justify-center border-t border-border/40 outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/40"
+          @pointerdown="onGripDown"
+          @dblclick="resetHistoryHeight"
+          @keydown.up.prevent="gripKey(() => nudgeHistoryHeight(-24))"
+          @keydown.down.prevent="gripKey(() => nudgeHistoryHeight(24))"
+          @keydown.delete.prevent="gripKey(resetHistoryHeight)"
+          @keydown.backspace.prevent="gripKey(resetHistoryHeight)"
+        >
+          <GripHorizontal
+            :size="14"
+            :class="
+              cn(
+                'text-muted-foreground/40 transition-colors group-hover/grip:text-muted-foreground',
+                historyResized && 'text-primary/50',
+              )
+            "
+          />
+        </button>
       </template>
     </div>
     </div>
@@ -1553,11 +1651,20 @@ watch(historyActivityScale, () => {
  * so it simply scrolls away as you read down and is there again at the top. The extra 10rem over
  * the old 26rem cap is the space the overview used to occupy above the scroller, kept so the panel
  * is about as tall as it was rather than shrinking by the height of the chart. */
+/* max-height, not height, so a three-commit repo still renders three rows tall. The grip under the
+ * list overrides it with an exact height (and clears the cap) — see @/lib/history-view. The
+ * transition smooths the double-click reset, which is a px→px glide by design; it is suppressed
+ * for the duration of a drag so the grip tracks the pointer with no lag. */
 .history-scroll {
   max-height: 36rem;
+  transition: height 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.history-scroll--dragging {
+  transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .history-scroll,
   .commit-body,
   .history-row-enter-active,
   .history-row-leave-active,
