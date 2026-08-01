@@ -24,7 +24,7 @@ import {
 import { publicKeyFor } from "./relay.ts";
 import { normalizeBuzzCommunities } from "./buzz-url.ts";
 
-export const VERSION = "0.18.0";
+export const VERSION = "0.19.0";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
@@ -211,6 +211,16 @@ export interface AiConfig {
    * auto-push). For an owner who trusts the AI and never edits the plan.
    */
   yolo?: boolean;
+  /**
+   * Whether the "Resolve with AI" affordance appears on conflicted files. Default ON.
+   *
+   * There is deliberately no YOLO equivalent for this one. Every other AI feature here produces
+   * a commit MESSAGE — prose the owner reads before it lands, whose worst case is embarrassing.
+   * This one produces SOURCE, whose worst case is a plausible file that compiles and is wrong,
+   * and which no later review step is guaranteed to catch. Proposal and apply stay two separate
+   * actions with a human between them; this flag only decides whether the button is there.
+   */
+  conflictEnabled?: boolean;
 }
 
 /**
@@ -577,6 +587,8 @@ export interface RedactedAiConfig {
   yolo: boolean;
   /** Whether the AI commit buttons are shown (default true — visible even with no key). */
   commitEnabled: boolean;
+  /** Whether "Resolve with AI" appears on conflicted files (default true). */
+  conflictEnabled: boolean;
 }
 
 /**
@@ -635,6 +647,7 @@ export function redactAi(cfg: RepoYetiConfig): RedactedAiConfig {
     diffDetail: cfg.ai?.diffDetail ?? DEFAULT_DIFF_DETAIL,
     yolo: cfg.ai?.yolo ?? false,
     commitEnabled: cfg.ai?.commitEnabled !== false, // default ON
+    conflictEnabled: cfg.ai?.conflictEnabled !== false, // default ON
   };
   for (const id of AI_PROVIDERS) {
     if (isAiProviderConfigured(cfg, id)) {

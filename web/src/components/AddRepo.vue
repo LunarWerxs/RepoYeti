@@ -53,13 +53,34 @@ const buzzParent = ref("");
 
 const busy = ref(false);
 
+// AppShell keeps this component permanently mounted (only the dialog's DOM unmounts), so nothing
+// resets these refs on its own — reopening would otherwise resume a half-filled form in whatever
+// mode was last used. Closing without submitting means "never mind": go back to the base view.
+function resetForm(): void {
+  mode.value = "register";
+  path.value = "";
+  cloneUrl.value = "";
+  cloneName.value = "";
+  cloneIdentity.value = "none";
+  loreRepoPath.value = "";
+  loreName.value = "";
+  buzzRepoPath.value = "";
+  buzzName.value = "";
+  // The three destination folders are deliberately kept: they default to a scan root, are the
+  // same for every add, and re-typing a path is the tedious part.
+}
+
 // Load scan roots when the dialog opens so the clone destination can default to one.
 watch(open, (isOpen) => {
   if (isOpen) {
     if (!store.roots.length) void store.loadRoots();
     if (!store.servers.length) void store.loadServers();
     void store.loadBuzzConfig();
+  } else if (!handingOffToScan) {
+    // A hand-off to the Scan modal is a detour, not a dismissal — keep the form for the trip back.
+    resetForm();
   }
+  handingOffToScan = false;
 });
 watch(
   () => store.roots,
@@ -112,9 +133,17 @@ function selectMode(v: unknown): void {
   if (v && typeof v === "string") mode.value = v as Mode;
 }
 
+// Layout only. Resting/hover/selected now come from the kit's toggleVariants, which paints them
+// so they stay distinct on any container (see lunarwerx-ui src/components/ui/toggle/index.ts).
+const itemClass = "justify-center gap-1.5";
+
 // Hand off to the one "Scan for projects" modal — scanning lives there, not in this dialog.
+// `scanReturnToAdd` gives that modal a Back control so the hand-off isn't a one-way door.
+let handingOffToScan = false;
 function openScan(): void {
+  handingOffToScan = true;
   open.value = false;
+  store.scanReturnToAdd = true;
   store.scanOpen = true;
 }
 
@@ -183,25 +212,27 @@ async function submit(): Promise<void> {
         <DialogDescription>{{ $t("addRepo.description") }}</DialogDescription>
       </DialogHeader>
 
+      <!-- A `bg-secondary` track with the selected item lifted to `bg-background`, matching the
+           Scan modal's segmented control this dialog hands off to. -->
       <ToggleGroup
         type="single"
         :model-value="mode"
         class="grid w-full grid-cols-2 gap-1 rounded-lg bg-secondary p-1"
         @update:model-value="selectMode"
       >
-        <ToggleGroupItem value="register" class="justify-center gap-1.5">
+        <ToggleGroupItem value="register" :class="itemClass">
           <FolderGit2 :size="14" /> {{ $t("addRepo.modeRegister") }}
         </ToggleGroupItem>
-        <ToggleGroupItem value="create" class="justify-center gap-1.5">
+        <ToggleGroupItem value="create" :class="itemClass">
           <FolderPlus :size="14" /> {{ $t("addRepo.modeCreate") }}
         </ToggleGroupItem>
-        <ToggleGroupItem value="clone" class="justify-center gap-1.5">
+        <ToggleGroupItem value="clone" :class="itemClass">
           <DownloadCloud :size="14" /> {{ $t("addRepo.modeClone") }}
         </ToggleGroupItem>
-        <ToggleGroupItem value="lore" class="justify-center gap-1.5">
+        <ToggleGroupItem value="lore" :class="itemClass">
           <Server :size="14" /> {{ $t("addRepo.modeLore") }}
         </ToggleGroupItem>
-        <ToggleGroupItem v-if="store.buzzEnabled" value="buzz" class="justify-center gap-1.5">
+        <ToggleGroupItem v-if="store.buzzEnabled" value="buzz" :class="itemClass">
           <Radio :size="14" /> {{ $t("addRepo.modeBuzz") }}
         </ToggleGroupItem>
       </ToggleGroup>

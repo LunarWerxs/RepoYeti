@@ -114,6 +114,38 @@ export const PLAN_SAMPLING: Sampling = { temperature: 0, top_p: 0.1 };
  *  default it was silently inheriting. Matches lazycommit's Groq-native value. */
 export const MESSAGE_SAMPLING: Sampling = { temperature: 0.3 };
 
+/**
+ * Conflict resolution decodes GREEDILY, and for a stronger reason than the plan call does.
+ *
+ * The plan wants determinism because its worst case is an unparseable reply. This call's worst
+ * case is a PARSEABLE one that quietly rewrote the owner's code, and sampling temperature is
+ * exactly the knob that trades "reproduce the input" for "produce something new". There is
+ * nothing here we want invented, so there is no temperature to spend.
+ */
+export const CONFLICT_SAMPLING: Sampling = { temperature: 0, top_p: 0.1 };
+
+/** Absolute ceiling for a conflict reply — past this the file belongs in a real merge tool. */
+const CONFLICT_MAX_TOKENS = 8192;
+
+/**
+ * Right-size the conflict reply's reservation to the conflicts actually being resolved.
+ *
+ * Unlike the commit paths, the reply's length is bounded by something we can measure directly:
+ * a resolution is roughly as long as the two sides it merges. Budgeting ~1.6x the summed sides
+ * (plus the per-block header overhead) covers a resolution that keeps both sides in full, which
+ * is the longest legitimate output rule 1 can produce. The `fileBytes` term only widens the
+ * floor a little for a file whose regions are small but whose glue may not be.
+ */
+export function conflictMaxTokens(
+  hunks: ReadonlyArray<{ oursText: string; theirsText: string }>,
+  fileBytes: number,
+): number {
+  // ~4 chars per token is the standard rough conversion; this is a reservation, not a bill.
+  const sides = hunks.reduce((n, h) => n + h.oursText.length + h.theirsText.length, 0) / 4;
+  const overhead = hunks.length * 60; // sentinel lines + CONFIDENCE + NOTE per region
+  return Math.max(1024, Math.min(CONFLICT_MAX_TOKENS, Math.ceil(sides * 1.6 + overhead + fileBytes / 400)));
+}
+
 /** Never set frequency/presence penalty: a good commit body REPEATS the symbol it is about
  *  ("`decodeRow()` …" three times is correct prose), and a positive penalty punishes exactly the
  *  specificity we are asking for. Every surveyed tool that sets them sets them to 0. */

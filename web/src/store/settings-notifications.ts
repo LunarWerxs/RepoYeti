@@ -107,6 +107,8 @@ export function useSettingsNotifications(pullRepo?: (repoId: string) => Promise<
   // Store-owned so every entry point (header kebab, Add-project button, and the
   // "new projects found" toast raised from inside this store) can open the one modal.
   const scanOpen = ref(false);
+  // "Add a repository" likewise, so the Scan modal it hands off to can hand back.
+  const addRepoOpen = ref(false);
 
   /** Pull every behind repo from the toast's action button, then toast the outcome. */
   async function pullBehind(behind: BehindRepo[]): Promise<void> {
@@ -400,6 +402,7 @@ export function useSettingsNotifications(pullRepo?: (repoId: string) => Promise<
     dismissNotification,
     clearNotifications,
     scanOpen,
+    addRepoOpen,
     updatePromptOpen,
     updateBlockedReason,
     notifyUpdateAvailable,

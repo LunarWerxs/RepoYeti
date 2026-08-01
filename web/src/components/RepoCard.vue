@@ -15,6 +15,9 @@ const RepoCardChanges = defineAsyncComponent(() => import("./repo-card/RepoCardC
 const RepoCardCommit = defineAsyncComponent(() => import("./repo-card/RepoCardCommit.vue"));
 const RepoCardActions = defineAsyncComponent(() => import("./repo-card/RepoCardActions.vue"));
 const RepoCollaboration = defineAsyncComponent(() => import("./repo-card/RepoCollaboration.vue"));
+// Only ever mounted for a conflicted repo, so the resolver + its hunk cards stay out of the
+// bundle every card that is merely dirty has to load.
+const ConflictResolver = defineAsyncComponent(() => import("./conflicts/ConflictResolver.vue"));
 const LogPanel = defineAsyncComponent(() => import("./LogPanel.vue"));
 
 const props = withDefaults(
@@ -155,6 +158,11 @@ watch(
           v-model:tree-query="treeQuery"
           v-model:content-mode="contentMode"
         />
+
+        <!-- conflicted files + AI resolution — see conflicts/ConflictResolver.vue. Sits ABOVE
+             the commit box on purpose: while a merge is unresolved, resolving it is the only
+             thing the owner can actually do here (git refuses the commit either way). -->
+        <ConflictResolver v-if="collaborationMode === 'mine' && repo.status?.conflicted" :repo="repo" />
 
         <!-- commit message box + smart-commit — see repo-card/RepoCardCommit.vue -->
         <RepoCardCommit

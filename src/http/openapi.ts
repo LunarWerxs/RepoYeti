@@ -49,6 +49,8 @@ import {
   ProviderUpdateSchema,
   CommitMessageSchema,
   CommitPlanSchema,
+  ConflictApplySchema,
+  ConflictResolveSchema,
   ShareCreateSchema,
   CollaborationInspectSchema,
   CollaborationJoinSchema,
@@ -193,6 +195,23 @@ export const META: Record<string, RouteMeta> = {
     tags: ["files"],
     query: [{ name: "q", description: "Search query.", required: true }],
   },
+  // ── merge conflicts ──────────────────────────────────────────────────────────────
+  // Three steps, kept as three routes so the write is always a separate, explicit act:
+  // read → propose (POST /conflict-resolve, in the ai tag) → apply.
+  "GET /api/repos/:id/conflicts": {
+    summary: "List unmerged paths, each flagged with whether it can be resolved here.",
+    tags: ["files"],
+  },
+  "GET /api/repos/:id/conflict": {
+    summary: "Read one conflicted file, parsed into regions, with the hash apply requires.",
+    tags: ["files"],
+    query: [{ name: "path", description: "Repo-relative file path.", required: true }],
+  },
+  "POST /api/repos/:id/conflict-apply": {
+    summary: "Write reviewed resolutions into a conflicted file. Never stages, so the path stays unmerged.",
+    body: ConflictApplySchema,
+    tags: ["files"],
+  },
   "GET /api/repos/:id/diff": {
     summary: "Both sides (HEAD + working) of a changed file.",
     tags: ["files"],
@@ -264,6 +283,7 @@ export const META: Record<string, RouteMeta> = {
   "DELETE /api/ai/providers/:provider": { summary: "Remove a provider's stored key.", tags: ["ai"] },
   "POST /api/repos/:id/commit-message": { summary: "Draft a commit message from the repo's diff.", body: CommitMessageSchema, tags: ["ai"] },
   "POST /api/repos/:id/commit-plan": { summary: "Propose a multi-commit plan (read-only; commits nothing).", body: CommitPlanSchema, tags: ["ai"] },
+  "POST /api/repos/:id/conflict-resolve": { summary: "Propose a merge resolution for one conflicted file (read-only; writes nothing). Owner-only.", body: ConflictResolveSchema, tags: ["ai"] },
 
   // ── events (SSE) — documented for completeness; not a JSON endpoint ───────────────
   "GET /api/events": { summary: "Server-Sent Events stream of live repo/settings updates.", tags: ["system"] },

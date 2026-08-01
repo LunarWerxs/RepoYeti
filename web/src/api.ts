@@ -21,6 +21,10 @@ import type {
   CommitDetail,
   CommitPlanResponse,
   CommitStyle,
+  ConflictApplyResponse,
+  ConflictFileResponse,
+  ConflictListEntry,
+  ConflictResolveResponse,
   DetectedIdentity,
   DiffDetail,
   FetchAllResult,
@@ -867,5 +871,33 @@ export const api = {
         `/api/repos/${repoId}/commit-plan`,
         { ...(provider ? { provider } : {}), ...(paths?.length ? { paths } : {}) },
       ),
+    /** Toggle whether "Resolve with AI" appears on conflicted files (default on). */
+    setConflictEnabled: (conflictEnabled: boolean) =>
+      req<AiSettings>("PUT", "/api/ai/settings", { conflictEnabled }),
+    /** Propose a resolution for every conflict in ONE file. Read-only — the daemon writes
+     *  nothing, and the proposal reaches disk only through `conflicts.apply` below. */
+    resolveConflict: (repoId: string, path: string, provider?: AiProviderId) =>
+      req<ConflictResolveResponse>(
+        "POST",
+        `/api/repos/${repoId}/conflict-resolve`,
+        { path, ...(provider ? { provider } : {}) },
+      ),
+  },
+
+  // ── merge conflicts ───────────────────────────────────────────────────────────
+  // Read/apply live outside `ai` on purpose: neither one calls a provider, and applying a
+  // hand-written resolution is a first-class path, not a degraded AI one.
+  conflicts: {
+    /** Every unmerged path, each annotated with whether the resolver can act on it. */
+    list: (repoId: string) =>
+      req<{ ok: boolean; files: ConflictListEntry[] }>("GET", `/api/repos/${repoId}/conflicts`),
+    /** One conflicted file parsed into hunks, plus the staleness hash `apply` requires. */
+    read: (repoId: string, path: string) =>
+      req<ConflictFileResponse>("GET", `/api/repos/${repoId}/conflict?path=${encodeURIComponent(path)}`),
+    /** Write reviewed resolutions into the file. Never stages — the path stays unmerged until
+     *  the owner stages it, so a partial or wrong resolution still can't be committed by
+     *  accident. `hash` must match the file as it is right now. */
+    apply: (repoId: string, path: string, hash: string, accepted: Array<{ index: number; content: string }>) =>
+      req<ConflictApplyResponse>("POST", `/api/repos/${repoId}/conflict-apply`, { path, hash, accepted }),
   },
 };

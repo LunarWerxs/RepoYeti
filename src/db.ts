@@ -82,6 +82,8 @@ interface RepoRow {
   starred: number;
   /** Owner opted this repo into the auto-commit timer (see src/auto-commit.ts). */
   auto_commit: number;
+  /** Drag-persisted position; NULL for a repo the owner has never reordered. */
+  sort_order: number | null;
   last_status: string | null;
   updated_at: number;
 }
@@ -112,6 +114,10 @@ export interface RepoView {
   starred: boolean;
   /** Opted into the auto-commit timer (per-repo; the timer only touches repos with this on). */
   autoCommit: boolean;
+  /** Drag-persisted list position, or null for a repo never manually reordered. Exposed so the
+   *  dashboard can slot a live-discovered repo into the same place getRepos() would, instead of
+   *  appending it to the bottom of whatever it already had. */
+  sortOrder: number | null;
   status: RepoStatus | null;
   updatedAt: number;
 }
@@ -703,6 +709,7 @@ function toView(r: RepoRow): RepoView {
     pinned: r.pinned === 1,
     starred: r.starred === 1,
     autoCommit: r.auto_commit === 1,
+    sortOrder: r.sort_order ?? null,
     status: r.last_status ? (JSON.parse(r.last_status) as RepoStatus) : null,
     updatedAt: r.updated_at,
   };

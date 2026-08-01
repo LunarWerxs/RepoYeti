@@ -18,9 +18,10 @@
  * codes the UI can render (mirrors the classify() pattern in git-actions.ts).
  *
  * This module is split by concern:
- *   - adapters.ts        per-provider adapters (model-list parsing, request shaping)
- *   - commit-message.ts  error/result types + HTTP plumbing + single commit-message drafting
- *   - commit-plan.ts     multi-commit "Smart Commit" planning
+ *   - adapters.ts         per-provider adapters (model-list parsing, request shaping)
+ *   - commit-message.ts   error/result types + HTTP plumbing + single commit-message drafting
+ *   - commit-plan.ts      multi-commit "Smart Commit" planning
+ *   - conflict-resolve.ts merge-conflict resolution (propose-only; the owner applies)
  */
 export type { AiModel, AiProviderRuntime } from "./adapters.ts";
 export {
@@ -52,3 +53,27 @@ export {
   heuristicPlan,
   generateCommitPlan,
 } from "./commit-plan.ts";
+
+export type {
+  ConflictHunk,
+  ParsedConflictFile,
+  ResolutionConfidence,
+  ResolutionFlag,
+  ResolutionAudit,
+  HunkResolution,
+  RejectedHunk,
+  ConflictResolution,
+} from "./conflict-resolve.ts";
+export {
+  MAX_CONFLICT_FILE_BYTES,
+  MAX_CONFLICT_HUNKS,
+  hasConflictMarkers,
+  parseConflictFile,
+  renderResolvedFile,
+  assessResolution,
+  looksSmallTierModel,
+  resolveSystemPrompt,
+  resolveUserPrompt,
+  parseConflictResolution,
+  generateConflictResolution,
+} from "./conflict-resolve.ts";

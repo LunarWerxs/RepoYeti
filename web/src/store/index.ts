@@ -184,6 +184,21 @@ export const useStore = defineStore("repoyeti", () => {
   const scanNew = ref(0); // of those, how many were not previously known
   const scanDone = ref(false); // a scan has finished (or was stopped) → show the summary
   const lastScanCancelled = ref(false); // the finished scan ended via the Stop (X) control
+  // The genuinely-new repos this scan turned up, collected from the `repo_added` events it emits.
+  // The daemon indexes as it walks, so this is a review list for what already happened — the modal
+  // uses it to name every find and to offer removing the ones the owner didn't want.
+  const scanNewRepos = ref<Array<{ id: string; name: string; absPath: string }>>([]);
+  // True while a scan is running, so `repo_added` knows to record its repos above. Discovery also
+  // fires `repo_added` at boot and from watchers; only a scan's finds belong in the review list.
+  const collectingScanRepos = ref(false);
+  // The Scan modal was reached from "Add a repository", so closing it should hand back rather than
+  // dropping the owner on the dashboard with no route to the flow they were in.
+  const scanReturnToAdd = ref(false);
+
+  /** Take a repo off the post-scan review list (it was removed, or the owner kept it). */
+  function dropScanNewRepo(repoId: string): void {
+    scanNewRepos.value = scanNewRepos.value.filter((r) => r.id !== repoId);
+  }
 
   /** Normalise any thrown ApiError into the structured {ok,code,message} the UI toasts. */
   function asResult(e: unknown): ActionResult {
@@ -205,6 +220,7 @@ export const useStore = defineStore("repoyeti", () => {
     clearFilters,
     showHidden,
     hasHidden,
+    hasManualOrder,
     sortMode,
     setSortMode,
     visibleRepos,
@@ -241,6 +257,7 @@ export const useStore = defineStore("repoyeti", () => {
     aiEnabled,
     aiUsable,
     aiCommitEnabled,
+    aiConflictEnabled,
     loadAiSettings,
     loadAiAvailability,
     loadAiCatalog,
@@ -250,12 +267,17 @@ export const useStore = defineStore("repoyeti", () => {
     setDefaultProvider,
     setYolo,
     setCommitEnabled,
+    setConflictEnabled,
     setStyle,
     setDiffDetail,
     removeProvider,
     genCommitMessage,
     genCommitPlan,
     smartCommit,
+    listConflicts,
+    readConflict,
+    resolveConflict,
+    applyConflict,
   } = useAi(busy, loadChanges, asResult, bumpHistoryRevision);
 
   const {
@@ -352,6 +374,7 @@ export const useStore = defineStore("repoyeti", () => {
     addRepo,
     cloneRepo,
     persistRepoOrder,
+    resetRepoOrder,
   } = useSources(
     repos,
     scanning,
@@ -474,6 +497,7 @@ export const useStore = defineStore("repoyeti", () => {
     dismissNotification,
     clearNotifications,
     scanOpen,
+    addRepoOpen,
     updatePromptOpen,
     updateBlockedReason,
     notifyUpdateAvailable,
@@ -753,9 +777,16 @@ export const useStore = defineStore("repoyeti", () => {
             reconcileBehindNotification(payload.id, payload.status.behind);
           }
         } else if (event.value === "repo_added") {
-          // Background discovery found a repo after boot — append it (or refresh in place).
+          // Background discovery found a repo after boot — slot it in (or refresh in place).
           const repo = payload.repo as Repo | undefined;
-          if (repo?.id) upsertRepo(repo);
+          if (repo?.id) {
+            const isNew = !hasRepo(repo.id);
+            upsertRepo(repo);
+            // Only a running scan's finds go on the review list, and only ones we didn't have.
+            if (isNew && collectingScanRepos.value) {
+              scanNewRepos.value.push({ id: repo.id, name: repo.name, absPath: repo.absPath });
+            }
+          }
         } else if (event.value === "repo_removed") {
           // A scan root was removed, the owner removed this repo, or — on an all-repos share link —
           // they hid it and it left this viewer's scope (src/share/events.ts translates the hide
@@ -907,12 +938,15 @@ export const useStore = defineStore("repoyeti", () => {
           lastScanCancelled.value = false;
           scanFound.value = 0;
           scanNew.value = 0;
+          scanNewRepos.value = [];
+          collectingScanRepos.value = true;
         } else if (event.value === "scan_progress") {
           if (typeof payload.found === "number") scanFound.value = payload.found;
           if (typeof payload.added === "number") scanNew.value = payload.added;
         } else if (event.value === "scan_done" || event.value === "scan_cancelled") {
           scanning.value = false;
           scanDone.value = true;
+          collectingScanRepos.value = false;
           lastScanCancelled.value = event.value === "scan_cancelled";
           if (typeof payload.found === "number") scanFound.value = payload.found;
           if (typeof payload.added === "number") scanNew.value = payload.added;
@@ -996,11 +1030,15 @@ export const useStore = defineStore("repoyeti", () => {
     addScanRoot,
     removeScanRoot,
     scanOpen,
+    addRepoOpen,
     scanning,
     scanFound,
     scanNew,
     scanDone,
     lastScanCancelled,
+    scanNewRepos,
+    scanReturnToAdd,
+    dropScanNewRepo,
     startScan,
     cancelScan,
     loadServers,
@@ -1023,6 +1061,7 @@ export const useStore = defineStore("repoyeti", () => {
     aiEnabled,
     aiUsable,
     aiCommitEnabled,
+    aiConflictEnabled,
     loadAiSettings,
     loadAiAvailability,
     loadAiCatalog,
@@ -1032,12 +1071,17 @@ export const useStore = defineStore("repoyeti", () => {
     setDefaultProvider,
     setYolo,
     setCommitEnabled,
+    setConflictEnabled,
     setStyle,
     setDiffDetail,
     removeProvider,
     genCommitMessage,
     genCommitPlan,
     smartCommit,
+    listConflicts,
+    readConflict,
+    resolveConflict,
+    applyConflict,
     authReady,
     authEnforced,
     authenticated,
@@ -1165,6 +1209,7 @@ export const useStore = defineStore("repoyeti", () => {
     clearFilters,
     showHidden,
     hasHidden,
+    hasManualOrder,
     sortMode,
     setSortMode,
     visibleRepos,
@@ -1193,6 +1238,7 @@ export const useStore = defineStore("repoyeti", () => {
     assignRepoAccount,
     addRepo,
     persistRepoOrder,
+    resetRepoOrder,
     createIdentity,
     updateIdentity,
     removeIdentity,

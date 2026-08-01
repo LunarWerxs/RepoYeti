@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { FolderSearch, HardDrive, Folder, Loader2, X } from "@lucide/vue";
+import { ref, watch } from "vue";
+import { ArrowLeft, FolderSearch, HardDrive, Folder, Loader2, X, Trash2 } from "@lucide/vue";
+import { toast } from "vue-sonner";
+import { useI18n } from "vue-i18n";
 import { useStore } from "../store";
 import {
   Dialog,
@@ -14,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+const { t } = useI18n();
+
 const open = defineModel<boolean>("open", { required: true });
 const store = useStore();
 
@@ -21,6 +25,21 @@ const store = useStore();
 type Mode = "machine" | "folder";
 const mode = ref<Mode>("machine");
 const folderPath = ref("");
+// Repo ids currently being removed from the review list, so their row can show a spinner.
+const removing = ref<string[]>([]);
+
+// This component stays mounted for the app's lifetime (AppShell owns it), so closing the dialog
+// leaves `mode`/`folderPath` exactly as they were. Reset them, and clear the previous run's
+// summary, so reopening starts at the base view instead of a stale "Found 51 projects".
+watch(open, (isOpen) => {
+  if (isOpen) return;
+  mode.value = "machine";
+  folderPath.value = "";
+  if (!store.scanning) {
+    store.scanDone = false;
+    store.scanNewRepos = [];
+  }
+});
 
 function start(): void {
   if (store.scanning) return;
@@ -32,13 +51,58 @@ function start(): void {
     void store.startScan();
   }
 }
+
+/** Return to "Add a repository" — the flow this modal was opened from. */
+function back(): void {
+  store.scanReturnToAdd = false;
+  open.value = false;
+  store.addRepoOpen = true;
+}
+
+function close(): void {
+  store.scanReturnToAdd = false;
+  open.value = false;
+}
+
+/**
+ * The daemon indexes each repo as it walks, so a scan cannot ask first — this is the undo.
+ * removeRepo() tombstones the path, so a later scan won't silently re-add what was rejected here.
+ */
+async function discard(repo: { id: string; name: string }): Promise<void> {
+  if (removing.value.includes(repo.id)) return;
+  removing.value.push(repo.id);
+  try {
+    await store.removeRepo(repo.id);
+    store.dropScanNewRepo(repo.id);
+    toast.success(t("scan.discarded", { name: repo.name }));
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t("scan.discardFailed"));
+  } finally {
+    removing.value = removing.value.filter((id) => id !== repo.id);
+  }
+}
 </script>
 
 <template>
   <Dialog v-model:open="open">
     <DialogContent class="sm:max-w-md">
       <DialogHeader>
-        <DialogTitle>{{ $t("scan.title") }}</DialogTitle>
+        <DialogTitle class="flex items-center gap-1.5">
+          <Tooltip v-if="store.scanReturnToAdd">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="-ml-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                :aria-label="$t('scan.back')"
+                @click="back"
+              >
+                <ArrowLeft :size="15" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{{ $t("scan.back") }}</TooltipContent>
+          </Tooltip>
+          {{ $t("scan.title") }}
+        </DialogTitle>
         <DialogDescription>{{ $t("scan.description") }}</DialogDescription>
       </DialogHeader>
 
@@ -124,8 +188,48 @@ function start(): void {
         <span v-if="store.lastScanCancelled" class="text-muted-foreground"> · {{ $t("scan.stopped") }}</span>
       </div>
 
+      <!-- Which projects are new. A scan adds as it walks (it has to — it indexes and watches each
+           repo to read its status), so this is the review list rather than a confirmation prompt:
+           every find is named, and anything unwanted can be discarded right here. -->
+      <div v-if="store.scanNewRepos.length" class="flex min-h-0 flex-col gap-1.5">
+        <p class="text-[12px] font-medium text-muted-foreground">
+          {{ $t("scan.newListLabel", { count: store.scanNewRepos.length }, store.scanNewRepos.length) }}
+        </p>
+        <ul class="flex max-h-44 flex-col gap-px overflow-y-auto rounded-md border border-border/60 bg-secondary/30 p-1">
+          <li
+            v-for="repo in store.scanNewRepos"
+            :key="repo.id"
+            class="group flex items-center gap-2 rounded-sm px-2 py-1.5 transition-colors hover:bg-secondary/70"
+          >
+            <span class="flex min-w-0 flex-col">
+              <span class="truncate text-[12.5px] font-medium text-foreground">{{ repo.name }}</span>
+              <span class="mono truncate text-[11px] text-muted-foreground">{{ repo.absPath }}</span>
+            </span>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  type="button"
+                  class="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                  :disabled="removing.includes(repo.id)"
+                  :aria-label="$t('scan.discard')"
+                  @click="discard(repo)"
+                >
+                  <Loader2 v-if="removing.includes(repo.id)" :size="14" class="animate-spin" />
+                  <Trash2 v-else :size="14" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{{ $t("scan.discard") }}</TooltipContent>
+            </Tooltip>
+          </li>
+        </ul>
+        <p class="text-[11.5px] text-muted-foreground">{{ $t("scan.newListHint") }}</p>
+      </div>
+
       <DialogFooter>
-        <Button variant="ghost" @click="open = false">{{ $t("scan.close") }}</Button>
+        <Button v-if="store.scanReturnToAdd" variant="ghost" @click="back">
+          <ArrowLeft /> {{ $t("scan.back") }}
+        </Button>
+        <Button variant="ghost" @click="close">{{ $t("scan.close") }}</Button>
         <Button
           v-if="!store.scanning"
           :disabled="mode === 'folder' && !folderPath.trim()"

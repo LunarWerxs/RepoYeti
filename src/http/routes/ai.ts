@@ -20,8 +20,10 @@ import {
   listModels,
   generateCommitMessage,
   generateCommitPlan,
+  generateConflictResolution,
   heuristicPlan,
   clearRateGate,
+  looksSmallTierModel,
   normalizeCompatibleBaseUrl,
   isCompatibleLoopbackBaseUrl,
   AiError,
@@ -36,8 +38,14 @@ import {
   ConnectSchema,
   CommitMessageSchema,
   CommitPlanSchema,
+  ConflictResolveSchema,
 } from "../../schemas.ts";
-import { collectRepoDiff, collectRepoPathsDiff, planCommitInput } from "../../service/index.ts";
+import {
+  collectRepoDiff,
+  collectRepoPathsDiff,
+  planCommitInput,
+  readConflictFile,
+} from "../../service/index.ts";
 import { requireId } from "../respond.ts";
 import { effectiveGuest } from "../../auth.ts";
 
@@ -64,6 +72,23 @@ export function register(app: Hono, { cfg }: Deps): void {
   const providerLabel = (id: AiProviderId): string => AI_CATALOG.find((e) => e.id === id)?.label ?? id;
   const runtimeFor = (id: AiProviderId): { baseUrl?: string } =>
     id === "compatible" ? { baseUrl: resolveAiBaseUrl(cfg, id) ?? undefined } : {};
+  /**
+   * Whether the model that would actually run LOOKS like a small/fast tier.
+   *
+   * Computed here rather than in the browser so the heuristic has exactly one definition
+   * (src/ai/conflict-resolve.ts). The conflict UI leans on it to escalate its warning, and a
+   * second copy in the web app would be a second copy to drift.
+   */
+  const modelTier = (): "small" | "unknown" | null => {
+    const provider = effectiveDefaultProvider(cfg);
+    const model = provider ? resolveModel(cfg, provider) : null;
+    if (!model) return null;
+    return looksSmallTierModel(model) ? "small" : "unknown";
+  };
+  /** The settings payload every AI settings route returns — redacted config plus the derived
+   *  bits the UI needs. One helper so a PUT can never answer with a differently-shaped body
+   *  than the GET the client loaded on boot. */
+  const aiPayload = () => ({ ...redactAi(cfg), modelTier: modelTier() });
   const guestAiUsage = new Map<string, GuestAiUsage>();
   const pruneGuestAiUsage = (now: number): void => {
     for (const [id, usage] of guestAiUsage) {
@@ -165,7 +190,7 @@ export function register(app: Hono, { cfg }: Deps): void {
   });
 
   // Redacted settings — NEVER includes any apiKey.
-  app.get("/api/ai/settings", (c) => c.json(redactAi(cfg)));
+  app.get("/api/ai/settings", (c) => c.json(aiPayload()));
 
   // Update commit style and/or the default provider.
   app.put("/api/ai/settings", async (c) => {
@@ -176,6 +201,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (p.data.diffDetail != null) ai.diffDetail = p.data.diffDetail;
     if (typeof p.data.yolo === "boolean") ai.yolo = p.data.yolo;
     if (typeof p.data.commitEnabled === "boolean") ai.commitEnabled = p.data.commitEnabled;
+    if (typeof p.data.conflictEnabled === "boolean") ai.conflictEnabled = p.data.conflictEnabled;
     if (p.data.defaultProvider !== undefined) {
       const dp = p.data.defaultProvider == null ? undefined : (p.data.defaultProvider as AiProviderId);
       if (dp !== undefined && !isAiProviderConfigured(cfg, dp)) {
@@ -184,7 +210,7 @@ export function register(app: Hono, { cfg }: Deps): void {
       ai.defaultProvider = dp;
     }
     saveConfig(cfg);
-    return c.json(redactAi(cfg));
+    return c.json(aiPayload());
   });
 
   // Connect a provider: validate the key by listing models, then SAVE it. The generic compatible
@@ -274,7 +300,7 @@ export function register(app: Hono, { cfg }: Deps): void {
       // look like it didn't work until the pause aged out.
       clearRateGate(provider);
       saveConfig(cfg);
-      return c.json({ ok: true, models, discoveryAvailable, settings: redactAi(cfg) });
+      return c.json({ ok: true, models, discoveryAvailable, settings: aiPayload() });
     } catch (e) {
       return aiErr(c, e, provider);
     }
@@ -341,7 +367,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     }
     if (p.data.makeDefault) ai.defaultProvider = provider;
     saveConfig(cfg);
-    return c.json(redactAi(cfg));
+    return c.json(aiPayload());
   });
 
   // Remove a provider's key (and re-home the default if it pointed here).
@@ -355,7 +381,7 @@ export function register(app: Hono, { cfg }: Deps): void {
       cfg.ai.defaultProvider = effectiveDefaultProvider(cfg) ?? undefined;
     }
     saveConfig(cfg);
-    return c.json(redactAi(cfg));
+    return c.json(aiPayload());
   });
 
   // Draft a commit message from the repo's diff using the default (or a chosen) provider.
@@ -495,6 +521,77 @@ export function register(app: Hono, { cfg }: Deps): void {
       );
     } finally {
       admission?.();
+    }
+  });
+
+  // Propose a resolution for every conflict in ONE file (read-only — writes NOTHING).
+  //
+  // OWNER-ONLY, unlike every other AI route here, and the asymmetry is deliberate. A share-link
+  // guest drafting a commit message spends the owner's tokens on prose the owner still reads
+  // before it lands. A guest resolving a merge would be spending them on the owner's SOURCE, in
+  // a repo they cannot see the rest of, to produce a change whose blast radius they cannot
+  // assess. There is no guest budget that makes that a good trade, so there isn't one.
+  //
+  // The proposal reaches disk only through POST /api/repos/:id/conflict-apply
+  // (src/http/routes/files.ts), which re-validates everything here independently.
+  app.post("/api/repos/:id/conflict-resolve", async (c) => {
+    const id = requireId(c);
+    if (id instanceof Response) return id;
+    if (effectiveGuest(c, cfg)) {
+      return jsonError(c, "FORBIDDEN", "AI conflict resolution is owner-only", 403);
+    }
+    if (cfg.ai?.conflictEnabled === false) {
+      return jsonError(c, "FORBIDDEN", "AI conflict resolution is disabled in Settings → AI", 403);
+    }
+    const p = await parseBody(c, ConflictResolveSchema);
+    if (!p.ok) return p.res;
+
+    const provider = (p.data.provider == null ? undefined : (p.data.provider as AiProviderId)) ??
+      effectiveDefaultProvider(cfg);
+    if (!provider) return jsonError(c, "NO_AI_PROVIDER", "no AI provider configured");
+    const apiKey = resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
+    if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
+      return jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`);
+    }
+    const model = resolveModel(cfg, provider);
+    if (!model) return jsonError(c, "NO_MODEL", `pick a model for ${provider} in Settings`);
+
+    const file = await readConflictFile(id, p.data.path);
+    if (!file.ok || !file.parsed) {
+      const status: ContentfulStatusCode = file.code === "NOT_FOUND" ? 404 : file.code === "NOT_CONFLICTED" ? 409 : 400;
+      return c.json({ ok: false, code: file.code, message: file.message }, status);
+    }
+
+    try {
+      const resolution = await generateConflictResolution(
+        provider,
+        apiKey,
+        model,
+        file.path!,
+        file.text!,
+        file.parsed,
+        undefined,
+        runtimeFor(provider),
+      );
+      return c.json({
+        ok: true,
+        ...resolution,
+        // Echoed back so the apply call can prove it is resolving the same bytes, and so the
+        // UI can render ours/theirs beside each proposal without a second round trip.
+        hash: file.hash,
+        hasBase: file.hasBase,
+        hunks: file.hunks,
+        provider,
+        model,
+        // Repeated per response rather than read once at page load: the owner can switch models
+        // in Settings between generating two files, and a stale banner is worse than no banner.
+        modelTier: looksSmallTierModel(model) ? "small" : "unknown",
+      });
+    } catch (e) {
+      // No heuristic fallback here, deliberately — see generateConflictResolution's doc comment.
+      // The honest degraded state for a failed merge resolution is the conflict markers the
+      // owner already has, not a machine-made guess wearing the same UI as a real proposal.
+      return aiErr(c, e, provider);
     }
   });
 }

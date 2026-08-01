@@ -122,6 +122,7 @@ test("checkIdentityPolicy: ok when no rule matches, or the resolved identity sat
     pinned: false,
     starred: false,
     autoCommit: false,
+    sortOrder: null,
     status: null,
     updatedAt: 0,
   };
@@ -151,6 +152,7 @@ test("checkIdentityPolicy: violation when the resolved identity (or none) doesn'
     pinned: false,
     starred: false,
     autoCommit: false,
+    sortOrder: null,
     status: null,
     updatedAt: 0,
   };

@@ -168,6 +168,52 @@ describe("RepoCardCommit default primary action", () => {
     expect(primary.attributes("data-commit-mode")).toBe("sync");
   });
 
+  it("keeps Ctrl+Enter on the SAME scope + mode as the primary button", async () => {
+    // The shortcut used to hard-code doCommit("commit"): with files checked it committed the whole
+    // tree while the button beside it read "Commit selected (1)".
+    defaultCommitAction.value = "sync";
+    const store = useStore();
+    const commit = vi.spyOn(store, "commit").mockResolvedValue({ ok: true, code: "OK" });
+    const commitSelected = vi.spyOn(store, "commitSelected").mockResolvedValue({ ok: true, code: "OK" });
+    vi.spyOn(store, "doAction").mockResolvedValue({ ok: true, code: "OK" });
+    const wrapper = mountCommit("origin", ["src/a.ts"]);
+
+    await wrapper.get("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
+    await flushPromises();
+
+    expect(commit).not.toHaveBeenCalled();
+    expect(commitSelected).toHaveBeenCalledWith("repo-1", "feat: ship it", ["src/a.ts"]);
+  });
+
+  it("offers a selection-scoped Sync in the dropdown instead of only a whole-tree one", async () => {
+    // The reported bug: with files checked, the menu's only sync entry committed EVERYTHING, so
+    // "commit and sync these files" was unreachable whenever the default action was a plain commit.
+    const store = useStore();
+    const commit = vi.spyOn(store, "commit").mockResolvedValue({ ok: true, code: "OK" });
+    const commitSelected = vi.spyOn(store, "commitSelected").mockResolvedValue({ ok: true, code: "OK" });
+    const action = vi.spyOn(store, "doAction").mockResolvedValue({ ok: true, code: "OK" });
+    const wrapper = mountCommit("origin", ["src/a.ts"]);
+
+    // The menu content is teleported to <body>, so it's queried there rather than through `wrapper`.
+    await wrapper.get('[aria-label="Commit options"]').trigger("pointerdown", { button: 0, ctrlKey: false });
+    await wrapper.get('[aria-label="Commit options"]').trigger("click");
+    await flushPromises();
+    const items = [...document.body.querySelectorAll('[role="menuitem"]')] as HTMLElement[];
+    const labels = items.map((el) => el.textContent?.trim());
+    expect(labels).toContain("Commit selected & Sync");
+    expect(labels).toContain("Commit all & Sync");
+
+    items.find((el) => el.textContent?.trim() === "Commit selected & Sync")?.click();
+    await flushPromises();
+
+    expect(commit).not.toHaveBeenCalled();
+    expect(commitSelected).toHaveBeenCalledWith("repo-1", "feat: ship it", ["src/a.ts"]);
+    expect(action.mock.calls).toEqual([
+      ["repo-1", "pull"],
+      ["repo-1", "push"],
+    ]);
+  });
+
   it("leaves the primary button on the whole tree when nothing is selected", () => {
     defaultCommitAction.value = "sync";
     const wrapper = mountCommit("origin", []);

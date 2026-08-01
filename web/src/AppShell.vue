@@ -38,7 +38,6 @@ watch(
 
 const store = useStore();
 const leftSharedWorkspace = new URLSearchParams(window.location.search).get("leftShare") === "1";
-const showAdd = ref(false);
 const showSettings = ref(false);
 const showRemote = ref(false);
 const { side: settingsSide, shiftPx: settingsShiftPx } = usePushPanel(showSettings, {
@@ -161,7 +160,7 @@ onBeforeUnmount(() => {
       :connected="store.connected"
       :repo-count="store.repos.length"
       @reload="store.loadAll()"
-      @add="showAdd = true"
+      @add="store.addRepoOpen = true"
       @settings="onSettings"
       @remote="showRemote = true"
     />
@@ -187,7 +186,7 @@ onBeforeUnmount(() => {
         <div class="text-sm font-medium text-muted-foreground">{{ $t("shell.noReposTitle") }}</div>
         <!-- A guest can't add repos (the daemon refuses it), and an empty dashboard for them means
              the share simply names no live repo — not that they should go make one. -->
-        <Button v-if="!store.isGuest" @click="showAdd = true">
+        <Button v-if="!store.isGuest" @click="store.addRepoOpen = true">
           <Plus />
           {{ $t("shell.addRepository") }}
         </Button>
@@ -226,7 +225,7 @@ onBeforeUnmount(() => {
     <!-- "an update is available, want it?" — never installs on its own; see UpdatePrompt.vue -->
     <UpdatePrompt v-if="!store.isGuest" />
 
-    <AddRepo v-model:open="showAdd" />
+    <AddRepo v-model:open="store.addRepoOpen" />
     <ScanProjects v-model:open="store.scanOpen" />
     <Settings v-model:open="showSettings" :side="settingsSide" :right-offset-px="pageShiftPx" :target-tab="settingsTab" />
     <!-- "I want to share ONE repo, not my whole dashboard" — the remote modal hands off to

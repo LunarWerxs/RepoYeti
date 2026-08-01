@@ -219,6 +219,7 @@ export const AiSettingsSchema = z.object({
   defaultProvider: z.string().nullish(), // provider validity → NOT_CONFIGURED in the handler
   yolo: z.boolean().optional(), // smart-commit: skip the review editor and commit the AI plan
   commitEnabled: z.boolean().optional(), // whether the AI commit buttons are shown at all
+  conflictEnabled: z.boolean().optional(), // whether "Resolve with AI" appears on conflicts
 });
 
 export const ProviderUpdateSchema = z.object({
@@ -231,6 +232,48 @@ export const CommitMessageSchema = z.object({
   // When present, draft the message from ONLY these paths (smart-commit per-group regenerate).
   paths: z.array(nonEmpty).max(MAX_PLAN_PATHS).optional(),
 });
+
+// ── AI conflict resolution ───────────────────────────────────────────────────────
+// Ask the model to propose a resolution for one conflicted file. Read-only: this route
+// writes nothing, and the proposal only reaches disk through ConflictApplySchema below.
+export const ConflictResolveSchema = z.object({
+  path: nonEmpty,
+  provider: z.string().optional(),
+});
+
+/**
+ * Apply reviewed resolutions to one conflicted file.
+ *
+ * `content` is sent by the CLIENT rather than looked up from a server-side proposal, which is
+ * what lets the owner edit the model's suggestion before accepting it — the common case, since
+ * a proposal that is 90% right is still worth taking. The route validates every region
+ * regardless of origin, so a hand-written resolution and a model's get identical treatment.
+ *
+ * `hash` is the staleness token from the read/resolve call. Without it, a proposal generated
+ * before an editor saved the file would splice into bytes nobody reviewed.
+ */
+export const ConflictApplySchema = z.object({
+  path: nonEmpty,
+  hash: z.string().min(8).max(128),
+  // Bounds mirror the engine's own limits (src/ai/conflict-resolve.ts): a file with more than
+  // MAX_CONFLICT_HUNKS (40) regions is refused before it ever gets here, and a resolvable file is
+  // at most MAX_CONFLICT_FILE_BYTES (512 KB), so one region can never legitimately exceed that.
+  // Sized to the real ceiling rather than "generously": these two numbers multiply into the
+  // request body the daemon will buffer, and the route pairs them with a bodyLimit to match.
+  accepted: z
+    .array(
+      z.object({
+        index: z.number().int().min(1).max(40),
+        content: z.string().max(512_000),
+      }),
+    )
+    .min(1)
+    .max(40),
+});
+
+/** Ceiling for a conflict-apply body: every region at its cap, plus JSON escaping overhead.
+ *  Enforced as middleware so an oversized body is rejected before it is buffered or parsed. */
+export const CONFLICT_APPLY_BODY_LIMIT = 2_000_000;
 
 // ── smart commit (AI multi-commit splitter) ──────────────────────────────────────
 // Plan generation reuses the message-route shape (optional provider override). `paths`, when

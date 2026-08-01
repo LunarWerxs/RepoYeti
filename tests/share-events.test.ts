@@ -287,6 +287,7 @@ test("guestRepoView drops the owner's credential bookkeeping + private flags", (
     pinned: true,
     starred: true,
     autoCommit: true,
+    sortOrder: 3,
     status: { branch: "main", detached: false, headOid: "d".repeat(40), dirty: 0, ahead: 0, behind: 0, remote: "https://u:p@h/r.git", error: null, fetchedAt: null, updatedAt: 0 },
     updatedAt: 0,
   });
@@ -320,6 +321,7 @@ test("guestRepoView KEEPS pinned/starred — the guest gets the owner's layout, 
     syncAccountLogin: null,
     hidden: false,
     autoCommit: false,
+    sortOrder: null,
     status: null,
     updatedAt: 0,
   };

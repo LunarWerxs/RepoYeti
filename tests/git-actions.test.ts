@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { gitPullFfOnly, gitCommitAll } from "../src/git-actions.ts";
-import { currentGitOperation, gitRawWithInput, safeGitEnv, sshCommandFor } from "../src/git.ts";
+import {
+  BLOCKED_GIT_ENV,
+  currentGitOperation,
+  gitFor,
+  gitRawWithInput,
+  safeGitEnv,
+  sshCommandFor,
+} from "../src/git.ts";
 import type { Identity } from "../src/db.ts";
 
 const ID: Identity = {
@@ -134,6 +141,32 @@ test("git environment strips ambient per-process config injection", () => {
   } finally {
     for (const name of names) {
       const value = previous.get(name);
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+// Regression: an ambient GIT_ASKPASS (exported by VS Code, Claude Code and GitHub Desktop into
+// every terminal they open) used to survive safeGitEnv(), and simple-git's guard then refused
+// EVERY git call with `Use of "GIT_ASKPASS" is not permitted without enabling allowUnsafeAskPass`.
+// The daemon worked from a plain shell and failed from an editor terminal. An empty string is the
+// realistic value, and it trips the guard exactly like a real path does, so it is what we set.
+test("git environment survives the ambient credential/editor vars that editors export", async () => {
+  // GIT_ASKPASS is named literally, NOT just taken from BLOCKED_GIT_ENV: a test that only iterates
+  // the list it is checking would pass again the moment someone deleted the entry that broke this.
+  const names = [...new Set<string>(["GIT_ASKPASS", ...BLOCKED_GIT_ENV])];
+  const previous = new Map(names.map((name) => [name, process.env[name]]));
+  for (const name of names) process.env[name] = "";
+  try {
+    const env = safeGitEnv();
+    expect(env.GIT_ASKPASS).toBeUndefined();
+    for (const name of names) expect(env[name]).toBeUndefined();
+    // The assertion that actually reproduces the bug: constructing and running through gitFor().
+    const version = await gitFor(join(import.meta.dir, "..")).raw(["--version"]);
+    expect(version).toContain("git version");
+  } finally {
+    for (const [name, value] of previous) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }

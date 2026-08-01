@@ -89,4 +89,121 @@ describe("ScanProjects.vue", () => {
     expect(cancelSpy).toHaveBeenCalledTimes(1);
     expect(buttonWithText("Start scan")).toBeFalsy(); // Start is hidden while a scan runs
   });
+
+  // A scan used to report "Found 51 projects · 7 new" and stop there: no way to see WHICH seven
+  // it had just added to your dashboard, and no way to undo any of them from here.
+  describe("post-scan review list", () => {
+    const found = (n: number) => ({
+      id: `r${n}`,
+      name: `project-${n}`,
+      absPath: `D:/code/project-${n}`,
+    });
+
+    it("names every new project, not just how many", async () => {
+      const store = useStore();
+      store.scanDone = true;
+      store.scanFound = 51;
+      store.scanNew = 2;
+      store.scanNewRepos = [found(1), found(2)];
+      mountScan();
+      await flush();
+
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("Found 51 projects");
+      expect(text).toContain("2 new projects added");
+      expect(text).toContain("project-1");
+      expect(text).toContain("D:/code/project-1");
+      expect(text).toContain("project-2");
+    });
+
+    it("shows no review list when the scan found nothing new", async () => {
+      const store = useStore();
+      store.scanDone = true;
+      store.scanFound = 51;
+      store.scanNew = 0;
+      store.scanNewRepos = [];
+      mountScan();
+      await flush();
+
+      expect(document.body.textContent ?? "").not.toContain("projects added");
+    });
+
+    it("discards an unwanted project and drops it from the list", async () => {
+      const store = useStore();
+      store.scanDone = true;
+      store.scanNewRepos = [found(1), found(2)];
+      const removeSpy = vi.spyOn(store, "removeRepo").mockResolvedValue(null);
+      mountScan();
+      await flush();
+
+      const discards = Array.from(
+        document.body.querySelectorAll('[aria-label="Discard"]'),
+      ) as HTMLElement[];
+      expect(discards).toHaveLength(2);
+      discards[0]!.click();
+      await flush();
+
+      expect(removeSpy).toHaveBeenCalledWith("r1");
+      expect(store.scanNewRepos.map((r) => r.id)).toEqual(["r2"]);
+    });
+
+    it("keeps the project listed when the discard fails", async () => {
+      const store = useStore();
+      store.scanDone = true;
+      store.scanNewRepos = [found(1)];
+      vi.spyOn(store, "removeRepo").mockRejectedValue(new Error("busy"));
+      mountScan();
+      await flush();
+
+      (document.body.querySelector('[aria-label="Discard"]') as HTMLElement).click();
+      await flush();
+
+      expect(store.scanNewRepos.map((r) => r.id)).toEqual(["r1"]);
+    });
+  });
+
+  // Reaching Scan from "Add a repository" used to be a one-way door — the only exits were Close
+  // and Escape, both of which dropped you on the dashboard.
+  describe("route back to Add a repository", () => {
+    it("offers no Back control when opened straight from the header", async () => {
+      const store = useStore();
+      store.scanReturnToAdd = false;
+      mountScan();
+      await flush();
+
+      expect(document.body.querySelector('[aria-label="Back to Add a repository"]')).toBeNull();
+    });
+
+    it("hands back to Add a repository when it was reached from there", async () => {
+      const store = useStore();
+      store.scanReturnToAdd = true;
+      store.addRepoOpen = false;
+      mountScan();
+      await flush();
+
+      const back = document.body.querySelector(
+        '[aria-label="Back to Add a repository"]',
+      ) as HTMLElement | null;
+      expect(back).toBeTruthy();
+      back!.click();
+      await flush();
+
+      expect(store.addRepoOpen).toBe(true);
+      expect(store.scanReturnToAdd).toBe(false);
+    });
+
+    it("plain Close leaves Add a repository shut", async () => {
+      const store = useStore();
+      store.scanReturnToAdd = true;
+      store.addRepoOpen = false;
+      mountScan();
+      await flush();
+
+      buttonWithText("Close")!.click();
+      await flush();
+
+      expect(store.addRepoOpen).toBe(false);
+      expect(store.scanReturnToAdd).toBe(false);
+    });
+  });
 });

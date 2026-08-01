@@ -189,11 +189,25 @@ export function useSources(
       (a, b) =>
         (pos.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.id) ?? Number.MAX_SAFE_INTEGER),
     );
+    // Mirror what setRepoOrder() is about to write server-side: every listed repo takes its
+    // position, everything else goes back to NULL. Without this the in-memory sortOrder stays at
+    // its pre-drag value and the next live-discovered repo is slotted against a stale order.
+    for (const repo of repos.value) repo.sortOrder = pos.get(repo.id) ?? null;
     try {
       await api.reorderRepos(orderedIds);
     } catch {
       /* order is a nicety — never block the UI on it */
     }
+  }
+
+  /**
+   * Drop the drag-persisted order entirely, so every repo falls back to the server's
+   * name ordering (and stays there as new ones are discovered). Reloads the list rather than
+   * re-sorting locally, so the client order is exactly what a fresh boot would show.
+   */
+  async function resetRepoOrder(): Promise<void> {
+    await api.reorderRepos([]);
+    repos.value = await api.listRepos();
   }
 
   return {
@@ -225,5 +239,6 @@ export function useSources(
     addRepo,
     cloneRepo,
     persistRepoOrder,
+    resetRepoOrder,
   };
 }

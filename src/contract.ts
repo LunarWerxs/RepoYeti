@@ -54,6 +54,11 @@ export type ApiErrorCode =
   | "EMPTY_PLAN"
   | "PLAN_PATHS_INVALID"
   | "PLAN_STALE"
+  // ── AI conflict resolution (mirror src/service/conflicts.ts) ──
+  /** The path isn't an unmerged, marker-bearing, resolvable text file. */
+  | "NOT_CONFLICTED"
+  /** The file changed after the resolution was generated — the proposal describes stale bytes. */
+  | "CONFLICT_STALE"
   // ── request / validation ──
   | "BAD_REQUEST"
   | "VALIDATION"
@@ -183,6 +188,8 @@ export function statusForCode(code: ApiCode): ContentfulStatusCode {
     case "STASH_CONFLICT":
     case "STASH_EMPTY":
     case "PLAN_STALE":
+    case "NOT_CONFLICTED":
+    case "CONFLICT_STALE":
     case "IDENTITY_POLICY_VIOLATION":
       return 409;
     // 502 — an upstream (git remote / AI provider) failed.

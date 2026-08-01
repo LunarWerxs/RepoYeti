@@ -6,9 +6,10 @@
  *  - GIT_OPTIONAL_LOCKS=0  → read-only commands (status) never rewrite .git/index,
  *    so our own reads don't trip the .git watcher into a feedback loop.
  *  - GIT_TERMINAL_PROMPT=0 → git never blocks on an interactive credential prompt.
- *  - editor vars stripped  → no daemon op should ever open an editor; simple-git also
- *    refuses to run when GIT_EDITOR is passed in explicitly (CVE guard), so we must
- *    remove it rather than forward the ambient one.
+ *  - BLOCKED_GIT_ENV stripped → no daemon op should ever open an editor, pager or credential
+ *    prompt, and nothing ambient may redirect git's config/binaries. simple-git's guard also
+ *    HARD-FAILS every call when one of these is present at all (CVE guard), so forwarding the
+ *    ambient value is not an option: see the comment on BLOCKED_GIT_ENV for the full rationale.
  *
  * Phase 3 layers per-operation identity on top via `.env(GIT_SSH_COMMAND=…)` and
  * `git -c user.name/user.email` — never by mutating global or repo config.
@@ -21,28 +22,66 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { Identity } from "./db.ts";
 import { readTextStreamLimited } from "./process-output.ts";
 
+/**
+ * Every environment variable `simple-git`'s block-unsafe guard rejects, plus the ambient
+ * config-injection vars git itself honours.
+ *
+ * These are a hard failure, not a soft one: if any of them is merely PRESENT in the daemon's
+ * environment (an empty string counts), simple-git throws
+ * `Use of "X" is not permitted without enabling allowUnsafeY` before git is ever spawned, so
+ * EVERY RepoYeti git operation fails. And they are not exotic. VS Code, Claude Code and GitHub
+ * Desktop all export `GIT_ASKPASS` into the terminals they open, which made the daemon fail every
+ * operation when launched from one of those while the same binary launched from a plain shell
+ * worked. That "works on my machine, and also on my machine it doesn't" shape is why the list is
+ * enumerated here in full rather than grown one incident at a time.
+ *
+ * Stripping is the right answer for all of them, not opting in: no daemon op may open an editor,
+ * pager or credential prompt, and nothing ambient should get to redirect which binaries, hooks,
+ * templates or config files git uses. RepoYeti injects what it actually needs per operation via
+ * `-c core.sshCommand` / `-c user.*` instead (see identityConfigArgs), where the value is derived
+ * from the owner's own stored data rather than from whoever started the process.
+ *
+ * Keep in sync with simple-git's guard: `bun run scripts/check-git-env.ts` fails if it drifts.
+ */
+export const BLOCKED_GIT_ENV = [
+  // Credential prompts. GIT_TERMINAL_PROMPT=0 below covers git's own prompt; these cover the
+  // helper programs git and ssh would shell out to instead.
+  "GIT_ASKPASS",
+  "SSH_ASKPASS",
+  "SSH_ASKPASS_REQUIRE",
+  // Editors and pagers: a daemon has no terminal to host either.
+  "GIT_EDITOR",
+  "GIT_SEQUENCE_EDITOR",
+  "GIT_PAGER",
+  "PAGER",
+  // Arbitrary programs git would execute on our behalf.
+  "GIT_EXTERNAL_DIFF",
+  "GIT_SSH",
+  "GIT_SSH_COMMAND",
+  "GIT_PROXY_COMMAND",
+  // Paths that redirect which config, binaries or templates git reads.
+  "GIT_CONFIG",
+  "GIT_CONFIG_GLOBAL",
+  "GIT_CONFIG_SYSTEM",
+  "GIT_EXEC_PATH",
+  "GIT_TEMPLATE_DIR",
+  // Per-process config injection (`git -c` expressed through the environment). Inheriting it would
+  // let whoever launches the daemon silently rewrite Git behavior for every RepoYeti operation
+  // (author, hooks, credential helper, safe.directory, and more). Numbered KEY/VALUE tuples are
+  // swept by pattern below.
+  "GIT_CONFIG_COUNT",
+  "GIT_CONFIG_PARAMETERS",
+] as const;
+
 export function safeGitEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;
   }
-  delete env.GIT_EDITOR;
-  delete env.GIT_SEQUENCE_EDITOR;
-  delete env.GIT_PAGER;
-  delete env.PAGER;
-  // Per-process config injection (`git -c` expressed through the environment). Besides being
-  // rejected by simple-git's safety guard, inheriting it would let whoever launches the daemon
-  // silently rewrite Git behavior for every RepoYeti operation (author, hooks, credential helper,
-  // safe.directory, and more). RepoYeti supplies its own deliberate per-operation `-c` options;
-  // ambient COUNT/KEY/VALUE tuples and GIT_CONFIG_PARAMETERS do not cross this boundary.
-  delete env.GIT_CONFIG_COUNT;
-  delete env.GIT_CONFIG_PARAMETERS;
+  for (const key of BLOCKED_GIT_ENV) delete env[key];
   for (const key of Object.keys(env)) {
     if (/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(key)) delete env[key];
   }
-  // We inject SSH auth via `-c core.sshCommand` per operation (see identityConfigArgs),
-  // not via this env var — simple-git refuses to run with GIT_SSH_COMMAND in the env.
-  delete env.GIT_SSH_COMMAND;
   env.GIT_OPTIONAL_LOCKS = "0";
   env.GIT_TERMINAL_PROMPT = "0";
   return env;

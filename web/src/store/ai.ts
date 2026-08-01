@@ -9,6 +9,10 @@ import type {
   AiSettings,
   CommitPlanResponse,
   CommitStyle,
+  ConflictApplyResponse,
+  ConflictFileResponse,
+  ConflictListEntry,
+  ConflictResolveResponse,
   DiffDetail,
   SmartCommitResult,
 } from "../types";
@@ -35,6 +39,8 @@ export function useAi(
     diffDetail: "lean", // mirrors DEFAULT_DIFF_DETAIL (src/config.ts)
     yolo: false,
     commitEnabled: true,
+    conflictEnabled: true,
+    modelTier: null,
   });
   const aiReady = ref(false);
   /** Guest-only readiness supplied by the sharer's daemon without disclosing provider details. */
@@ -50,6 +56,17 @@ export function useAi(
   /** Whether the AI commit buttons are SHOWN. Default on, independent of whether a key exists —
    *  clicking with no usable provider nudges the owner to add one (see RepoCardCommit). */
   const aiCommitEnabled = computed(() => aiSettings.value.commitEnabled !== false);
+  /**
+   * Whether "Resolve with AI" appears on conflicted files.
+   *
+   * Also requires `aiUsable`, unlike the commit buttons. Those are shown with no key on purpose
+   * (clicking one nudges the owner to add a key), but that nudge is worth much less here and the
+   * cost of getting it wrong is higher: an owner mid-merge does not want to discover the button
+   * was decorative. Either it can run or it isn't there.
+   */
+  const aiConflictEnabled = computed(
+    () => aiSettings.value.conflictEnabled !== false && aiUsable.value && remoteAiUsable.value === null,
+  );
   // Back-compat alias: `aiEnabled` historically meant "a usable provider is connected".
   const aiEnabled = aiUsable;
 
@@ -118,6 +135,17 @@ export function useAi(
       throw e;
     }
   }
+  /** Toggle whether "Resolve with AI" appears on conflicts (optimistic; rolls back on failure). */
+  async function setConflictEnabled(conflictEnabled: boolean): Promise<void> {
+    const prev = aiSettings.value.conflictEnabled;
+    aiSettings.value = { ...aiSettings.value, conflictEnabled };
+    try {
+      aiSettings.value = await api.ai.setConflictEnabled(conflictEnabled);
+    } catch (e) {
+      aiSettings.value = { ...aiSettings.value, conflictEnabled: prev }; // roll back
+      throw e;
+    }
+  }
   /** Toggle whether the AI commit buttons are shown (optimistic; rolls back on failure). */
   async function setCommitEnabled(commitEnabled: boolean): Promise<void> {
     const prev = aiSettings.value.commitEnabled;
@@ -167,6 +195,41 @@ export function useAi(
     return api.ai.commitPlan(repoId, provider, paths);
   }
 
+  // ── merge conflicts ───────────────────────────────────────────────────────────
+  // Three calls, and the split between them IS the safety model: list and read touch nothing,
+  // resolve produces a proposal the daemon never writes, and apply is the single explicit
+  // owner action that reaches disk. Nothing here stages anything.
+
+  /** Every unmerged path in the repo, each annotated with whether it can be resolved here. */
+  async function listConflicts(repoId: string): Promise<ConflictListEntry[]> {
+    return (await api.conflicts.list(repoId)).files;
+  }
+  /** Read one conflicted file: its text, its parsed hunks, and the hash `applyConflict` needs. */
+  async function readConflict(repoId: string, path: string): Promise<ConflictFileResponse> {
+    return api.conflicts.read(repoId, path);
+  }
+  /** Ask the model to propose resolutions for one file. Writes NOTHING. Throws ApiError
+   *  (NO_AI_PROVIDER / AI_RATE_LIMITED / NOT_CONFLICTED …) → the caller toasts. */
+  async function resolveConflict(
+    repoId: string,
+    path: string,
+    provider?: AiProviderId,
+  ): Promise<ConflictResolveResponse> {
+    return api.ai.resolveConflict(repoId, path, provider);
+  }
+  /** Write the resolutions the owner accepted. Reloads the changed-file tree afterwards so the
+   *  per-file conflict badges reflect what's left. */
+  async function applyConflict(
+    repoId: string,
+    path: string,
+    hash: string,
+    accepted: Array<{ index: number; content: string }>,
+  ): Promise<ConflictApplyResponse> {
+    const r = await api.conflicts.apply(repoId, path, hash, accepted);
+    await loadChanges(repoId); // the "C" badge may have cleared, or the count shrunk
+    return r;
+  }
+
   /** Execute an (owner-edited) commit plan. Sets the commit busy state, reloads the changed-
    *  file tree afterward (it shrank), and returns the structured result for the UI to render. */
   async function smartCommit(
@@ -200,6 +263,7 @@ export function useAi(
     aiEnabled,
     aiUsable,
     aiCommitEnabled,
+    aiConflictEnabled,
     loadAiSettings,
     loadAiAvailability,
     loadAiCatalog,
@@ -209,11 +273,16 @@ export function useAi(
     setDefaultProvider,
     setYolo,
     setCommitEnabled,
+    setConflictEnabled,
     setStyle,
     setDiffDetail,
     removeProvider,
     genCommitMessage,
     genCommitPlan,
     smartCommit,
+    listConflicts,
+    readConflict,
+    resolveConflict,
+    applyConflict,
   };
 }

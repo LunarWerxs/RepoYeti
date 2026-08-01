@@ -251,6 +251,17 @@ async function onCommitEnabled(enabled: boolean): Promise<void> {
   }
 }
 
+// Toggle whether "Resolve with AI" shows on conflicted files. There is deliberately no YOLO
+// counterpart: this is the only AI feature here that writes SOURCE, so the review step between
+// proposal and apply is the feature, not a setting.
+async function onConflictEnabled(enabled: boolean): Promise<void> {
+  try {
+    await store.setConflictEnabled(enabled);
+  } catch {
+    toast.error(t("settings.aiConflictEnableFailed"));
+  }
+}
+
 // Toggle smart-commit YOLO mode (commit the AI plan without the review editor).
 async function onYolo(enabled: boolean): Promise<void> {
   try {
@@ -290,6 +301,19 @@ async function onDiffDetail(detail: string): Promise<void> {
           :model-value="store.aiCommitEnabled"
           :aria-label="$t('settings.aiCommitEnable')"
           @update:model-value="(v: boolean) => onCommitEnabled(v)"
+        />
+      </template>
+    </SettingsRow>
+
+    <!-- Merge-conflict resolution (default on). Separate from the commit toggle because it is a
+         different kind of risk: commit messages are prose the owner reads, this writes code. -->
+    <SettingsRow :label="$t('settings.aiConflictEnabled')">
+      <template #info><InfoHint :text="$t('settings.aiConflictEnabledHint')" /></template>
+      <template #control>
+        <Switch
+          :model-value="store.aiSettings.conflictEnabled"
+          :aria-label="$t('settings.aiConflictEnabled')"
+          @update:model-value="(v: boolean) => onConflictEnabled(v)"
         />
       </template>
     </SettingsRow>

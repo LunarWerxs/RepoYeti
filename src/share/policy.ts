@@ -64,6 +64,17 @@ export interface RoutePolicy {
  *   GET  /api/identities/detected — leaks the abs path of every watchable repo on the machine.
  *   GET  /api/accounts            — leaks gh logins, token scopes, the global commit author.
  *   POST /api/mcp, /api/approvals/* — the agent surface and its safety rail.
+ *   POST /api/repos/:id/conflict-resolve — the one AI route that is owner-only. The commit-message
+ *                                     and commit-plan routes above spend the owner's tokens on
+ *                                     PROSE the owner still reads before it lands. This one would
+ *                                     spend them on the owner's SOURCE, to produce a merge whose
+ *                                     blast radius a guest — who can see only part of the repo —
+ *                                     has no way to assess. There is no guest budget that makes
+ *                                     that trade good, so there isn't one.
+ *   GET  /api/repos/:id/conflicts|conflict — ship the conflicted file's full contents, which is
+ *                                     the read half of the same feature.
+ *   POST /api/repos/:id/conflict-apply — overwrites source in the owner's working tree; same
+ *                                     class as PUT /file above, and refused for the same reason.
  */
 export const GUEST_ROUTES: Record<string, RoutePolicy> = {
   // ── read: the dashboard ──────────────────────────────────────────────────────
@@ -216,6 +227,14 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/repos/:id/auto-commit",
   // working-tree mutation beyond the sync loop
   "PUT /api/repos/:id/file",
+  // AI merge-conflict resolution, all four routes. The two GETs ship a conflicted file's full
+  // contents; conflict-resolve spends the owner's tokens on their SOURCE rather than on a commit
+  // message; conflict-apply overwrites that source. See the "Deliberately NOT here" note above
+  // for why this is the one AI feature a `control` guest does not get.
+  "GET /api/repos/:id/conflicts",
+  "GET /api/repos/:id/conflict",
+  "POST /api/repos/:id/conflict-resolve",
+  "POST /api/repos/:id/conflict-apply",
   // Pre-pull preview. Read-only in substance, but ?fetch=1 makes the daemon reach out to the
   // remote, and it reports the upstream ref name and every incoming path. Kept owner-only so
   // the guest surface stays exactly the size the owner sized it (see the tripwire in

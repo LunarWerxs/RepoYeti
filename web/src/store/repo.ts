@@ -32,6 +32,11 @@ function saveSortModePref(mode: SortMode): void {
   }
 }
 
+/** A repo's drag-persisted position, with a pre-`sortOrder` daemon's missing field read as "none". */
+function rank(repo: Repo): number | null {
+  return typeof repo.sortOrder === "number" ? repo.sortOrder : null;
+}
+
 /**
  * Repo-list filters/sections plus the per-repo card actions (fetch/pull/push/refresh,
  * commit, changed-file tree, identity/account assignment, hide/pin/star). Shares `repos`
@@ -115,8 +120,44 @@ export function useRepoActions(
       Object.assign(current, next);
       return;
     }
-    repos.value.push(next);
-    repoLookup.set(next.id, next);
+    // A live-discovered repo goes where the server's own ORDER BY would put it, not on the end.
+    // Appending is what made a scan dump its finds in raw walk order at the bottom of the list.
+    const index = serverOrderIndex(next);
+    repos.value.splice(index, 0, next);
+    // `next` is a RAW object (JSON.parse of an SSE frame). Splicing it into a deep-reactive array
+    // stores the raw value in the proxy's target; only reading it BACK out yields the reactive
+    // proxy the rendered list actually depends on. Caching the raw reference here would make every
+    // later patchRepo() Object.assign straight onto the target, bypassing the proxy's set trap —
+    // so a scan-discovered repo would sit there with status null (no clean badge, push disabled)
+    // until a full reload rebuilt the lookup. Cache what the array yields, not what we handed it.
+    repoLookup.set(next.id, repos.value[index]!);
+    // The splice shifted every later entry to a new index, but each cached value is the same
+    // proxy object — position is not part of the key, so the lookup stays valid.
+  }
+
+  /**
+   * getRepos()'s `ORDER BY (sort_order IS NULL) ASC, sort_order ASC, is_submodule ASC,
+   * name COLLATE NOCASE ASC`, expressed for one pair. Kept in lockstep with src/db.ts so a
+   * repo that streams in mid-session lands exactly where a reload would place it.
+   */
+  function compareServerOrder(a: Repo, b: Repo): number {
+    // A daemon older than this field sends no `sortOrder` at all. Treating that `undefined` as
+    // "has a position" would file every repo into the dragged bucket, so normalise it away first.
+    const ra = rank(a);
+    const rb = rank(b);
+    if ((ra === null) !== (rb === null)) return ra === null ? 1 : -1;
+    if (ra !== null && rb !== null && ra !== rb) return ra - rb;
+    if (a.isSubmodule !== b.isSubmodule) return a.isSubmodule ? 1 : -1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  }
+
+  /** First index whose repo sorts after `next`; the array length when it belongs last. */
+  function serverOrderIndex(next: Repo): number {
+    const list = repos.value;
+    for (let i = 0; i < list.length; i++) {
+      if (compareServerOrder(next, list[i]!) < 0) return i;
+    }
+    return list.length;
   }
 
   // ── list filters (display-only; drag-reorder is disabled while a filter is active) ──
@@ -129,6 +170,9 @@ export function useRepoActions(
   // not a "filter" — drag-reorder still works over the visible set when it's off).
   const showHidden = ref(false);
   const hasHidden = computed(() => repos.value.some((r) => r.hidden));
+  /** Any repo carries a drag-persisted position, so the list is pinned to a saved arrangement
+   *  and every newly discovered repo is forced below it. Gates the "Reset to A–Z" menu entry. */
+  const hasManualOrder = computed(() => repos.value.some((r) => rank(r) !== null));
   /** The repos any non-search view starts from: hidden ones dropped unless showHidden, then
    *  re-ordered per the display sort mode (a no-op pass-through in "manual" mode). */
   const visibleRepos = computed(() =>
@@ -445,6 +489,7 @@ export function useRepoActions(
     clearFilters,
     showHidden,
     hasHidden,
+    hasManualOrder,
     sortMode,
     setSortMode,
     visibleRepos,

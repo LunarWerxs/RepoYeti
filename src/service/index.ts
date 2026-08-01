@@ -15,6 +15,7 @@
  *   - scan        → on-demand "Scan for projects" (cancellable rescan of all roots)
  *   - reads       → branches/log/commit/stashes/tags/changes/search + AI diff collectors
  *   - files       → file-viewer read/write/diff + diff-patch runtime settings
+ *   - conflicts   → list/read conflicted files + apply reviewed merge resolutions
  *   - editors     → "Open with…" external-editor catalog / detection / launch
  *   - guards      → shared repo-precondition guard
  */
@@ -25,5 +26,6 @@ export * from "./repo-mgmt.ts";
 export * from "./scan.ts";
 export * from "./reads.ts";
 export * from "./files.ts";
+export * from "./conflicts.ts";
 export * from "./editors.ts";
 export * from "./guards.ts";

@@ -2,6 +2,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { safeGitEnv } from "./git.ts";
 import { createSemaphore } from "./gitgate.ts";
 import { readTextStreamLimited } from "./process-output.ts";
 
@@ -58,7 +59,11 @@ function idFor(...parts: string[]): string {
 async function run(args: string[], timeoutMs = 1500): Promise<RunResult> {
   return identityDetectionGate.run(async () => {
     try {
-      const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+      // Same scrubbed environment every other git call gets (see safeGitEnv). These probes read
+      // the user's REAL identity, so an ambient GIT_CONFIG_GLOBAL / GIT_CONFIG_PARAMETERS must not
+      // be able to answer in git's place. It also keeps `ssh-add -l` from firing SSH_ASKPASS: a
+      // listing command has no business popping a passphrase dialog on the daemon's machine.
+      const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: safeGitEnv() });
       let limited = false;
       const kill = (): void => {
         try {

@@ -24,6 +24,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import type { TreeSelectionApi } from "@/lib/changes-selection";
@@ -152,6 +153,28 @@ async function generate(): Promise<void> {
   }
 }
 
+/** The remote leg shared by doCommit and doCommitSelected — identical for both because the scope
+ *  question ("which files went into the commit") is already settled by the time we get here.
+ *  Commit & Sync fast-forward-pulls before pushing so a diverged remote surfaces as
+ *  NON_FAST_FORWARD instead of a failed push. Returns false once it has toasted a failure. */
+async function runRemoteLeg(mode: CommitMode): Promise<boolean> {
+  if (mode === "sync") {
+    const pull = await store.doAction(props.repo.id, "pull");
+    if (!pull.ok) {
+      toast.error(friendly(pull.code) || pull.message || t("repo.actions.failed", { action: "pull" }));
+      return false;
+    }
+  }
+  if (mode === "push" || mode === "sync") {
+    const push = await store.doAction(props.repo.id, "push");
+    if (!push.ok) {
+      toast.error(friendly(push.code) || push.message || t("repo.actions.failed", { action: "push" }));
+      return false;
+    }
+  }
+  return true;
+}
+
 async function doCommit(mode: CommitMode = "commit"): Promise<void> {
   const msg = commitMsg.value.trim();
   if (!msg || committing.value) return;
@@ -163,22 +186,7 @@ async function doCommit(mode: CommitMode = "commit"): Promise<void> {
       return;
     }
     commitMsg.value = "";
-    // Commit & Sync fast-forward-pulls before pushing so a diverged remote surfaces
-    // as NON_FAST_FORWARD instead of a failed push.
-    if (mode === "sync") {
-      const pull = await store.doAction(props.repo.id, "pull");
-      if (!pull.ok) {
-        toast.error(friendly(pull.code) || pull.message || t("repo.actions.failed", { action: "pull" }));
-        return;
-      }
-    }
-    if (mode === "push" || mode === "sync") {
-      const push = await store.doAction(props.repo.id, "push");
-      if (!push.ok) {
-        toast.error(friendly(push.code) || push.message || t("repo.actions.failed", { action: "push" }));
-        return;
-      }
-    }
+    if (!(await runRemoteLeg(mode))) return;
     // Static t() calls (not a computed key) so the i18n parity check sees them used.
     toast.success(
       {
@@ -197,7 +205,7 @@ async function doCommit(mode: CommitMode = "commit"): Promise<void> {
 // Per-file staging: commit ONLY the checked files (the rest stay pending). Shares the same message
 // box as the normal commit; the store reloads the changed-file list afterward, and the prune watch
 // above drops the just-committed paths from the selection. A stale path comes back as PLAN_STALE.
-async function doCommitSelected(mode: CommitMode = "commit"): Promise<void> {
+async function doCommitSelected(mode: Exclude<CommitMode, "amend"> = "commit"): Promise<void> {
   const msg = commitMsg.value.trim();
   const paths = [...props.treeSelection.selected];
   if (!msg || !paths.length || committing.value) return;
@@ -212,19 +220,9 @@ async function doCommitSelected(mode: CommitMode = "commit"): Promise<void> {
     props.treeSelection.clear();
     // Now that a selection drives the PRIMARY button, it inherits the owner's default commit mode.
     // Dropping the sync silently would mean the same button quietly stops pushing the moment you
-    // tick a checkbox. Same pull-then-push order as doCommit, for the same NON_FAST_FORWARD reason.
-    if (mode === "sync") {
-      const pull = await store.doAction(props.repo.id, "pull");
-      if (!pull.ok) {
-        toast.error(friendly(pull.code) || pull.message || t("repo.actions.failed", { action: "pull" }));
-        return;
-      }
-      const push = await store.doAction(props.repo.id, "push");
-      if (!push.ok) {
-        toast.error(friendly(push.code) || push.message || t("repo.actions.failed", { action: "push" }));
-        return;
-      }
-    }
+    // tick a checkbox. Same pull-then-push leg as doCommit, so "& Sync"/"& Push" mean the same
+    // thing in both scopes — only the set of files in the commit differs.
+    if (!(await runRemoteLeg(mode))) return;
     void loadRecentMsgs();
     toast.success(t("repo.commit.selectedSuccess", { n: paths.length }));
   } finally {
@@ -235,11 +233,21 @@ async function doCommitSelected(mode: CommitMode = "commit"): Promise<void> {
 // Ctrl/⌘+Enter commits from the message box (plain Enter is a newline). Gated by the
 // keyboard-shortcuts master switch (Settings → Updates & shortcuts); scoped to this
 // Textarea's own keydown, so it can never fire globally.
+// It fires the PRIMARY button exactly as clicking it would — same scope (selected files when any
+// are checked) and same mode. A shortcut that quietly committed the whole tree while the button
+// beside it said "Commit selected (3)" would be the same trap the dropdown used to be.
 function onCommitKey(e: KeyboardEvent): void {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && shortcutsActive()) {
     e.preventDefault();
-    void doCommit("commit");
+    void runPrimary();
   }
+}
+
+/** What the primary split-button does: selected-files scope when anything is checked, whole tree
+ *  otherwise — in the owner's default commit mode. Shared by the button and Ctrl/⌘+Enter. */
+function runPrimary(): void {
+  if (selectedCount.value > 0) void doCommitSelected(primaryCommitMode.value);
+  else void doCommit(primaryCommitMode.value);
 }
 
 // Exposed so RepoCard can refresh the "recent" chips on expand / when new dirty files show up
@@ -318,7 +326,12 @@ defineExpose({ loadRecentMsgs, recentMsgs });
           :data-commit-scope="selectedCount > 0 ? 'selected' : 'all'"
           class="h-9 rounded-r-none"
           :disabled="!commitMsg.trim() || committing"
-          @click="selectedCount > 0 ? doCommitSelected(primaryCommitMode) : doCommit(primaryCommitMode)"
+          :title="tooltipsEnabled && selectedCount > 0
+            ? (primaryCommitMode === 'sync'
+              ? $t('repo.commit.titleSelectedSync', { n: selectedCount })
+              : $t('repo.commit.titleSelected', { n: selectedCount }))
+            : undefined"
+          @click="runPrimary()"
         >
           <Loader2 v-if="committing" class="animate-spin" />
           <RefreshCw v-else-if="primaryCommitMode === 'sync'" />
@@ -346,10 +359,29 @@ defineExpose({ loadRecentMsgs, recentMsgs });
               <ChevronDown :size="16" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="w-52">
-            <!-- These commit the WHOLE tree even while files are checked, so they say so — the
-                 primary button next to them is the selected-files action in that state, and two
-                 identically-labelled "Commit"s would be a trap. -->
+          <DropdownMenuContent align="end" class="w-56">
+            <!-- With files checked the menu splits into two labelled scopes. It used to offer only
+                 whole-tree Push/Sync, so anyone who wanted "commit and sync just these files" had
+                 to reach past the plain-commit primary button into a menu whose only sync entry
+                 quietly committed EVERYTHING. Both scopes now carry the same three modes, and the
+                 whole-tree ones keep saying "all" so the two groups can't be confused. -->
+            <template v-if="selectedCount > 0">
+              <DropdownMenuLabel>{{ $t("repo.commit.scopeSelected", { n: selectedCount }) }}</DropdownMenuLabel>
+              <DropdownMenuItem @select="doCommitSelected('commit')">
+                <GitCommitHorizontal :size="15" />
+                <span>{{ $t("repo.commit.commitSelected", { n: selectedCount }) }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem :disabled="!canSync" @select="doCommitSelected('push')">
+                <ArrowUpFromLine :size="15" />
+                <span>{{ $t("repo.commit.commitSelectedPush") }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem :disabled="!canSync" @select="doCommitSelected('sync')">
+                <RefreshCw :size="15" />
+                <span>{{ $t("repo.commit.commitSelectedSync") }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>{{ $t("repo.commit.scopeAll") }}</DropdownMenuLabel>
+            </template>
             <DropdownMenuItem @select="doCommit('commit')">
               <GitCommitHorizontal :size="15" />
               <span>{{ selectedCount > 0 ? $t("repo.commit.commitAll") : $t("repo.commit.commit") }}</span>
@@ -360,7 +392,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             </DropdownMenuItem>
             <DropdownMenuItem :disabled="!canSync" @select="doCommit('push')">
               <ArrowUpFromLine :size="15" />
-              <span>{{ $t("repo.commit.commitPush") }}</span>
+              <span>{{ selectedCount > 0 ? $t("repo.commit.commitAllPush") : $t("repo.commit.commitPush") }}</span>
             </DropdownMenuItem>
             <DropdownMenuItem :disabled="!canSync" @select="doCommit('sync')">
               <RefreshCw :size="15" />

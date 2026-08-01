@@ -82,6 +82,9 @@ export interface Repo {
   starred: boolean;
   /** Opted into the auto-commit timer (per-repo; see the daemon's src/auto-commit.ts). */
   autoCommit: boolean;
+  /** Drag-persisted list position, or null when this repo has never been manually reordered.
+   *  Only used to place a live-discovered repo where the server's own ORDER BY would put it. */
+  sortOrder: number | null;
   status: RepoStatus | null;
   updatedAt: number;
 }
@@ -563,6 +566,8 @@ export type ApiErrorCode =
   | "EMPTY_PLAN"
   | "PLAN_PATHS_INVALID"
   | "PLAN_STALE"
+  | "NOT_CONFLICTED"
+  | "CONFLICT_STALE"
   | "BAD_REQUEST"
   | "VALIDATION"
   | "NO_MESSAGE"
@@ -697,7 +702,18 @@ export interface AiSettings {
   yolo: boolean;
   /** Whether the AI commit buttons (Generate + Auto) are shown at all (default true). */
   commitEnabled: boolean;
+  /** Whether "Resolve with AI" appears on conflicted files (default true). */
+  conflictEnabled: boolean;
+  /** Whether the effective model LOOKS like a small/fast tier, so the conflict UI can escalate
+   *  its warning. Computed by the daemon (src/ai/conflict-resolve.ts looksSmallTierModel) — the
+   *  heuristic is deliberately NOT mirrored here, because a second copy is one that drifts.
+   *  Null when no provider/model is resolved yet. */
+  modelTier: ModelTier | null;
 }
+
+/** How much to trust the selected model with a merge. "unknown" means "not recognised as a
+ *  small tier" — never "good enough for this"; see looksSmallTierModel's doc comment. */
+export type ModelTier = "small" | "unknown";
 
 // ── smart commit (AI multi-commit splitter) — mirrors src/ai.ts + src/service.ts ──
 
@@ -742,6 +758,107 @@ export interface CommitPlanResponse {
   model: string;
   /** True when the daemon used the deterministic fallback after an AI failure. */
   fallback?: boolean;
+}
+
+// ── AI conflict resolution — mirrors src/ai/conflict-resolve.ts + src/service/conflicts.ts ──
+
+/** Why a conflicted path can't be resolved here (the list shows the reason rather than hiding
+ *  the file, so an unsupported case never looks like a broken feature). */
+export type ConflictUnsupported =
+  | "no-markers"
+  | "binary"
+  | "too-large"
+  | "too-many-hunks"
+  | "unparseable"
+  | "missing";
+
+export interface ConflictListEntry {
+  path: string;
+  kind?: ConflictKind;
+  hunks: number;
+  unsupported?: ConflictUnsupported;
+}
+
+/** One conflict region in a file, as git wrote it. */
+export interface ConflictHunk {
+  index: number;
+  /** 0-based line of the `<<<<<<<` marker. */
+  line: number;
+  oursLabel: string;
+  theirsLabel: string;
+  oursText: string;
+  /** Common-ancestor text, when git could supply it (diff3 markers or index stages). */
+  baseText?: string;
+  theirsText: string;
+  raw: string;
+}
+
+export interface ConflictFileResponse {
+  ok: boolean;
+  path: string;
+  text: string;
+  /** Staleness token — echoed back on apply to prove the file hasn't changed since. */
+  hash: string;
+  hunks: ConflictHunk[];
+  hasBase: boolean;
+}
+
+export type ResolutionConfidence = "high" | "medium" | "low";
+
+/**
+ * Machine-checked observations about a proposed resolution — computed by the daemon from the
+ * three texts, NOT claimed by the model. These are what make a confidently-worded bad merge
+ * visible in the review UI, so they are rendered even when the model says "high".
+ */
+export type ResolutionFlag =
+  | "dropped-shared-lines"
+  | "identical-to-ours"
+  | "identical-to-theirs"
+  | "much-shorter"
+  | "invented-lines"
+  | "emptied";
+
+export interface HunkResolution {
+  index: number;
+  content: string;
+  /** The model's own claim. Advisory — `flags` is the verified part. */
+  confidence: ResolutionConfidence;
+  note: string;
+  flags: ResolutionFlag[];
+  /** Lines both sides kept that the resolution dropped. */
+  droppedLines: string[];
+  /** Lines in the resolution that appear on neither side. */
+  inventedLines: string[];
+}
+
+/** A region whose proposal was refused. Surfaced so the UI can say WHICH regions came back
+ *  unusable, rather than silently showing fewer cards than the file has conflicts. */
+export interface RejectedHunk {
+  index: number;
+  reason: "conflict-markers" | "missing" | "malformed" | "duplicate";
+}
+
+export interface ConflictResolveResponse {
+  ok: boolean;
+  path: string;
+  resolutions: HunkResolution[];
+  rejected: RejectedHunk[];
+  /** True when the file was too large to show the model in full. */
+  windowed: boolean;
+  hash: string;
+  hasBase: boolean;
+  hunks: ConflictHunk[];
+  provider: AiProviderId;
+  model: string;
+  modelTier: ModelTier;
+}
+
+export interface ConflictApplyResponse {
+  ok: boolean;
+  path: string;
+  applied: number;
+  /** Regions still carrying markers. 0 means fully resolved — but still NOT staged. */
+  remaining: number;
 }
 
 /** Per-group outcome of executing a plan, in order. */

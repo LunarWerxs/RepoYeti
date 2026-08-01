@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
-import { RefreshCw, Plus, Settings, Cloud, CloudOff, CircleUser, Check, DownloadCloud, FolderSearch, FolderX, ListChecks, Loader2, MoreVertical, Power, Bell, ArrowDownToLine, Download, Code } from "@lucide/vue";
+import { RefreshCw, Plus, Settings, Cloud, CloudOff, CircleUser, Check, DownloadCloud, FolderSearch, FolderX, ListChecks, Loader2, MoreVertical, Power, Bell, ArrowDownToLine, ArrowDownAZ, Download, Code } from "@lucide/vue";
 import type { SortMode } from "../store/repo";
 import type { BehindRepo } from "../store/settings";
 import { useI18n } from "vue-i18n";
@@ -264,6 +264,23 @@ const sortOptions: { mode: SortMode; label: () => string }[] = [
 ];
 function setSort(mode: SortMode): void {
   store.setSortMode(mode);
+}
+
+// Clear the drag-persisted positions so the list is plain alphabetical again — and STAYS that way
+// as repos are discovered, instead of stacking every new find below the saved arrangement.
+const resettingOrder = ref(false);
+async function resetOrder(): Promise<void> {
+  if (resettingOrder.value) return;
+  resettingOrder.value = true;
+  try {
+    await store.resetRepoOrder();
+    actionsOpen.value = false;
+    toast.success(t("header.sortResetDone"));
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t("header.sortResetFailed"));
+  } finally {
+    resettingOrder.value = false;
+  }
 }
 
 function openSettings(): void {
@@ -573,6 +590,22 @@ onBeforeUnmount(() => {
               <Check v-if="store.sortMode === opt.mode" class="text-primary" />
               <span v-else class="size-4 shrink-0" />
               <span>{{ opt.label() }}</span>
+            </button>
+            <!-- Manual order is sticky in a way that surprises people: once anything has been
+                 dragged, every repo carries a saved position and newly discovered ones can only
+                 land after them, forever. This clears those positions so the list (and everything
+                 a future scan finds) falls back to plain alphabetical, drag still available. -->
+            <button
+              v-if="!store.isGuest && store.hasManualOrder"
+              type="button"
+              role="menuitem"
+              :disabled="resettingOrder"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
+              @click="resetOrder"
+            >
+              <Loader2 v-if="resettingOrder" class="animate-spin" />
+              <ArrowDownAZ v-else />
+              <span>{{ $t("header.sortReset") }}</span>
             </button>
             <div class="-mx-1 my-1 h-px bg-border" />
             <button

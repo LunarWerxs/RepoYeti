@@ -929,3 +929,48 @@ test("a guest cookie grants nothing when the daemon has no OIDC configured (gate
   const res = await app.request("/api/repos", { headers: { cookie: guestCookie(mkShare("view")) } });
   expect(res.status).toBe(200);
 });
+
+test("the whole AI conflict-resolution surface is owner-only, denied by the allowlist itself", async () => {
+  // The one AI feature a share guest cannot reach, even with `control` and a fully-configured
+  // provider. commit-message and commit-plan spend the owner's tokens on PROSE the owner reads
+  // before it lands; this would spend them on the owner's SOURCE, to produce a merge whose blast
+  // radius a guest — who sees only part of the repo — cannot assess. And conflict-apply writes to
+  // the working tree, which is the same class as PUT /file (already refused above).
+  //
+  // Note WHERE the refusal comes from: these routes are simply absent from GUEST_ROUTES, so the
+  // gate denies by default before any handler runs. The routes' own owner checks are the second
+  // line, not the first — which is why all four are asserted here rather than just the AI one.
+  const app = createApp(
+    enforcedCfg({
+      ai: {
+        providers: { openai: { apiKey: "owner-secret-key", model: "gpt-test" } },
+        defaultProvider: "openai",
+      },
+    }),
+  );
+  const headers = { ...REMOTE, cookie: guestCookie(mkShare("control")), "content-type": "application/json" };
+  const calls: Array<[string, RequestInit]> = [
+    [`/api/repos/${sharedRepoId}/conflicts`, { headers }],
+    [`/api/repos/${sharedRepoId}/conflict?path=a.txt`, { headers }],
+    [
+      `/api/repos/${sharedRepoId}/conflict-resolve`,
+      { method: "POST", headers, body: JSON.stringify({ path: "a.txt" }) },
+    ],
+    [
+      `/api/repos/${sharedRepoId}/conflict-apply`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ path: "a.txt", hash: "0".repeat(32), accepted: [{ index: 1, content: "x" }] }),
+      },
+    ],
+  ];
+  for (const [path, init] of calls) {
+    const res = await app.request(path, init);
+    expect(res.status).toBe(403);
+    // Denied by the gate ⇒ no body at all, so nothing about the owner's setup can leak.
+    const raw = await res.text();
+    expect(raw).not.toContain("owner-secret-key");
+    expect(raw).not.toContain("gpt-test");
+  }
+});

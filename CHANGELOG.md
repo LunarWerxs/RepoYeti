@@ -4,6 +4,70 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-08-01
+
+### Added
+
+- **Merge conflicts can be resolved with AI, one region at a time.** A conflicted repo card now
+  lists its unmerged files and offers "Resolve with AI" on each one. The model proposes a
+  resolution per conflict region; you review them side by side with what git actually found, edit
+  anything you want to change, and only the regions you tick are written. Off-limits by design:
+  nothing is ever staged, so git keeps refusing the commit until you stage it yourself, and any
+  region you skip keeps its conflict markers untouched.
+
+  Because a wrong merge is code that compiles, unlike a wrong commit message, which you read
+  before it lands, every proposal is checked mechanically as well as by the model. RepoYeti
+  compares each resolution against both sides and the common ancestor and flags the telling
+  cases: a line both sides kept that the resolution dropped, an output that is mostly new code,
+  a region that merely picked a side. Those findings are shown above the code and are shown
+  whatever confidence the model claimed for itself.
+
+  The panel also names the model that will run and warns harder when it looks like a small, fast
+  tier, including some of RepoYeti's own recommended defaults, which were chosen for cheap
+  commit messages rather than for this. It is advice, not a gate. Turn the whole feature off in
+  Settings → AI if you would rather not have the button. Owner-only: share-link guests cannot
+  reach it, even with control permission.
+
+- **A scan now tells you which projects it found, and lets you undo any of them.** "Found 51
+  projects, 7 new" named none of the seven, so the only way to see what had just been added to
+  your dashboard was to go hunting for it. The modal now lists every new project by name and
+  path as it finds them, each with a Discard button. A scan cannot ask before it adds, because
+  it has to index and watch a repository to read its status at all, so this is the undo rather
+  than a prompt: discarding also tombstones the path, and a later scan will not put it back.
+
+- **"Reset to A–Z" in the actions menu clears a saved drag order.** The first drag stamps a
+  position onto every repository at once, and from then on anything newly discovered can only
+  sort below all of them, permanently, whatever it is called. That is why scanned projects
+  collected at the bottom of the list and stayed there across restarts. Resetting drops the
+  saved positions and hands the list back to plain alphabetical ordering, with drag-to-reorder
+  still available.
+
+### Fixed
+
+- **A repository found by a scan now shows its status without a reload.** Newly discovered
+  repositories sat with no clean/dirty badge and a dead Push button until the whole dashboard
+  was reloaded, which also made a repository that was genuinely behind look unpushable. The
+  dashboard was caching the raw object from the discovery event rather than the reactive one the
+  list actually renders, so every status update that followed wrote to a copy nothing was
+  watching. Reloading appeared to fix it only because that rebuilt the cache from scratch.
+
+- **A newly discovered repository is inserted where it belongs, not appended.** Scans added
+  their finds to the end of the list in raw filesystem-walk order. They now land in the same
+  position a fresh start would give them.
+
+- **The mode buttons in "Add a repository" respond to the pointer.** Point to folder, Create
+  new, Clone and From Lore had no hover feedback and no visible selection, so the group read as
+  one flat block rather than four choices. Hover and the selected state were both painted in the
+  same colour as the strip behind them. Fixed in the shared UI kit, so every toggle built on it
+  gets the same treatment.
+
+- **Closing "Add a repository" without adding anything resets it.** Reopening used to resume the
+  half-filled form in whichever mode was last used. Stepping out to the scan modal is treated as
+  a detour rather than a dismissal, and keeps what you had typed.
+
+- **The scan modal can hand back to "Add a repository".** Opening it from there was a one-way
+  door: the only exits dropped you on the dashboard with no route back to the flow you were in.
+
 ## [0.18.0] - 2026-07-30
 
 ### Added
@@ -197,8 +261,8 @@ All notable changes to RepoYeti are documented here. The format is based on
   RepoYeti, maps a local checkout to one of the shared repositories, and appears live on the
   owner's card. The owner can switch between Mine, Theirs, and Combined changed-file views and
   expand a bounded unified diff for tracked peer edits. Working-tree snapshots contain
-  repo-relative paths, Git state, line/character totals, and that encrypted diff—never credentials
-  or absolute paths—and are authenticated with the share secret before going directly to the
+  repo-relative paths, Git state, line/character totals, and that encrypted diff, never credentials
+  or absolute paths, and are authenticated with the share secret before going directly to the
   owner's tunnel. Revoking or rotating the share cuts off future updates. A Connections identity
   supplies the collaborator label; their own remote access can remain off.
 - **Accepted collaborations are available to MCP agents.** New read-only tools list both
@@ -310,7 +374,7 @@ All notable changes to RepoYeti are documented here. The format is based on
   quietly steps the relay aside; an explicit opt-out in the config is still honored.
 - **"Custom address" is one honest toggle.** Off by default; turning it on opens the domain
   editor, and turning it off with a domain configured asks before removing anything. A new
-  [setup guide](docs/STABLE_ADDRESS.md) walks through creating the Cloudflare named tunnel —
+  [setup guide](docs/STABLE_ADDRESS.md) walks through creating the Cloudflare named tunnel,
   the part nobody could have guessed from an input box.
 - **Cloud sync says what "not connected" means.** Signed-in-but-disconnected now explains that
   the daemon keeps its own credential (your browser session is separate) and that Reconnect
@@ -319,12 +383,12 @@ All notable changes to RepoYeti are documented here. The format is based on
 ### Fixed
 
 - **Settings toggles stick again.** "Watch specific folders" no longer flips itself back on at
-  every settings open — an over-helpful auto-disclose overrode the saved choice, and it's gone.
+  every settings open, an over-helpful auto-disclose overrode the saved choice, and it's gone.
 - **The Accounts tab fits on one line.** "Accounts & access" wrapped the tab bar; it's just
   "Accounts" now.
 - **One Connections account, one place.** The "Signed in with Connections" card moved into
   Cloud sync (it used to float under Git identity, where it looked like a git thing), and Cloud
-  sync no longer offers "Sign in with Connections" while you're already signed in — a sync that
+  sync no longer offers "Sign in with Connections" while you're already signed in, a sync that
   lost its connection says so and offers Reconnect instead.
 - **The stable address no longer presents as an editable mystery.** The active address shows as a
   status line; the hostname/token editor is folded behind "Change or remove this address…".
@@ -333,7 +397,7 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 - **The built-in stable address got a real name.** New links use `https://go.repoyeti.com`
   instead of the `…workers.dev` hostname. It's the same Worker and store behind a custom domain,
-  so every link already registered keeps resolving — nothing to migrate. (The free fallback
+  so every link already registered keeps resolving, nothing to migrate. (The free fallback
   hostname is `repoyeti.lunawerx.workers.dev`.)
 - **Running your own relay is a linked click away.** "Use a different relay" now points at the
   setup guide, so pointing RepoYeti at a relay you host isn't a guess.
@@ -345,7 +409,7 @@ All notable changes to RepoYeti are documented here. The format is based on
 ### Added
 
 - **History shows changed files as a folder tree.** Expanding a commit lists its changed files as a
-  collapsible folder tree — the same look as the Changes panel — toggleable in Settings → Appearance
+  collapsible folder tree (the same look as the Changes panel), toggleable in Settings → Appearance
   (a flat path list is still available). A commit touching more than a few hundred files opens with
   its folders collapsed, so a pathological commit is a scannable directory overview rather than a
   wall of rows. Rename provenance and per-file line counts show on every row.
@@ -354,31 +418,31 @@ All notable changes to RepoYeti are documented here. The format is based on
   a relay that gives this RepoYeti one address that never changes and forwards to wherever it
   currently lives. Without it, a zero-config tunnel is handed a fresh hostname on every restart, so
   every link you already sent quietly stops resolving and the recipient sees what looks like a
-  broken link. Off until you turn it on, and only your current address is ever published — never a
+  broken link. Off until you turn it on, and only your current address is ever published, never a
   repository name, a path, or the link itself. Share tokens ride in the URL fragment, which browsers
   do not transmit, so the relay cannot see or redeem the link it forwards. Owners with a stable
   named tunnel are told they don't need it.
 
-- **Cloning a private repo works for any account you're signed in to,** not just the active one —
+- **Cloning a private repo works for any account you're signed in to,** not just the active one,
   the same fix as below, applied to the clone URL.
 - **Repos sync as the right GitHub account on their own.** If a repo's own git config names an
   account, or its remote is one you're signed in to, RepoYeti now authenticates as that account
   without being told to. Previously this was the cause of a baffling failure: `git` would refuse
   with *"could not read Password for 'https://someone@github.com'"* naming an account that
-  `gh auth status` listed as signed in on the very next line — because the GitHub CLI's credential
+  `gh auth status` listed as signed in on the very next line, because the GitHub CLI's credential
   helper only ever serves whichever account is *active*, and declines for every other one.
 
 ### Changed
 
 - **Switching a repo's GitHub account no longer changes your machine's active account.** The
   credential is handed to that one git command instead. Previously syncing a repo flipped the
-  active account for every other tool on the machine — terminals, editors, agents — and left it
+  active account for every other tool on the machine (terminals, editors, agents) and left it
   flipped; with several repos syncing at once they could also interleave and authenticate as each
   other. Both are gone.
 - **A failed sync says which account it needed.** The raw git error is replaced with a plain one
   naming the account and how to fix it.
 - **"Address has changed" is now measured against the address links are actually handed out on.**
-  With the relay on, a tunnel restart no longer flags every healthy link as stale — while links
+  With the relay on, a tunnel restart no longer flags every healthy link as stale, while links
   minted before the relay was switched on are still flagged, because those really are dead.
 - **Settings is reorganized.** A new Advanced tab holds the rarely-touched tools (agent rail,
   identity firewall, Lore servers); Accounts and Access merged into one tab; the General tab
@@ -404,7 +468,7 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 - **Share links warn that a quick-tunnel address is temporary.** A zero-config tunnel gets a fresh
   random `*.trycloudflare.com` hostname every time RepoYeti restarts, and links are built against
-  whatever the address was when they were minted — so a restart silently kills every link already
+  whatever the address was when they were minted, so a restart silently kills every link already
   sent, and the recipient sees a DNS failure that reads as "your link is wrong". The panel now says
   this up front and points at the named tunnel, whose address survives restarts.
 - **The remote-access dialog leads with the link, not the QR code.** The QR is behind a button next
@@ -437,8 +501,8 @@ All notable changes to RepoYeti are documented here. The format is based on
   discard now apply to a whole folder; ignoring a build directory previously meant one right-click
   per file inside it.
 - **A read-only file tree stops offering actions it can't perform.** The pull preview no longer
-  draws per-file checkboxes — a pull is fetch + merge of a branch, so there is no such thing as
-  pulling a subset — and its context menu no longer shows dividers around items that aren't there.
+  draws per-file checkboxes, a pull is fetch + merge of a branch, so there is no such thing as
+  pulling a subset, and its context menu no longer shows dividers around items that aren't there.
 - **Toasts stack instead of hiding each other.** Ours carry Undo, and an older toast's Undo used to
   end up unreachable behind a newer one.
 - **History rows are reachable by keyboard.** They were plain divs with a click handler, so they
@@ -571,8 +635,8 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 - **Rename and Remove, on every repo card** (overflow menu). Two things the dashboard simply had no
   button for.
-  - **Rename** sets a display label. Your folder keeps its own name — nothing on disk is moved or
-    renamed — and the label survives a rescan. Clear it to fall back to the folder name.
+  - **Rename** sets a display label. Your folder keeps its own name, nothing on disk is moved or
+    renamed, and the label survives a rescan. Clear it to fall back to the folder name.
   - **Remove from RepoYeti** takes a repo out of the list *only*: the folder, the files and the git
     history are never touched. It also stops future scans re-adding it (a removal that a rescan
     silently undid would be no removal at all), and both actions offer Undo. Restore anything you
@@ -580,8 +644,8 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Changed
 
-- Commit identities now stay out of the way until you use them. If you commit as one person — which
-  is nearly everyone — the identity picker, the identity manager and the Identity Firewall are
+- Commit identities now stay out of the way until you use them. If you commit as one person, which
+  is nearly everyone, the identity picker, the identity manager and the Identity Firewall are
   hidden, and the Settings tab reads "Accounts". They come back on their own the moment you save a
   second identity, pin a Firewall rule, or assign one to a repo; "Using more than one git identity?
   → Set up" turns them on by hand. GitHub accounts are unaffected and always shown: an account is
@@ -601,7 +665,7 @@ All notable changes to RepoYeti are documented here. The format is based on
   finished message, as prior turns) instead of text inside the instructions. Rendered in the
   instructions, its content leaked: one live run attributed the example's null-timestamp fix to a
   function in the actual diff. As a completed exchange it teaches the shape and stays attributed to
-  its own change — zero leaks in six runs after the move.
+  its own change, zero leaks in six runs after the move.
 - The message prompt tells the model how many files the change touches and asks for roughly one
   bullet each; a count derived from the tree can't be argued down or padded past.
 - Commit bodies wrap at 72 columns in code, with continuation indent under each bullet. The prompt
@@ -612,26 +676,26 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 - A scripted rebuild (`misc\Restart-Daemon.ps1` + `misc\Wait-Daemon.ps1`) can no longer end with
   RepoYeti not running at all. The restart killed only the daemon, so the old tray host survived
-  with its auto-restart watchdog armed, and the relaunch raced it with a second tray host — a fight
+  with its auto-restart watchdog armed, and the relaunch raced it with a second tray host, a fight
   that on 2026-07-15 left zero instances within ~90 seconds. The old tray host is now a first-class
   kill target (found by its `RepoYeti-Tray.ps1` command line, killed before the daemon so no
   watchdog interferes), the replacement is launched detached via WMI so closing the terminal that
   ran the rebuild no longer tears the app down with it, and `Wait-Daemon.ps1` only declares victory
-  after the new daemon stays up — same process, still answering — through a 30-second stability
+  after the new daemon stays up (same process, still answering) through a 30-second stability
   hold instead of one second after boot. Also fixed on the way: under Windows PowerShell 5.1 both
   scripts died at startup ("empty string" from `Split-Path`), because a `[CmdletBinding()]` script
   evaluates parameter defaults before `$PSScriptRoot` exists; the root now resolves in the body.
-  (Shared tray-host kit files — the same fix landed in lunarwerx-ui and all four apps.)
+  (Shared tray-host kit files, the same fix landed in lunarwerx-ui and all four apps.)
 - Smart Commit no longer reports a deleted line as a deleted function. It read each change with no
   surrounding lines, so a file whose only edit was dropping an unused local arrived as a lone
-  deletion under a header naming the enclosing function — and the message said the function had
+  deletion under a header naming the enclosing function, and the message said the function had
   been removed, in 4 of 6 measured runs. It now reads one line of context on each side, which shows
   the function still standing: 0 of 6 in the same test.
 - AI commit messages write a real body instead of restating the subject. A body like
   `- generate plane pwa` under the subject `chore: generate plane pwa` had several causes and none
   of them was the model being lazy. The largest: a big file's diff was folded down to a list of
   symbol names with no code under it, so the message was written by something that had never seen
-  the change — "Modified `AI_ADAPTERS` record to accommodate changes" was the best answer that
+  the change, "Modified `AI_ADAPTERS` record to accommodate changes" was the best answer that
   input allowed. A folded file now carries real diff lines alongside its symbol map, sampled from
   the hunks that changed the most rather than whatever sat at the top of the file, and within the
   same per-file budget as before. The prompt also asked for "WHAT changed and WHY", which is
@@ -730,7 +794,7 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
   install in a half-updated state. Covered by new tests that exercise the rollback against a
   real git repo.
 - The optional Connections settings-sync and Lore VCS integrations are now both optional,
-  lazy-loaded dependencies — a daemon that doesn't use either feature never pulls their SDKs
+  lazy-loaded dependencies, a daemon that doesn't use either feature never pulls their SDKs
   into memory.
 - Added last-resort process-level handlers for uncaught exceptions and unhandled promise
   rejections, so an unexpected error is logged instead of crashing the daemon silently.
@@ -738,8 +802,8 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
 ### Added
 
 - **Auto-commit timer.** An opt-in, daemon-wide scheduler that, for each repo you flag from its
-  ⋯ menu, automatically runs the AI **Smart Commit** splitter over its uncommitted changes and —
-  configurably — `pull --ff-only`s then pushes. Two schedules: **repeat on a timer** (every
+  ⋯ menu, automatically runs the AI **Smart Commit** splitter over its uncommitted changes and,
+  configurably, `pull --ff-only`s then pushes. Two schedules: **repeat on a timer** (every
   N minutes/hours, clamped [60s, 24h]) or **once a day** at a set local time. Pull and push are
   each independently toggleable (off = commit locally only). **Safety:** a repo with a merge
   conflict or that is mid-merge/rebase/cherry-pick is always **skipped** (never auto-committed) and
@@ -752,18 +816,18 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
   "Search content" and Collapse All) flips the file view between the nested folder **tree** (default)
   and a flat **list** of full paths. Persisted per repo in `localStorage`, like the tree height and
   fold state; reuses the same rows so selection, discard, diff-stats, and keyboard nav are identical.
-- **MCP server for AI agents.** A hand-rolled Model Context Protocol server (zero new deps —
+- **MCP server for AI agents.** A hand-rolled Model Context Protocol server (zero new deps,
   JSON-RPC 2.0 + MCP implemented directly) exposes RepoYeti's git operations to AI agents over
-  two transports: **`repoyeti mcp`** (stdio — what an MCP client like Claude Desktop/Code or
+  two transports: **`repoyeti mcp`** (stdio, what an MCP client like Claude Desktop/Code or
   Cursor spawns) and **`POST /api/mcp`** (HTTP, auto-gated by the same `/api/*` auth). One
-  transport-agnostic core drives **14 tools** — 8 read-only (`list_repos`, `repo_status`,
+  transport-agnostic core drives **14 tools**, 8 read-only (`list_repos`, `repo_status`,
   `git_log`, `list_branches`, `git_diff`, `git_search`, `list_stashes`, `drift`) and 6 mutating
   (`git_commit`, `create_branch`, `git_checkout`, `git_push`, `git_pull`, `git_fetch`, each
   tagged `MUTATES`). The stdio server proxies to the local daemon over HTTP; the HTTP endpoint
   uses an in-process adapter. Either way every call runs behind the same op-queue and safety
-  guards as the dashboard — the daemon never half-merges, no matter who asks.
+  guards as the dashboard, the daemon never half-merges, no matter who asks.
 - **CLI git verbs.** `repoyeti repos / status <repo> / log / branches / branch / checkout /
-  commit / diff / drift / stash / push / pull / fetch` — real shell shortcuts (no `curl`) that
+  commit / diff / drift / stash / push / pull / fetch`, real shell shortcuts (no `curl`) that
   drive the already-running daemon over its loopback HTTP API and pretty-print the result. They
   locate the live daemon and never start one or touch git in-process (single-instance respected).
   Honour `REPOYETI_BASE_URL` (override the daemon origin) and `REPOYETI_TOKEN` (Bearer auth for a
@@ -772,7 +836,7 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
   (`repoyeti token new` → `POST /api/auth/token`, value shown once; revoke/show too) lets a
   remote or headless agent authenticate over the tunnel with `Authorization: Bearer <token>` (or
   `REPOYETI_TOKEN` for the CLI/MCP) when there's no browser for the OIDC login. **Off by
-  default** — when no token is set, auth is byte-for-byte the prior OIDC-only behavior. The token
+  default**, when no token is set, auth is byte-for-byte the prior OIDC-only behavior. The token
   is a separate, local credential (constant-time compared, stored in the OS keychain), never
   touches connections.icu, and never weakens the default OIDC posture.
 - **Machine-readable API surface.** `GET /api/openapi.json` serves an OpenAPI 3.1 document built
@@ -798,7 +862,7 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
 
 - **Smart Commit (AI multi-commit splitter).** Turn a pile of unrelated working-tree changes into
   an ordered set of small, scoped commits. The daemon proposes a plan (`POST /api/repos/:id/commit-plan`
-  → AI, with a deterministic heuristic fallback — nothing is committed), you review and edit it in a
+  → AI, with a deterministic heuristic fallback, nothing is committed), you review and edit it in a
   dedicated editor (rename subjects, move files between commits, reorder/merge), then execute
   (`POST /api/repos/:id/smart-commit`, which re-validates the edited plan against the live tree and
   commits each group in isolation, file-level only). A **YOLO mode** (Settings → AI) skips the review
@@ -808,24 +872,24 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
   is supported experimentally behind `REPOYETI_LORE=1`.
 - **Server registry (API).** Register version-control servers and clone repos from them via
   `GET/POST/DELETE /api/servers` + `POST /api/servers/clone` (→ `cloneLoreRepo`). _Backend + routes
-  only for now — the Settings → Servers UI is still pending._
+  only for now, the Settings → Servers UI is still pending._
 - **Background remote-sync.** An optional periodic check (`src/remote-sync.ts`) keeps each repo's
   "behind" count fresh, with an opt-in **keep-in-sync** mode that auto fast-forwards safe (clean,
   non-diverged) repos. Cadence + toggles live in Settings (`syncCheck` / `syncIntervalSecs` / `keepInSync`).
 - **Remote & tags management.** A per-repo "Remote & tags" dialog (repo card ⋮ menu) sets or
-  updates the `origin` URL — a local config change, no network — so a repo you created with
+  updates the `origin` URL (a local config change, no network), so a repo you created with
   `git init` from the phone can finally be given a remote and pushed. The same dialog lists the
   repo's tags (newest first) and **creates a tag** (annotated when you add a message), optionally
-  **pushing it to origin** — "tag a release from your phone." Backed by `POST`/`DELETE
+  **pushing it to origin**, "tag a release from your phone." Backed by `POST`/`DELETE
   /api/repos/:id/remote` (URL-scheme validated), `GET /api/repos/:id/tags`, and
   `POST /api/repos/:id/tag` (git-only, ref-name validated).
 - **Clone from URL.** The Add-repository dialog has a **Clone** mode: paste a git URL, pick a
   destination folder (must be inside a scan folder) and an optional identity, and RepoYeti clones
-  it onto the machine — the new repo appears live. The URL scheme, target name, and destination
+  it onto the machine, the new repo appears live. The URL scheme, target name, and destination
   are validated server-side before any git runs, and the chosen identity's SSH key is injected
   per-operation (same seam as fetch/pull/push).
 - **Recent commit messages.** The commit box shows your last few commit subjects as one-tap
-  chips — handy when typing on a phone.
+  chips, handy when typing on a phone.
 - **Scan folders from the dashboard.** Add or remove discovery roots in **Settings → Scan
   folders** (no more CLI-only `repoyeti add-root`). Adding one scans it immediately and the repos
   stream in live; removing one drops the auto-discovered repos found under it (repos you added
@@ -833,23 +897,23 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
 - **Fetch all.** A header button fetches every repo that has a remote in one tap (bounded by the
   network gate), then reports a one-line summary of what succeeded / failed.
 - **Sign out everywhere.** Settings → Access can invalidate the session on every device at once.
-  Sessions are stateless signed cookies, so this rotates the daemon's signing key — every existing
+  Sessions are stateless signed cookies, so this rotates the daemon's signing key, every existing
   cookie stops verifying instantly.
 - **Branches.** Each repo card now lists its local branches (with ahead/behind), lets you
-  **switch** to one (refused on a dirty tree — "stash or resolve at your desk"), **create** a
+  **switch** to one (refused on a dirty tree, "stash or resolve at your desk"), **create** a
   new branch (＋), and **safe-delete** a merged local branch (`-d` only; the current branch and
   protected `main`/`master`/`develop`/`trunk` are refused, and an unmerged branch surfaces
   `UNMERGED_BRANCH` rather than being force-deleted).
 - **Commit history.** A lazy, paginated read-only log per repo (short hash · subject · author ·
   relative time; tap a hash to copy it), backed by `GET /api/repos/:id/log`.
-- **Stash.** Stash all changes — including untracked — to escape the "dirty tree blocks pull"
+- **Stash.** Stash all changes (including untracked) to escape the "dirty tree blocks pull"
   dead-end, then **pop** or **drop** from the phone. A conflicting pop keeps the stash entry and
   reports `STASH_CONFLICT` ("resolve at your desk") instead of leaving a silent half-merge.
 - **Discard a file.** Revert one changed file to its last-committed state directly from the
-  changes tree (confirm-gated) — the inverse of the in-app editor. Path-confined and behind the
+  changes tree (confirm-gated), the inverse of the in-app editor. Path-confined and behind the
   per-repo op-queue, like every other mutation.
 - **In-app file viewer.** Click any changed file in a repo's tree to open its contents in an
-  inline Monaco (VS Code) editor — a right-side push-drawer on desktop (the page slides left
+  inline Monaco (VS Code) editor, a right-side push-drawer on desktop (the page slides left
   and stays centred; drag the left edge to resize) or a bottom sheet on mobile. Read-only,
   syntax-highlighted, theme-aware. A **Content / Diff** toggle (defaulting to Diff) switches
   between the whole file and a HEAD ↔ working-tree diff with GitHub-style collapsed unchanged
@@ -858,21 +922,21 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
   endpoints (binary, deleted-file, and oversized cases handled). Monaco is lazy-loaded and
   excluded from the PWA precache so it never bloats the initial app.
 - **Internationalisation scaffolding (i18n).** All UI copy runs through `vue-i18n` rather than
-  hardcoded strings, so locales can be added later. **Only English (`en.json`) ships today** —
+  hardcoded strings, so locales can be added later. **Only English (`en.json`) ships today**,
   the earlier machine-translated drafts and the language switcher were removed; `bun run i18n:check`
   keeps the codebase translation-ready (no untranslated literals, no missing keys).
-- **`bun run i18n:check`** — a compliance script that fails CI on untranslated UI strings,
+- **`bun run i18n:check`**, a compliance script that fails CI on untranslated UI strings,
   missing translation keys, or locale key-parity drift (templates are parsed with the Vue
   compiler, not regex).
 - **VS Code-style file-type icons** in the changed-files tree, using the `vscode-icons`
   set (real per-language glyphs and colours, bundled offline, tree-shaken).
-- **Resizable changed-files view** — a per-repo drag grip (with keyboard ↑/↓ and
+- **Resizable changed-files view**, a per-repo drag grip (with keyboard ↑/↓ and
   double-click-to-reset) plus a global default size (Small / Medium / Tall) in Settings.
-- **Bring-your-own-key AI commit messages** — generate a commit message from the repo's
+- **Bring-your-own-key AI commit messages**, generate a commit message from the repo's
   diff via a configurable provider (Groq / OpenRouter / Gemini / Claude / ChatGPT /
   DeepSeek). Keys live on the daemon only and never leave the machine.
 - **Sponsor credit** footer.
-- **Launcher guard tests** (`tests/launcher.test.ts`) — fail the build unless the one-click
+- **Launcher guard tests** (`tests/launcher.test.ts`), fail the build unless the one-click
   launcher is intact: the shortcut machinery (`Create-Shortcut.ps1`, `RepoYeti.vbs`,
   `RepoYeti-Tray.ps1`, `RepoYeti.ico`) exists, is **committed**, and is wired
   shortcut → wscript → vbs → tray → daemon + icon. On Windows it also runs the tray's new
@@ -886,7 +950,7 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
   a busy port; now it records the port it ACTUALLY bound in `~/.repoyeti/runtime.json`, so the
   tray opens the right URL (validated with an auth-exempt `/api/health` probe) instead of
   blindly assuming the preferred port. A second launch detects the running daemon and exits
-  rather than starting a rival on another port — across the tray, `bun run start`, and
+  rather than starting a rival on another port, across the tray, `bun run start`, and
   `bun run dev` (whose `--watch` reloads stay exempt so hot-reload still rebinds). The Vite
   dev proxy follows the same pointer.
 - Web UI rebuilt on **reka-ui (shadcn-vue) + Tailwind v4** (replacing the earlier Naive UI
@@ -917,7 +981,7 @@ A pre-tag pass over the whole tree, focused on nothing shipping that shouldn't:
 
 Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
-## [0.0.1] — Initial
+## [0.0.1], Initial
 
 - Daemon core: repo discovery, `.git` watchers, SQLite state, per-repo status engine,
   serialized op-queue, REST + SSE.

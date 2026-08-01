@@ -1,8 +1,17 @@
 import type { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Deps } from "../deps.ts";
 import { jsonError, statusForCode, type ApiErrorCode } from "../../contract.ts";
-import { parseBody, DiscardSchema, DeleteFileSchema, StageSchema, GitignoreAddSchema } from "../../schemas.ts";
+import {
+  parseBody,
+  DiscardSchema,
+  DeleteFileSchema,
+  StageSchema,
+  GitignoreAddSchema,
+  ConflictApplySchema,
+  CONFLICT_APPLY_BODY_LIMIT,
+} from "../../schemas.ts";
 import {
   discardFile,
   deleteFile,
@@ -10,6 +19,9 @@ import {
   addToGitignore,
   getChanges,
   searchChangedContent,
+  listConflicts,
+  readConflictFile,
+  applyConflictResolutions,
   readFileContent,
   readImagePreview,
   readBinaryPreview,
@@ -247,6 +259,77 @@ export function register(app: Hono, { cfg }: Deps): void {
     const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
     return c.json(result, status);
   });
+
+  // ── merge conflicts ─────────────────────────────────────────────────────────────────
+  // Read side of the conflict resolver. Both routes are side-effect free; the AI proposal that
+  // sits between them lives in routes/ai.ts, and the write is conflict-apply below.
+
+  // Every unmerged path, each annotated with whether the resolver can act on it (and if not,
+  // why). Unsupported paths are LISTED rather than filtered — a delete/modify conflict silently
+  // missing from the list reads as a broken feature, not as an unsupported case.
+  app.get("/api/repos/:id/conflicts", async (c) => {
+    const id = requireId(c);
+    if (id instanceof Response) return id;
+    const result = await listConflicts(id);
+    if (result.ok) return c.json(result);
+    return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
+  });
+
+  // One conflicted file, parsed into hunks, with common-ancestor text where git can supply it.
+  // Also the source of the `hash` the apply call must echo back.
+  app.get("/api/repos/:id/conflict", async (c) => {
+    const id = requireId(c);
+    if (id instanceof Response) return id;
+    const result = await readConflictFile(id, c.req.query("path") ?? "");
+    if (!result.ok) {
+      const status: ContentfulStatusCode =
+        result.code === "NOT_FOUND" ? 404 : result.code === "NOT_CONFLICTED" ? 409 : 400;
+      return c.json({ ok: false, code: result.code, message: result.message }, status);
+    }
+    // `parsed` is the internal representation (it carries the raw region text for splicing);
+    // the wire form is `hunks` + `text`, which is everything the review UI needs.
+    const { parsed: _parsed, ...wire } = result;
+    return c.json(wire);
+  });
+
+  // Write reviewed resolutions into a conflicted file.
+  //
+  // Destructive (it overwrites source) → same remote-editing gate as file writes and discard.
+  // Three things this route deliberately does NOT do:
+  //   - it does not stage. The path stays unmerged until the owner stages it, so `git commit`
+  //     keeps refusing and the auto-commit gate keeps skipping the repo.
+  //   - it does not trust the client's text. Every region is re-validated in the service layer
+  //     (markers, index validity, file-level write guards) regardless of who authored it.
+  //   - it does not accept a stale proposal. The `hash` must match the file as it is right now.
+  app.post(
+    "/api/repos/:id/conflict-apply",
+    // Sized to the schema's own ceiling (40 regions × 512 KB is already impossible for a file
+    // the engine would accept). Middleware rather than a handler check so an oversized body is
+    // refused before the daemon buffers and JSON-parses it.
+    bodyLimit({
+      maxSize: CONFLICT_APPLY_BODY_LIMIT,
+      onError: (c) => jsonError(c, "BAD_REQUEST", "resolution payload is too large", 413),
+    }),
+    async (c) => {
+      const id = requireId(c);
+      if (id instanceof Response) return id;
+      const blocked = remoteEditingBlocked(c, cfg);
+      if (blocked) return blocked;
+      const p = await parseBody(c, ConflictApplySchema);
+      if (!p.ok) return p.res;
+      const result = await applyConflictResolutions(id, p.data.path, p.data.hash, p.data.accepted);
+      if (result.ok) return c.json(result);
+      const status: ContentfulStatusCode =
+        result.code === "NOT_FOUND"
+          ? 404
+          : result.code === "TOO_LARGE"
+            ? 413
+            : result.code === "NOT_CONFLICTED" || result.code === "CONFLICT_STALE"
+              ? 409
+              : 400;
+      return c.json(result, status);
+    },
+  );
 
   // Stage one changed file's working-tree change into the index (the changes-tree per-file
   // "Stage" action, GitHub-Desktop-style). Non-destructive — no remote-editing gate needed

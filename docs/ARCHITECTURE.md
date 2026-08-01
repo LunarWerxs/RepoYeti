@@ -456,6 +456,15 @@ GIT_SSH_COMMAND="ssh -i <ssh_key_path> -o IdentitiesOnly=yes -o BatchMode=yes" \
 - **The daemon never leaves a repo mid-merge.** Every unsafe state surfaces as a clear status, not an action.
 - Binds to **`127.0.0.1` only**; the *only* network path in is the authenticated tunnel.
 - All git invocations use **parameterized argument arrays** via `simple-git` — never a shell string.
+- **The ambient environment is scrubbed, not forwarded.** `safeGitEnv()` (`src/git.ts`) deletes
+  `BLOCKED_GIT_ENV`: every var that names a program git would execute (askpass, editor, pager,
+  external diff, ssh, proxy) or a path it would read config/binaries/templates from. Two reasons,
+  and the second is the one that draws blood. (a) Whoever launches the daemon must not get to
+  redirect what git runs. (b) `simple-git`'s guard **hard-fails every call** when one of these is
+  merely *present* (`Use of "X" is not permitted without enabling allowUnsafeY`), and editors export
+  these: VS Code, Claude Code and GitHub Desktop all set `GIT_ASKPASS` in the terminals they open,
+  so an unscrubbed daemon works from a plain shell and fails from an editor terminal.
+  `bun run check:gitenv` probes `simple-git` and fails if its blocked set drifts from ours.
 
 ---
 
@@ -1381,3 +1390,81 @@ Guest AI generation follows the same owner-daemon rule as owner generation. The 
 only `/api/ai/availability` (`usable` and `commitEnabled`); provider, model, and key configuration
 remain owner-only. `commit-message` and `commit-plan` execute on the sharer's daemon with its
 keychain-backed key and return only their generated result.
+
+## 19. AI merge-conflict resolution
+
+> **Goal.** A conflicted file gets a "Resolve with AI" button that proposes a merge for each
+> conflict region, shows what it did and what it might have got wrong, and writes only the
+> regions you tick. Opt-in per region, never automatic.
+
+This is the only AI feature in RepoYeti whose output is **source code** rather than a commit
+message, and every design decision below follows from that one fact. A bad commit message is
+prose the owner reads before it lands; its worst case is embarrassing. A bad merge is a file that
+compiles, passes review by looking plausible, and is wrong — with nothing downstream positioned
+to catch it. So the feature is built to make a wrong merge *visible*, not to make merging fast.
+
+### The pipeline (three steps, three routes, deliberately)
+
+| Step | Route | Writes? |
+| --- | --- | --- |
+| List unmerged paths | `GET /api/repos/:id/conflicts` | no |
+| Read + parse one file | `GET /api/repos/:id/conflict?path=` | no |
+| Propose a resolution | `POST /api/repos/:id/conflict-resolve` | no |
+| Apply reviewed regions | `POST /api/repos/:id/conflict-apply` | yes |
+
+Splitting propose from apply is what keeps the model's text out of the working tree by
+construction rather than by care. `conflict-apply` takes the resolution text from the CLIENT, so
+an owner editing the proposal before accepting it travels the same validated path as the raw
+proposal — hand-resolution is a first-class case, not a degraded one.
+
+### The five guarantees
+
+1. **Nothing is staged, ever.** A fully-resolved file stays unmerged in git's index. `git commit`
+   keeps refusing, and the auto-commit safety gate (`src/auto-commit.ts` `hasConflict`) keeps
+   skipping the repo. "The AI resolved it" and "the merge is done" remain two different states.
+2. **Unaccepted regions keep their original markers, byte-for-byte.** A partial apply therefore
+   leaves the file still conflicted; there is no state where a half-resolved file looks finished.
+   Text outside a conflict region is spliced from verbatim slices of the original, so line endings
+   and the final-newline convention survive untouched.
+3. **Every proposal is mechanically audited.** `assessResolution` compares the proposal against
+   both sides and the ancestor, independently of whatever confidence the model claimed. The
+   strongest check is `dropped-shared-lines`: a line BOTH sides kept, missing from the result. The
+   review UI renders the audit *above* the code and shows the dropped lines themselves.
+4. **A resolution carrying conflict markers is refused** — in the reply parser, and again in the
+   service layer, because apply accepts client text. "Applied" can never mean "the markers moved".
+5. **A stale proposal is refused.** The read returns a content hash the apply must echo; a file
+   that changed underneath is rejected rather than merged into bytes nobody reviewed.
+
+### Context quality
+
+Git only writes `|||||||` ancestor markers under `merge.conflictStyle=diff3`, which is not the
+default — so most conflicted files show only two sides. That absence matters: without the
+ancestor, a model cannot distinguish "they added this" from "we deleted it". So the service
+reconstructs diff3 output from index stages 1/2/3 via `git merge-file -p --diff3` in a temp
+directory, and grafts the ancestor text across **only** where the reconstructed regions match the
+on-disk ones side-for-side. An owner who already hand-edited the file fails that check and simply
+gets no base, rather than a description of a file they no longer have. `git checkout
+--conflict=diff3` would be simpler and is deliberately not used: it rewrites the working file.
+
+### Model tier
+
+`looksSmallTierModel` flags model ids that look like small/fast tiers (`mini`, `flash`, `haiku`,
+`nano`, `≤13b`, …) and the UI escalates its warning for them. It is two-valued on purpose: a
+non-match means "not recognised as small", never "good enough for this" — any "capable" list
+would be wrong within a quarter. Several of `AI_CATALOG`'s own `recommended` models match, which
+is the intended result: they were chosen for cheap commit messages, and this call is not that.
+The warning is advice, not a gate. Owner's key, owner's repo, owner's call.
+
+### Guest access
+
+Owner-only, all four routes, and enforced by absence from `GUEST_ROUTES` (the gate default-denies)
+with the routes' own checks as a second line. A `control` guest may already draft commit messages,
+because that spends the owner's tokens on prose the owner still reads. Spending them on the
+owner's *source*, to produce a merge whose blast radius a guest — who sees only part of the repo —
+cannot assess, is a different trade, and there is no budget that makes it a good one.
+
+### No fallback
+
+Unlike Smart Commit, which degrades to a deterministic bucket-split, a failed resolution has no
+fallback. A machine-made "resolution" of a merge conflict would be a guess wearing the same UI as
+a real proposal. The honest degraded state here is the conflict markers the owner already has.
