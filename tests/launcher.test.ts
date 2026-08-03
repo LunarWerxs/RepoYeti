@@ -258,7 +258,7 @@ test("launcher chain is wired: shortcut → wscript → Tray-Launch.vbs (auto-di
   );
 
   // Full-shutdown sentinel: RepoYeti opts INTO the engine's sentinel watch (SentinelFile set to
-  // shutdown.request, unlike CCManagerUI which passes $null). The polling/clear/Quit-reuse
+  // shutdown.request, unlike AgentHydra which passes $null). The polling/clear/Quit-reuse
   // machinery itself is engine-owned; RepoYeti's opt-in + exact filename live in the adapter.
   must(/function\s+Invoke-QuitApp/.test(engine), "Tray-Host.ps1 is missing the shared Quit teardown Invoke-QuitApp");
   must(/\$watchTimer\.Add_Tick/.test(engine), "Tray-Host.ps1 is missing the sentinel watch timer");
