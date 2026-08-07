@@ -40,6 +40,7 @@
     "@tailwindcss/vite": "^4.3.1",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/compiler-sfc": "^3.5.39",
     "@vue/test-utils": "^2.4.11",
     "happy-dom": "^20.10.6",
     "tailwindcss": "^4.3.2",
@@ -55,5 +56,11 @@
     "brace-expansion": "2.1.2",
     "dompurify": "3.4.12",
     "fast-uri": "3.1.4"
+  },
+  "patchedDependencies": {
+    "@formkit/auto-animate@0.8.4": "patches/@formkit%2Fauto-animate@0.8.4.patch",
+    "@formkit/drag-and-drop@0.6.1": "patches/@formkit%2Fdrag-and-drop@0.6.1.patch",
+    "local-pkg@1.2.1": "patches/local-pkg@1.2.1.patch",
+    "vue-sonner@2.0.9": "patches/vue-sonner@2.0.9.patch"
   }
 }

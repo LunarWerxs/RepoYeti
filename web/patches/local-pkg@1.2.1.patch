@@ -1,0 +1,21 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index a1ee38d578aac4008ecb166a14dd2f803a1112cb..d89acbfd65804174b7f1938ee7ed31d10c03e0ab 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1,5 +1,6 @@
+ import fs from 'node:fs';
+ import { createRequire } from 'node:module';
++import { pathToFileURL } from 'node:url';
+ import path, { dirname, join, win32 } from 'node:path';
+ import process from 'node:process';
+ import fsPromises from 'node:fs/promises';
+@@ -92,7 +93,8 @@ function resolveModule(name, options = {}) {
+   }
+ }
+ async function importModule(path) {
+-  const i = await import(path);
++  const resolved = resolveModule(path);
++  const i = await import(resolved ? pathToFileURL(resolved).href : path);
+   if (i)
+     return interopDefault(i);
+   return i;

@@ -1,0 +1,13 @@
+diff --git a/package.json b/package.json
+index 04be8958df290407d6ed518a3a516fe2a20286f4..03d6b73873a33cc7e72148f08020a5a8b2492cb3 100644
+--- a/package.json
++++ b/package.json
+@@ -56,5 +56,8 @@
+       "import": "./index.mjs",
+       "default": "./index.mjs"
+     }
++  },
++  "peerDependencies": {
++    "vue": "^3.0.0"
+   }
+ }

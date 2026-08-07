@@ -1,0 +1,14 @@
+diff --git a/package.json b/package.json
+index 224d37123bfaa2f369de642a2a136f0710cd8083..a945040f256a8de0ba75f85355e25ab078723dc0 100644
+--- a/package.json
++++ b/package.json
+@@ -26,7 +26,8 @@
+     "url": "https://github.com/formkit/drag-and-drop/issues"
+   },
+   "peerDependencies": {
+-    "@marko/runtime-tags": ">=6.0.166"
++    "@marko/runtime-tags": ">=6.0.166",
++    "vue": "^3.0.0"
+   },
+   "peerDependenciesMeta": {
+     "@marko/runtime-tags": {
