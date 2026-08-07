@@ -4,6 +4,25 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2026-08-06
+
+### Changed
+
+- **Inter ships with the app instead of being fetched from Google's CDN.** The shared kit's base
+  stylesheet opened with a remote `@import`, and a remote import at the head of a render-blocking
+  stylesheet is itself render-blocking: nothing painted until the browser had been to Google and
+  back. That is free on a warm HTTP cache, which is why it went unnoticed, but it is dead time on
+  a first load or after a cache eviction, and an outright stall with no network, on a dashboard
+  that is normally reached over your own LAN. Both Latin subsets of Inter's variable woff2 now
+  ship with the web bundle, so the UI renders offline, with no flash of fallback text.
+
+### Internal
+
+- CI and Release can be started manually, so a commit or a tag can be built without waiting on a
+  webhook. GitHub's standard mitigation for an Actions incident is to throttle webhook triggers,
+  which lands the push and creates no run at all.
+- Follow the sibling app's rename to AgentHydra in vendored comments.
+
 ## [0.19.0] - 2026-08-01
 
 ### Added
