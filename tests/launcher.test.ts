@@ -329,20 +329,37 @@ test.skipIf(!isWin)("a root shortcut can be (re)generated and resolves to the tr
     `$s = $ws.CreateShortcut('${lnk.replace(/'/g, "''")}');`,
     `$icon = ($s.IconLocation -split ',')[0];`,
     `$arg = $s.Arguments.Trim([char]34);`,
-    `[pscustomobject]@{ target=$s.TargetPath; args=$s.Arguments; iconExists=[bool](Test-Path $icon); vbsExists=[bool](Test-Path $arg) } | ConvertTo-Json -Compress`,
+    // The config argument is resolved RELATIVE TO THE EXE's folder, which is how the host itself
+    // resolves it; checking it against the cwd would pass or fail for the wrong reason.
+    `$cfg = Join-Path (Split-Path -Parent $s.TargetPath) $arg;`,
+    `[pscustomobject]@{ target=$s.TargetPath; args=$s.Arguments; iconExists=[bool](Test-Path $icon); targetExists=[bool](Test-Path $s.TargetPath); configExists=[bool](Test-Path $cfg) } | ConvertTo-Json -Compress`,
   ].join(" ");
   const r = Bun.spawnSync(["powershell", "-NoProfile", "-Command", resolve], { cwd: ROOT });
   const info = JSON.parse((r.stdout?.toString() ?? "{}").trim()) as {
     target: string;
     args: string;
     iconExists: boolean;
-    vbsExists: boolean;
+    targetExists: boolean;
+    configExists: boolean;
   };
-  must(/wscript/i.test(info.target), `shortcut target isn't wscript: ${info.target}`);
-  must(/Tray-Launch\.vbs/i.test(info.args), `shortcut doesn't launch the shared Tray-Launch.vbs: ${info.args}`);
-  must(info.vbsExists, "shortcut points at a Tray-Launch.vbs that doesn't exist");
+  // The shortcut now runs the NATIVE tray host directly. wscript + Tray-Launch.vbs existed only to
+  // start PowerShell without a console flash, and the native host suppresses its own console, so
+  // both layers are gone: the daemon process is created at ~25ms instead of ~475ms.
+  must(
+    /lunarwerx-tray\.exe$/i.test(info.target),
+    `shortcut target isn't the native tray host: ${info.target}`,
+  );
+  must(!/wscript/i.test(info.target), `shortcut still goes through wscript: ${info.target}`);
+  // The config filename IS the per-app surface: the binary is generic and shared, so a shortcut
+  // that lost this argument would start a tray host with nothing to host.
+  must(
+    /RepoYeti-Tray\.json/i.test(info.args),
+    `shortcut doesn't pass RepoYeti-Tray.json: ${info.args}`,
+  );
+  must(info.targetExists, "shortcut points at a lunarwerx-tray.exe that doesn't exist");
+  must(info.configExists, "shortcut names a RepoYeti-Tray.json that doesn't exist");
   must(info.iconExists, "shortcut's tray icon (RepoYeti.ico) doesn't exist");
-  expect(info.iconExists && info.vbsExists).toBe(true);
+  expect(info.iconExists && info.targetExists && info.configExists).toBe(true);
 });
 
 test("Create-Shortcut.ps1 dot-sources the shared New-TrayShortcut.ps1 engine", () => {

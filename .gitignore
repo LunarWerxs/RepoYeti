@@ -61,6 +61,11 @@ vendor/cloudflared/
 repoyeti
 repoyeti.exe
 *.exe
+# ...except the tray host, which is a SHIPPED launcher component, not a build output. The shortcut
+# runs it, so a clone without it has no way to start the app at all. Its source is vendored beside
+# it in misc/tray-host-native/ (kit source: lunarwerx-ui/src/tray-host-native), and `cargo build
+# --release` there reproduces this exact binary.
+!misc/lunarwerx-tray.exe
 
 # secrets / keys — belt-and-suspenders, never commit
 *.pem

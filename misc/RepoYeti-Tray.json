@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "RepoYeti's tray-host config, read by misc/lunarwerx-tray.exe (source vendored beside it in",
+    "misc/tray-host-native/). This file is the whole per-app surface; the host binary is generic and",
+    "shared, exactly as RepoYeti-Tray.ps1's $TrayConfig hashtable was.",
+    "",
+    "Paths are relative to THIS file unless absolute. %VAR% expands an environment variable,",
+    "%VAR|fallback% supplies a default, and a leading ~ is the user profile."
+  ],
+
+  "displayName": "RepoYeti",
+  "serviceName": "repoyeti",
+  "mutexName": "RepoYetiTrayHost",
+  "menuOpenLabel": "Open RepoYeti",
+  "iconFile": "RepoYeti.ico",
+  "appRoot": "..",
+
+  "port": 7171,
+  "urlHost": "127.0.0.1",
+  "infoFile": "%REPOYETI_HOME|~\\.repoyeti%\\runtime.json",
+  "sentinelFile": "%REPOYETI_HOME|~\\.repoyeti%\\shutdown.request",
+
+  "startCommand": "{RUNTIME} run src\\index.ts start --port {PORT}",
+  "runtimeCandidates": ["~\\.bun\\bin\\bun.exe", "%APPDATA%\\npm\\node_modules\\bun\\bin\\bun.exe"],
+  "runtimeFallback": "bun",
+
+  "firstRun": [
+    { "missing": "node_modules", "run": "bun install" },
+    { "missing": "web\\node_modules", "run": "cd /d web && bun install" },
+    { "missing": "web\\dist\\index.html", "run": "bun run --cwd web build:fast" }
+  ],
+
+  "rebuildCommand": "bun run --cwd web build:fast",
+  "rebuildLogName": "RepoYeti-Rebuild.log",
+  "isDevTree": "%REPOYETI_DEV%",
+
+  "onStrayDaemon": "attach",
+
+  "_shutdown": "No token: RepoYeti uses the force-kill flavour, so shutdownTokenEnvVar stays unset.",
+
+  "_wait": "A cold start scans the whole root and can take up to a minute, well above the 12-15s family default.",
+  "startupWaitSec": 60,
+  "workerWaitSec": 60,
+
+  "notServingHint": "RepoYeti started but isn't serving.\n\nThe most likely cause is that no scan root is configured. Open a terminal in this folder and run:\n\n    bun run src\\index.ts add-root <path-to-your-git-projects>\n\nthen click RepoYeti again. (Other causes: a failed web build, or no free port.)",
+
+  "portableWindowSize": { "width": 840, "height": 760 },
+  "portableWindowSizeHint": true
+}
