@@ -266,7 +266,16 @@ const history = await byText("History");
 if (history) {
   await moveTo(history, 0.35);
   await tap();
-  await hold(1.6);
+  await hold(0.9);
+  // The History row sits near the bottom of the viewport, so the section expands BELOW the
+  // fold and the whole payoff would play off screen. Lift the page until the activity block
+  // sits under the app header, and record the travel so the reveal is part of the loop.
+  const lift = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="history-activity"]');
+    return el ? Math.max(0, Math.round(el.getBoundingClientRect().top - 88)) : 320;
+  });
+  if (lift > 0) await scrollBy(null, lift, 0.7);
+  await hold(1.0);
   await scrollBy(".history-scroll", 220, 0.8);
   await hold(1.2);
 }
