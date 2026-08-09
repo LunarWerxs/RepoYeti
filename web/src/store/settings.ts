@@ -173,6 +173,15 @@ export function useSettings(deps: {
       authReady.value = true;
     }
   }
+  /**
+   * A mid-session request came back 401 (revoked/expired auth) — flip the sign-in gate back on
+   * immediately instead of leaving the owner stuck behind a generic error toast with no route
+   * back. Idempotent, so a caller never needs to check `authenticated` first.
+   */
+  function handleUnauthorized(): void {
+    authenticated.value = false;
+  }
+
   /** Grant the localhost-only bypass, then reload into the dashboard. */
   async function continueLocal(): Promise<void> {
     await api.continueLocal();
@@ -695,6 +704,7 @@ export function useSettings(deps: {
     localBypass,
     shareViewer,
     loadAuth,
+    handleUnauthorized,
     continueLocal,
     setMode,
     setTunnel,

@@ -148,6 +148,38 @@ async function extract(archive: string, destination: string): Promise<void> {
   }
 }
 
+/** The release asset holding the per-file SHA-256 manifest (produced by .github/workflows/release.yml). */
+const CHECKSUM_ASSET = "SHA256SUMS.txt";
+
+/**
+ * The SHA-256 the release publishes for `assetName`, or null if the manifest doesn't cover it.
+ *
+ * `SHA256SUMS.txt` is `sha256sum` output — "<64 hex>  <name>", two spaces — built in the release
+ * workflow across every uploaded artifact. It has always been attached to the release; nothing
+ * ever read it.
+ */
+async function publishedChecksum(assets: ReleaseAsset[], assetName: string): Promise<string | null> {
+  const manifest = assets.find((a) => a.name === CHECKSUM_ASSET);
+  if (!manifest) return null;
+  const response = await fetch(manifest.browser_download_url, {
+    headers: { accept: "text/plain", "user-agent": `${SERVICE}/${VERSION}` },
+    redirect: "follow",
+  });
+  if (!response.ok) return null;
+  for (const line of (await response.text()).split(/\r?\n/)) {
+    const m = /^([0-9a-f]{64})\s+\*?(.+?)\s*$/i.exec(line.trim());
+    if (m && basename(m[2]!) === assetName) return m[1]!.toLowerCase();
+  }
+  return null;
+}
+
+/** SHA-256 of a file on disk, lowercase hex. */
+async function sha256File(path: string): Promise<string> {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(new Uint8Array(await Bun.file(path).arrayBuffer()));
+  return hasher.digest("hex").toLowerCase();
+}
+
 function verifyVersion(executable: string, expected: string): Promise<boolean> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -198,9 +230,11 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
   if (!status.updateAvailable) return failure("already up to date");
   const remoteVersion = (status.remoteCommit ?? "").replace(/^v/, "");
 
+  let assets: ReleaseAsset[] = [];
   let asset: ReleaseAsset | null = null;
   try {
-    asset = assetForPlatform((await latestRelease()).assets ?? []);
+    assets = (await latestRelease()).assets ?? [];
+    asset = assetForPlatform(assets);
   } catch {}
   if (!asset) return failure(`no ${releaseTarget()} archive is attached to v${remoteVersion}`);
 
@@ -211,6 +245,7 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
   const bundledName = process.platform === "win32" ? "repoyeti.exe" : "repoyeti";
   const output: string[] = [];
   let movedAside = false;
+  let parkedPath: string | null = null;
 
   try {
     rmSync(staging, { recursive: true, force: true });
@@ -223,6 +258,31 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
     });
     if (!response.ok) return failure(`download failed (HTTP ${response.status})`);
     await Bun.write(archive, response);
+
+    // Verify the archive against the release's published SHA-256 BEFORE unpacking it, and fail
+    // closed if there is nothing to verify against.
+    //
+    // Until now the only check on a downloaded binary was verifyVersion() below — running it and
+    // seeing whether it printed the expected version string. Anything that prints that string
+    // passes, so the check tells you the file is the right VERSION and nothing at all about
+    // whether it is the right FILE. This code then renames it over the running executable, which
+    // makes "whatever was served at browser_download_url" arbitrary code execution on every
+    // installation with auto-update enabled.
+    //
+    // Fail-closed is deliberate. A missing manifest means we cannot tell a good archive from a
+    // bad one, and "install it anyway" is the exact behavior being removed. Every release the
+    // current workflow builds attaches SHA256SUMS.txt, so the only thing this refuses is an
+    // update we have no way to trust.
+    const expectedHash = await publishedChecksum(assets, asset.name);
+    if (!expectedHash) {
+      return failure(`v${remoteVersion} publishes no ${CHECKSUM_ASSET}, so the download cannot be verified`);
+    }
+    const actualHash = await sha256File(archive);
+    if (actualHash !== expectedHash) {
+      return failure(`the downloaded ${asset.name} does not match the checksum published for v${remoteVersion}`);
+    }
+    output.push(`verified sha256 ${actualHash.slice(0, 12)}…`);
+
     await extract(archive, staging);
 
     const candidate = join(staging, bundledName);
@@ -231,9 +291,24 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
       return failure("the downloaded executable failed its version self-check");
     }
 
+    // Park the new binary in the INSTALL directory first, then do the two renames back to back.
+    //
+    // The swap has to be move-aside-then-move-in (Windows will rename a running .exe but never
+    // overwrite one), so there is unavoidably an instant with nothing at `executable`. What was
+    // avoidable was its LENGTH: `moveInto` falls back to a full `cpSync` when source and
+    // destination are on different volumes, and the staging dir is a subdirectory of the install
+    // dir but the extracted candidate need not share its volume in every deployment. That put a
+    // whole file copy inside the window. Parking first makes both steps same-directory metadata
+    // operations with no I/O between them, which is as narrow as this can be made — and it
+    // matters because the tray's Quit is a `taskkill /T /F` that can land at any moment.
+    const parked = join(installDir, `.${basename(executable)}.new-${status.checkedAt}`);
+    rmSync(parked, { force: true });
+    moveInto(candidate, parked);
+    parkedPath = parked;
     renameSync(executable, oldExecutable);
     movedAside = true;
-    moveInto(candidate, executable);
+    renameSync(parked, executable);
+    parkedPath = null;
     if (process.platform !== "win32") {
       try {
         await run("chmod", ["+x", executable]);
@@ -256,6 +331,13 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
         renameSync(oldExecutable, executable);
       } catch {}
     }
+    // A parked binary that never got renamed into place is dead weight sitting in the install
+    // directory; drop it rather than leave a mystery file beside the executable.
+    if (parkedPath) {
+      try {
+        rmSync(parkedPath, { force: true });
+      } catch {}
+    }
     return failure(`update failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -266,7 +348,12 @@ export function cleanupStaleUpdateArtifacts(): void {
     const executableName = basename(process.execPath);
     rmSync(join(installDir, ".update-staging"), { recursive: true, force: true });
     for (const name of readdirSync(installDir)) {
-      if (name.startsWith(`${executableName}.old-`)) rmSync(join(installDir, name), { force: true });
+      // `<exe>.old-*` is the previous binary; `.<exe>.new-*` is a candidate that was parked for
+      // the swap and never renamed in (a kill between the two renames). Both are stale once this
+      // process is running from the canonical name again.
+      if (name.startsWith(`${executableName}.old-`) || name.startsWith(`.${executableName}.new-`)) {
+        rmSync(join(installDir, name), { force: true });
+      }
     }
   } catch {}
 }

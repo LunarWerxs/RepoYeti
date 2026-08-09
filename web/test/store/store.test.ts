@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { useStore } from "@/store";
 import { api } from "@/api";
+import { ApiError } from "@/lib/httpClient";
 import {
   MAX_RETAINED_GIT_REPO_CACHES,
   MAX_RETAINED_LOG_COMMITS,
@@ -358,5 +359,36 @@ describe("AI settings writers", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ code: "ERROR" }, false, 500)));
     await expect(store.setStyle("concise")).rejects.toThrow();
     expect(store.aiSettings.style).toBe("detailed"); // reverted to the last known-good
+  });
+});
+
+// A mid-session 401 (revoked/expired session) used to leave `authenticated` stuck at true
+// forever — every action just failed with a generic toast and there was no route back to the
+// sign-in screen. asResult() now flips it back off the moment an ApiError carries status 401.
+describe("mid-session 401 handling", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    useStore().repos.push({ id: "r" } as never);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("flips authenticated to false when an action gets a 401", async () => {
+    const store = useStore();
+    expect(store.authenticated).toBe(true); // default until loadAuth() says otherwise
+    vi.spyOn(api, "fetch").mockRejectedValue(new ApiError(401, "session expired"));
+
+    const result = await store.doAction("r", "fetch");
+
+    expect(result.ok).toBe(false);
+    expect(store.authenticated).toBe(false);
+  });
+
+  it("leaves authenticated alone for a non-401 failure", async () => {
+    const store = useStore();
+    vi.spyOn(api, "fetch").mockRejectedValue(new ApiError(500, "boom"));
+
+    await store.doAction("r", "fetch");
+
+    expect(store.authenticated).toBe(true);
   });
 });

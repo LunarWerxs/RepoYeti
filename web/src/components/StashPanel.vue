@@ -3,7 +3,7 @@
 // list from the store (RepoCard triggers the load on expand) and runs the git ops itself, keyed by
 // repoId. Multi-root: the "Stash" save button (only when there are uncommitted changes) + the
 // stash-list dropdown (only when stashes exist) — both gated by the repo's stash capability.
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { Archive, ChevronDown, CornerDownLeft, Trash2, Loader2 } from "@lucide/vue";
 import { useStore } from "../store";
@@ -17,6 +17,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 const props = defineProps<{ repoId: string; canStash: boolean; dirty: number }>();
 const store = useStore();
@@ -35,9 +43,25 @@ async function stashPop(index: number): Promise<void> {
   if (gitBusy.value) return;
   toastResult(await store.stashPop(props.repoId, index), t("repo.stash.popped"));
 }
-async function stashDrop(index: number): Promise<void> {
-  if (gitBusy.value) return;
-  toastResult(await store.stashDrop(props.repoId, index), t("repo.stash.dropped"));
+
+// ── drop a stash (confirm-gated: `git stash drop` is unrecoverable, and the Drop button sits
+//    right beside Pop at the same size, so a mis-tap on a phone must not be able to fire it
+//    directly — see the discard/delete-file confirms in RepoCardChanges.vue, same shape). ──
+const dropTarget = ref<{ index: number; message: string } | null>(null);
+const dropOpen = computed({
+  get: () => dropTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) dropTarget.value = null;
+  },
+});
+function askDrop(index: number, message: string): void {
+  dropTarget.value = { index, message };
+}
+async function confirmDrop(): Promise<void> {
+  const target = dropTarget.value;
+  dropTarget.value = null;
+  if (!target || gitBusy.value) return;
+  toastResult(await store.stashDrop(props.repoId, target.index), t("repo.stash.dropped"));
 }
 </script>
 
@@ -94,11 +118,25 @@ async function stashDrop(index: number): Promise<void> {
           :disabled="!!gitBusy"
           :title="tooltipsEnabled ? $t('repo.stash.dropTooltip') : undefined"
           :aria-label="$t('repo.stash.drop')"
-          @click="stashDrop(s.index)"
+          @click="askDrop(s.index, s.message)"
         >
           <Trash2 :size="14" />
         </button>
       </div>
     </DropdownMenuContent>
   </DropdownMenu>
+
+  <!-- confirm before dropping a stash (destructive, unrecoverable — names the stash message) -->
+  <Dialog v-model:open="dropOpen">
+    <DialogContent class="sm:max-w-sm">
+      <DialogHeader>
+        <DialogTitle>{{ $t("repo.stash.dropTitle") }}</DialogTitle>
+        <DialogDescription>{{ $t("repo.stash.dropBody", { message: dropTarget?.message ?? "" }) }}</DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="gap-2 sm:gap-2">
+        <Button variant="secondary" @click="dropOpen = false">{{ $t("common.cancel") }}</Button>
+        <Button variant="destructive" @click="confirmDrop">{{ $t("repo.stash.dropConfirm") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>

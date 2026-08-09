@@ -4,8 +4,9 @@
  * touch a remote, so none take `netGate` — but they share the same dirty/detached-HEAD guards
  * and identity attribution as the sync actions in ./sync.ts.
  */
-import { existsSync, lstatSync, readdirSync, rmSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, readdirSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { pathWithin } from "../paths.ts";
 import { gitFor, identityConfigArgs } from "../git.ts";
 import { readStatus } from "../read/status.ts";
 import type { Identity } from "../db.ts";
@@ -123,12 +124,48 @@ export async function gitCommitGroups(
     } catch (err) {
       const r = classify(err);
       committed.push({ ok: false, code: r.code, subject, message: r.message });
+      // Put the index back where the loop found it before bailing out. The `git add` above may
+      // well have succeeded and the `commit` failed, which would strand this group's files STAGED
+      // — the working tree is safe either way, but the index no longer matches the state the
+      // caller started from, and the next discard/commit reads that index to decide what it is
+      // looking at. Mixed reset only (never `--hard`), path-scoped to this group, and
+      // best-effort: a failure here must not mask the real error being returned.
+      try {
+        for (const chunk of chunkByBytes(g.paths)) {
+          await git.raw(["reset", "-q", "--", ...chunk]);
+        }
+      } catch {
+        /* unborn HEAD, or nothing staged — the reported failure below is what matters */
+      }
       // Stop on the first failure; the remaining groups' changes stay safely in the tree.
       return { ok: false, code: r.code, message: r.message, committed, remaining: groups.length - i - 1 };
     }
   }
   const made = committed.filter((c) => c.message !== "skipped (no changes)").length;
   return { ok: true, code: "OK", message: `committed ${made} change set${made === 1 ? "" : "s"}`, committed, remaining: 0 };
+}
+
+/**
+ * Unlink an untracked working-tree file, but only if it really sits inside the repo.
+ *
+ * `resolveRepoPath` confines the *spelling* of `relPath` (no `..`, no absolute path), which is
+ * enough for git subcommands — git resolves paths against the repo itself. It is NOT enough for a
+ * direct `unlinkSync`: a directory SYMLINK committed inside the repo (`vendor -> C:\Users\me`) is
+ * a perfectly legal repo entry, and `vendor/.ssh/id_rsa` is then a clean relative path that
+ * resolves outside the checkout entirely. Repos get cloned from the internet, so a hostile one is
+ * a realistic input, and this is the only mutation reached with a raw fs call.
+ *
+ * The PARENT directory is what gets resolved, not the leaf: if the leaf is itself a symlink we
+ * want to unlink the link, not follow it (and not refuse it). Mirrors the guard
+ * `resolveReadableWorkFile` and `writeFileContent` already apply on the read/write paths.
+ */
+function unlinkConfinedFile(absPath: string, relPath: string): void {
+  const abs = join(absPath, relPath);
+  if (!existsSync(abs) || !lstatSync(abs).isFile()) return;
+  if (!pathWithin(realpathSync(absPath), realpathSync(dirname(abs)))) {
+    throw new Error("path escapes the repository through a link");
+  }
+  unlinkSync(abs);
 }
 
 /**
@@ -153,8 +190,7 @@ export async function gitDiscardFile(absPath: string, relPath: string): Promise<
       // Restores both the index and the working tree to the committed content.
       await git.raw(["checkout", "HEAD", "--", relPath]);
     } else {
-      const abs = join(absPath, relPath);
-      if (existsSync(abs) && lstatSync(abs).isFile()) unlinkSync(abs);
+      unlinkConfinedFile(absPath, relPath);
       // Drop any staged "add" for this path. No-op (harmless throw) on an unborn HEAD.
       try {
         await git.raw(["reset", "-q", "--", relPath]);
@@ -269,8 +305,7 @@ export async function gitDeleteFile(
     if (inHead) {
       await git.raw(["rm", "-f", "--", relPath]);
     } else {
-      const abs = join(absPath, relPath);
-      if (existsSync(abs) && lstatSync(abs).isFile()) unlinkSync(abs);
+      unlinkConfinedFile(absPath, relPath);
       // Drop any staged "add" for this path. No-op (harmless throw) on an unborn HEAD.
       try {
         await git.raw(["reset", "-q", "--", relPath]);

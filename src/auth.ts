@@ -415,8 +415,15 @@ export async function handleComplete(
   }
 }
 
+/** POST /api/auth/logout — end this browser's session.
+ *
+ *  Clears the local-bypass cookie too. "Sign out" that leaves `gm_local` alive is not a sign-out:
+ *  in remote mode the middleware admits a loopback request on that cookie alone (see
+ *  authMiddleware below), so the next reload lands the user straight back in, fully authorized,
+ *  having just been told they were signed out. */
 export function handleLogout(c: Context, opts?: AuthOptions): Response {
   deleteCookie(c, opts?.cookieName ?? COOKIE, { path: "/" });
+  deleteCookie(c, opts?.localCookieName ?? LOCAL_COOKIE, { path: "/" });
   return c.json({ ok: true });
 }
 

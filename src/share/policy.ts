@@ -337,7 +337,17 @@ export function policyFor(method: string, pathname: string): PolicyMatch | null 
     if (!hit) continue;
     const params: Record<string, string> = {};
     c.params.forEach((name, i) => {
-      params[name] = decodeURIComponent(hit[i + 1]!);
+      const raw = hit[i + 1]!;
+      // decodeURIComponent throws URIError on a malformed escape ("/api/repos/%ZZ/pull"), and
+      // this runs inside the auth middleware — an uncaught throw here turns a guest's bad request
+      // into a 500 from the gate. Fall back to the undecoded segment: it will simply fail the
+      // shareCoversRepo lookup and be refused, which is the correct answer for a path that names
+      // no real repo.
+      try {
+        params[name] = decodeURIComponent(raw);
+      } catch {
+        params[name] = raw;
+      }
     });
     return { policy: c.policy, params };
   }

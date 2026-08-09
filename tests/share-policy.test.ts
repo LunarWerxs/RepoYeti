@@ -130,3 +130,53 @@ test("the guest surface stays small and deliberate", () => {
   // repository activity is a capped 24-hour read-only aggregate.
   expect(Object.keys(GUEST_ROUTES).length).toBeLessThanOrEqual(27);
 });
+/**
+ * The OTHER half of the policy, and the half that actually broke.
+ *
+ * policy.ts decides WHO may call a route. It cannot decide what the handler then puts in the
+ * body, and that judgement is duplicated across handlers. One of them forgot: POST
+ * /api/repos/:id/refresh returned the raw RepoView, handing a view-tier guest the owner's
+ * identityId, sync account, and the unredacted remote URL (which share/redact.ts's own comment
+ * notes routinely embeds a PAT).
+ *
+ * The drift guard above could never have caught it: the route WAS classified, correctly. So this
+ * is the missing tripwire on the second half. It reads source rather than issuing requests
+ * because the failure is structural (a handler that never calls the projection), and a
+ * behavioural test only catches it for the response shapes someone remembered to exercise.
+ */
+test("every guest-reachable route returning a repo record projects it through guestRepoView", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+
+  const routesDir = join(import.meta.dir, "..", "src", "http", "routes");
+  const files = readdirSync(routesDir).filter((f) => f.endsWith(".ts"));
+  const offenders: string[] = [];
+
+  for (const guestRoute of Object.keys(GUEST_ROUTES)) {
+    const gap = guestRoute.indexOf(" ");
+    const method = guestRoute.slice(0, gap).toLowerCase();
+    const path = guestRoute.slice(gap + 1);
+    for (const file of files) {
+      const src = readFileSync(join(routesDir, file), "utf8");
+      const at = src.indexOf(`app.${method}("${path}"`);
+      if (at === -1) continue;
+      // Slice out JUST this handler, registration to next registration. Checking the whole FILE
+      // would pass the moment any OTHER route in it happened to project, which is precisely the
+      // blind spot that let the /refresh leak sit in git-ops.ts beside compliant siblings.
+      const rest = src.slice(at + 1);
+      const next = rest.search(/\n\s*app\.(get|post|put|patch|delete)\(/);
+      const handler = next === -1 ? rest : rest.slice(0, next);
+      if (!/c\.json\(\{\s*repos?\b/.test(handler)) continue; // hands back no repo record
+      if (!handler.includes("guestRepoView") && !handler.includes("guestStatus")) {
+        offenders.push(`${guestRoute} -> src/http/routes/${file}`);
+      }
+    }
+  }
+
+  expect(
+    offenders,
+    `These guest-reachable routes return a repo record without projecting it. Branch on ` +
+      `effectiveGuest(c, cfg) and map through guestRepoView(), the way routes/repos.ts's ` +
+      `GET /api/repos does: ${offenders.join(", ")}`,
+  ).toEqual([]);
+});

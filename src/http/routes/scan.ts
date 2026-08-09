@@ -4,6 +4,7 @@ import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import { jsonError } from "../../contract.ts";
 import { rescanMachine, rescanFolder, cancelScan, isScanning } from "../../service/index.ts";
+import { parseBody, ScanSchema } from "../../schemas.ts";
 
 export function register(app: Hono, _deps: Deps): void {
   // ── on-demand project scan (cancellable) ──────────────────────────────────────────
@@ -11,7 +12,9 @@ export function register(app: Hono, _deps: Deps): void {
   // Fire-and-forget: repos + progress stream in over SSE (scan_started → scan_progress /
   // repo_added → scan_done | scan_cancelled). A second start while one runs is a no-op.
   app.post("/api/scan", async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { path?: unknown };
+    const p = await parseBody(c, ScanSchema);
+    if (!p.ok) return p.res;
+    const body = p.data;
     const rawPath = typeof body.path === "string" ? body.path.trim() : "";
     if (rawPath) {
       const abs = resolve(rawPath);

@@ -8,6 +8,7 @@ import { lstatSync, mkdirSync, realpathSync, renameSync, statSync, unlinkSync } 
 import { resolve, dirname } from "node:path";
 import { pathWithin, normalizeRelPath } from "../paths.ts";
 import { getRepo } from "../db.ts";
+import { enqueue } from "../opqueue.ts";
 import { gitFor, safeGitEnv } from "../git.ts";
 import { backendFor } from "../vcs/index.ts";
 import { readBytesStreamLimited, readTextStreamLimited } from "../process-output.ts";
@@ -699,6 +700,21 @@ export async function writeFileContent(
 ): Promise<WriteFileResult> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  // Behind the per-repo op-queue, like every other working-tree mutation (discardFile /
+  // deleteFile / stageFile in service/actions.ts). It was the one that wasn't: a pull or a
+  // stash-pop rewriting the same file could interleave with the viewer's Save, and the loser's
+  // write simply vanished. The queue slot covers the VALIDATION too, not just the rename — the
+  // lstat/realpath checks below are the TOCTOU-sensitive part, so hoisting them inside the slot
+  // is the point, not an accident. applyConflictResolutions (service/conflicts.ts) calls through
+  // here, so it inherits the serialization.
+  return enqueue(repoId, () => writeFileContentQueued(repo, relPath, content));
+}
+
+async function writeFileContentQueued(
+  repo: NonNullable<ReturnType<typeof getRepo>>,
+  relPath: string,
+  content: string,
+): Promise<WriteFileResult> {
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
 
@@ -786,7 +802,17 @@ export interface MoveFileResult {
 export async function moveFile(repoId: string, from: string, toDir: string): Promise<MoveFileResult> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  // Op-queued for the same reason as writeFileContent above: a drag-move racing a checkout or a
+  // stash-pop over the same path is a lost rename, and the realpath checks inside are TOCTOU
+  // sensitive, so the whole thing belongs in one slot rather than just the `git mv`.
+  return enqueue(repoId, () => moveFileQueued(repo, from, toDir));
+}
 
+async function moveFileQueued(
+  repo: NonNullable<ReturnType<typeof getRepo>>,
+  from: string,
+  toDir: string,
+): Promise<MoveFileResult> {
   const src = resolveRepoPath(repo.absPath, from);
   if ("error" in src) return { ok: false, code: "ERROR", message: src.error };
 

@@ -19,6 +19,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
 
 const props = defineProps<{ repoId: string; branch: string | null; detached: boolean }>();
@@ -48,8 +56,24 @@ async function createBranch(): Promise<void> {
     creatingBranch.value = false;
   }
 }
-async function removeBranch(name: string): Promise<void> {
-  if (gitBusy.value) return;
+
+// ── delete a branch (confirm-gated: the delete button sits right beside the switch row's own
+//    hit area, so a mis-tap on a phone must not be able to fire it directly — see the
+//    discard/delete-file confirms in RepoCardChanges.vue, same shape). ────────────────────────
+const deleteTarget = ref<string | null>(null);
+const deleteOpen = computed({
+  get: () => deleteTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) deleteTarget.value = null;
+  },
+});
+function askDelete(name: string): void {
+  deleteTarget.value = name;
+}
+async function confirmDelete(): Promise<void> {
+  const name = deleteTarget.value;
+  deleteTarget.value = null;
+  if (!name || gitBusy.value) return;
   toastResult(await store.deleteBranch(props.repoId, name), t("repo.branches.deleted"));
 }
 </script>
@@ -102,7 +126,7 @@ async function removeBranch(name: string): Promise<void> {
             class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 pointer-coarse:opacity-100 outline-none transition group-hover/br:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
             :title="tooltipsEnabled ? $t('repo.branches.deleteTooltip') : undefined"
             :aria-label="$t('repo.branches.deleteTooltip')"
-            @click="removeBranch(b.name)"
+            @click="askDelete(b.name)"
           >
             <Trash2 :size="13" />
           </button>
@@ -140,4 +164,18 @@ async function removeBranch(name: string): Promise<void> {
     </Button>
   </form>
   </ExpandTransition>
+
+  <!-- confirm before deleting a branch (destructive — names the branch) -->
+  <Dialog v-model:open="deleteOpen">
+    <DialogContent class="sm:max-w-sm">
+      <DialogHeader>
+        <DialogTitle>{{ $t("repo.branches.deleteTitle") }}</DialogTitle>
+        <DialogDescription>{{ $t("repo.branches.deleteBody", { name: deleteTarget ?? "" }) }}</DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="gap-2 sm:gap-2">
+        <Button variant="secondary" @click="deleteOpen = false">{{ $t("common.cancel") }}</Button>
+        <Button variant="destructive" @click="confirmDelete">{{ $t("repo.branches.deleteConfirm") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>

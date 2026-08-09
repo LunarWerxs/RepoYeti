@@ -79,3 +79,25 @@ export function normalizeRelPath(p: unknown): string {
     .trim()
     .replace(/^\/+|\/+$/g, "");
 }
+
+/**
+ * True when a repo-relative path names, or reaches into, a VCS metadata directory (`.git` /
+ * `.lore`) — the "never touch the repo's own bookkeeping" guard.
+ *
+ * **Case-insensitive, deliberately, on every platform.** NTFS (and APFS by default) resolve
+ * `.GIT` to the same directory as `.git`, so a case-sensitive comparison is not a stricter
+ * check — it is a hole. It was one: `deleteFile(repo, ".GIT", { recursive: true })` slipped past
+ * the marker guard, then past `findNestedRepo` (which only inspects `.git`'s *children*, never
+ * `.git` itself), and reached an unconditional `rmSync(abs, { recursive, force })` — deleting the
+ * entire repository history, unrecoverably. Matching case-insensitively everywhere also keeps the
+ * guard's behavior identical across platforms, which is worth more than honoring the one case-
+ * sensitive filesystem where `.GIT` really would be a different (and still deeply suspicious)
+ * directory.
+ *
+ * `clean` must already be normalized (see `normalizeRelPath`): forward slashes, no leading or
+ * trailing separator.
+ */
+export function pathTouchesVcsMarker(clean: string, marker: string): boolean {
+  const needle = marker.toLowerCase();
+  return clean.split("/").some((segment) => segment.toLowerCase() === needle);
+}

@@ -974,3 +974,50 @@ test("the whole AI conflict-resolution surface is owner-only, denied by the allo
     expect(raw).not.toContain("gpt-test");
   }
 });
+
+// ── the refresh route's projection (audit finding: a raw RepoView reached a guest) ──
+// POST /api/repos/:id/refresh is on the guest allowlist at the `view` tier, but its handler
+// returned `c.json({ repo })` straight from forceRefresh — the only guest-reachable route that
+// returned a whole repo record without going through guestRepoView. That shipped the owner's
+// identityId, sync account, hidden/autoCommit flags, and the UNREDACTED remote URL, which
+// share/redact.ts's own comment notes routinely embeds a PAT.
+test("POST /repos/:id/refresh gives a guest the PROJECTED repo, never the raw one", async () => {
+  const share = mkShare("view");
+  const res = await createApp(enforcedCfg()).request(`/api/repos/${sharedRepoId}/refresh`, {
+    method: "POST",
+    headers: { ...REMOTE, cookie: guestCookie(share) },
+  });
+  expect(res.status).toBe(200);
+  const { repo } = (await res.json()) as { repo: Record<string, unknown> };
+  // The owner's private bookkeeping is stripped, exactly as GET /api/repos strips it.
+  expect(repo.identityId).toBeNull();
+  expect(repo.syncAccountHost).toBeNull();
+  expect(repo.syncAccountLogin).toBeNull();
+  expect(repo.hidden).toBe(false);
+  expect(repo.autoCommit).toBe(false);
+  revokeShare(share.id);
+});
+
+test("POST /repos/:id/refresh still gives the OWNER the unprojected repo", async () => {
+  const res = await createApp(enforcedCfg()).request(`/api/repos/${sharedRepoId}/refresh`, {
+    method: "POST",
+    headers: { ...REMOTE, cookie: ownerCookie() },
+  });
+  expect(res.status).toBe(200);
+  const { repo } = (await res.json()) as { repo: Record<string, unknown> };
+  // The projection must not have leaked into the owner's own view of their own machine.
+  expect(repo).toHaveProperty("identityId");
+  expect(repo).toHaveProperty("autoCommit");
+});
+
+// A malformed percent-escape in a scoped path used to throw URIError out of policyFor, inside the
+// auth middleware — turning a guest's bad request into a 500 from the gate itself.
+test("a malformed percent-escape in a guest path is refused, not a 500", async () => {
+  const share = mkShare("control");
+  const res = await createApp(enforcedCfg()).request("/api/repos/%ZZ/pull", {
+    method: "POST",
+    headers: { ...REMOTE, cookie: guestCookie(share) },
+  });
+  expect(res.status).toBeLessThan(500);
+  revokeShare(share.id);
+});

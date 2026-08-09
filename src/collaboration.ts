@@ -876,6 +876,14 @@ async function publishCollaboration(link: CollaborationLink): Promise<void> {
   // Recompute at least once per heartbeat even when path/stat totals are unchanged. Two edits can
   // have identical line counts while different bytes; reusing the old patch would make "Theirs"
   // stale indefinitely.
+  //
+  // This shares collectPathsDiff with the AI collectors, so the secret-file redaction baked into
+  // boundedDiff (see git-actions/diff.ts redactSecretFileDiffs) applies here too, and that is
+  // INTENDED, not an accident of reuse: a collaboration peer holds a share link, not your trust
+  // with credentials, so the diff of a `.env` / key / credentials file has no more business
+  // reaching their "Theirs" pane than it does reaching an AI provider. The peer still sees that
+  // the file changed (name + stat ride in `changes`); only the +/- lines are withheld. The
+  // owner's own file-viewer bypasses this via fileDiffPatch → boundedGit and is unaffected.
   const diff = changes.length
     ? await collectPathsDiff(
         repo.absPath,

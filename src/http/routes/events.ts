@@ -19,19 +19,32 @@ export class BoundedSseQueue {
   readonly items: QueuedSseEvent[] = [];
   bytes = 0;
 
+  /**
+   * Queue one event. Returns FALSE when this stream can no longer be kept coherent and the
+   * caller must close it.
+   *
+   * Two ways that happens, and the second used to be silent. An oversized snapshot obviously
+   * can't be made to fit. But so does a client that simply cannot drain fast enough: the
+   * eviction loop below drops the OLDEST queued events to stay under the caps, and it used to
+   * return true anyway. The connection stayed open and looked perfectly healthy while individual
+   * repo_state_changed events evaporated — and because the stream has no replay and the client
+   * has no way to know it missed anything, the affected repo's card stayed wrong indefinitely.
+   * A dropped event is a desync, so it is reported like one: closing the stream makes
+   * EventSource reconnect, and the client resyncs on reconnect.
+   */
   push(message: QueuedSseEvent): boolean {
     const bytes = Buffer.byteLength(message.event) + Buffer.byteLength(message.data);
-    // One oversized state snapshot cannot be made safe by evicting smaller messages. Tell the
-    // caller to close this slow stream; EventSource will reconnect without retaining the payload.
     if (bytes > MAX_SSE_QUEUE_BYTES) return false;
     this.items.push(message);
     this.bytes += bytes;
+    let dropped = false;
     while (this.items.length > MAX_SSE_QUEUE || this.bytes > MAX_SSE_QUEUE_BYTES) {
       const removed = this.items.shift();
       if (!removed) break;
       this.bytes -= Buffer.byteLength(removed.event) + Buffer.byteLength(removed.data);
+      dropped = true;
     }
-    return true;
+    return !dropped;
   }
 
   drain(): QueuedSseEvent[] {

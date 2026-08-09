@@ -38,6 +38,7 @@ describe("store daemon_status reconciliation", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("keeps one SSE connection and releases its watches on disconnect", async () => {
@@ -142,5 +143,72 @@ describe("store daemon_status reconciliation", () => {
 
     expect(store.repos).toHaveLength(1);
     expect(store.repos[0]?.displayName).toBe("From SSE");
+  });
+
+  // The daemon broadcasts ai_key_invalid, auto_update_applying, and auto_update_restarting (see
+  // src/ai-keycheck.ts and src/auto-update.ts), but the subscription array omitted all three, so
+  // the browser's EventSource silently dropped every one of them before the handler ever saw it.
+  it("subscribes to ai_key_invalid, auto_update_applying, and auto_update_restarting", () => {
+    const status = ref<"OPEN" | "CONNECTING" | "CLOSED">("CLOSED");
+    const event = ref<string | null>(null);
+    const data = ref<string | null>(null);
+    vi.mocked(useEventSource).mockReturnValue({
+      status,
+      event,
+      data,
+      error: ref(null),
+      close: vi.fn(),
+      open: vi.fn(),
+    });
+    vi.spyOn(api, "collaborationSnapshots").mockResolvedValue({ snapshots: [] });
+
+    const store = useStore();
+    store.connect();
+
+    const subscribed = vi.mocked(useEventSource).mock.calls[0]?.[1] as string[];
+    expect(subscribed).toEqual(
+      expect.arrayContaining(["ai_key_invalid", "auto_update_applying", "auto_update_restarting"]),
+    );
+  });
+
+  // The daemon has no event replay/Last-Event-ID, so anything broadcast while a client was
+  // offline (a phone backgrounding and returning, a flaky network) used to be lost for good —
+  // autoReconnect quietly re-subscribed, but nothing ever resynced the state that was missed.
+  it("resyncs via loadAll after a genuine reconnect, but not on the very first connect", async () => {
+    const status = ref<"OPEN" | "CONNECTING" | "CLOSED">("CLOSED");
+    const event = ref<string | null>(null);
+    const data = ref<string | null>(null);
+    vi.mocked(useEventSource).mockReturnValue({
+      status,
+      event,
+      data,
+      error: ref(null),
+      close: vi.fn(),
+      open: vi.fn(),
+    });
+    vi.spyOn(api, "collaborationSnapshots").mockResolvedValue({ snapshots: [] });
+    vi.spyOn(api, "listRepos").mockResolvedValue([]);
+    // loadAll()'s background hydration burst (status, AI settings, accounts, etc.) is
+    // best-effort and already tolerant of failure — stub fetch so those calls fail fast
+    // instead of trying a real network request.
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline in test"); }));
+
+    const store = useStore();
+    store.connect();
+
+    status.value = "OPEN"; // the very first connect — the caller already loads everything itself
+    await nextTick();
+    expect(store.connected).toBe(true);
+    expect(api.listRepos).not.toHaveBeenCalled();
+
+    status.value = "CONNECTING";
+    await nextTick();
+    status.value = "CLOSED"; // dropped (e.g. the tab backgrounded)
+    await nextTick();
+    expect(store.connected).toBe(false);
+
+    status.value = "OPEN"; // reconnected after a genuine drop
+    await nextTick();
+    await vi.waitFor(() => expect(api.listRepos).toHaveBeenCalledTimes(1));
   });
 });

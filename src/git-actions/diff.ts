@@ -28,8 +28,16 @@ async function boundedGit(absPath: string, args: string[], cap: number): Promise
   // These reads are called by independent AI, collaboration, file-viewer, and content-search
   // requests, so a per-request byte cap alone does not bound how many Git children can coexist.
   // Take one daemon-wide read slot per invocation (never around a caller that itself holds one).
+  // Force literal UTF-8 paths in every diff, defeating git's default core.quotePath=true.
+  // With quoting on, a path containing any non-ASCII byte comes back as `"a/\346\227\245"` — a
+  // double-quoted, octal-escaped header. redactSecretFileDiffs's `diff --git a/… b/…` matcher
+  // then fails to recognize the header and passes the chunk through UNREDACTED, so a
+  // `credentials.json` inside a folder with an accented or CJK name leaked to the AI provider in
+  // full. Unquoted headers keep that matcher (and the fold splitter) on the ASCII shape they
+  // assume. Applied only to `diff` so `status`/`grep`/etc. are untouched.
+  const finalArgs = args[0] === "diff" ? ["-c", "core.quotePath=false", ...args] : args;
   return readGate.run(async () => {
-    const proc = Bun.spawn(["git", ...args], {
+    const proc = Bun.spawn(["git", ...finalArgs], {
       cwd: absPath,
       env: safeGitEnv(),
       stdout: "pipe",
@@ -116,7 +124,162 @@ async function boundedDiff(
     paths,
     Math.max(cap - tracked.length, Math.floor(cap * UNTRACKED_RESERVE_FRACTION)),
   );
-  return untracked ? (tracked ? `${tracked}\n${untracked}` : untracked) : tracked;
+  const combined = untracked ? (tracked ? `${tracked}\n${untracked}` : untracked) : tracked;
+  // Last thing before any caller can see it: this is the ONE function every provider-bound diff
+  // passes through, so it is where secret-bearing files lose their bodies.
+  return redactSecretFileDiffs(combined);
+}
+
+/**
+ * Files whose diff BODY must never leave the machine.
+ *
+ * Smart Commit and AI commit messages ship the working-tree diff to a third-party API (Groq,
+ * OpenAI, Anthropic, Gemini, or a custom endpoint). The size folding above decides how MUCH to
+ * send; nothing decided WHAT was too sensitive to send at all. A tracked `.env`, a `*.pem`, an
+ * `id_rsa`, a `credentials.json` — every one of them a real thing people really do commit — went
+ * over the wire in full, with no warning and no way to opt out.
+ *
+ * The file still appears in the diff (and in the authoritative file list), because the planner
+ * needs to know it changed to group and describe the commit correctly. Only the +/- lines go.
+ */
+const SECRET_BASENAMES = new Set([
+  ".env", ".envrc", ".netrc", "_netrc", ".npmrc", ".pypirc", ".htpasswd",
+  "credentials", "credentials.json", "secrets.json", "service-account.json",
+  "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+  // Known secret-bearing files whose extension IS a code/prose extension, so they would otherwise
+  // be short-circuited to "not secret" by CODE_EXT below. This exact-name set is checked FIRST, so
+  // it wins. wp-config.php is the textbook accidentally-committed-DB-password file.
+  "wp-config.php", ".git-credentials", ".pgpass", ".dockercfg",
+]);
+/** Extensions and name shapes that mean "this is a key or a credential store". */
+const SECRET_PATTERNS: RegExp[] = [
+  /^\.env(\.|$)/i, // .env.local, .env.production…
+  // Private-key / keystore / credential-vault extensions. p8 = Apple/APNs key, kdbx = KeePass,
+  // keychain = macOS, ovpn = bundled VPN creds, pkcs12 = alias for p12.
+  /\.(pem|key|p12|pkcs12|pfx|jks|keystore|keychain|kdbx|asc|gpg|ppk|p8|ovpn)$/i,
+  /(^|[._-])secrets?([._-]|$)/i,
+  /(^|[._-])credentials?([._-]|$)/i,
+  /^id_(rsa|dsa|ecdsa|ed25519)(\.|$)/i,
+];
+
+/** True when a repo-relative path names a file whose contents are presumed secret. */
+/**
+ * Names that LOOK like a secret but are committed deliberately, and whose whole purpose is to be
+ * read: `.env.example`, `config.sample`, `secrets.template`. Withholding these would cost real
+ * context (they are usually the file that explains what the change is about) and protect nothing.
+ */
+const TEMPLATE_SUFFIX = /\.(example|sample|template|dist|tpl)$/i;
+
+/**
+ * Source and prose extensions. A file called `secrets.ts` is CODE ABOUT secrets, not a secret —
+ * withholding it would have silently degraded commit messages on any codebase with a
+ * `secrets.ts` / `credentials.go` / `Secrets.tsx`, this one included (`src/secrets.ts`).
+ *
+ * Deliberately NOT here: `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.xml`, `.sh`, `.ps1`, `.sql`.
+ * Those are the formats credentials actually live in, so a fuzzy name match on them should still
+ * withhold. The trade is one-directional on purpose: a withheld `deploy-secrets.sh` costs a
+ * slightly vaguer commit message, while a sent one costs a credential.
+ */
+const CODE_EXT =
+  /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|py|rb|go|rs|java|kt|kts|swift|m|mm|c|h|cc|cpp|hpp|cs|php|scala|ex|exs|dart|lua|r|pl|md|mdx|rst|txt|adoc|html|htm|css|scss|less)$/i;
+
+/** True when a repo-relative path names a file whose contents are presumed secret. */
+export function isSecretPath(path: string): boolean {
+  const base = (normalizeRelPath(path).split("/").pop() ?? "").toLowerCase();
+  if (!base) return false;
+  // A `.pub` key is the public half — publishing it is the entire point — and a template is
+  // published on purpose too. Both are checked BEFORE the basename set, so `.env.example`
+  // resolves as a template rather than as `.env`.
+  if (base.endsWith(".pub") || TEMPLATE_SUFFIX.test(base)) return false;
+  // An exact known name wins over everything below: `credentials.json` IS a credential store.
+  if (SECRET_BASENAMES.has(base)) return true;
+  // Fuzzy name shapes ("…secret…", "…credential…") only apply to files that could plausibly BE a
+  // credential store. Source and prose are excluded; a real key extension is checked either way.
+  if (CODE_EXT.test(base)) return false;
+  return SECRET_PATTERNS.some((rx) => rx.test(base));
+}
+
+const WITHHELD_NOTICE =
+  "… [contents withheld: this file looks like it holds credentials, so RepoYeti does not send its diff to an AI provider]";
+
+const QUOTED_PATH = /^"(.*)"$/;
+/** Strip git's `"…"` wrapper (it never appears with core.quotePath=false, which boundedGit forces,
+ *  but a caller feeding us a diff from elsewhere might). The octal escapes inside don't need
+ *  decoding — the basename secret check keys on ASCII names like `.env` / `credentials.json`. */
+function unquoteGitPath(p: string): string {
+  const m = QUOTED_PATH.exec(p);
+  return m ? m[1]! : p;
+}
+
+/**
+ * Every file path a diff chunk refers to — gathered from the UNAMBIGUOUS, one-path-per-line header
+ * lines, not scraped out of the `diff --git` line.
+ *
+ * The `diff --git a/… b/…` line is genuinely unparseable in the general case: paths are unquoted
+ * and may contain spaces, and a RENAME puts TWO paths on it (`diff --git a/old b/new`), so there is
+ * no reliable delimiter. An earlier version regex-split it and a directory literally named `… b`
+ * defeated the split, letting a renamed secret file through — the exact opposite of this filter's
+ * job. So instead read git's own single-path lines, each of which carries exactly one path:
+ * `rename from`/`rename to`, `copy from`/`copy to`, and `--- a/…`/`+++ b/…`. Any one of them
+ * naming a secret means the chunk touches a secret. The `diff --git` line is added only as a
+ * best-effort extra source; a wrong parse there can over-withhold (safe), never under-withhold.
+ */
+function diffChunkPaths(chunk: string): string[] {
+  const paths: string[] = [];
+  for (const line of chunk.split(/\r?\n/)) {
+    if (line.startsWith("@@")) break; // reached the hunk body — headers are done
+    let m: RegExpExecArray | null;
+    if ((m = /^(?:rename|copy) (?:from|to) (.+)$/.exec(line))) paths.push(unquoteGitPath(m[1]!));
+    else if ((m = /^--- a\/(.+)$/.exec(line))) paths.push(unquoteGitPath(m[1]!));
+    else if ((m = /^\+\+\+ b\/(.+)$/.exec(line))) paths.push(unquoteGitPath(m[1]!));
+  }
+  if (paths.length > 0) return paths;
+  // Last resort — a chunk with a `diff --git` line but none of the above: a mode-only change or a
+  // binary file (no `---`/`+++`, no rename). There is NO rename here, so a === b on the header line
+  // and its parse is reliable; the ambiguity that made this line untrustworthy only arises with a
+  // rename, which is handled by the reliable lines above and never reaches here.
+  const nl = chunk.indexOf("\n");
+  const g = parseDiffGitHeader(nl === -1 ? chunk : chunk.slice(0, nl));
+  if (g) return [g.a, g.b];
+  return [];
+}
+
+/** Best-effort parse of the two paths on a `diff --git a/… b/…` line, tolerating git's quoted form.
+ *  ONLY sound when a === b (no rename) — see diffChunkPaths for why it's a last resort, not primary. */
+function parseDiffGitHeader(headerLine: string): { a: string; b: string } | null {
+  const bare = /^diff --git a\/(.+) b\/(.+)$/.exec(headerLine);
+  if (bare) return { a: bare[1]!, b: bare[2]! };
+  const quoted = /^diff --git "a\/((?:[^"\\]|\\.)*)" "b\/((?:[^"\\]|\\.)*)"$/.exec(headerLine);
+  if (quoted) return { a: quoted[1]!, b: quoted[2]! };
+  return null;
+}
+
+/**
+ * Replace the body of every secret-bearing file's chunk with a one-line notice, keeping the
+ * `diff --git` header so the model still knows the file changed.
+ *
+ * Same chunk split as foldLargeFileDiffs: each chunk starts at a `diff --git` line.
+ *
+ * FAIL CLOSED. A chunk that opens with `diff --git` but from which we can extract NO path is
+ * treated as secret and withheld, not passed through. This is a security filter: "I can't identify
+ * this file" must never mean "so send it". The cost of a false withhold is a vaguer commit message;
+ * the cost of a false pass-through is a leaked credential. (A chunk that does NOT start with
+ * `diff --git` is not a file body and is left alone.)
+ */
+export function redactSecretFileDiffs(diff: string): string {
+  if (!diff) return diff;
+  return diff
+    .split(/(?=^diff --git )/m)
+    .map((chunk) => {
+      if (!chunk.startsWith("diff --git ")) return chunk; // preamble / not a file body
+      const nl = chunk.indexOf("\n");
+      const headerLine = nl === -1 ? chunk : chunk.slice(0, nl);
+      const paths = diffChunkPaths(chunk);
+      if (paths.length === 0) return `${headerLine}\n${WITHHELD_NOTICE}\n`; // can't identify → withhold
+      if (!paths.some(isSecretPath)) return chunk;
+      return `${headerLine}\n${WITHHELD_NOTICE}\n`;
+    })
+    .join("");
 }
 
 /** Share of the raw read cap that untracked files keep even when the tracked diff has already

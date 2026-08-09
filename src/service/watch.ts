@@ -162,8 +162,25 @@ export function unwatchOne(repoId: string): void {
   forgetQueue(repoId); // drop the op-queue chain too, so `chains` doesn't leak per removed repo
   promoteDeferredWatch();
 }
-export function startWatching(repos: Array<{ id: string; absPath: string }>): void {
-  for (const r of repos) watchOne(r.id, r.absPath);
+/**
+ * Install watchers for a set of repos, yielding to the event loop between batches.
+ *
+ * watchRepo() is synchronous fs work all the way down — statSync + readFileSync for the marker
+ * layout, then existsSync per watch target plus the native fs.watch() install, five or six of
+ * them per repo. Run as one unbroken loop over a few hundred repos that is a thousand-plus
+ * blocking syscalls with no yield, and boot calls this BEFORE Bun.serve() binds (deliberately:
+ * a change during boot must not be missed), so every one of them is time the daemon is not
+ * answering. Batching keeps that ordering guarantee and its correctness while letting the
+ * runtime breathe.
+ */
+const WATCH_INSTALL_BATCH = 25;
+
+export async function startWatching(repos: Array<{ id: string; absPath: string }>): Promise<void> {
+  for (let i = 0; i < repos.length; i++) {
+    const r = repos[i]!;
+    watchOne(r.id, r.absPath);
+    if ((i + 1) % WATCH_INSTALL_BATCH === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 export function stopWatching(): void {
   for (const h of watchHandles.values()) h.close();

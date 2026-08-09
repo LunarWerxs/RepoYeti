@@ -18,6 +18,7 @@
  * why per-repo sync could not be built without it, and what is done to keep the blast radius small.
  */
 import { createSemaphore } from "./gitgate.ts";
+import { safeGitEnv } from "./git.ts";
 import { readTextStreamLimited } from "./process-output.ts";
 
 interface RunResult {
@@ -46,10 +47,17 @@ async function run(
 ): Promise<RunResult> {
   return accountCliGate.run(async () => {
     try {
+      // safeGitEnv(), not raw process.env. This module is the ONE place RepoYeti writes the
+      // machine's GLOBAL git author (`git config --global user.name/user.email`), and an
+      // inherited GIT_CONFIG_GLOBAL / GIT_CONFIG_PARAMETERS would silently redirect that write
+      // somewhere else. Editors really do export these: git.ts's own header notes VS Code,
+      // Claude Code and GitHub Desktop all set GIT_ASKPASS in the terminals they open, which is
+      // exactly how a daemon launched from an editor gets a polluted environment. Every other
+      // git/gh spawn in this codebase already scrubs; this one did not.
       const proc = Bun.spawn(cmd, {
         stdout: "pipe",
         stderr: "pipe",
-        ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
+        env: { ...safeGitEnv(), ...(extraEnv ?? {}) },
       });
       let limited = false;
       const kill = (): void => {

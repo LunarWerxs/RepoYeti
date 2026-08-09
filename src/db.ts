@@ -141,15 +141,57 @@ export interface IdentityInput {
 
 let db: Database | null = null;
 
+/**
+ * Run one `ALTER TABLE … ADD COLUMN` migration, tolerating only the ONE failure that is expected.
+ *
+ * These all used to be `try { … } catch { /* column already present *​/ }`, which is true almost
+ * every time — and indistinguishable from the times it isn't. A locked database (Windows AV
+ * holding the -wal), a read-only directory, or a full disk raises a completely different error
+ * and was swallowed just as quietly, so the daemon booted "successfully" with a column that does
+ * not exist and then threw `no such column` from whatever request happened to touch it first.
+ * That is a long way from the cause, at a moment with no context.
+ *
+ * Deliberately NOT fatal: a transient lock at boot should not stop the daemon from serving what
+ * it can. But it says so, loudly, naming the statement, so the trail starts at the real problem.
+ */
+function migrateAddColumn(handle: Database, sql: string): void {
+  try {
+    handle.exec(sql);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (/duplicate column name/i.test(message)) return; // already migrated — the normal path
+    console.error(`[repoyeti] schema migration failed: ${sql}\n           ${message}`);
+  }
+}
+
 export function initDb(): Database {
   if (db) return db;
   ensureConfigDir();
   const handle = new Database(DB_PATH, { create: true });
   // WAL + retry posture (Windows AV can briefly lock the -wal file).
+  //
+  // `PRAGMA journal_mode` mostly does NOT throw when it can't honour the request — it is a
+  // query that RETURNS the mode actually in effect, so a try/catch alone proves nothing. The
+  // header above stakes the watcher/API/git-ops concurrency story on WAL being on, so read the
+  // answer back and say so out loud when it isn't, rather than running in a different mode with
+  // no trace anywhere.
   try {
     handle.exec("PRAGMA journal_mode = WAL;");
   } catch {
     handle.exec("PRAGMA journal_mode = DELETE;");
+  }
+  try {
+    const mode = String(
+      (handle.query("PRAGMA journal_mode;").get() as { journal_mode?: string } | null)?.journal_mode ?? "",
+    ).toLowerCase();
+    if (mode !== "wal") {
+      console.warn(
+        `[repoyeti] SQLite is in "${mode || "unknown"}" journal mode, not WAL — concurrent reads and writes ` +
+          `will contend. This is usually a network/synced folder or antivirus holding the -wal file.`,
+      );
+    }
+  } catch {
+    /* the read-back is diagnostic only; never let it stop the daemon from opening the DB */
   }
   handle.exec("PRAGMA synchronous = NORMAL;");
   handle.exec("PRAGMA busy_timeout = 5000;");
@@ -277,100 +319,45 @@ export function initDb(): Database {
     CREATE INDEX IF NOT EXISTS git_commit_stats_repo_date
       ON git_commit_stats (repo_id, committed_at);
   `);
-  // Migrations: add columns to pre-existing databases. Each throws "duplicate column
-  // name" on DBs that already have it (incl. fresh ones) — ignore.
-  try {
-    // Which public origin a share link's URL was built against, so the Sharing panel can spot a
-    // link whose address no longer exists (a quick tunnel re-hosts itself on every restart).
-    handle.exec("ALTER TABLE shares ADD COLUMN origin TEXT;");
-  } catch {
-    /* column already present */
-  }
-  try {
-    // The link's own secret, retained so the Sharing panel can offer "Copy link" on a share it
-    // minted earlier rather than only in the one-shot panel at creation. See the `token` field on
-    // Share for what this costs and why it is nonetheless the owner's call.
-    handle.exec("ALTER TABLE shares ADD COLUMN token TEXT;");
-  } catch {
-    /* column already present */
-  }
+  // Migrations: add columns to pre-existing databases. Each raises "duplicate column name" on a
+  // DB that already has it (including every fresh one), which migrateAddColumn treats as the
+  // normal path — and ONLY that error; anything else is reported rather than swallowed.
+  // Which public origin a share link's URL was built against, so the Sharing panel can spot a
+  // link whose address no longer exists (a quick tunnel re-hosts itself on every restart).
+  migrateAddColumn(handle, "ALTER TABLE shares ADD COLUMN origin TEXT;");
+  // The link's own secret, retained so the Sharing panel can offer "Copy link" on a share it
+  // minted earlier rather than only in the one-shot panel at creation. See the `token` field on
+  // Share for what this costs and why it is nonetheless the owner's call.
+  migrateAddColumn(handle, "ALTER TABLE shares ADD COLUMN token TEXT;");
   // Early collaboration builds persisted the full invitation URL even though every durable
   // operation uses the separately stored token/origin fields. The URL embeds the same bearer
   // secret, so retaining it only duplicated the credential in database backups.
   handle.exec("UPDATE collaboration_links SET invite_url = '' WHERE invite_url <> '';");
-  try {
-    // Existing links stay ordinary links. New links opt into peer working-tree synchronization
-    // explicitly (the UI defaults the new control on, but migration never widens an old grant).
-    handle.exec("ALTER TABLE shares ADD COLUMN collaborative INTEGER NOT NULL DEFAULT 0;");
-  } catch {
-    /* column already present */
-  }
-  try {
-    // Collaboration originally prototyped the hosted relay as a high-frequency mailbox. Presence
-    // now goes straight to the owner's daemon; retain the resolved origin so publishes avoid a
-    // relay request unless the quick tunnel has actually moved.
-    handle.exec("ALTER TABLE collaboration_links ADD COLUMN remote_origin TEXT NOT NULL DEFAULT '';");
-  } catch {
-    /* column already present */
-  }
-  try {
-    // Present only for invitations using app.repoyeti.com/r/:id. It lets a failed direct publish
-    // re-resolve the owner's new quick-tunnel origin.
-    handle.exec("ALTER TABLE collaboration_links ADD COLUMN daemon_id TEXT;");
-  } catch {
-    /* column already present */
-  }
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN sort_order INTEGER;");
-  } catch {
-    /* column already present */
-  }
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;");
-  } catch {
-    /* column already present */
-  }
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;");
-  } catch {
-    /* column already present */
-  }
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;");
-  } catch {
-    /* column already present */
-  }
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN vcs TEXT NOT NULL DEFAULT 'git';");
-  } catch {
-    /* column already present */
-  }
+  // Existing links stay ordinary links. New links opt into peer working-tree synchronization
+  // explicitly (the UI defaults the new control on, but migration never widens an old grant).
+  migrateAddColumn(handle, "ALTER TABLE shares ADD COLUMN collaborative INTEGER NOT NULL DEFAULT 0;");
+  // Collaboration originally prototyped the hosted relay as a high-frequency mailbox. Presence
+  // now goes straight to the owner's daemon; retain the resolved origin so publishes avoid a
+  // relay request unless the quick tunnel has actually moved.
+  migrateAddColumn(handle, "ALTER TABLE collaboration_links ADD COLUMN remote_origin TEXT NOT NULL DEFAULT '';");
+  // Present only for invitations using app.repoyeti.com/r/:id. It lets a failed direct publish
+  // re-resolve the owner's new quick-tunnel origin.
+  migrateAddColumn(handle, "ALTER TABLE collaboration_links ADD COLUMN daemon_id TEXT;");
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN sort_order INTEGER;");
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;");
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;");
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;");
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN vcs TEXT NOT NULL DEFAULT 'git';");
   // Repo-level GitHub "sync account" (host + login) — the account fetch/pull/push authenticates as.
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN sync_account_host TEXT;");
-  } catch {
-    /* column already present */
-  }
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN sync_account_login TEXT;");
-  } catch {
-    /* column already present */
-  }
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN sync_account_host TEXT;");
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN sync_account_login TEXT;");
   // Per-repo opt-in for the auto-commit timer (src/auto-commit.ts).
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN auto_commit INTEGER NOT NULL DEFAULT 0;");
-  } catch {
-    /* column already present */
-  }
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN auto_commit INTEGER NOT NULL DEFAULT 0;");
   // Owner-chosen display label (Rename). NULL = fall back to `name` (the folder basename).
   // It is a SEPARATE column on purpose: `upsertRepo` overwrites `name` from the basename on every
   // scan, so a label stored there would silently revert on the next rescan. Renaming NEVER touches
   // the folder on disk — this is a label, not a move.
-  try {
-    handle.exec("ALTER TABLE repos ADD COLUMN display_name TEXT;");
-  } catch {
-    /* column already present */
-  }
+  migrateAddColumn(handle, "ALTER TABLE repos ADD COLUMN display_name TEXT;");
   // Paths the owner explicitly removed from RepoYeti ("don't show me this again").
   //
   // Without this, "Remove" is a lie for any auto-discovered repo: the row is deleted, the next

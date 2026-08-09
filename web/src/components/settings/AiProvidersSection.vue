@@ -474,6 +474,16 @@ async function onDiffDetail(detail: string): Promise<void> {
                   </p>
                 </div>
 
+                <!-- Every provider ships selected diffs/prompts to it — a custom endpoint is not
+                     more of a privacy step than Groq or Anthropic, so the same warning applies to
+                     all of them, just naming the provider instead of a typed URL. -->
+                <p
+                  v-else
+                  class="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+                >
+                  {{ $t("settings.providerDestinationDisclosure", { name: p.label }) }}
+                </p>
+
                 <div class="flex items-center gap-2">
                   <Input
                     v-model="rowFor(p.id).keyInput"
@@ -526,6 +536,12 @@ async function onDiffDetail(detail: string): Promise<void> {
                       url: compatibleDestination(p.id),
                     })
                   }}
+                </div>
+                <div
+                  v-else-if="!isCompatible(p)"
+                  class="rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+                >
+                  {{ $t("settings.providerSavedDestination", { name: p.label }) }}
                 </div>
 
                 <div class="flex items-center gap-2">

@@ -76,6 +76,7 @@ import {
 import { isKnownEditor } from "../../service/index.ts";
 import { invalidAiKeys } from "../../ai-keycheck.ts";
 import { effectiveGuest } from "../../auth.ts";
+import { parseBody, SettingsUpdateSchema } from "../../schemas.ts";
 
 /**
  * First-run outer size of the portable app window (what Chromium's `--window-size` takes).
@@ -252,7 +253,9 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
   // config, updates the runtime flag, tells every client over SSE, and re-reads all repos
   // so each card's aggregate stat appears/clears immediately.
   app.put("/api/settings", async (c) => {
-    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const p = await parseBody(c, SettingsUpdateSchema);
+    if (!p.ok) return p.res;
+    const b = p.data;
     if (typeof b.diffStats === "boolean") {
       cfg.diffStats = b.diffStats;
       setDiffStatsEnabled(b.diffStats);

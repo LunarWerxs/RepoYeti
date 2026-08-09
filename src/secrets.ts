@@ -65,9 +65,26 @@ function warnOnce(op: string, e: unknown): void {
   );
 }
 
-/** True unless a keychain op has failed (or it was force-disabled). Drives disk stripping. */
+/** True unless a keychain op has failed (or it was force-disabled). OPTIMISTIC: an untested
+ *  keychain (no op run yet this process) reads as available. Fine for non-destructive decisions,
+ *  NOT for deciding whether it's safe to delete the on-disk plaintext copy of a secret. */
 export function keychainAvailable(): boolean {
   return !disabled() && available !== false;
+}
+
+/**
+ * True ONLY after a keychain op has actually SUCCEEDED this process (available === true).
+ *
+ * The strict form, for the one decision that is irreversible: stripping a secret out of
+ * config.json. keychainAvailable() reports an UNTESTED keychain (available === null) as available,
+ * which is the right optimism for a read but a trap for a delete — a one-shot `repoyeti add-root`
+ * never runs a keychain op, so on a host whose keychain is actually broken it would strip legacy
+ * plaintext secrets it had never migrated anywhere, losing them for good. Requiring a confirmed
+ * success means "untested" falls to the safe side: keep the plaintext (and ACL-protect it) until a
+ * real daemon boot has proven the keychain and migrated the secrets. Every successful get/set/delete
+ * sets available = true, so the normal daemon path (hydrateSecrets runs first) is unaffected. */
+export function keychainConfirmed(): boolean {
+  return !disabled() && available === true;
 }
 
 /** Pre-rename keychain namespace (back when RepoYeti was "GitMob"). On a default install

@@ -35,6 +35,77 @@ const nonEmpty = z.string().trim().min(1);
 const MAX_PLAN_GROUPS = 200;
 const MAX_PLAN_PATHS = 5000;
 
+/**
+ * Owner settings (PUT /api/settings). health.ts applies every field as an independent,
+ * best-effort partial update: an absent key means "leave this setting alone", not "reset it",
+ * several fields clamp out-of-range numbers rather than reject them, and `changesStatDisplay`
+ * deliberately rejects an unrecognized value (but only AFTER every other field has already been
+ * applied — see the `badStatDisplay` comment in health.ts). None of that can live in the shape
+ * check: a strict per-field zod type would fail the WHOLE object on one bad field, which is
+ * exactly the "changesStatDisplay wipes out remoteEditing" bug this route was fixed for.
+ *
+ * So every field here is guaranteed to never fail the object parse:
+ *  - boolean/number/string fields use `.optional().catch(undefined)` — a wrong-typed value
+ *    collapses to "absent", which is exactly what the handler's own `typeof x === "..."` guards
+ *    already treat as "ignore this field". Numbers add `.finite()` to match the handler's
+ *    `Number.isFinite` guard (rejects NaN/Infinity the same way).
+ *  - `changesStatDisplay` is `z.unknown()` — deliberately UNvalidated here, so the wrong-but-present
+ *    value survives into the handler's own equality check + reject-at-the-end logic unchanged.
+ *  - `autoCommitMode`/`autoCommitAiFallback` are closed enums with `.catch(undefined)`: a
+ *    mismatched value collapses to undefined, which the handler's equality check already treats
+ *    as "ignore" (never reject), so this is behavior-identical to the old code, just typed.
+ */
+export const SettingsUpdateSchema = z.object({
+  diffStats: z.boolean().optional().catch(undefined),
+  changesStatDisplay: z.unknown().optional(),
+  changesChars: z.boolean().optional().catch(undefined),
+  remoteEditing: z.boolean().optional().catch(undefined),
+  diffPatchBytes: z.number().finite().optional().catch(undefined),
+  diffPatchEnabled: z.boolean().optional().catch(undefined),
+  syncCheck: z.boolean().optional().catch(undefined),
+  syncIntervalSecs: z.number().finite().optional().catch(undefined),
+  keepInSync: z.boolean().optional().catch(undefined),
+  autoCommit: z.boolean().optional().catch(undefined),
+  autoCommitMode: z.enum(["interval", "daily"]).optional().catch(undefined),
+  autoCommitIntervalSecs: z.number().finite().optional().catch(undefined),
+  autoCommitAt: z.string().optional().catch(undefined),
+  autoCommitPull: z.boolean().optional().catch(undefined),
+  autoCommitPush: z.boolean().optional().catch(undefined),
+  autoCommitAiFallback: z.enum(["skip", "basic"]).optional().catch(undefined),
+  autoUpdate: z.boolean().optional().catch(undefined),
+  updateNotify: z.boolean().optional().catch(undefined),
+  autoUpdateIntervalSecs: z.number().finite().optional().catch(undefined),
+  autoScan: z.boolean().optional().catch(undefined),
+  loreServersEnabled: z.boolean().optional().catch(undefined),
+  portableMode: z.boolean().optional().catch(undefined),
+  hideTrayIcon: z.boolean().optional().catch(undefined),
+  mcpApprovalGate: z.boolean().optional().catch(undefined),
+  mcpApprovalTimeoutSecs: z.number().finite().optional().catch(undefined),
+  mcpAutoDeny: z.boolean().optional().catch(undefined),
+  mcpAutoApprove: z.boolean().optional().catch(undefined),
+  mcpAutoApproveTimeoutSecs: z.number().finite().optional().catch(undefined),
+  // "" clears the preference; a value must match the live editor catalog (isKnownEditor) — that
+  // lookup can't happen at parse time, so it stays a domain check in the handler.
+  defaultEditor: z.string().optional().catch(undefined),
+});
+
+// ── access mode (local ↔ remote) ────────────────────────────────────────────────
+// `mode` is deliberately `z.unknown()` — the "must be 'local' or 'remote'" check keeps its own
+// BAD_MODE error code in the handler (mode.ts), matching this file's domain-rule convention
+// (see header comment) rather than collapsing to the generic BAD_REQUEST shape error.
+export const ModeUpdateSchema = z.object({
+  mode: z.unknown().optional(),
+});
+
+// ── on-demand scan (whole machine, or one folder) ──────────────────────────────────
+// `path` absent/empty/wrong-typed all mean "scan the whole machine" (see scan.ts) — that's a
+// deliberate default, not a shape failure, so a wrong type collapses to undefined rather than
+// rejecting. A present string is checked against the filesystem in the handler (existence/is-a-
+// directory), which can't happen at parse time.
+export const ScanSchema = z.object({
+  path: z.string().optional().catch(undefined),
+});
+
 // ── identities ──────────────────────────────────────────────────────────────────
 export const IdentityCreateSchema = z.object({
   displayName: nonEmpty,
@@ -274,6 +345,15 @@ export const ConflictApplySchema = z.object({
 /** Ceiling for a conflict-apply body: every region at its cap, plus JSON escaping overhead.
  *  Enforced as middleware so an oversized body is rejected before it is buffered or parsed. */
 export const CONFLICT_APPLY_BODY_LIMIT = 2_000_000;
+
+/**
+ * Default ceiling for ANY /api/* request body (src/http/app.ts). A backstop, not a policy: it
+ * exists so no route can silently inherit Bun's ~128 MB default and buffer + JSON.parse that much
+ * before its schema gets a say. Sized above the largest legitimate body — a 2 MB file write or
+ * conflict resolution, plus JSON escaping — so routes with an exact bound still declare it
+ * themselves.
+ */
+export const API_BODY_LIMIT = 8_000_000;
 
 // ── smart commit (AI multi-commit splitter) ──────────────────────────────────────
 // Plan generation reuses the message-route shape (optional provider override). `paths`, when

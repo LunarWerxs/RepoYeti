@@ -14,7 +14,7 @@ import {
   getSecret,
   setSecret,
   deleteSecret,
-  keychainAvailable,
+  keychainConfirmed,
   aiKeyName,
   OAUTH_CLIENT_SECRET,
   TUNNEL_TOKEN,
@@ -23,8 +23,9 @@ import {
 } from "./secrets.ts";
 import { publicKeyFor } from "./relay.ts";
 import { normalizeBuzzCommunities } from "./buzz-url.ts";
+import { restrictToCurrentUser } from "./fs-perms.ts";
 
-export const VERSION = "0.19.1";
+export const VERSION = "0.20.0";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
@@ -900,7 +901,13 @@ function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
   // A degraded keychain host retains the existing plaintext fallback for actual RepoYeti
   // credentials. Buzz is different: RepoYeti never owns a Buzz credential, so its config is
   // ALWAYS reduced to the public allowlist below, independent of keychain availability.
-  if (keychainAvailable()) {
+  //
+  // keychainCONFIRMED, not keychainAvailable: deleting a secret from disk is irreversible, so it
+  // must never happen on optimism. An untested keychain (a one-shot `repoyeti add-root` that never
+  // ran a keychain op) would otherwise strip legacy plaintext secrets that were never migrated
+  // anywhere — permanent loss on a broken-keychain host. Confirmed-only means the strip waits for a
+  // real daemon boot (hydrateSecrets) to prove the keychain and migrate them first.
+  if (keychainConfirmed()) {
     if (clone.ai?.providers) {
       for (const p of Object.values(clone.ai.providers)) {
         if (p) delete p.apiKey;
@@ -924,11 +931,25 @@ function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
 
 export function saveConfig(cfg: RepoYetiConfig): void {
   ensureConfigDir();
-  // 0600 belt-and-suspenders; with the keychain available the file holds no secret at all.
+  // With the keychain available this file holds no secret at all. When it ISN'T available
+  // (secrets.ts falls back to plaintext, loudly) it holds the AI keys, the OAuth client secret,
+  // the tunnel token and the API bearer token — so the 0600 has to be real. It isn't on NTFS,
+  // where the mode argument grants and denies nothing; restrictToCurrentUser writes an actual
+  // ACL, on the temp file BEFORE the rename so the permissions land with the content.
+  //
+  // Gated on the keychain being UNAVAILABLE, and that gate is load-bearing rather than tidy:
+  // restrictToCurrentUser shells out to icacls, saveConfig is called from ~60 sites (every
+  // settings toggle, every repo flag), and running a synchronous subprocess on each one would
+  // put tens of milliseconds of blocking work on the daemon's event loop for a file that, in the
+  // normal case, contains nothing worth protecting.
   const onDisk = stripSecretsForDisk(cfg);
   const tmp = `${CONFIG_PATH}.${process.pid}.${Date.now()}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(onDisk, null, 2), { mode: 0o600 });
+    // Apply the real NTFS ACL exactly when secrets might be on disk — i.e. whenever the strip
+    // above did NOT run. Same strict signal, so the two decisions never disagree: confirmed →
+    // stripped → nothing to protect; not confirmed → plaintext kept → protect it.
+    if (!keychainConfirmed()) restrictToCurrentUser(tmp);
     renameSync(tmp, CONFIG_PATH);
   } catch (e) {
     try {

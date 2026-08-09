@@ -202,7 +202,14 @@ export const useStore = defineStore("repoyeti", () => {
 
   /** Normalise any thrown ApiError into the structured {ok,code,message} the UI toasts. */
   function asResult(e: unknown): ActionResult {
-    if (e instanceof ApiError) return { ok: false, code: e.code ?? "ERROR", message: e.message };
+    if (e instanceof ApiError) {
+      // A 401 here means the daemon revoked/expired this session mid-flight: every action that
+      // flows through asResult only ever runs from an already-authenticated dashboard (AppShell
+      // gates loadAll()/the whole UI behind the sign-in screen), so this can't be a pre-auth 401.
+      // Flip the gate back on immediately instead of leaving the owner behind a generic toast.
+      if (e.status === 401) handleUnauthorized();
+      return { ok: false, code: e.code ?? "ERROR", message: e.message };
+    }
     return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
   }
 
@@ -234,6 +241,8 @@ export const useStore = defineStore("repoyeti", () => {
     hasRepo,
     patchRepo,
     upsertRepo,
+    queueRepoAdded,
+    flushPendingRepoInserts,
     doAction,
     commit,
     commitSelected,
@@ -429,6 +438,7 @@ export const useStore = defineStore("repoyeti", () => {
     localBypass,
     shareViewer,
     loadAuth,
+    handleUnauthorized,
     continueLocal,
     setMode,
     setTunnel,
@@ -748,12 +758,31 @@ export const useStore = defineStore("repoyeti", () => {
         "approval_pending",
         "approval_resolved",
         "collaboration_snapshots_changed",
+        "ai_key_invalid",
+        "auto_update_applying",
+        "auto_update_restarting",
       ],
       { autoReconnect: { retries: -1, delay: 2500 } },
     );
     closeEventSource = close;
+    // Whether THIS connection has ever reached OPEN before, so the very first connect (already
+    // covered by the caller's own loadAll()) doesn't trigger a redundant resync — only a genuine
+    // reconnect after a drop does.
+    let hasConnectedOnce = false;
     stopEventWatches = [
-      watch(status, (s) => (connected.value = s === "OPEN"), { immediate: true }),
+      watch(
+        status,
+        (s) => {
+          const isOpen = s === "OPEN";
+          // The daemon has no event replay/Last-Event-ID, so anything broadcast while this
+          // client was offline (a phone backgrounding and returning, a flaky network) is lost
+          // for good unless something re-hydrates from scratch on reconnect.
+          if (isOpen && hasConnectedOnce && !connected.value) void loadAll();
+          connected.value = isOpen;
+          if (isOpen) hasConnectedOnce = true;
+        },
+        { immediate: true },
+      ),
       watch(data, (raw) => {
       if (!raw || !event.value) return;
       try {
@@ -777,11 +806,14 @@ export const useStore = defineStore("repoyeti", () => {
             reconcileBehindNotification(payload.id, payload.status.behind);
           }
         } else if (event.value === "repo_added") {
-          // Background discovery found a repo after boot — slot it in (or refresh in place).
+          // Background discovery found a repo after boot — slot it in (or refresh in place). A
+          // scan fires this once per repo it finds, so new repos are buffered and merged in one
+          // batch per animation frame instead of splicing (and recomputing every dependent list)
+          // once per event — see queueRepoAdded/flushPendingRepoInserts in store/repo.ts.
           const repo = payload.repo as Repo | undefined;
           if (repo?.id) {
             const isNew = !hasRepo(repo.id);
-            upsertRepo(repo);
+            queueRepoAdded(repo);
             // Only a running scan's finds go on the review list, and only ones we didn't have.
             if (isNew && collectingScanRepos.value) {
               scanNewRepos.value.push({ id: repo.id, name: repo.name, absPath: repo.absPath });
@@ -944,6 +976,10 @@ export const useStore = defineStore("repoyeti", () => {
           if (typeof payload.found === "number") scanFound.value = payload.found;
           if (typeof payload.added === "number") scanNew.value = payload.added;
         } else if (event.value === "scan_done" || event.value === "scan_cancelled") {
+          // Force in whatever `repo_added` events are still sitting in the insert buffer — the
+          // scan can finish between animation frames, and the summary/review list below reads
+          // straight off `repos.value`/`scanNewRepos`, which must already reflect every find.
+          flushPendingRepoInserts();
           scanning.value = false;
           scanDone.value = true;
           collectingScanRepos.value = false;

@@ -21,7 +21,7 @@ import type { ActionResult } from "../contract.ts";
 import { runAction, refreshRepo, accountAuthFor, type ActionOutcome } from "./core.ts";
 import { guardRepo } from "./guards.ts";
 import { resolveRepoPath } from "./files.ts";
-import { normalizeRelPath } from "../paths.ts";
+import { normalizeRelPath, pathTouchesVcsMarker } from "../paths.ts";
 import { collaborationFingerprint } from "../collaboration.ts";
 
 export const fetchRepo = (id: string): Promise<ActionOutcome> =>
@@ -169,7 +169,7 @@ export async function discardFile(repoId: string, relPath: string): Promise<Disc
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   const backend = backendFor(repo.vcs);
   // Never reach into the VCS marker dir (.git / .lore) — restoring its internals is nonsense/unsafe.
-  if (r.clean.split("/").includes(backend.marker)) {
+  if (pathTouchesVcsMarker(r.clean, backend.marker)) {
     return { ok: false, code: "ERROR", message: `refusing to touch a ${backend.marker} directory` };
   }
   const result = await enqueue(repoId, () => backend.discardFile(repo.absPath, r.clean));
@@ -224,6 +224,11 @@ export interface DeleteFileResult {
 /** VCS marker directories that mean "a DIFFERENT repository lives here". */
 const NESTED_REPO_MARKERS = new Set([".git", ".lore"]);
 
+/** Case-insensitive membership in NESTED_REPO_MARKERS — see `pathTouchesVcsMarker` for why the
+ *  comparison must ignore case: on NTFS/APFS `.GIT` IS `.git`, so a case-sensitive check would
+ *  walk straight past a nested checkout and delete its history. */
+const isNestedRepoMarker = (name: string): boolean => NESTED_REPO_MARKERS.has(name.toLowerCase());
+
 /**
  * Repo-relative path of a nested repository checkout anywhere under `dir`, or null.
  *
@@ -253,12 +258,12 @@ function findNestedRepo(dir: string): string | null {
       if (!entry.isDirectory()) continue;
       // A `.git` FILE (a linked worktree's indirection) counts too — it still points at a real
       // repository — but it is not a directory, so check the name on both entry kinds.
-      if (NESTED_REPO_MARKERS.has(entry.name)) return join(current, entry.name).slice(dir.length + 1);
+      if (isNestedRepoMarker(entry.name)) return join(current, entry.name).slice(dir.length + 1);
       stack.push(join(current, entry.name));
     }
     for (const entry of entries) {
       if (!entry.isFile()) continue;
-      if (NESTED_REPO_MARKERS.has(entry.name)) return join(current, entry.name).slice(dir.length + 1);
+      if (isNestedRepoMarker(entry.name)) return join(current, entry.name).slice(dir.length + 1);
     }
   }
   return null;
@@ -272,7 +277,7 @@ export async function deleteFile(repoId: string, relPath: string, recursive = fa
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   const backend = backendFor(repo.vcs);
   // Never reach into the VCS marker dir (.git / .lore) — deleting its internals is nonsense/unsafe.
-  if (r.clean.split("/").includes(backend.marker)) {
+  if (pathTouchesVcsMarker(r.clean, backend.marker)) {
     return { ok: false, code: "ERROR", message: `refusing to touch a ${backend.marker} directory` };
   }
   // Repo-root guard — see doc comment above. Must hold BEFORE the isDir/recursive branching
@@ -333,7 +338,7 @@ export async function stageFile(repoId: string, relPath: string): Promise<StageR
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   const backend = backendFor(repo.vcs);
   // Never reach into the VCS marker dir (.git / .lore) — staging its internals is nonsense/unsafe.
-  if (r.clean.split("/").includes(backend.marker)) {
+  if (pathTouchesVcsMarker(r.clean, backend.marker)) {
     return { ok: false, code: "ERROR", message: `refusing to touch a ${backend.marker} directory` };
   }
   const result = await enqueue(repoId, () => backend.stageFile(repo.absPath, r.clean));
@@ -378,7 +383,7 @@ export async function addToGitignore(repoId: string, relPath: string): Promise<G
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   // Never write a pattern that reaches into the VCS marker dir (.git).
-  if (r.clean.split("/").includes(backend.marker)) {
+  if (pathTouchesVcsMarker(r.clean, backend.marker)) {
     return { ok: false, code: "ERROR", message: `refusing to touch a ${backend.marker} directory` };
   }
   const pattern = `/${r.clean}`; // anchored to the repo root = this exact path, not a loose glob

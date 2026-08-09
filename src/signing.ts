@@ -15,6 +15,7 @@ import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIR, ensureConfigDir } from "./config.ts";
+import { restrictToCurrentUser } from "./fs-perms.ts";
 
 // ── signing key (persisted so sessions survive a restart) ──────────────────────
 let KEY: Buffer | null = null;
@@ -26,7 +27,10 @@ export function key(): Buffer {
     KEY = Buffer.from(readFileSync(p, "utf8").trim(), "hex");
   } else {
     KEY = randomBytes(32);
+    // mode 0o600 is a no-op on NTFS — see fs-perms.ts. This file is the master key behind every
+    // owner session, local bypass and share cookie, so it gets a real ACL as well as the bit.
     writeFileSync(p, KEY.toString("hex"), { mode: 0o600 });
+    restrictToCurrentUser(p);
   }
   return KEY;
 }
@@ -61,7 +65,9 @@ export function unsign(token: string | undefined, secret?: Buffer): string | nul
 export function rotateKey(): Buffer {
   ensureConfigDir();
   const fresh = randomBytes(32);
-  writeFileSync(join(CONFIG_DIR, "session.key"), fresh.toString("hex"), { mode: 0o600 });
+  const p = join(CONFIG_DIR, "session.key");
+  writeFileSync(p, fresh.toString("hex"), { mode: 0o600 });
+  restrictToCurrentUser(p);
   KEY = fresh;
   return fresh;
 }

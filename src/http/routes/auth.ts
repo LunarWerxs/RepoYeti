@@ -13,6 +13,7 @@ import {
   type AuthOptions,
 } from "../../auth.ts";
 import { rememberTokens, clearTokens, pullNow } from "../../connections-sync.ts";
+import { deleteSecret, API_TOKEN } from "../../secrets.ts";
 import { effectiveGuest } from "../../auth.ts";
 import { clearGuestCookie } from "../../share/index.ts";
 
@@ -71,8 +72,17 @@ export function register(app: Hono, { cfg }: Deps): void {
   // "Sign out everywhere" — rotate the signing key so every device's session cookie is
   // invalidated at once (sessions are stateless signed cookies; there is no row to revoke). Also
   // forget the Connections refresh token: signing out everywhere severs the settings-sync link too.
-  app.post("/api/auth/logout-all", (c) => {
-    void clearTokens();
+  //
+  // AND revoke the owner's API Bearer token. That one is NOT a cookie and NOT signed by the
+  // rotated key — validBearerToken compares straight against cfg.apiToken — so rotation alone
+  // left it authenticating over the public tunnel after the owner had pressed the only
+  // panic-button the UI offers. A credential that survives "sign out everywhere" makes the
+  // button a lie, so this awaits the revocation rather than firing it off: the response must not
+  // claim the token is gone before it is. (Revocation is host-specific — the durable bytes live
+  // in this app's keychain — so it belongs here in the adapter, not in the reusable auth.ts.)
+  app.post("/api/auth/logout-all", async (c) => {
+    await Promise.allSettled([clearTokens(), deleteSecret(API_TOKEN)]);
+    delete cfg.apiToken;
     return handleLogoutAll(c);
   });
   // "Continue local for now" — grant a localhost-only bypass (refused over the tunnel).

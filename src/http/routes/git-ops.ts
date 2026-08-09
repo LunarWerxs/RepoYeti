@@ -14,6 +14,7 @@ import {
 } from "../../service/index.ts";
 import { action, requireId } from "../respond.ts";
 import { effectiveGuest } from "../../auth.ts";
+import { guestRepoView } from "../../share/redact.ts";
 
 export function register(app: Hono, { cfg }: Deps): void {
   // ── safe git actions ───────────────────────────────────────────────────────
@@ -68,10 +69,16 @@ export function register(app: Hono, { cfg }: Deps): void {
     return c.json(r, r.ok ? 200 : statusForCode(r.code));
   });
 
+  // The one guest-reachable route that returns a whole repo record. It MUST project through
+  // guestRepoView the way GET /api/repos does (routes/repos.ts): the raw RepoView carries the
+  // owner's identityId, sync account, hidden/autoCommit flags, and the UNREDACTED remote URL —
+  // which, per share/redact.ts, routinely embeds a PAT (`https://user:ghp_…@github.com/…`).
+  // Shipping that to a "view"-tier link holder handed out the owner's push credential.
   app.post("/api/repos/:id/refresh", async (c) => {
     const id = requireId(c);
     if (id instanceof Response) return id;
     const repo = await forceRefresh(id);
-    return repo ? c.json({ repo }) : jsonError(c, "NOT_FOUND", "repo not found");
+    if (!repo) return jsonError(c, "NOT_FOUND", "repo not found");
+    return c.json({ repo: effectiveGuest(c, cfg) ? guestRepoView(repo) : repo });
   });
 }

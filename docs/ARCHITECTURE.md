@@ -132,9 +132,12 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | Session-management UI / per-device revoke | Phase 5 | A "sign out everywhere" clears daemon sessions; the Connections login itself is governed by AEGIS. v1 has a single owner session. **Partly landed:** §17's Sharing panel is per-*link* listing + revoke. Per-*device* owner-session revoke is still just the "sign out everywhere" hammer. |
 | Commit signing (GPG/SSH) | post-v1 | Schema slot reserved, not wired. |
 | Diff viewer · merge-conflict UI · rebase · `reset --hard` · `push --force` | **never** | Out of scope by design. Daemon surfaces "resolve at your desk" and stops. |
-| SVN / Mercurial · cloud-synced accounts · auto-updater · native installers | post-v1 | Not on the path. |
+| SVN / Mercurial · cloud-synced accounts · native installers | post-v1 | Not on the path. |
 | WebSockets | **never** | SSE is strictly sufficient; enforce this against drift. |
 | Self-hosted frp/bore/chisel relay | **never** | Converts "self-contained tool" into "infra operator" — contradicts the whole point. Note the opt-in share-link relay (`relay/`) is deliberately NOT this: it stores one id→origin row and answers with a redirect, so no repository traffic passes through it and whoever runs it never becomes custodian of anyone's source. |
+
+**Auto-updater is not on this table; it shipped.** Self-update (git-based check/apply) is fully
+wired; see §16 for the `updater-engine` design and the `useSelfUpdate` composable, not this list.
 
 ---
 
@@ -156,7 +159,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 │   ├─ SSE:  /api/events  ◄─────────────── emits on status change ────────────┘      │
 │   └─ static: embedded Vue 3 PWA                                                     │
 │                            │                                                        │
-│  Secrets ──► OS keychain (keytar): owner Connections tokens, PATs, client_secret?  │
+│  Secrets ──► OS keychain (Bun.secrets): owner Connections tokens, PATs, client_secret?  │
 │             (SSH key paths in DB)  ──► OAuth @ accounts.connections.icu (OIDC)      │
 │                            │                                                        │
 │  cloudflared child process ─────► https://xxxx.trycloudflare.com (HTTPS edge)      │
@@ -193,53 +196,56 @@ injection) holds no matter which door a request comes through. The layering:
 
 ## 5. Data model (SQLite, WAL mode)
 
-Minimal schema. `workspaces` exists for future identity inheritance but is **not** surfaced in the v1 UI.
+This matches `src/db.ts` (`CREATE TABLE IF NOT EXISTS`, run once at daemon boot). There is no
+`workspaces` table and no `sessions` table; both were early-draft schema that never shipped. See
+the note under Auth below for why `sessions` in particular was dropped rather than built.
 
 ```sql
 -- repos discovered or registered
 CREATE TABLE repos (
-  id            TEXT PRIMARY KEY,           -- ULID
+  id            TEXT PRIMARY KEY,
   abs_path      TEXT UNIQUE NOT NULL,
   name          TEXT NOT NULL,
-  source        TEXT NOT NULL,              -- 'auto' | 'pinned' | 'created'
-  workspace_id  TEXT REFERENCES workspaces(id),
-  identity_id   TEXT REFERENCES identities(id),  -- assigned identity (override)
+  source        TEXT NOT NULL DEFAULT 'auto',   -- 'auto' | 'pinned' | 'created'
+  vcs           TEXT NOT NULL DEFAULT 'git',
+  identity_id   TEXT,                       -- assigned identity (override)
   is_submodule  INTEGER NOT NULL DEFAULT 0,
+  hidden        INTEGER NOT NULL DEFAULT 0,
+  pinned        INTEGER NOT NULL DEFAULT 0,
+  starred       INTEGER NOT NULL DEFAULT 0,
+  auto_commit   INTEGER NOT NULL DEFAULT 0,
   last_status   TEXT,                       -- JSON: {branch,dirty,ahead,behind,remote,error,fetched_at}
+  sort_order    INTEGER,
   updated_at    INTEGER NOT NULL
-);
-
-CREATE TABLE workspaces (                   -- schema-only in v1
-  id                  TEXT PRIMARY KEY,
-  name                TEXT NOT NULL,
-  default_identity_id TEXT REFERENCES identities(id)
+  -- plus display_name, sync_account_host, sync_account_login: added by later migrations in db.ts
 );
 
 CREATE TABLE identities (
-  id              TEXT PRIMARY KEY,         -- ULID
+  id              TEXT PRIMARY KEY,
   display_name    TEXT NOT NULL,            -- "Personal GitHub"
   git_username    TEXT NOT NULL,
   git_email       TEXT NOT NULL,
   ssh_key_path    TEXT,                     -- path ONLY; file never read by daemon
-  pat_handle      TEXT,                     -- keychain handle, e.g. 'repoyeti/identity/<id>/pat' — NEVER the PAT
+  pat_handle      TEXT,                     -- keychain handle string; NEVER the PAT itself
   signing_handle  TEXT                      -- reserved, unused in v1
-);
-
--- Auth is "Sign in with Connections" (public OIDC, §7):
---   • the trusted owner identity (sub/email) lives in config + OS keychain ('repoyeti/owner-sub');
---   • the owner's Connections OAuth tokens live in the OS keychain, never in SQLite;
---   • a single 'sessions' row (or signed __Host- cookie) tracks the active daemon session;
---   • no password, PIN, or shared secret is ever stored.
-CREATE TABLE sessions (                     -- the daemon's own RP session(s)
-  id            TEXT PRIMARY KEY,           -- ULID
-  owner_sub     TEXT NOT NULL,              -- verified Connections sub
-  created_at    INTEGER NOT NULL,
-  expires_at    INTEGER NOT NULL,           -- refreshed via the OAuth refresh token
-  revoked       INTEGER NOT NULL DEFAULT 0
 );
 ```
 
-**Invariant:** owner authentication secrets do not land in SQLite — only key *paths* (SSH) and
+**No `sessions` table, by design.** Auth is "Sign in with Connections" (public OIDC, §7), and the
+daemon's own session is a stateless, HMAC-signed cookie (`src/auth.ts`), not a database row: the
+cookie carries its own expiry and is checked against a signing key on each request. That is also
+why "sign out everywhere" has no row to delete; it rotates the signing key instead, which
+invalidates every outstanding cookie at once. The trusted owner identity (sub/email) still lives
+in config plus the OS keychain, and the owner's Connections OAuth tokens live in the OS keychain,
+never in SQLite; no password, PIN, or shared secret is ever stored.
+
+The rest of what the daemon persists lives in its own table, documented where it is used rather
+than repeated here: `account_identities` (GitHub account to saved-identity link), `shares` /
+`share_repos` / `share_events` (guest share links, §17), `collaboration_links` (peer working-tree
+pairings, §18), `git_commit_stats` (cached per-commit diff stats for the History activity chart),
+and `ignored_paths` (the "Remove" tombstones that stop a rescan from resurrecting a removed repo).
+
+**Invariant:** owner authentication secrets do not land in SQLite, only key *paths* (SSH) and
 keychain *handles*. Share-link tokens are the deliberate exception added in §17: they are retained
 in `shares.token` solely so the owner can copy an existing link, making `repoyeti.db`
 bearer-sensitive. Connections credentials remain issued and revoked by connections.icu and stored
@@ -430,10 +436,18 @@ part of this section, not as a feature note.
   remotes cannot identify a human login by name, so RepoYeti asks GitHub for each signed-in
   account's `permissions.push` value and uses the unique writable account (or the active writable
   account when several qualify). Those non-secret booleans are cached briefly; tokens never are.
-- **`keytar` fallback:** if keytar fails to load (common on Windows without build tools), encrypt the
-  daemon-side secrets to an **AES-256-GCM** file in the config dir, key =
-  `HKDF-SHA256(machineUUID ‖ username ‖ 'repoyeti-v1')`, perms `0600`, with a **loud, specific terminal
-  warning**. Still external to SQLite, still not plaintext.
+- **OS keychain, and what happens when it is not there:** secrets are stored via **`Bun.secrets`**,
+  built into the Bun runtime, which talks to Windows Credential Manager, macOS Keychain, or Linux
+  `libsecret` directly, so there is no native addon to compile or ship (see `src/secrets.ts`). If
+  the platform secret service is unavailable, a headless Linux box with no `libsecret` is the
+  common case, every keychain call becomes a no-op and the daemon falls back to storing those
+  secrets in **plaintext** in `~/.repoyeti/config.json`. That fallback is silent apart from a
+  **one-time console warning** (`warnOnce` in `secrets.ts`) the first time a call fails; nothing
+  else marks the host as degraded. The file is written with `mode: 0o600` (`saveConfig` in
+  `src/config.ts`), which restricts access on Linux and macOS but is a **no-op on Windows**: NTFS
+  does not honor POSIX mode bits, so a 0600 `config.json` on Windows is not access-restricted by
+  that flag at all. Treat "keychain unavailable" as "these secrets are plaintext on disk," not as a
+  softer, still-protected fallback.
 
 ### Identity injection (never break the user's desk)
 
@@ -472,9 +486,12 @@ GIT_SSH_COMMAND="ssh -i <ssh_key_path> -o IdentitiesOnly=yes -o BatchMode=yes" \
 
 These were not in the original briefs; they will bite if ignored.
 
-1. **`keytar` × `bun --compile` native-addon compatibility is the #1 technical unknown.** Run a
-   **Phase-1 spike** on Mac arm64, Windows x64, Linux x64 *before* committing. If it fails on a
-   platform, the AES-256-GCM file becomes the *primary* there, not a fallback.
+1. **The plaintext-secrets fallback is silent, and `0600` does nothing on Windows.** Secrets ship on
+   `Bun.secrets` (no native addon, no `bun --compile` spike needed; see §7), but when the OS secret
+   service is unavailable the daemon quietly drops to plaintext `config.json`, marked only by a
+   one-time console warning that is easy to miss. `mode: 0o600` on that file is a no-op on Windows
+   (NTFS ignores POSIX mode bits), so treat "keychain unavailable" as "secrets are readable by
+   anything with filesystem access on this host," not as a softer, still-protected fallback.
 2. **SSH passphrase blocking.** Always pass `-o BatchMode=yes` (`sshCommandFor`), and bound every
    `simple-git` op with a timeout. **Do not report that timeout as `SSH_PASSPHRASE_REQUIRED`**;
    the original spec said to, and it was wrong twice over. (a) `timeout.block` is an **idle** timer

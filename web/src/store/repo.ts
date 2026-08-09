@@ -95,7 +95,25 @@ export function useRepoActions(
   // lookup stays correct without a deep watcher over every status field.
   let lookupSource: Repo[] | null = null;
   const repoLookup = new Map<string, Repo>();
+
+  // ── batched insertion for freshly discovered repos ────────────────────────────────────
+  // A "scan whole computer" run fires a `repo_added` SSE event per repo it finds — hundreds in a
+  // burst. Splicing each one into `repos.value` immediately re-triggers every dependent computed
+  // (visibleRepos, filteredRepos, pinned/starred/other) once per repo, so a scan's client-side
+  // work scaled O(n²) and the tab janked mid-scan. New repos are buffered here and flushed as one
+  // sorted merge + one array replace per animation frame, so a whole burst costs one recompute.
+  // Refreshes of repos ALREADY live stay immediate (the `Object.assign` path below) — those were
+  // already O(1) and never caused the jank, only first-time inserts did.
+  const pendingInserts = new Map<string, Repo>(); // id → raw SSE repo; a repeated id just overwrites
+  let flushHandle: number | null = null;
+  let flushIsTimer = false;
+
   function findRepo(repoId: string): Repo | undefined {
+    // A repo can be sitting in the insert buffer, not yet spliced into `repos.value` — look there
+    // first so a patch that lands between "discovered" and "flushed" (e.g. a fast-following status
+    // update for the same id) still applies instead of silently no-op'ing.
+    const pending = pendingInserts.get(repoId);
+    if (pending) return pending;
     if (lookupSource !== repos.value) {
       lookupSource = repos.value;
       repoLookup.clear();
@@ -108,7 +126,9 @@ export function useRepoActions(
     return found;
   }
 
-  /** Insert or refresh a streamed repo in O(1) after the first lookup build. */
+  /** Insert or refresh a repo from a deliberate, one-off local action (register/create/clone/
+   *  restore) — always immediate, never buffered, so the card the owner just triggered appears
+   *  the instant the call returns. Bulk discovery goes through `queueRepoAdded` instead. */
   function upsertRepo(next: Repo): void {
     if (lookupSource !== repos.value) {
       lookupSource = repos.value;
@@ -120,19 +140,30 @@ export function useRepoActions(
       Object.assign(current, next);
       return;
     }
-    // A live-discovered repo goes where the server's own ORDER BY would put it, not on the end.
-    // Appending is what made a scan dump its finds in raw walk order at the bottom of the list.
+    // Rare race: a scan's burst already buffered this same id (not yet flushed) when a manual
+    // action for it lands too — fold the newer data in and promote it to live now instead of
+    // leaving a duplicate for the next flush to (correctly, but needlessly slowly) resolve.
+    const pending = pendingInserts.get(next.id);
+    if (pending) {
+      Object.assign(pending, next);
+      pendingInserts.delete(next.id);
+      insertLive(pending);
+      return;
+    }
+    insertLive(next);
+  }
+
+  /** Splice a repo into `repos.value` at its server-ordered position. `next` is a RAW object;
+   *  splicing it into a deep-reactive array stores the raw value in the proxy's target, and only
+   *  reading it BACK out yields the reactive proxy the rendered list actually depends on. Caching
+   *  the raw reference in `repoLookup` would make a later patchRepo() Object.assign land straight
+   *  on the target, bypassing the proxy's set trap — so cache what the array yields, not what we
+   *  handed it. Position shifts on a later splice, but each cached value is the same proxy
+   *  object, so the lookup stays valid regardless. */
+  function insertLive(next: Repo): void {
     const index = serverOrderIndex(next);
     repos.value.splice(index, 0, next);
-    // `next` is a RAW object (JSON.parse of an SSE frame). Splicing it into a deep-reactive array
-    // stores the raw value in the proxy's target; only reading it BACK out yields the reactive
-    // proxy the rendered list actually depends on. Caching the raw reference here would make every
-    // later patchRepo() Object.assign straight onto the target, bypassing the proxy's set trap —
-    // so a scan-discovered repo would sit there with status null (no clean badge, push disabled)
-    // until a full reload rebuilt the lookup. Cache what the array yields, not what we handed it.
     repoLookup.set(next.id, repos.value[index]!);
-    // The splice shifted every later entry to a new index, but each cached value is the same
-    // proxy object — position is not part of the key, so the lookup stays valid.
   }
 
   /**
@@ -158,6 +189,89 @@ export function useRepoActions(
       if (compareServerOrder(next, list[i]!) < 0) return i;
     }
     return list.length;
+  }
+
+  /**
+   * Buffer a repo discovered via the live `repo_added` SSE event — used only by that one call
+   * site (the store's event stream), never by a manual add/clone/restore, which stay immediate
+   * via `upsertRepo` above. A "scan whole computer" run fires this once per repo it finds, so
+   * refreshing an already-live repo still applies right away (cheap, O(1), was never the
+   * problem); only a genuinely new repo goes on the buffer, flushed in one batch below.
+   */
+  function queueRepoAdded(next: Repo): void {
+    if (lookupSource !== repos.value) {
+      lookupSource = repos.value;
+      repoLookup.clear();
+      for (const repo of repos.value) repoLookup.set(repo.id, repo);
+    }
+    const current = repoLookup.get(next.id);
+    if (current) {
+      Object.assign(current, next);
+      return;
+    }
+    const pending = pendingInserts.get(next.id);
+    if (pending) Object.assign(pending, next);
+    else pendingInserts.set(next.id, next);
+    scheduleFlush();
+  }
+
+  function scheduleFlush(): void {
+    if (flushHandle !== null) return;
+    if (typeof requestAnimationFrame === "function") {
+      flushHandle = requestAnimationFrame(flushPendingInserts);
+      flushIsTimer = false;
+    } else {
+      // No rAF (SSR / a test env without a polyfill) — a short timer still coalesces a burst
+      // instead of firing a flush per event.
+      flushHandle = setTimeout(flushPendingInserts, 16) as unknown as number;
+      flushIsTimer = true;
+    }
+  }
+
+  /** Merge every buffered repo into `repos.value` in one pass — a single sorted merge instead of
+   *  N splices, so a whole burst of `repo_added` events recomputes dependent state exactly once. */
+  function flushPendingInserts(): void {
+    flushHandle = null;
+    if (pendingInserts.size === 0) return;
+    // `repos.value` can have been wholesale-replaced since these were buffered (a fresh reload, a
+    // manual-order reset, an identity switch) — that replacement is authoritative for whatever it
+    // already carries, so drop any buffered repo it already has rather than merging a stale copy
+    // on top of it (which would duplicate the card). This is what keeps the buffer from leaking
+    // stale data across a store reset instead of an ordinary flush.
+    const liveIds = new Set(repos.value.map((r) => r.id));
+    const toInsert: Repo[] = [];
+    for (const [id, repo] of pendingInserts) {
+      if (!liveIds.has(id)) toInsert.push(repo);
+    }
+    pendingInserts.clear();
+    if (toInsert.length === 0) return;
+    // Stable sort with the exact comparator the old per-event path used, then a linear merge —
+    // together equivalent to inserting each one at its `serverOrderIndex` in arrival order, just
+    // without the O(n) rescan per repo.
+    toInsert.sort(compareServerOrder);
+    const list = repos.value;
+    const merged: Repo[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < list.length && j < toInsert.length) {
+      if (compareServerOrder(toInsert[j]!, list[i]!) < 0) merged.push(toInsert[j++]!);
+      else merged.push(list[i++]!);
+    }
+    while (i < list.length) merged.push(list[i++]!);
+    while (j < toInsert.length) merged.push(toInsert[j++]!);
+    repos.value = merged; // one reactive replace; repoLookup rebuilds lazily next access
+  }
+
+  /** Force any buffered inserts in right now. Call this when a scan ends so the last burst of
+   *  `repo_added` events isn't left waiting on the next animation frame after the UI already
+   *  reports the scan as done (also handy for tests, which don't want to await a real rAF). */
+  function flushPendingRepoInserts(): void {
+    if (flushHandle !== null) {
+      if (flushIsTimer) clearTimeout(flushHandle);
+      else cancelAnimationFrame(flushHandle);
+      flushHandle = null;
+    }
+    flushPendingInserts();
   }
 
   // ── list filters (display-only; drag-reorder is disabled while a filter is active) ──
@@ -278,6 +392,7 @@ export function useRepoActions(
     repoId: string,
     name: "fetch" | "pull" | "push" | "refresh",
   ): Promise<ActionResult> {
+    if (busy[repoId]) return { ok: false, code: "BUSY", message: "Another action is already running for this repo." };
     busy[repoId] = name;
     try {
       if (name === "refresh") {
@@ -322,6 +437,7 @@ export function useRepoActions(
   }
 
   async function commit(repoId: string, message: string, amend = false): Promise<ActionResult> {
+    if (busy[repoId]) return { ok: false, code: "BUSY", message: "Another action is already running for this repo." };
     busy[repoId] = "commit";
     try {
       const result = await api.commit(repoId, message, amend);
@@ -338,6 +454,7 @@ export function useRepoActions(
   // reloaded afterward to drop the committed files (unlike a full commit, which empties the tree
   // and hides the section). The SSE status push refreshes the dirty count; this refreshes the list.
   async function commitSelected(repoId: string, message: string, paths: string[]): Promise<ActionResult> {
+    if (busy[repoId]) return { ok: false, code: "BUSY", message: "Another action is already running for this repo." };
     busy[repoId] = "commit";
     try {
       const result = await api.commitSelected(repoId, message, paths);
@@ -354,19 +471,34 @@ export function useRepoActions(
     }
   }
 
+  /** Assign (or clear) a repo's identity (optimistic; rolls back on failure). */
   async function assignIdentity(repoId: string, identityId: string | null): Promise<void> {
+    const prev = findRepo(repoId)?.identityId ?? null;
     patchRepo(repoId, { identityId }); // optimistic
-    await api.assignIdentity(repoId, identityId);
+    try {
+      await api.assignIdentity(repoId, identityId);
+    } catch (e) {
+      patchRepo(repoId, { identityId: prev }); // roll back
+      throw e;
+    }
   }
 
-  /** Pin (or clear) the GitHub account a repo syncs as. Optimistic; the repo_account_changed SSE
-   *  echo keeps every device in step. */
+  /** Pin (or clear) the GitHub account a repo syncs as (optimistic; rolls back on failure). The
+   *  repo_account_changed SSE echo keeps every device in step on success. */
   async function assignRepoAccount(repoId: string, host: string | null, login: string | null): Promise<void> {
+    const found = findRepo(repoId);
+    const prevHost = found?.syncAccountHost ?? null;
+    const prevLogin = found?.syncAccountLogin ?? null;
     patchRepo(repoId, {
       syncAccountHost: login ? host || "github.com" : null,
       syncAccountLogin: login,
     }); // optimistic
-    await api.assignRepoAccount(repoId, host, login);
+    try {
+      await api.assignRepoAccount(repoId, host, login);
+    } catch (e) {
+      patchRepo(repoId, { syncAccountHost: prevHost, syncAccountLogin: prevLogin }); // roll back
+      throw e;
+    }
   }
 
   /** Set/clear a repo's display label (optimistic; rolls back on failure). Never touches the
@@ -455,6 +587,10 @@ export function useRepoActions(
     changesCacheLru.delete(repoId);
     changesRequests.delete(repoId);
     repoLookup.delete(repoId);
+    // A repo can be removed (another device, a scan root going away) while it's still sitting in
+    // the insert buffer, never having reached `repos.value` — drop it here too, or the next flush
+    // would resurrect a card that was just removed.
+    pendingInserts.delete(repoId);
     delete changesByRepo[repoId];
     delete changesLoading[repoId];
     delete changesMeta[repoId];
@@ -503,6 +639,8 @@ export function useRepoActions(
     hasRepo,
     patchRepo,
     upsertRepo,
+    queueRepoAdded,
+    flushPendingRepoInserts,
     doAction,
     commit,
     commitSelected,

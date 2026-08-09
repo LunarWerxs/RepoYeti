@@ -6,7 +6,10 @@
  * 127.0.0.1 only (see index.ts). Auth is one middleware in front of /api/* (docs/ARCHITECTURE.md §7).
  */
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { RepoYetiConfig } from "../config.ts";
+import { jsonError } from "../contract.ts";
+import { API_BODY_LIMIT } from "../schemas.ts";
 import { authMiddleware, isRemoteRequest } from "../auth.ts";
 import { loopbackGuard } from "../loopback-guard.mjs";
 import { mountWeb } from "./web.ts";
@@ -146,6 +149,25 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   // Auth gate — applies to /api/* only; no-op when OIDC isn't configured (local mode).
   // MUST be registered first so it fronts every /api/* route below.
   app.use("/api/*", authMiddleware(cfg));
+
+  // Default request-body ceiling for the whole API. Without one, every JSON route falls back to
+  // Bun's ~128 MB default and fully buffers + JSON.parses the body BEFORE its zod schema ever
+  // runs — so the validation that bounds each field does nothing to bound the allocation. Two of
+  // those routes (stage, commit) are reachable by a share-link guest, who is by definition the
+  // least-trusted caller the daemon has.
+  //
+  // 8 MB, not 1: the largest legitimate body is a 2 MB file write or conflict resolution
+  // (MAX_FILE_BYTES / CONFLICT_APPLY_BODY_LIMIT), and JSON escaping inflates text on the way in.
+  // This is a backstop against absurd bodies, not a per-route policy — routes that need a
+  // tighter, exact bound still declare their own (see routes/files.ts conflict-apply), and
+  // registering this AFTER the auth gate keeps an anonymous caller's answer a plain 401.
+  app.use(
+    "/api/*",
+    bodyLimit({
+      maxSize: API_BODY_LIMIT,
+      onError: (c) => jsonError(c, "BAD_REQUEST", "request body is too large", 413),
+    }),
+  );
 
   const deps: Deps = { cfg, requestShutdown: hooks.requestShutdown };
 

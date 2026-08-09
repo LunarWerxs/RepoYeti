@@ -246,3 +246,33 @@ test("deleteFile still deletes an ordinary deep folder that holds no repo", asyn
   expect(r.ok).toBe(true);
   expect(existsSync(join(dir, "adir"))).toBe(false);
 });
+
+// ── case-insensitive marker guard ────────────────────────────────────────────────
+// The guard used to compare path segments against ".git" case-SENSITIVELY. On NTFS (and APFS)
+// ".GIT" names the very same directory, so `deleteFile(id, ".GIT", true)` walked straight past
+// the marker check, past findNestedRepo (which inspects .git's CHILDREN, never .git itself), and
+// into an unconditional recursive rmSync of the entire repository history. These two cases are
+// the proof it cannot happen again; they are meaningful on every platform because the guard now
+// compares case-insensitively everywhere rather than deferring to the filesystem.
+test("deleteFile refuses an oddly-cased .git, on any filesystem", async () => {
+  const dir = await repo();
+  const id = mustUpsertRepo(dir, "del-uppercase-git", "auto", false);
+
+  for (const spelling of [".GIT", ".Git", ".gIt"]) {
+    const r = await deleteFile(id, spelling, true);
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("refusing to touch");
+  }
+  // The history is still there — which is the entire point of the guard.
+  expect(existsSync(join(dir, ".git", "HEAD"))).toBe(true);
+});
+
+test("deleteFile refuses a path REACHING INTO an oddly-cased .git", async () => {
+  const dir = await repo();
+  const id = mustUpsertRepo(dir, "del-uppercase-git-child", "auto", false);
+
+  const r = await deleteFile(id, ".GIT/hooks", true);
+  expect(r.ok).toBe(false);
+  expect(r.message).toContain("refusing to touch");
+  expect(existsSync(join(dir, ".git", "HEAD"))).toBe(true);
+});

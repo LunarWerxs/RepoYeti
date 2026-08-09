@@ -67,7 +67,7 @@ describe("upsertRepo: live-discovered repos stay reactive", () => {
   // stores the raw value in the array proxy's target and only wraps it on READ, so patching that
   // cached raw reference mutated the target directly and never fired the proxy's set trap. A repo
   // a scan discovered therefore sat at status:null — no clean badge, push disabled — until a full
-  // reload replaced the array. Anything that merely reads the list must see the patch.
+  // reload rebuilt the lookup. Anything that merely reads the list must see the patch.
   it("re-renders a scan-discovered repo when its status arrives later", () => {
     const h = harness();
     const branch = computed(() => h.repos.value[0]?.status?.branch ?? null);
@@ -193,5 +193,97 @@ describe("hasManualOrder", () => {
 
     h.upsertRepo(repo("apple"));
     expect(h.names()).toEqual(["apple", "legacy"]); // still plain alphabetical
+  });
+});
+
+describe("queueRepoAdded: batched insertion for a repo_added burst", () => {
+  // A "scan whole computer" run fires one `repo_added` SSE event per repo it finds — hundreds in
+  // a burst. `upsertRepo` (used only by deliberate local actions: register/create/clone/restore)
+  // stays immediate; `queueRepoAdded` is what the live event stream calls, and it buffers new
+  // repos instead of splicing each one in, so a whole burst costs one recompute of the dependent
+  // computeds (visibleRepos, filteredRepos, pinned/starred/other) instead of one per repo.
+  it("buffers new repos until flushed, applying them as one merge", () => {
+    const h = harness([repo("alpha"), repo("charlie")]);
+
+    h.queueRepoAdded(repo("bravo"));
+    h.queueRepoAdded(repo("aardvark"));
+    expect(h.names()).toEqual(["alpha", "charlie"]); // still buffered, not yet in the list
+
+    h.flushPendingRepoInserts();
+    expect(h.names()).toEqual(["aardvark", "alpha", "bravo", "charlie"]);
+  });
+
+  it("matches per-event insertion for a shuffled arrival order", () => {
+    // A realistic mixed batch: some repos carry a drag-persisted sort_order, some don't; one is a
+    // submodule; one only differs from another by case. Arrival order is deliberately scrambled
+    // relative to the final order the server's ORDER BY would produce.
+    const arrivals = [
+      repo("kiwi"),
+      repo("zebra", { sortOrder: 2 }),
+      repo("aardvark"),
+      repo("sub-tool", { isSubmodule: true }),
+      repo("banana", { sortOrder: 1 }),
+      repo("Cherry"),
+      repo("mango"),
+      repo("apple", { sortOrder: 0 }),
+    ];
+    const expected = [
+      "apple", "banana", "zebra", // ranked, by sort_order
+      "aardvark", "Cherry", "kiwi", "mango", // un-ranked, alphabetical, case-insensitive
+      "sub-tool", // un-ranked submodule, after ordinary repos at the same rank
+    ];
+
+    // Sequential: today's `upsertRepo` per-event behaviour (one splice + resort per repo), kept
+    // as the ground truth the batched path must reproduce exactly.
+    const sequential = harness();
+    for (const r of arrivals) sequential.upsertRepo(r);
+    expect(sequential.names()).toEqual(expected);
+
+    // Batched: the exact same repos, all buffered via queueRepoAdded, then a single flush (a
+    // scan burst).
+    const batched = harness();
+    for (const r of arrivals) batched.queueRepoAdded(r);
+    expect(batched.names()).toEqual([]); // nothing lands until the flush
+    batched.flushPendingRepoInserts();
+    expect(batched.names()).toEqual(expected);
+  });
+
+  it("drops a buffered repo a wholesale reload already carries, instead of duplicating it", () => {
+    const h = harness([repo("alpha")]);
+    h.queueRepoAdded(repo("fresh", { status: status({ dirty: 3 }) })); // buffered, not flushed
+
+    // A full reload (loadAll, resetRepoOrder, an identity switch) replaces the array wholesale —
+    // and this one already carries "fresh" with newer data than the stale buffered copy.
+    h.repos.value = [repo("alpha"), repo("fresh", { status: status({ dirty: 9 }) })];
+
+    h.flushPendingRepoInserts();
+    expect(h.names()).toEqual(["alpha", "fresh"]); // no duplicate "fresh"
+    const fresh = h.repos.value.find((r) => r.name === "fresh");
+    expect(fresh?.status?.dirty).toBe(9); // the reload's data won, not the stale buffered copy
+  });
+
+  it("does not resurrect a repo removed from the cache while still buffered", () => {
+    const h = harness();
+    h.queueRepoAdded(repo("ghost")); // buffered, not yet flushed
+    h.clearRepoCache("ghost"); // e.g. its repo_removed SSE event arrives before the next flush
+
+    h.flushPendingRepoInserts();
+    expect(h.names()).toEqual([]);
+  });
+
+  it("keeps a patch applied to a still-buffered repo through the flush", () => {
+    const h = harness();
+    h.queueRepoAdded(repo("fresh")); // buffered, not yet flushed
+    h.patchRepo("fresh", { status: status({ branch: "trunk" }) }); // arrives before the flush
+
+    h.flushPendingRepoInserts();
+    expect(h.repos.value[0]?.status?.branch).toBe("trunk");
+  });
+
+  it("refreshes an already-live repo immediately, without buffering", () => {
+    const h = harness([repo("alpha", { status: status({ dirty: 0 }) })]);
+
+    h.queueRepoAdded(repo("alpha", { status: status({ dirty: 5 }) }));
+    expect(h.repos.value[0]?.status?.dirty).toBe(5); // no flush needed — it was already live
   });
 });

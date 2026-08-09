@@ -39,10 +39,23 @@ export function redactRemoteUrl(remote: string | null): string | null {
   return remote.replace(/^([a-z][a-z0-9+.-]*:\/\/)([^/:@]*):[^/@]*@/i, "$1$2@");
 }
 
-/** A repo's status as a guest may see it: identical, minus any credential in the remote URL. */
+/**
+ * A repo's status as a guest may see it: identical, minus any credential in the remote URL and
+ * minus the detail of any error.
+ *
+ * `error` is whatever `readStatus`'s catch-all put there — a raw Node/git exception message
+ * (`read/status.ts`). Those routinely carry absolute filesystem paths (`ENOENT: … 'C:\Users\…'`)
+ * and, when git quotes a PAT-bearing remote back at us, a live credential. The guest still needs
+ * to know the repo is in a bad state — the card renders an error badge off this field — so the
+ * signal is kept and only the detail is dropped. The owner's own view is untouched.
+ */
 export function guestStatus(status: RepoStatus | null): RepoStatus | null {
   if (!status) return null;
-  return { ...status, remote: redactRemoteUrl(status.remote) };
+  return {
+    ...status,
+    remote: redactRemoteUrl(status.remote),
+    error: status.error ? "this repository reported an error" : null,
+  };
 }
 
 /**

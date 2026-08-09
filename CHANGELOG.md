@@ -4,6 +4,60 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-08-09
+
+A security and hardening release from a full-codebase audit, followed by adversarial review rounds
+until a round found nothing left. Nothing in the way you use RepoYeti changes; several ways it could
+have surprised you no longer can.
+
+### Added
+
+- **Dropping a stash and deleting a branch now confirm first.** They join discard and delete-file
+  behind an explicit confirmation that names the exact thing it is about to remove, so a mistap on a
+  phone can no longer throw away work that has no undo.
+- **Files that look like secrets are held back from AI providers.** When Smart Commit or an AI commit
+  message sends a diff to your provider, a file that looks like it holds credentials (a `.env`, a
+  private key, a credential store) keeps its contents out of what is sent, while still appearing in
+  the commit so the message stays accurate. Every provider now states at connect time that diffs
+  leave your machine, not only the custom-endpoint option.
+
+### Fixed
+
+- **Share links no longer expose the owner's details.** A view-only link could receive a repo's
+  unredacted remote URL (which can carry an access token), the owner's identity and account bindings,
+  and raw error text containing local file paths. Guests now get a projected view with all of that
+  removed, on every route, not just most of them.
+- **"Sign out everywhere" now revokes the API token too, and plain "Sign out" clears the
+  local-access cookie.** Neither leaves a working credential behind after you have asked to be signed
+  out.
+- **The dashboard recovers from a dropped live connection.** Updates missed while a phone was asleep
+  are reconciled the moment it reconnects instead of leaving a repo card stale, and a session that
+  expires mid-use returns you to sign-in instead of failing silently.
+- **The auto-updater verifies every download against its published checksum before installing** and
+  refuses an update it cannot verify.
+- Assorted correctness fixes: file writes and moves are serialized against concurrent git
+  operations, an interrupted network operation cleans up the lock it leaves behind, a stale database
+  migration failure is reported instead of silently swallowed, and a repository living under a folder
+  with accented or non-Latin characters no longer slips past the secret-file protection above.
+
+### Security
+
+- **Process launches on Windows are injection-proof.** A repository or file path containing shell
+  metacharacters can no longer change what the daemon runs when it opens an editor, relaunches after
+  an update, or shows the app window.
+- **Secrets kept in the config file are protected at the filesystem level** on the rare host with no
+  OS keychain, and are never removed from disk until the keychain has actually been confirmed to hold
+  them.
+- The mobile dashboard's static files are served with a strict path check that cannot be walked out
+  of, and every API route now has a request-size ceiling.
+
+### Internal
+
+- Owner-facing settings routes validate their input through the shared schema layer like every other
+  route.
+- The architecture and configuration docs were corrected to describe what the code actually does
+  (the secrets design, the self-update engine, the real database schema).
+
 ## [0.19.1] - 2026-08-06
 
 ### Changed

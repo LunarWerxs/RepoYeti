@@ -39,6 +39,9 @@ function mountPanel() {
   // DropdownMenuContent teleports into document.body (reka-ui's DropdownMenuPortal), so the
   // component must be attached to a live document for the portal target to exist and for the
   // dropdown to actually open in happy-dom.
+  // The delete confirm Dialog is stubbed to plain passthrough elements (mirrors
+  // RemoteAccess.test.ts) so its content is queryable without reka-ui's portal/open-transition
+  // machinery in happy-dom.
   activeWrapper = mount(
     {
       components: { BranchPanel, TooltipProvider },
@@ -48,7 +51,20 @@ function mountPanel() {
     },
     {
       props: { repoId, branch: "main", detached: false },
-      global: { plugins: [i18n] },
+      global: {
+        plugins: [i18n],
+        stubs: {
+          // NOT stubbing 'teleport' globally: reka-ui's DropdownMenuPortal also uses <Teleport>,
+          // and this test relies on it teleporting for real into document.body (see openMenu
+          // below). Only the Dialog primitives are stubbed, so DialogContent never reaches its
+          // own <Teleport> in the first place.
+          Dialog: { template: "<div><slot /></div>" },
+          DialogContent: { template: "<section><slot /></section>" },
+          DialogHeader: { template: "<header><slot /></header>" },
+          DialogTitle: { template: "<h2><slot /></h2>" },
+          DialogDescription: { template: "<p><slot /></p>" },
+        },
+      },
       attachTo: document.body,
     },
   );
@@ -130,6 +146,32 @@ describe("BranchPanel.vue", () => {
     expect(createSpy).toHaveBeenCalledWith(repoId, "new-feature", true);
   });
 
+  it("delete is confirm-gated: the Trash2 button opens a dialog naming the branch, not an immediate delete", async () => {
+    const store = useStore();
+    seedBranches();
+    const deleteSpy = vi.spyOn(store, "deleteBranch").mockResolvedValue({ ok: true, code: "OK" });
+
+    const wrapper = mountPanel();
+    const menu = await openMenu(wrapper);
+    const featureRow = menu.findAll('[class*="group/br"]').find((row) => row.text().includes("feature"))!;
+    const deleteIcon = featureRow.findAll("button")[1]!;
+
+    await deleteIcon.trigger("click");
+    await wrapper.vm.$nextTick();
+    // A single tap must not have deleted the branch yet — the confirm dialog is in the way.
+    expect(deleteSpy).not.toHaveBeenCalled();
+    // The dialog body (stubbed DialogDescription → <p>) names the specific branch, so the owner
+    // knows what they're about to lose before confirming.
+    expect(wrapper.find("p").text()).toContain("feature");
+
+    const confirmBtn = wrapper.findAll("button").find((b) => b.text() === "Delete")!;
+    expect(confirmBtn.exists()).toBe(true);
+    await confirmBtn.trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(deleteSpy).toHaveBeenCalledOnce();
+    expect(deleteSpy).toHaveBeenCalledWith(repoId, "feature");
+  });
+
   it("#22 toasts the friendly protected-branch message, not the raw code, on delete failure", async () => {
     const store = useStore();
     seedBranches();
@@ -142,9 +184,13 @@ describe("BranchPanel.vue", () => {
     const wrapper = mountPanel();
     const menu = await openMenu(wrapper);
     const featureRow = menu.findAll('[class*="group/br"]').find((row) => row.text().includes("feature"))!;
-    const deleteBtn = featureRow.findAll("button")[1]!;
+    const deleteIcon = featureRow.findAll("button")[1]!;
 
-    await deleteBtn.trigger("click");
+    // Open the confirm dialog, then confirm — the toast fires only after the confirmed op fails.
+    await deleteIcon.trigger("click");
+    await wrapper.vm.$nextTick();
+    const confirmBtn = wrapper.findAll("button").find((b) => b.text() === "Delete")!;
+    await confirmBtn.trigger("click");
     await wrapper.vm.$nextTick();
     await new Promise((r) => setTimeout(r, 0));
 

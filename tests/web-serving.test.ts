@@ -150,3 +150,50 @@ test("path traversal out of the web root is forbidden", async () => {
   // Either rejected outright or normalised to a miss — never leaks a file outside web/dist.
   expect([403, 404]).toContain(res.status);
 });
+
+// The traversal test above passes for the wrong reason on its own: `new URL()` collapses literal
+// dot-segments before the handler ever sees them, so "/../../package.json" arrives already
+// normalised. These cover the two cases that genuinely reached the filesystem check.
+test("percent-encoded traversal cannot escape the web root", async () => {
+  const app = createApp(localCfg());
+  // %2e%2e%2f survives URL's dot-segment collapse (it is not a literal "../" at that point) and
+  // only becomes ".." after decodeURIComponent, which runs afterwards.
+  // The SLASH has to be encoded too. WHATWG URL decodes `%2e` when deciding what is a dot-segment,
+  // so "/%2e%2e/x" is collapsed away before the handler runs and never reaches the check (that one
+  // is harmless, and is asserted separately below). "%2f" is NOT decoded there, so the whole thing
+  // stays one opaque segment, survives normalisation, and only becomes "../" at decodeURIComponent
+  // — after the collapse has already happened. That is the case that reached the filesystem.
+  for (const path of [
+    "/%2e%2e%2f%2e%2e%2fpackage.json",
+    "/assets/%2e%2e%2f%2e%2e%2f%2e%2e%2fpackage.json",
+  ]) {
+    const res = await app.request(path);
+    // 403 SPECIFICALLY: a 404 would also mean "you didn't get the file", but it would mean the
+    // confinement check never fired and the path simply missed. This must be a refusal.
+    expect(res.status).toBe(403);
+    expect(await res.text()).not.toContain("\"name\": \"repoyeti\"");
+  }
+  // Literal (or %2e-spelled) dot segments are neutralised by URL parsing itself: they normalise
+  // to an in-root path, so a plain miss is the correct answer.
+  expect((await app.request("/%2e%2e/%2e%2e/package.json")).status).toBe(404);
+});
+
+test("a sibling directory sharing the web root's prefix is not reachable", async () => {
+  // The one that a `startsWith(WEB_ROOT)` check let through: WEB_ROOT is `<repo>/web/dist` with
+  // no trailing separator, so `<repo>/web/dist-next/index.html` passed it — and the build really
+  // does create `dist-next` and `dist-old` (web/scripts/swap-dist.mjs), with best-effort cleanup
+  // that can leave them on disk to be served, unauthenticated, over the tunnel.
+  //
+  // Asserting 403 rather than "not 200" is the whole value of this test: under the old check the
+  // response was a 404 whenever the stale directory happened to be absent, so a laxer assertion
+  // would have passed against the bug on any machine that had just cleaned its build.
+  const res = await createApp(localCfg()).request("/%2e%2e%2fdist-next%2findex.html");
+  expect(res.status).toBe(403);
+});
+
+test("a malformed percent-escape is a 400, not a 500", async () => {
+  // decodeURIComponent throws URIError on "%ZZ". This route answers before ANY auth runs, so an
+  // uncaught throw here is an unauthenticated 500.
+  const res = await createApp(localCfg()).request("/%ZZ");
+  expect(res.status).toBe(400);
+});

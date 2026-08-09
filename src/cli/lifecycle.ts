@@ -6,6 +6,7 @@
  * can live beside these without one giant entry file.
  */
 import { spawn } from "node:child_process";
+import { buildDetachedSpawn } from "../detached-spawn.mjs";
 import { connect } from "node:net";
 import { resolve } from "node:path";
 import qrcode from "qrcode-terminal";
@@ -109,6 +110,15 @@ function applyIdentityMergeToConfig(cfg: RepoYetiConfig): void {
 
 // ── daemon ────────────────────────────────────────────────────────────────────
 
+/** The relaunch signal, carried BOTH as this CLI flag and as REPOYETI_RELAUNCH=1. The flag is what
+ *  survives the win32 WMI launch (which drops the env block); the env var covers the POSIX path and
+ *  anything that reads it directly. `start`'s own flag loop ignores unknown flags, so the extra
+ *  token is harmless to arg parsing. */
+const RELAUNCH_FLAG = "--relaunch";
+function isRelaunch(): boolean {
+  return process.env.REPOYETI_RELAUNCH === "1" || process.argv.includes(RELAUNCH_FLAG);
+}
+
 export async function start(rest: string[], options: { openUi?: boolean } = {}): Promise<void> {
   cleanupStaleUpdateArtifacts();
   const cfg = loadConfig();
@@ -135,8 +145,15 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   // still alive and answering /api/health during the ~800ms handoff, so probing here
   // would see "already running" and make the successor exit, leaving ZERO daemons.
   // It instead falls through to the REPOYETI_RELAUNCH port-wait below and takes over.
-  if (process.env.REPOYETI_DEV !== "1" && process.env.REPOYETI_RELAUNCH !== "1") {
-    const live = await findLiveInstance();
+  if (process.env.REPOYETI_DEV !== "1" && !isRelaunch()) {
+    // Three probes, not one. instance-pointer.mjs's own docstring calls a single probe "a COIN
+    // FLIP" here and says spawn-deciding callers must pass attempts >= 2: a live daemon that
+    // happens to be mid-scan can miss one 1s health probe, and the answer to "is one already
+    // running?" is then wrong in the expensive direction. writeInstanceInfo() overwrites the
+    // runtime pointer unconditionally, so the second daemon takes ownership of it while the
+    // first keeps serving and both write the same SQLite file — and the tray, launcher and MCP
+    // all follow whichever one wrote last.
+    const live = await findLiveInstance(1000, 3);
     if (live) {
       console.log(`\nRepoYeti is already running → ${live.url}\nNot starting a second instance.\n`);
       if (options.openUi) openUi(live.url);
@@ -193,7 +210,7 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
 
   // 2) watch known repos → refresh on change → SSE. Set up BEFORE serving so a change during
   //    boot isn't missed. Repos found later by discovery are watched as they're indexed.
-  startWatching(known);
+  await startWatching(known);
 
   // 3) serve immediately.
   let server: Awaited<ReturnType<typeof listen>> | null = null;
@@ -227,7 +244,7 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   // A daemon relaunched by the auto-updater (REPOYETI_RELAUNCH=1) waits for its predecessor to free
   // the preferred port so it rebinds the SAME port — an open browser tab's SSE then reconnects
   // seamlessly instead of the daemon hopping to a port the tab can't reach.
-  if (process.env.REPOYETI_RELAUNCH === "1") await waitForPortFree(port, 8000);
+  if (isRelaunch()) await waitForPortFree(port, 8000);
   server = await listen(app, port);
   const url = `http://127.0.0.1:${server.port}`;
   // Advertise where we actually landed (the port may have hopped) so the launcher
@@ -307,9 +324,25 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   setAutoUpdateHooks({
     relaunch: () => {
       try {
-        const child = spawn(process.argv[0]!, process.argv.slice(1), {
+        // Through buildDetachedSpawn, like every other detached launch here (editors, the
+        // portable window). `detached: true` is NOT a tree escape on Windows — detached-spawn's
+        // own header says so, and it is the whole reason that primitive exists. Left as a plain
+        // spawn, the successor stayed inside this process's tree for the ~800ms handoff, so the
+        // tray's Quit (`taskkill /T /F`, misc/tray-host-native) landing in that window killed
+        // BOTH the outgoing daemon and the replacement, leaving the user with none.
+        //
+        // The relaunch signal rides as a CLI FLAG (`--relaunch`), NOT only as an env var. On
+        // win32 buildDetachedSpawn hands the launch to WMI Win32_Process.Create, which takes a
+        // command-LINE and does NOT inherit the caller's environment block — so an env-only
+        // signal reached the transient powershell.exe and never the actual successor daemon. The
+        // successor then saw the predecessor still alive, concluded "already running", and exited:
+        // an applied update leaving ZERO daemons. A flag is part of the command line WMI does
+        // deliver. The env var is kept too, so the POSIX (env-inheriting) path is belt-and-braces.
+        const relaunchArgv = [process.argv[0]!, ...process.argv.slice(1), RELAUNCH_FLAG];
+        const plan = buildDetachedSpawn(process.platform, relaunchArgv);
+        const child = spawn(plan.argv[0]!, plan.argv.slice(1), {
           cwd: process.cwd(),
-          detached: true,
+          detached: plan.detached,
           stdio: "ignore",
           windowsHide: true,
           env: { ...process.env, REPOYETI_RELAUNCH: "1" },

@@ -141,3 +141,32 @@ test("POST /api/auth/logout-all succeeds and clears the session cookie", async (
   expect(res.status).toBe(200);
   expect((await res.json()).ok).toBe(true);
 });
+
+// ── logout must actually revoke every credential it implies ──────────────────────
+// Two audit findings, same shape: a "sign out" that leaves a live credential behind.
+test("POST /api/auth/logout clears the LOCAL BYPASS cookie too, not just the session", async () => {
+  // In remote mode the gate admits a loopback request on gm_local alone. A Sign out that left it
+  // alive meant the very next reload landed the user back in, fully authorized, having just been
+  // told they were signed out.
+  const res = await createApp(localCfg()).request("/api/auth/logout", { method: "POST" });
+  expect(res.status).toBe(200);
+  const cookies = res.headers.getSetCookie().join("\n");
+  expect(cookies).toContain("gm_session=");
+  expect(cookies).toContain("gm_local=");
+  // Both must be EXPIRED, not merely re-issued.
+  for (const line of cookies.split("\n")) {
+    expect(line).toMatch(/Max-Age=0|Expires=Thu, 01 Jan 1970/i);
+  }
+});
+
+test("POST /api/auth/logout-all revokes the owner's API bearer token", async () => {
+  // rotateKey() invalidates every signed COOKIE, but the API token is not a cookie and is not
+  // signed by that key — validBearerToken compares straight against cfg.apiToken. So the one
+  // credential explicitly designed to be used from a headless agent over the public tunnel was
+  // the one credential "sign out everywhere" did not touch.
+  const cfg = localCfg();
+  cfg.apiToken = "a-minted-token-value";
+  const res = await createApp(cfg).request("/api/auth/logout-all", { method: "POST" });
+  expect(res.status).toBe(200);
+  expect(cfg.apiToken).toBeUndefined();
+});

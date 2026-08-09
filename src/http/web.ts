@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import type { Hono } from "hono";
 import { compress } from "hono/compress";
+import { pathWithin } from "../paths.ts";
 
 /** Path to the built PWA (`web/dist`). Works in dev (relative to this source) and
  * when compiled (a `web/dist` shipped next to the binary). */
@@ -66,12 +67,28 @@ export function mountWeb(app: Hono): void {
   });
 
   app.get("/*", async (c) => {
-    let pathname = decodeURIComponent(new URL(c.req.url).pathname);
+    // decodeURIComponent throws URIError on a malformed escape ("/%ZZ"), which would surface as a
+    // 500 from the one route that answers before any auth runs. A path we can't decode is a path
+    // we won't serve.
+    let pathname: string;
+    try {
+      pathname = decodeURIComponent(new URL(c.req.url).pathname);
+    } catch {
+      return c.text("bad request", 400);
+    }
     if (pathname === "/" || pathname === "") pathname = "/index.html";
 
     const embedded = embeddedWeb();
     const filePath = normalize(join(WEB_ROOT, pathname));
-    if (!filePath.startsWith(WEB_ROOT)) return c.text("forbidden", 403);
+    // pathWithin(), not startsWith(): WEB_ROOT has no trailing separator, so a raw prefix test
+    // also accepts any SIBLING directory whose name merely begins with "dist" — and
+    // web/scripts/swap-dist.mjs really does create `web/dist-next` and `web/dist-old`, with
+    // best-effort cleanup that can leave them on disk. The `..` needed to reach them survives
+    // URL's own dot-segment collapse when percent-encoded ("%2e%2e%2f"), because the decode above
+    // runs AFTER that collapse. This route carries no auth at all, so the escape was reachable
+    // pre-sign-in over the tunnel. pathWithin is segment-boundary aware (src/paths.ts) and is
+    // what every other confinement check in this codebase already uses.
+    if (!pathWithin(WEB_ROOT, filePath)) return c.text("forbidden", 403);
 
     const lastSeg = pathname.slice(pathname.lastIndexOf("/") + 1);
     const isAssetRequest = pathname.startsWith("/assets/") || STATIC_EXT.test(lastSeg);

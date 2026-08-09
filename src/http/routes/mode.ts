@@ -22,14 +22,16 @@ import {
 import { broadcast } from "../../bus.ts";
 import { jsonError } from "../../contract.ts";
 import { setSecret, deleteSecret, TUNNEL_TOKEN } from "../../secrets.ts";
-import { parseBody, TunnelSettingsSchema, RelaySettingsSchema } from "../../schemas.ts";
+import { parseBody, ModeUpdateSchema, TunnelSettingsSchema, RelaySettingsSchema } from "../../schemas.ts";
 
 export function register(app: Hono, { cfg }: Deps): void {
   // Flip local ↔ remote. Enabling remote auto-manages the Cloudflare tunnel, but refuses
   // until an owner is claimed (a signed-in owner) so a stranger can't race TOFU over a
   // freshly-opened tunnel. Disabling tears the tunnel down.
   app.put("/api/mode", async (c) => {
-    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const p = await parseBody(c, ModeUpdateSchema);
+    if (!p.ok) return p.res;
+    const b = p.data;
     const mode = b.mode === "remote" ? "remote" : b.mode === "local" ? "local" : null;
     if (!mode) return jsonError(c, "BAD_MODE", "mode must be 'local' or 'remote'");
     if (mode === "remote") {

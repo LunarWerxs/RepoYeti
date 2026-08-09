@@ -403,11 +403,15 @@ export const AI_ADAPTERS: Record<AiProviderId, AiAdapter> = {
   },
 
   gemini: {
-    // model id goes in the path; the key goes in the query string (no auth header).
-    modelsUrl: (apiKey) => `${GEMINI_BASE}?pageSize=1000&key=${encodeURIComponent(apiKey)}`,
-    generateUrl: (model, apiKey) =>
-      `${GEMINI_BASE}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    headers: () => ({ "content-type": "application/json" }),
+    // Model id goes in the path; the key goes in the `x-goog-api-key` HEADER, like every other
+    // provider here. It used to ride in the query string (`?key=…`), which Google supports but
+    // which puts a live credential somewhere URLs habitually get written down: proxy and gateway
+    // access logs, crash reports, and any fetch/undici debug output. Headers are not logged by
+    // default anywhere in that chain. Same request, same auth, one fewer place for the key to
+    // come to rest.
+    modelsUrl: () => `${GEMINI_BASE}?pageSize=1000`,
+    generateUrl: (model) => `${GEMINI_BASE}/${encodeURIComponent(model)}:generateContent`,
+    headers: (apiKey) => ({ "content-type": "application/json", "x-goog-api-key": apiKey }),
     models: (json) => {
       const raw = (json as { models?: unknown })?.models;
       const models: Array<Record<string, unknown>> = Array.isArray(raw) ? raw : [];

@@ -23,6 +23,9 @@ function mountPanel(props: { canStash: boolean; dirty: number }) {
   // DropdownMenuContent teleports into document.body (reka-ui's DropdownMenuPortal), so the
   // component must be attached to a live document for the portal target to exist and for the
   // pop/drop dropdown to actually open in happy-dom (mirrors BranchPanel.test.ts's approach).
+  // The drop confirm Dialog is stubbed to plain passthrough elements (mirrors
+  // RemoteAccess.test.ts) so its content is queryable without reka-ui's portal/open-transition
+  // machinery in happy-dom.
   activeWrapper = mount(
     {
       components: { StashPanel, TooltipProvider },
@@ -32,7 +35,20 @@ function mountPanel(props: { canStash: boolean; dirty: number }) {
     },
     {
       props: { repoId, ...props },
-      global: { plugins: [i18n] },
+      global: {
+        plugins: [i18n],
+        stubs: {
+          // NOT stubbing 'teleport' globally: reka-ui's DropdownMenuPortal also uses <Teleport>,
+          // and this test relies on it teleporting for real into document.body (see openMenu
+          // below). Only the Dialog primitives are stubbed, so DialogContent never reaches its
+          // own <Teleport> in the first place.
+          Dialog: { template: "<div><slot /></div>" },
+          DialogContent: { template: "<section><slot /></section>" },
+          DialogHeader: { template: "<header><slot /></header>" },
+          DialogTitle: { template: "<h2><slot /></h2>" },
+          DialogDescription: { template: "<p><slot /></p>" },
+        },
+      },
       attachTo: document.body,
     },
   );
@@ -124,7 +140,7 @@ describe("StashPanel.vue", () => {
     expect(popSpy).toHaveBeenCalledWith(repoId, 0);
   });
 
-  it("#18 blocks stashDrop while busy, then allows it once free", async () => {
+  it("drop is confirm-gated: the Trash2 button opens a dialog naming the stash, not an immediate drop", async () => {
     const store = useStore();
     store.stashesByRepo[repoId] = {
       ok: true,
@@ -135,20 +151,55 @@ describe("StashPanel.vue", () => {
 
     const wrapper = mountPanel({ canStash: true, dirty: 0 });
     const menu = await openMenu(wrapper);
-    // Re-find the button after each state change — see the stashSave test above for why a
-    // stale wrapper reference can miss a reactive re-render.
-    const findDropBtn = () => menu.findAll("button").find((b) => b.attributes("aria-label") === "Drop")!;
-    expect(findDropBtn().exists()).toBe(true);
+    const dropIcon = menu.findAll("button").find((b) => b.attributes("aria-label") === "Drop")!;
+    expect(dropIcon.exists()).toBe(true);
 
+    await dropIcon.trigger("click");
+    await wrapper.vm.$nextTick();
+    // A single tap must not have dropped the stash yet — the confirm dialog is in the way.
+    expect(dropSpy).not.toHaveBeenCalled();
+    // The dialog body (stubbed DialogDescription → <p>) names the specific stash, so the owner
+    // knows what they're about to lose before confirming.
+    expect(wrapper.find("p").text()).toContain("wip");
+
+    const confirmBtn = wrapper.findAll("button").find((b) => b.text() === "Drop")!;
+    expect(confirmBtn.exists()).toBe(true);
+    await confirmBtn.trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(dropSpy).toHaveBeenCalledOnce();
+    expect(dropSpy).toHaveBeenCalledWith(repoId, 0);
+  });
+
+  it("#18 blocks the confirmed stashDrop while busy, then allows it once free", async () => {
+    const store = useStore();
+    store.stashesByRepo[repoId] = {
+      ok: true,
+      code: "OK",
+      stashes: [{ index: 0, message: "wip", date: 0 }],
+    };
+    const dropSpy = vi.spyOn(store, "stashDrop").mockResolvedValue({ ok: true, code: "OK" });
+
+    const wrapper = mountPanel({ canStash: true, dirty: 0 });
+    const menu = await openMenu(wrapper);
+    const dropIcon = () => menu.findAll("button").find((b) => b.attributes("aria-label") === "Drop")!;
+    const confirmBtn = () => wrapper.findAll("button").find((b) => b.text() === "Drop")!;
+
+    // Open the confirm dialog, then confirm while a git op is already in flight for the repo:
+    // the drop must no-op (matches stashSave/stashPop above).
+    await dropIcon().trigger("click");
+    await wrapper.vm.$nextTick();
     store.gitOpBusy[repoId] = "stash";
     await wrapper.vm.$nextTick();
-    await findDropBtn().trigger("click");
+    await confirmBtn().trigger("click");
     await wrapper.vm.$nextTick();
     expect(dropSpy).not.toHaveBeenCalled();
 
+    // Free again: re-open and confirm should now go through.
     store.gitOpBusy[repoId] = undefined;
     await wrapper.vm.$nextTick();
-    await findDropBtn().trigger("click");
+    await dropIcon().trigger("click");
+    await wrapper.vm.$nextTick();
+    await confirmBtn().trigger("click");
     await wrapper.vm.$nextTick();
     expect(dropSpy).toHaveBeenCalledOnce();
     expect(dropSpy).toHaveBeenCalledWith(repoId, 0);

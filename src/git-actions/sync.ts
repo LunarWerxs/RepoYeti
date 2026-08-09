@@ -5,6 +5,8 @@
  * Auth + author identity are injected per operation (`-c core.sshCommand` + `-c user.*`)
  * via git.ts — global/repo config is never mutated.
  */
+import { rmSync, statSync } from "node:fs";
+import { join } from "node:path";
 import {
   gitFor,
   identityConfigArgs,
@@ -32,6 +34,26 @@ function isTimeout(err: unknown): boolean {
  * of "Writing objects:  43% (…)". Taking line 1 blindly would report a progress bar as the error.
  * Prefer git's own diagnostic prefixes, then the first line that isn't progress.
  */
+/**
+ * Strip http(s) userinfo out of every URL in a blob of text.
+ *
+ * Distinct from `redactRemoteUrl` (share/redact.ts), which redacts ONE known URL: this scrubs
+ * URLs embedded anywhere inside a message we did not compose. It has to exist because git's own
+ * diagnostics quote the remote back verbatim — `fatal: unable to access
+ * 'https://user:ghp_xxx@github.com/o/r.git/': …` — and for an owner who pasted a PAT into their
+ * remote (which is what `git clone` writes, and what several CI setups produce) that line IS a
+ * live credential. It then travels into an `ActionResult.message`, which reaches the HTTP
+ * response body, the log, and — for a control-tier share guest — someone who was never given
+ * that token.
+ *
+ * Applied for EVERY caller, not just guests: a credential does not belong in a log line either.
+ * Non-http schemes are left alone (`ssh://git@host/…` — `git` there is an account name, not a
+ * secret; dropping it would garble the message the owner has to read).
+ */
+export function scrubUrlCredentials(text: string): string {
+  return text.replace(/\b(https?:\/\/)[^/\s'"@]*@/gi, "$1");
+}
+
 function diagnosisLine(raw: string): string {
   const lines = raw
     .split(/[\r\n]+/)
@@ -40,12 +62,12 @@ function diagnosisLine(raw: string): string {
   const isProgress = (l: string): boolean =>
     /\d+% \(\d+\/\d+\)/.test(l) ||
     /^(remote: )?(Enumerating|Counting|Compressing|Writing|Receiving|Resolving|Unpacking|Total|Cloning into) /i.test(l);
-  return (
+  const line =
     lines.find((l) => /^(remote: )?(fatal|error):/i.test(l)) ??
     lines.find((l) => !isProgress(l)) ??
     lines[0] ??
-    "git error"
-  );
+    "git error";
+  return scrubUrlCredentials(line);
 }
 
 /** What the caller knows that makes a timeout diagnosable. */
@@ -101,7 +123,9 @@ export function classify(err: unknown, ctx?: ClassifyContext): ActionResult {
   // actually asked for, so the message points at the right thing.
   if (low.includes("could not read password") || low.includes("terminal prompts disabled")) {
     const who = /could not read password for '([^']+)'/i.exec(raw)?.[1] ?? "";
-    const login = /^https?:\/\/([^@]+)@/i.exec(who)?.[1] ?? "";
+    // Take only the username half of the userinfo: `https://user:ghp_xxx@github.com` would
+    // otherwise put the token itself in the message we hand back to the caller.
+    const login = /^https?:\/\/([^@:]+)(?::[^@]*)?@/i.exec(who)?.[1] ?? "";
     return fail(
       "GH_ACCOUNT_NOT_AUTHORIZED",
       login
@@ -181,8 +205,33 @@ export async function classifyRemote(
   err: unknown,
 ): Promise<ActionResult> {
   if (!isTimeout(err)) return classify(err);
+  // A block-timeout is not a clean exit: simple-git SIGINTs the child mid-flight, and if git was
+  // between "create .git/index.lock" and "remove it", the lock outlives it. Nothing removes it
+  // afterwards, so every later operation on that repo fails with "Unable to create
+  // '.git/index.lock': File exists" — and the owner is holding a phone, which is the one place
+  // they cannot go and delete it. Clear it here, where we know a kill just happened.
+  clearStaleIndexLock(absPath);
   const couldPromptForPassphrase = !identity?.sshKeyPath && (await hasSshRemote(absPath));
   return classify(err, { couldPromptForPassphrase });
+}
+
+/**
+ * Remove `.git/index.lock` if it looks like the corpse of the op we just killed.
+ *
+ * Age-checked, and this is the whole safety argument: a lock younger than the timeout budget may
+ * belong to a DIFFERENT git process still legitimately working (the user's own shell, an editor),
+ * and deleting that one would corrupt a live index write. A lock at least as old as the budget we
+ * just spent waiting cannot be a healthy concurrent operation. Best-effort throughout — failing to
+ * clean up must never replace the real error being reported.
+ */
+export function clearStaleIndexLock(absPath: string): void {
+  try {
+    const lock = join(absPath, ".git", "index.lock");
+    const age = Date.now() - statSync(lock).mtimeMs;
+    if (age >= NET_BLOCK_MS) rmSync(lock, { force: true });
+  } catch {
+    /* no lock, no .git, or no permission — nothing to recover */
+  }
 }
 
 export async function gitFetch(

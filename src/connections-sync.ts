@@ -41,8 +41,19 @@ import { broadcast } from "./bus.ts";
 /**
  * The ONLY daemon-config keys that sync. Deliberately excludes machine-specific state (roots,
  * servers, port, maxDepth, maxRepos), the security-relevant access `mode`, unattended-action master
- * toggles (`autoCommit`, `autoCommitPush` — a fresh machine must not start pushing on its own), and
- * every secret (oauth, tunnel, ai keys, apiToken). What's left is portable UI/behaviour preference.
+ * toggles, and every secret (oauth, tunnel, ai keys, apiToken). What's left is portable
+ * UI/behaviour preference.
+ *
+ * "Unattended-action master toggle" means ANY switch that makes the daemon touch a repository
+ * with nobody watching, and the rule has to be applied to all of them or it protects nothing:
+ *   • `autoCommit` / `autoCommitPush` — a fresh machine must not start pushing on its own.
+ *   • `keepInSync` / `syncCheck` — and these two were in the list anyway, which was the bug.
+ *     `keepInSync` makes the daemon auto fast-forward-pull (see remote-sync.ts canAutoPull), so
+ *     enabling cloud sync on a second machine silently armed unattended pulling there. The pull
+ *     is guarded to safe fast-forwards, so this was never destructive — but consent is the
+ *     entire point of the exclusion, and a working copy moving under you on a machine you never
+ *     configured is exactly the surprise it exists to prevent.
+ * The CADENCE knobs still sync; they only matter on a machine that has opted in locally.
  */
 const PREF_KEYS = [
   "diffStats",
@@ -51,9 +62,7 @@ const PREF_KEYS = [
   "remoteEditing",
   "diffPatchBytes",
   "diffPatchEnabled",
-  "syncCheck",
   "syncIntervalSecs",
-  "keepInSync",
   "autoCommitMode",
   "autoCommitIntervalSecs",
   "autoCommitAt",
