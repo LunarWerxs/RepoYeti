@@ -52,8 +52,8 @@
     "vitest": "^4.1.9",
     "vue-tsc": "^3.3.5"
   },
+  "//overrides": "Do NOT pin brace-expansion to one version. minimatch 5/9 want ^2 (`module.exports = expand`); minimatch 10 — what workbox-build's glob uses — wants ^5 (named `expand` export). A flat 2.1.2 pin made the PWA build throw '(0 , brace_expansion_1.expand) is not a function' inside workbox's globbing, which is only a *warning*: the build stayed green while the precache silently shrank to the 6 public/ files, so the app shell was never cached offline. Bun does not support nested overrides (it warns and ignores them), so each requester must resolve on its own; every line is past the CVE-2025-5889 ReDoS fix (1.1.12 / 2.0.2 / 3.0.1 / 4.0.1), so natural resolution stays patched.",
   "overrides": {
-    "brace-expansion": "2.1.2",
     "dompurify": "3.4.12",
     "fast-uri": "3.1.4"
   },
