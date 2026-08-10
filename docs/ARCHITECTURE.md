@@ -79,12 +79,12 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | **Git engine** | **`simple-git`** over the system `git` binary | Reuses the user's installed, optimized git. Its per-call `env` option maps *directly* onto `GIT_SSH_COMMAND` / `GIT_AUTHOR_*` injection. No JS git reimplementation to trust. |
 | **HTTP framework** | **Hono** | Tiny, TS-native. Its middleware model makes auth **structural** — a single `app.use()` gates the whole router, so you *cannot* add an unauthenticated route by accident. |
 | **Storage** | **`bun:sqlite`**, WAL mode, `synchronous=NORMAL` | Only store that survives concurrent writers (watcher + API + git ops). One file: `repoyeti.db`. Retry on `SQLITE_BUSY`; fall back to `journal_mode=DELETE` if WAL won't open (Windows AV). |
-| **Tunnel** | **`cloudflared` quick or named tunnel** + stable OAuth callback for Quick Tunnels | Quick Tunnels stay zero-config and rotating; the relay returns OAuth to their announced origin without proxying the dashboard. Named tunnels use their stable callback directly. Tunnel client bundled as a pinned binary. |
+| **Tunnel** | **`cloudflared` quick or named tunnel** + stable OAuth callback for Quick Tunnels | Quick Tunnels stay zero-config and rotating; the relay returns OAuth to their announced origin without proxying the dashboard. Named tunnels use their stable callback directly. The tunnel client is NOT vendored: the release is a single executable (release.yml asserts a one-file archive), so `cloudflared` must be on `PATH` for `--tunnel` in every install. `resolveCloudflaredExecutable` still prefers a sibling `vendor/` copy if one is ever placed there. |
 | **Auth** | **"Sign in with Connections"** — public OIDC (AEGIS) at `accounts.connections.icu`; daemon verifies the login token and trusts one owner `sub` | Stand-alone relying party using connections.icu's **public** OAuth — like "Log in with Google." No shared secret, no Connections-repo coupling, no homegrown password/PIN. See §7. |
 | **Transport / sync** | **SSE** daemon→phone, **REST** phone→daemon | v2 decided this. SSE auto-reconnects through cloudflared with no WebSocket upgrade; maps cleanly onto the event-driven watcher. Commands are request/response → REST. |
 | **Frontend** | **Vue 3 + Vite**, PWA, **embedded in the binary**; **import pre-built libraries, minimal hand-written UI** | Static files bundled at `bun --compile` time; daemon serves them — no second server. **Owner directive: lean on smart pre-built libs, write minimal UI to maintain.** Stack: **reka-ui** (shadcn-vue–style component kit, `src/components/ui/`) · **Tailwind v4** (`@tailwindcss/vite`) · **@vueuse/core** (composables — `useEventSource` handles SSE+reconnect, `useColorMode`, `useLocalStorage`) · **@formkit/auto-animate** (zero-config list/card transitions — solves "no layout shift on SSE updates" for free) · **@lucide/vue** icons · **vue-sonner** toasts · **Pinia** state · **vite-plugin-pwa** (auto manifest + service worker). |
 | **Secrets** | **OS keychain via `keytar`** | SSH key *paths* in SQLite (the daemon never reads key bytes — only passes the path to `ssh -i`). Git PATs, the owner's Connections OAuth tokens, and any confidential `client_secret` in keychain by handle, resolved at call time. |
-| **Packaging** | `bun --compile` per platform, shipped via **npm** | `npm install -g repoyeti && repoyeti start`. ~25–35 MB incl. embedded frontend + bundled cloudflared. Tauri tray deferred to Phase 6. |
+| **Packaging** | `bun --compile` per platform, shipped via **npm** | `npm install -g repoyeti && repoyeti start`. ~25-35 MB incl. embedded frontend. `cloudflared` is a separate PATH dependency, not bundled. Tauri tray deferred to Phase 6. |
 
 ---
 
@@ -640,11 +640,12 @@ repoyeti/
 │  ├─ src/ … (App, RepoCard, IdentitySelector, sse client)
 │  └─ vite.config.ts         # build → embedded static assets
 ├─ relay/                    # stable address + Quick Tunnel OAuth callback Worker
-├─ vendor/cloudflared/       # pinned per-platform binaries
+├─ vendor/cloudflared/       # gitignored, optional local drop-in; never shipped
 └─ scripts/build.ts          # vite build → bun --compile per target
 ```
 
-The daemon is the **primary artifact**; `web/` builds into it; `vendor/cloudflared/` ships with it;
+The daemon is the **primary artifact**; `web/` builds into it; `cloudflared` stays an external PATH
+dependency (nothing is vendored into the release);
 `relay/` contains the separately deployed redirect Worker used by stable links and Quick Tunnel
 OAuth return routing (see §15); a future `tray/` (Tauri) would spawn the same binary unchanged.
 `scripts/check-boundaries.ts` enforces the layering: `read ⊥ service`, `vcs ⊥ service`, `cli ⊥

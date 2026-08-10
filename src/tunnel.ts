@@ -53,6 +53,27 @@ export function resolveCloudflaredExecutable(
 }
 
 /**
+ * A missing binary is the single most common tunnel failure, and `spawn cloudflared ENOENT` does not
+ * tell anyone what to do about it. Note this is NOT only a source-checkout problem: the release is a
+ * single self-contained executable (see .github/workflows/release.yml, which asserts the archive
+ * holds exactly one file), so `vendor/cloudflared` is never populated and `--tunnel` needs
+ * cloudflared on PATH in every install. Say that, and say where to get it.
+ */
+function launchFailure(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  // Bun throws `Executable not found in $PATH: "cloudflared.exe"` synchronously; Node emits an
+  // async ENOENT on the child. Both mean the same thing to the person running the command.
+  const missing = /ENOENT|not found in \$PATH|executable not found/i.test(message);
+  if (!missing) return `could not launch cloudflared: ${message}`;
+  return [
+    "cloudflared was not found on PATH, so the tunnel could not start.",
+    "Remote access needs it installed once:",
+    "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
+    "Verify with `cloudflared --version`, then start RepoYeti again.",
+  ].join("\n  ");
+}
+
+/**
  * Spawn cloudflared with `args`, watching the merged stdout/stderr stream. The first time `detect`
  * returns a URL from a chunk, fire `onUrl` (once). A launch failure or an exit before readiness
  * fires `onError`. Shared by the quick and named tunnels — they differ only in args + `detect`.
@@ -67,7 +88,7 @@ function spawnCloudflared(
   try {
     proc = spawn(resolveCloudflaredExecutable(), args, { stdio: ["ignore", "pipe", "pipe"] });
   } catch (err) {
-    onError(`could not launch cloudflared: ${err instanceof Error ? err.message : err}`);
+    onError(launchFailure(err));
     return { stop() {} };
   }
 
@@ -83,7 +104,8 @@ function spawnCloudflared(
   proc.stdout?.on("data", scan);
   proc.stderr?.on("data", scan);
 
-  proc.on("error", (err) => onError(`cloudflared error: ${err.message}`));
+  // ENOENT arrives here, not as a throw from spawn(): the failure is asynchronous.
+  proc.on("error", (err) => onError(launchFailure(err)));
   proc.on("exit", (code) => {
     if (!found) onError(`cloudflared exited (code ${code}) before the tunnel was ready`);
   });

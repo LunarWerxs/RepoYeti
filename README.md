@@ -62,31 +62,49 @@ RepoYeti runs a small daemon on your machine, finds every git repo you have, and
 
 ## Quick start
 
+Grab your platform from [Releases](https://github.com/LunarWerxs/RepoYeti/releases): one file, no
+runtime to install. On Windows that's `repoyeti-windows-x64.exe`; run it directly. The dashboard is
+embedded in the executable, so there is no `web` or `node_modules` folder to keep beside it. The
+one-file ZIP remains available for the automatic updater.
+
 ```sh
-git clone https://github.com/LunarWerxs/RepoYeti.git
-cd repoyeti && bun install
-bun run src/index.ts add-root ~/code   # point it at where your repos live
-bun run src/index.ts start             # daemon on 127.0.0.1:7171
+repoyeti add-root ~/code   # point it at where your repos live
+repoyeti start             # daemon on 127.0.0.1:7171
 ```
 
 To reach it from your phone (opens a Cloudflare tunnel and prints a QR code):
 
 ```sh
-bun run src/index.ts start --tunnel
+repoyeti start --tunnel
 ```
 
-Quick Tunnel sign-in uses the registered `https://app.repoyeti.com/oauth/callback` only to return
-the OAuth response to the current daemon. Dashboard and Git traffic still go directly through the
-Cloudflare tunnel, including when you choose the temporary `*.trycloudflare.com` address.
-If that callback announcement fails during startup, RepoYeti retries it three times with bounded
-backoff. Login remains at a safe 503 while recovery is in progress and asks for a restart only after
-those retries are exhausted.
+Remote access needs [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+installed and on `PATH`; it is not bundled, in a release or a clone. Check with `cloudflared
+--version`. If it is missing, RepoYeti says so and keeps serving locally.
 
-Prefer a prebuilt copy? Grab your platform from
-[Releases](https://github.com/LunarWerxs/RepoYeti/releases). On Windows, download
-`repoyeti-windows-x64.exe` and run it directly. The dashboard is embedded in the executable; there
-is no `web` or `node_modules` folder to keep beside it. The one-file ZIP remains available for the
-automatic updater.
+Sign-in over a tunnel returns through RepoYeti's registered callback at `app.repoyeti.com`; your
+dashboard and Git traffic never pass through it. See [Remote access](docs/STABLE_ADDRESS.md).
+
+### Running from a clone
+
+The repo has **two** dependency sets (the daemon's and the dashboard's), and the dashboard is
+normally compiled into the release binary rather than committed, so a fresh clone has to build it
+once. Without that step the daemon starts and serves `web app not built`.
+
+```sh
+git clone https://github.com/LunarWerxs/RepoYeti.git
+cd RepoYeti
+
+bun install                     # daemon deps
+bun install --cwd web           # dashboard deps (separate package.json)
+bun run --cwd web build:fast    # compile the dashboard into web/dist
+
+bun run src/index.ts add-root ~/code
+bun run src/index.ts start
+```
+
+You need [Bun](https://bun.com/docs/installation) ≥ 1.1 and `git` on `PATH`, plus `cloudflared` if
+you want `--tunnel` (same as a release, see above).
 
 ## AI setup: a free Groq key in 3 clicks
 

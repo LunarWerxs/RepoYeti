@@ -318,8 +318,15 @@ export function tunnelActive(): boolean {
  * and exposed at /api/status when the tunnel is ready. `cfg` selects the flavour — a NAMED tunnel
  * (stable host) when `tunnel.hostname` + a token are configured, else the default QUICK tunnel.
  * `onReady` lets the CLI print the URL (with a QR) without coupling this module to the terminal.
+ * `onFailed` does the same for the failure: without it a launch error is only ever broadcast over
+ * SSE, so a CLI run with no dashboard open (the first thing a source user does) sat at "Starting
+ * cloudflared tunnel…" forever with the reason discarded.
  */
-export function startManagedTunnel(cfg: RepoYetiConfig, onReady?: (url: string) => void): void {
+export function startManagedTunnel(
+  cfg: RepoYetiConfig,
+  onReady?: (url: string) => void,
+  onFailed?: (message: string) => void,
+): void {
   if (tunnelHandle || tunnelStarting || !serverPort) return;
   tunnelStarting = true;
   const onUrl = (url: string): void => {
@@ -336,6 +343,7 @@ export function startManagedTunnel(cfg: RepoYetiConfig, onReady?: (url: string) 
   const onErr = (msg: string): void => {
     tunnelStarting = false;
     tunnelHandle = null;
+    onFailed?.(msg);
     broadcast("daemon_status", { tunnelUrl: null, tunnelActive: false, error: msg });
   };
   const named = namedTunnel(cfg);

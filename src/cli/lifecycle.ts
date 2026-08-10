@@ -291,11 +291,20 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   const ownerClaimed = !!(liveCfg.oauth?.ownerSub || liveCfg.oauth?.ownerEmail);
   if (wantTunnel || (accessMode(liveCfg) === "remote" && ownerClaimed)) {
     console.log("\nStarting cloudflared tunnel…");
-    startManagedTunnel(liveCfg, (tunnelUrl) => {
-      console.log(`\n  ▸ Remote URL:  ${tunnelUrl}\n`);
-      qrcode.generate(tunnelUrl, { small: true });
-      console.log("  Scan to open on your phone, then Sign in with Connections.\n");
-    });
+    startManagedTunnel(
+      liveCfg,
+      (tunnelUrl) => {
+        console.log(`\n  ▸ Remote URL:  ${tunnelUrl}\n`);
+        qrcode.generate(tunnelUrl, { small: true });
+        console.log("  Scan to open on your phone, then Sign in with Connections.\n");
+      },
+      // The daemon keeps serving locally when the tunnel dies, so this is a warning, not a fatal
+      // error — but it must reach the terminal, or --tunnel just appears to hang.
+      (message) => {
+        console.error(`\n  ⚠ Tunnel not started: ${message}\n`);
+        console.error("  RepoYeti is still running locally at the address above.\n");
+      },
+    );
   }
 
   // 6) progressive background hydration — readGate (see gitgate.ts) bounds the git fanout
