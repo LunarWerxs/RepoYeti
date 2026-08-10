@@ -11,11 +11,15 @@ import {
   isRemoteRequest,
   hasLocalBypass,
   type AuthOptions,
+  type HandleLoginOptions,
+  type OAuthCallbackUnavailableReason,
+  OAuthCallbackUnavailableError,
 } from "../../auth.ts";
 import { rememberTokens, clearTokens, pullNow } from "../../connections-sync.ts";
 import { deleteSecret, API_TOKEN } from "../../secrets.ts";
 import { effectiveGuest } from "../../auth.ts";
 import { clearGuestCookie } from "../../share/index.ts";
+import { getOAuthCallback, getOAuthCallbackStatus } from "../../runtime.ts";
 
 export function register(app: Hono, { cfg }: Deps): void {
   // Public: lets the PWA decide whether to show the "Sign in with Connections" screen,
@@ -102,11 +106,24 @@ export function register(app: Hono, { cfg }: Deps): void {
       });
     },
   };
+  const loginOpts: HandleLoginOptions = {
+    ...authOpts,
+    resolveRedirect: async (origin) => {
+      const callback = getOAuthCallback(cfg, origin);
+      if (!callback) {
+        const status = getOAuthCallbackStatus(cfg, origin);
+        const reason: OAuthCallbackUnavailableReason =
+          status === "failed" || status === "incompatible" ? status : "temporary";
+        throw new OAuthCallbackUnavailableError(reason);
+      }
+      return callback;
+    },
+  };
 
   // OIDC dance (only meaningful when configured). oauthGuard guarantees cfg.oauth is present.
   const oauthGuard = (h: (c: Context) => Promise<Response>) => (c: Context) =>
     authEnforced(cfg) ? h(c) : c.text("Sign-in is not configured for this daemon.", 404);
-  app.get("/oauth/login", oauthGuard((c) => handleLogin(c, cfg.oauth!, authOpts)));
+  app.get("/oauth/login", oauthGuard((c) => handleLogin(c, cfg.oauth!, loginOpts)));
   app.get("/oauth/finish", oauthGuard((c) => handleComplete(c, cfg.oauth!, authOpts)));
   app.get("/oauth/callback", oauthGuard((c) => handleComplete(c, cfg.oauth!, authOpts)));
 }

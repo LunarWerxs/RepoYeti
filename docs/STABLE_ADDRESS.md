@@ -31,6 +31,15 @@ It needs no account or domain, but it changes when RepoYeti restarts. Existing s
 bookmarks that contain the old address then stop working. Choose this when you specifically prefer
 Cloudflare's temporary address over RepoYeti's stable front door.
 
+This choice changes the address shown to visitors, not the OAuth registration. RepoYeti still
+announces the current tunnel to `app.repoyeti.com` once at startup so the registered callback can
+return `code` and `state` to `/oauth/finish`. The hosted service does not proxy the dashboard or
+implicitly enable the stable RepoYeti address.
+
+If the startup announcement is rejected temporarily—for example because the host clock has just
+been corrected—RepoYeti retries after 1, 3, and 10 seconds. The sign-in page remains unavailable
+during those retries and recommends restarting only if every attempt fails.
+
 ## Custom domain
 
 If you own a domain on Cloudflare, a named tunnel serves RepoYeti at a hostname you control, such

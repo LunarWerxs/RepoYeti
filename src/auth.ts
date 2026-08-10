@@ -10,11 +10,10 @@
  * local-only (127.0.0.1) and unauthenticated — safe because nothing can reach it.
  *
  * Flow (daemon-side PKCE; the phone never holds tokens):
- *   /oauth/login → authorize (redirect_uri = <origin>/oauth/callback) with signed state that
- *   embeds this daemon's origin → IdP → <origin>/oauth/callback?code&state → token exchange →
- *   verify id_token (JWKS) → owner check → signed session cookie. The IdP allow-lists the daemon's
- *   OWN callback (app.repoyeti.com/oauth/callback + the loopback); the old rotating-URL "shim" Worker
- *   is retired (see config.ts CONNECTIONS_OAUTH + handleLogin below).
+ *   /oauth/login → authorize with the exact registered redirect URI stored in signed state → IdP →
+ *   callback → /oauth/finish → token exchange with that same redirect URI → verify id_token (JWKS)
+ *   → owner check → signed session cookie. Quick Tunnels use the stable relay callback; loopback and
+ *   other stable origins complete directly on the daemon.
  *
  * Reusable across apps: the OIDC handlers (handleLogin/handleComplete/handleLogout/…) take a bare
  * `OAuthConfig` plus an optional `AuthOptions` bag (cookie names, signing secret, a TOFU-persist
@@ -152,8 +151,8 @@ function clientProto(c: Context): string {
 function isHttps(c: Context): boolean {
   return clientProto(c) === "https";
 }
-/** The daemon's public origin as the browser reached it (https over a tunnel). This
- * is what we stamp into `state` so the shim bounces back to a reachable URL. */
+/** The daemon's public origin as the browser reached it (https over a tunnel). This is signed into
+ * state so the relay return and the final post-login navigation stay bound to the initiating host. */
 function publicOrigin(c: Context): string {
   const u = new URL(c.req.url);
   u.protocol = `${clientProto(c)}:`;
@@ -241,7 +240,10 @@ export function handleContinueLocal(c: Context, opts?: AuthOptions): Response {
 }
 
 // ── HTML for the auth-complete error page ──────────────────────────────────────
-function errPage(message: string): string {
+function errPage(
+  message: string,
+  action: { href: string; label: string } = { href: "/oauth/login", label: "Try again" },
+): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RepoYeti — sign in</title>
 <body style="margin:0;background:#0e0e12;color:#e6e6ea;font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh">
@@ -249,7 +251,7 @@ function errPage(message: string): string {
 <div style="font-size:40px">🔒</div>
 <h2 style="margin:12px 0 8px">Can't sign you in</h2>
 <p style="color:#9a9aa6;font-size:14px;line-height:1.5">${message}</p>
-<a href="/oauth/login" style="display:inline-block;margin-top:14px;background:#3ddc84;color:#06210f;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:9px">Try again</a>
+<a href="${action.href}" style="display:inline-block;margin-top:14px;background:#3ddc84;color:#06210f;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:9px">${action.label}</a>
 </div></body>`;
 }
 
@@ -262,23 +264,67 @@ type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<
 export interface HandleLoginOptions extends AuthOptions {
   /** Override the fetch used for OIDC discovery (lets a unit test avoid a live network). */
   fetchImpl?: FetchLike;
+  /** Resolve the exact registered callback for the browser-visible origin. */
+  resolveRedirect?: (origin: string) => Promise<{ redirectUri: string; relayId?: string }>;
+}
+
+export type OAuthCallbackUnavailableReason = "temporary" | "failed" | "incompatible";
+
+export class OAuthCallbackUnavailableError extends Error {
+  constructor(readonly reason: OAuthCallbackUnavailableReason) {
+    super("Quick Tunnel OAuth callback is unavailable");
+  }
 }
 
 export async function handleLogin(c: Context, oauth: OAuthConfig, opts?: HandleLoginOptions): Promise<Response> {
   const o = oauth;
+  const origin = publicOrigin(c);
+  let resolved: { redirectUri: string; relayId?: string };
+  try {
+    resolved = opts?.resolveRedirect
+      ? await opts.resolveRedirect(origin)
+      : { redirectUri: `${origin}/oauth/callback` };
+  } catch (error) {
+    if (error instanceof OAuthCallbackUnavailableError && error.reason === "incompatible") {
+      return c.html(
+        errPage(
+          "The remote sign-in service needs to be updated before this RepoYeti version can authenticate through a Quick Tunnel (missing oauth-callback-v1).",
+          { href: "/", label: "Return to RepoYeti" },
+        ),
+        503,
+      );
+    }
+    if (error instanceof OAuthCallbackUnavailableError && error.reason === "failed") {
+      return c.html(
+        errPage(
+          "Remote sign-in could not prepare its callback route. Restart RepoYeti and try again.",
+          { href: "/", label: "Return to RepoYeti" },
+        ),
+        503,
+      );
+    }
+    return c.html(errPage("Remote sign-in is temporarily unavailable. Try again shortly."), 503);
+  }
   const doc = await discover(o.issuer, opts?.fetchImpl ?? authFetch);
   const { verifier, challenge } = pkce();
   const nonce = randomBytes(16).toString("base64url");
   txs.set(nonce, { verifier, ts: Date.now() });
   gcTx();
-  const origin = publicOrigin(c);
-  const state = sign(JSON.stringify({ n: nonce, o: origin }), opts?.secret);
+  const state = sign(
+    JSON.stringify({
+      n: nonce,
+      o: origin,
+      d: resolved.redirectUri,
+      ...(resolved.relayId ? { r: resolved.relayId } : {}),
+    }),
+    opts?.secret,
+  );
   const url = new URL(doc.authorization_endpoint!);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", o.clientId);
-  // Doing it right (we own the domain): register the daemon's OWN callback at its current origin —
-  // no rotating-URL shim. The IdP allow-lists app.repoyeti.com/oauth/callback + the loopback.
-  url.searchParams.set("redirect_uri", `${origin}/oauth/callback`);
+  // This exact value is signed into state and must be reused by the token exchange. Quick Tunnels
+  // resolve to the stable relay callback; loopback and stable origins use their own callback.
+  url.searchParams.set("redirect_uri", resolved.redirectUri);
   url.searchParams.set("scope", o.scopes || "openid profile email photo");
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
@@ -295,7 +341,7 @@ export interface HandleCompleteOptions extends AuthOptions {
   jwksSet?: Parameters<typeof jwtVerify>[1];
 }
 
-/** Shared by /oauth/finish (shim bounce) and /oauth/callback (loopback). */
+/** Shared by /oauth/finish (stable relay return) and /oauth/callback (direct completion). */
 export async function handleComplete(
   c: Context,
   oauth: OAuthConfig,
@@ -310,10 +356,12 @@ export async function handleComplete(
   if (!sp) return c.html(errPage("Invalid or tampered sign-in state."), 400);
   let nonce: string;
   let stateOrigin: string;
+  let stateRedirectUri: string;
   try {
     const parsed = JSON.parse(sp);
     nonce = parsed.n as string;
     stateOrigin = String(parsed.o || "");
+    stateRedirectUri = String(parsed.d || `${stateOrigin}/oauth/callback`);
   } catch {
     return c.html(errPage("Invalid sign-in state."), 400);
   }
@@ -329,9 +377,9 @@ export async function handleComplete(
     const body = new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      // Must EXACTLY match the redirect_uri sent at /oauth/login — the daemon's own origin (from the
-      // signed state, so it can't be tampered) + /oauth/callback. No shim.
-      redirect_uri: `${stateOrigin}/oauth/callback`,
+      // Must EXACTLY match the redirect_uri sent at /oauth/login. New states carry it explicitly;
+      // old local states fall back to their signed origin + /oauth/callback.
+      redirect_uri: stateRedirectUri,
       client_id: o.clientId,
       code_verifier: tx.verifier,
     });

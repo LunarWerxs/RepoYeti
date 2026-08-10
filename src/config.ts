@@ -44,7 +44,7 @@ export interface OAuthConfig {
   clientId: string;
   /** Only for a confidential client; a public PKCE client omits it. */
   clientSecret?: string;
-  /** Registered redirect URI — the fixed shim URL (Path A) or the loopback (Path B). */
+  /** Registered redirect URI used for rotating Quick Tunnels; stable/loopback origins stay direct. */
   redirectUri: string;
   /** The single owner this daemon admits (match either). */
   ownerSub?: string;
@@ -665,11 +665,10 @@ export function redactAi(cfg: RepoYetiConfig): RedactedAiConfig {
 
 /**
  * The public "Sign in with Connections" OAuth client for RepoYeti, baked in so login works
- * with zero owner setup. These are PUBLIC by nature (a PKCE client — no secret). Now that we own
- * a stable domain, login is done the RIGHT way: the daemon registers its OWN callback at its
- * current origin (`<origin>/oauth/callback`, see src/auth.ts) — the old rotating-URL "shim" Worker
- * is retired. The IdP allow-lists `https://app.repoyeti.com/oauth/callback` + the loopback. This
- * `redirectUri` is now just a presence marker for authEnforced(); auth.ts derives the live value.
+ * with zero owner setup. These are PUBLIC by nature (a PKCE client — no secret). Connections
+ * allow-lists `https://app.repoyeti.com/oauth/callback` plus loopback. Quick Tunnels use that exact
+ * stable callback through the relay; loopback and other stable origins use their own callback.
+ * `redirectUri` is therefore protocol data, not a configuration-presence marker.
  */
 const CONNECTIONS_OAUTH: OAuthConfig = {
   issuer: "https://accounts.connections.icu",
@@ -1000,7 +999,7 @@ export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
     // The baked-in Connections client is PUBLIC (PKCE is its only proof): AEGIS registers it with
     // token_endpoint_auth_method "none" and no secret hash, and its token endpoint refuses any
     // exchange that PRESENTS a client_secret — with invalid_client, BEFORE it consumes the code, so
-    // every sign-in dies at /oauth/callback while the code sits unspent. The retired GitMob-era shim
+    // every sign-in dies at /oauth/callback while the code sits unspent. The old GitMob callback
     // registered this SAME client_id as confidential, so its secret can still be in the keychain —
     // and getSecret() re-homes it out of the old "gitmob" service, which is how a dead credential
     // reaches a client that must never send one. AEGIS kept no hash to verify it against: it is

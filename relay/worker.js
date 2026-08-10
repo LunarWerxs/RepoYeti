@@ -22,6 +22,12 @@
  * `<currentOrigin>/s/<token>`. So the relay learns that someone opened *a* link for a daemon, and
  * cannot learn the secret or redeem it. That property is structural, not a promise about logging.
  *
+ * OAUTH CALLBACK
+ * The registered `/oauth/callback` also forwards a transient authorization code and signed state
+ * to the announced daemon's `/oauth/finish`. The Worker can observe that code, but cannot redeem it:
+ * the PKCE verifier exists only in daemon memory. It extracts only the relay id from state and
+ * resolves the destination from its signed-announcement KV record, never from a caller-owned URL.
+ *
  * TRUST MODEL — trust on first use, then signatures.
  * The first `/announce` for an id registers its Ed25519 public key. Every later announce for that
  * id must carry a signature verifiable against the stored key, so only the daemon holding the
@@ -33,6 +39,7 @@
  */
 
 const ID_RE = /^[a-z0-9]{16,64}$/i;
+const CAPABILITIES = ["oauth-callback-v1"];
 /** Reject an announce whose timestamp is far from ours — a captured one can't be replayed later. */
 const MAX_SKEW_MS = 5 * 60 * 1000;
 
@@ -52,6 +59,17 @@ function b64urlToBytes(s) {
   const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
   const bin = atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), "="));
   return Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+}
+
+function relayIdFromState(state) {
+  try {
+    const body = String(state ?? "").split(".")[0];
+    if (!body) return null;
+    const parsed = JSON.parse(new TextDecoder().decode(b64urlToBytes(body)));
+    return ID_RE.test(String(parsed?.r ?? "")) ? String(parsed.r) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function verify(publicKeyB64, signatureB64, payload) {
@@ -145,7 +163,7 @@ export default {
         `d:${id}`,
         JSON.stringify({ publicKey: key, origin: cleanOrigin, updatedAt: Date.now() }),
       );
-      return json({ ok: true, url: `${url.origin}/r/${id}` });
+      return json({ ok: true, url: `${url.origin}/r/${id}`, capabilities: CAPABILITIES });
     }
 
     // ── resolve a daemon for another RepoYeti installation ─────────────────────
@@ -160,6 +178,35 @@ export default {
       const target = safeOrigin(JSON.parse(raw).origin);
       if (!target) return json({ ok: false, error: "not found" }, 404);
       return json({ ok: true, origin: target });
+    }
+
+    // ── stable OAuth callback for rotating Quick Tunnels ───────────────────────
+    if (url.pathname === "/oauth/callback" && request.method === "GET") {
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      const id = relayIdFromState(state);
+      if (!code || !state || !id) return json({ ok: false, error: "bad oauth callback" }, 400);
+
+      const raw = await env.RELAY.get(`d:${id}`);
+      if (!raw) return json({ ok: false, error: "daemon not found" }, 404);
+      let target;
+      try {
+        target = safeOrigin(JSON.parse(raw).origin);
+      } catch {
+        target = null;
+      }
+      if (!target) return json({ ok: false, error: "daemon not found" }, 404);
+
+      const finish = new URL("/oauth/finish", target);
+      finish.searchParams.set("code", code);
+      finish.searchParams.set("state", state);
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: finish.toString(),
+          "cache-control": "no-store",
+        },
+      });
     }
 
     // ── someone opens a link ──────────────────────────────────────────────────
@@ -181,7 +228,7 @@ export default {
       return new Response(forwardPage(target), { headers: html() });
     }
 
-    if (url.pathname === "/health") return json({ ok: true });
+    if (url.pathname === "/health") return json({ ok: true, capabilities: CAPABILITIES });
     return new Response("Not found", { status: 404 });
   },
 };

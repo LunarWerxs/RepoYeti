@@ -126,11 +126,19 @@ test("announce sends the id, origin and signature — and nothing else", async (
       body: JSON.parse(String(init.body)),
       sig: new Headers(init.headers).get("x-signature"),
     };
-    return new Response(JSON.stringify({ ok: true, url: "https://relay.example/r/abc" }), { status: 200 });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        url: "https://relay.example/r/abc",
+        capabilities: ["oauth-callback-v1", 42, null],
+      }),
+      { status: 200 },
+    );
   }) as unknown as typeof fetch;
 
   const res = await announce("https://relay.example/", identity, "https://host.trycloudflare.com/", spy);
   expect(res.ok).toBe(true);
+  expect(res.capabilities).toEqual(["oauth-callback-v1"]);
   expect(seen!.url).toBe("https://relay.example/announce");
   expect(seen!.sig).toBeTruthy();
   // Exactly these four fields. Anything else would be data leaving a self-hosted tool.
@@ -147,6 +155,18 @@ test("a relay failure is reported, never thrown", async () => {
   const res = await announce("https://relay.example", identity, "https://host.trycloudflare.com", boom);
   expect(res.ok).toBe(false);
   expect(res.error).toContain("network down");
+});
+
+test("a legacy announce response remains successful for stable relay publishing", async () => {
+  const identity = createRelayIdentity();
+  const legacyWorker = (async () =>
+    new Response(JSON.stringify({ ok: true, url: "https://relay.example/r/stable" }), {
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch;
+
+  const res = await announce("https://relay.example", identity, "https://named.example.com", legacyWorker);
+
+  expect(res).toEqual({ ok: true, url: "https://relay.example/r/stable" });
 });
 
 test("the share token rides in the fragment, never the path", () => {

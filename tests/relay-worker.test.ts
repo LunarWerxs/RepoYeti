@@ -42,9 +42,21 @@ async function register(identity = createRelayIdentity(), origin = "https://one.
   return { identity, res };
 }
 
+test("health advertises stable OAuth callback support for deployment checks", async () => {
+  const res = await worker.fetch(new Request("https://relay.example/health"), env);
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, capabilities: ["oauth-callback-v1"] });
+});
+
 test("a first announce registers the daemon and pins its key", async () => {
   const { identity, res } = await register();
   expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({
+    ok: true,
+    url: `https://relay.example/r/${identity.id}`,
+    capabilities: ["oauth-callback-v1"],
+  });
   const stored = JSON.parse(env.RELAY.map.get(`d:${identity.id}`)!);
   expect(stored.origin).toBe("https://one.trycloudflare.com");
   expect(stored.publicKey).toBe(identity.publicKey);
@@ -125,6 +137,64 @@ test("a path after the id is a plain redirect", async () => {
   const res = await worker.fetch(new Request(`https://relay.example/r/${identity.id}/dashboard`), env);
   expect(res.status).toBe(302);
   expect(res.headers.get("location")).toBe("https://one.trycloudflare.com/dashboard");
+});
+
+test("the stable OAuth callback returns the browser to the announced daemon finish route", async () => {
+  const { identity } = await register();
+  const state = `${Buffer.from(JSON.stringify({ r: identity.id })).toString("base64url")}.daemon-hmac`;
+  const callback = new URL("https://relay.example/oauth/callback");
+  callback.searchParams.set("code", "short-lived-code");
+  callback.searchParams.set("state", state);
+  callback.searchParams.set("untrusted", "must-not-forward");
+
+  const res = await worker.fetch(new Request(callback), env);
+
+  expect(res.status).toBe(302);
+  const location = new URL(res.headers.get("location")!);
+  expect(`${location.origin}${location.pathname}`).toBe("https://one.trycloudflare.com/oauth/finish");
+  expect(location.searchParams.get("code")).toBe("short-lived-code");
+  expect(location.searchParams.get("state")).toBe(state);
+  expect(location.searchParams.has("untrusted")).toBe(false);
+  expect(res.headers.get("cache-control")).toBe("no-store");
+});
+
+test("the OAuth callback fails closed when the registered daemon record is corrupt", async () => {
+  const id = "abcdef0123456789";
+  env.RELAY.map.set(`d:${id}`, "not-json");
+  const state = `${Buffer.from(JSON.stringify({ r: id })).toString("base64url")}.daemon-hmac`;
+  const callback = new URL("https://relay.example/oauth/callback");
+  callback.searchParams.set("code", "short-lived-code");
+  callback.searchParams.set("state", state);
+
+  const res = await worker.fetch(new Request(callback), env);
+
+  expect(res.status).toBe(404);
+  expect(res.headers.has("location")).toBe(false);
+});
+
+test("the OAuth callback never redirects for an unresolved relay destination", async () => {
+  const unknownId = "0123456789abcdef0123456789abcdef";
+  const unsafeId = "abcdef0123456789abcdef0123456789";
+  env.RELAY.map.set(
+    `d:${unsafeId}`,
+    JSON.stringify({ publicKey: "x", origin: "http://plaintext.example" }),
+  );
+  const states = [
+    "",
+    "not-base64.daemon-hmac",
+    `${Buffer.from(JSON.stringify({ r: "wrong-shape" })).toString("base64url")}.daemon-hmac`,
+    `${Buffer.from(JSON.stringify({ r: unknownId })).toString("base64url")}.daemon-hmac`,
+    `${Buffer.from(JSON.stringify({ r: unsafeId })).toString("base64url")}.daemon-hmac`,
+  ];
+
+  for (const state of states) {
+    const callback = new URL("https://relay.example/oauth/callback");
+    callback.searchParams.set("code", "short-lived-code");
+    if (state) callback.searchParams.set("state", state);
+    const res = await worker.fetch(new Request(callback), env);
+    expect(res.status).not.toBe(302);
+    expect(res.headers.has("location")).toBe(false);
+  }
 });
 
 test("another RepoYeti can resolve a relay invitation without executing the forwarding page", async () => {
