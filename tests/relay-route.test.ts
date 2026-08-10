@@ -16,6 +16,8 @@ import {
   publicShareOrigin,
   shareLinkFor,
   getRelayBase,
+  getOAuthCallback,
+  publishRemoteRoutes,
 } from "../src/runtime.ts";
 import { createRelayIdentity, publicKeyFor } from "../src/relay.ts";
 import { isStaleOrigin } from "../src/share/index.ts";
@@ -154,6 +156,53 @@ test("GET /api/status carries the redacted relay for the owner, private key abse
   expect(st.relayUrl).toBe(`https://go.example.com/r/${cfg.relay?.identity?.id}`);
   expect(st.relayError).toBeNull();
   expect(body).not.toContain(cfg.relay?.identity?.privateKey ?? "__absent__");
+});
+
+test("a direct Quick Tunnel still publishes the stable OAuth callback route once", async () => {
+  const cfg = base({
+    relay: { enabled: false },
+    oauth: {
+      issuer: "https://accounts.connections.icu",
+      clientId: "public-client",
+      redirectUri: "https://app.repoyeti.com/oauth/callback",
+    },
+  });
+  let announcedAt = "";
+  const fetchImpl = (async (input: string | URL | Request) => {
+    announcedAt = String(input);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+
+  await publishRemoteRoutes(cfg, "https://snowy-yeti.trycloudflare.com", fetchImpl);
+
+  expect(announcedAt).toBe("https://app.repoyeti.com/announce");
+  expect(getOAuthCallback(cfg, "https://snowy-yeti.trycloudflare.com")).toEqual({
+    redirectUri: "https://app.repoyeti.com/oauth/callback",
+    relayId: cfg.relay?.identity?.id,
+  });
+  expect(redactRelay(cfg).enabled).toBe(false);
+});
+
+test("a failed Quick Tunnel callback announce leaves remote login unavailable", async () => {
+  const cfg = base({
+    relay: { enabled: false },
+    oauth: {
+      issuer: "https://accounts.connections.icu",
+      clientId: "public-client",
+      redirectUri: "https://app.repoyeti.com/oauth/callback",
+    },
+  });
+
+  await publishRemoteRoutes(
+    cfg,
+    "https://offline-yeti.trycloudflare.com",
+    (async () => new Response("unavailable", { status: 503 })) as unknown as typeof fetch,
+  );
+
+  expect(getOAuthCallback(cfg, "https://offline-yeti.trycloudflare.com")).toBeNull();
 });
 
 // ── the origin links are handed out on ─────────────────────────────────────────────

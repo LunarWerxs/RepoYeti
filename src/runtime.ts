@@ -48,6 +48,94 @@ export async function publishToRelay(cfg: RepoYetiConfig, origin: string): Promi
   });
 }
 
+interface OAuthCallbackRoute {
+  origin: string;
+  redirectUri: string;
+  relayId: string;
+  error: string | null;
+}
+
+let oauthCallbackRoute: OAuthCallbackRoute | null = null;
+let remoteRouteGeneration = 0;
+
+function isQuickTunnelOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return url.protocol === "https:" && url.hostname.toLowerCase().endsWith(".trycloudflare.com");
+  } catch {
+    return false;
+  }
+}
+
+/** Publish every remote route needed by one freshly-created tunnel without per-login writes. */
+export async function publishRemoteRoutes(
+  cfg: RepoYetiConfig,
+  origin: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const generation = ++remoteRouteGeneration;
+  if (!isQuickTunnelOrigin(origin)) {
+    oauthCallbackRoute = null;
+    await publishToRelay(cfg, origin);
+    return;
+  }
+
+  const redirectUri = cfg.oauth?.redirectUri;
+  if (!redirectUri) {
+    oauthCallbackRoute = null;
+    await publishToRelay(cfg, origin);
+    return;
+  }
+
+  const callbackBase = new URL(redirectUri).origin;
+  const relay = relayEffective(cfg);
+  const identity = await ensureRelayIdentity(cfg);
+  if (generation !== remoteRouteGeneration) return;
+  const sameRelay = relay.enabled && relay.url.replace(/\/+$/, "") === callbackBase;
+  const callbackResult = await announce(callbackBase, identity, origin, fetchImpl);
+  // A stopped or replaced tunnel must not become login-ready just because its older announce
+  // finished last. Only the newest publication attempt may update process-wide route state.
+  if (generation !== remoteRouteGeneration) return;
+  oauthCallbackRoute = {
+    origin,
+    redirectUri,
+    relayId: identity.id,
+    error: callbackResult.ok ? null : (callbackResult.error ?? "announce failed"),
+  };
+
+  if (sameRelay) {
+    relayAnnounced = callbackResult.ok;
+    relayError = oauthCallbackRoute.error;
+    broadcast("daemon_status", {
+      relay: redactRelay(cfg),
+      relayUrl: getRelayBase(cfg),
+      relayAnnounced,
+      relayError,
+    });
+  } else if (relay.enabled) {
+    await publishToRelay(cfg, origin);
+  }
+}
+
+/** Exact callback route available for this request origin, or null while its announce is unavailable. */
+export function getOAuthCallback(
+  cfg: RepoYetiConfig,
+  origin: string,
+): { redirectUri: string; relayId?: string } | null {
+  if (!isQuickTunnelOrigin(origin)) return { redirectUri: `${origin}/oauth/callback` };
+  if (
+    oauthCallbackRoute?.origin !== origin ||
+    oauthCallbackRoute.redirectUri !== cfg.oauth?.redirectUri ||
+    oauthCallbackRoute.error
+  ) {
+    return null;
+  }
+  return {
+    redirectUri: oauthCallbackRoute.redirectUri,
+    relayId: oauthCallbackRoute.relayId,
+  };
+}
+
 /**
  * This daemon's relay keypair, minted and persisted on first need.
  *
@@ -180,7 +268,7 @@ export function startManagedTunnel(cfg: RepoYetiConfig, onReady?: (url: string) 
     // a quick tunnel hands out a NEW hostname here, which is exactly when every share link already
     // sent would otherwise go dead. Best-effort and non-blocking — the relay is a convenience, and
     // a failure to reach it must never affect local git management.
-    void publishToRelay(cfg, url);
+    void publishRemoteRoutes(cfg, url);
   };
   const onErr = (msg: string): void => {
     tunnelStarting = false;
@@ -199,6 +287,8 @@ export function stopManagedTunnel(): void {
   tunnelHandle = null;
   tunnelStarting = false;
   tunnelUrl = null;
+  remoteRouteGeneration++;
+  oauthCallbackRoute = null;
   // The relay is still pointing at the address we just abandoned, so "registered" is no longer a
   // true statement about a link that works. Clear it rather than leave a stale green tick.
   resetRelayStatus();

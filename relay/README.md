@@ -11,6 +11,8 @@ person you sent it to gets a DNS failure that reads as *"your link is wrong"* ra
 address moved"* — and you only find out when they tell you.
 
 The relay gives each daemon one URL that never changes and forwards to wherever it currently lives.
+It also provides RepoYeti's registered OAuth callback for rotating Quick Tunnels. That callback is
+a narrow return route, not a dashboard proxy.
 
 ## What it is not
 
@@ -26,6 +28,11 @@ Optional collaboration presence does not use KV. The collaborator resolves the i
 then sends authenticated AES-256-GCM snapshots straight to the owner's tunnel. If a quick tunnel
 moves, `/resolve/:id` supplies its new origin. This keeps realtime updates out of the relay's
 storage and request budget.
+
+The OAuth return is similarly narrow: `GET /oauth/callback` reads only the relay id from the signed
+`state`, resolves the origin already registered by an Ed25519 announcement, and redirects only
+`code` and `state` to `<currentOrigin>/oauth/finish`. It never accepts a destination URL from the
+request. Missing, malformed, unknown, corrupt, or non-HTTPS destinations fail without a redirect.
 
 ## Why the relay never sees a share token
 
@@ -54,6 +61,10 @@ feature into a phishing kit. Ids are 128-bit random, so squatting an unused id i
 attack. Announces also carry a timestamp and are rejected outside a five-minute window, so a
 captured one cannot be replayed later.
 
+The Worker can observe the short-lived OAuth authorization code while forwarding it. PKCE binds
+that code to a verifier held only in daemon memory, so the Worker cannot exchange it for tokens.
+Both callback errors and redirects use `Cache-Control: no-store`.
+
 Covered by `tests/relay-worker.test.ts`, which runs the real Worker against a fake KV — including
 the case where an attacker signs correctly with their *own* key and offers a replacement public key.
 
@@ -70,11 +81,11 @@ Self-hosting on your own domain? Change the `routes` entry in `wrangler.toml` to
 cert. A bare `workers.dev` hostname works too (`workers_dev = true`, no custom domain) — it's
 already stable, which is the only property this service requires.
 
-**If you own a domain, you probably don't want this at all.** Put the daemon on a NAMED TUNNEL
+**If you own a domain, you do not need the relay for routing.** Put the daemon on a NAMED TUNNEL
 instead (`tunnel.hostname` + a connector token in the daemon config): your address is then stable
 AND resolves on networks that block `trycloudflare.com`, because visitors never touch trycloudflare.
-The relay only forwards to a quick tunnel, so it fixes rotation and not blocking. It exists for
-people without a domain.
+Quick Tunnels still use its registered OAuth callback even when the owner chooses the direct
+Cloudflare address; named tunnels complete OAuth directly.
 
 ## Deploy
 
@@ -115,15 +126,16 @@ Leave `identity` alone — the daemon mints its own keypair on first announce an
 Deleting it registers a NEW id next time, which breaks every link already handed out; turning the
 relay off in Settings deliberately keeps it for that reason.
 
-**Off by default, deliberately.** A self-hosted tool should not phone anywhere unless asked. When
-enabled, the only thing that ever leaves the machine is `(id, origin, timestamp, signature)`: no
-repository names, no paths, no tokens.
+Choosing the direct Cloudflare address disables the stable `/r/:id` address, but a Quick Tunnel
+still sends one signed announcement at startup for OAuth return routing. The announcement contains
+only `(id, origin, timestamp, signature)`: no repository names, paths, or share tokens.
 
 ## Endpoints
 
 | Method | Path            | Purpose                                                        |
 | ------ | --------------- | -------------------------------------------------------------- |
 | `POST` | `/announce`     | Daemon publishes its current origin (signed).                    |
+| `GET`  | `/oauth/callback` | Resolve relay id from signed state; forward only `code` + `state`. |
 | `GET`  | `/r/:id`        | Forwarding page; re-attaches the URL fragment client-side.       |
 | `GET`  | `/r/:id/<path>` | Plain 302 for links that carry no secret (e.g. "open my board"). |
 | `GET`  | `/health`       | Liveness.                                                        |
@@ -134,3 +146,9 @@ This fixes **addresses changing**. It does not fix `trycloudflare.com` being DNS
 school and corporate networks, because the forward still lands there. For a link that resolves
 everywhere, use a named tunnel on your own domain — RepoYeti supports that directly, and then you
 do not need the relay at all.
+
+## Rollout order
+
+Deploy the Worker with `/oauth/callback` support before releasing a daemon that sends Quick Tunnel
+logins there. No KV migration is required. For rollback, revert the daemon first; the additional
+Worker endpoint is inert and backward-compatible for older daemons.

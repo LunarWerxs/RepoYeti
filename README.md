@@ -75,6 +75,10 @@ To reach it from your phone (opens a Cloudflare tunnel and prints a QR code):
 bun run src/index.ts start --tunnel
 ```
 
+Quick Tunnel sign-in uses the registered `https://app.repoyeti.com/oauth/callback` only to return
+the OAuth response to the current daemon. Dashboard and Git traffic still go directly through the
+Cloudflare tunnel, including when you choose the temporary `*.trycloudflare.com` address.
+
 Prefer a prebuilt copy? Grab your platform from
 [Releases](https://github.com/LunarWerxs/RepoYeti/releases). On Windows, download
 `repoyeti-windows-x64.exe` and run it directly. The dashboard is embedded in the executable; there

@@ -22,10 +22,11 @@
 > case), and **Phase 6 (Tauri tray)** is deferred — the CLI binary + phone browser is the whole product.
 > The only thing between "built" and a live remote login is a single owner-gated end-to-end sign-in.
 >
-> **⚠️ Update since v1 — the tunnel/shim design in §2 & §7 is SUPERSEDED.** RepoYeti now runs a
-> **named Cloudflare tunnel** (`app.repoyeti.com`) and the daemon uses its **own**
-> `<origin>/oauth/callback` — there is no shim (`shim/` is dead reference code). The shipped design
-> and runbook are in **§15 (Remote access)**.
+> **Current remote-login design.** RepoYeti supports named tunnels and rotating Quick Tunnels.
+> Quick Tunnels authorize against the registered `https://app.repoyeti.com/oauth/callback`; the
+> relay resolves a signed-announcement id and returns only `code` and `state` to the current
+> daemon's `/oauth/finish`. Stable and loopback origins use their own callback directly. The relay
+> never proxies dashboard traffic. See **§7** and **§15**.
 
 ---
 
@@ -78,7 +79,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | **Git engine** | **`simple-git`** over the system `git` binary | Reuses the user's installed, optimized git. Its per-call `env` option maps *directly* onto `GIT_SSH_COMMAND` / `GIT_AUTHOR_*` injection. No JS git reimplementation to trust. |
 | **HTTP framework** | **Hono** | Tiny, TS-native. Its middleware model makes auth **structural** — a single `app.use()` gates the whole router, so you *cannot* add an unauthenticated route by accident. |
 | **Storage** | **`bun:sqlite`**, WAL mode, `synchronous=NORMAL` | Only store that survives concurrent writers (watcher + API + git ops). One file: `repoyeti.db`. Retry on `SQLITE_BUSY`; fall back to `journal_mode=DELETE` if WAL won't open (Windows AV). |
-| **Tunnel** | **`cloudflared` quick tunnel** (free, rotating) **+ a fixed redirect shim** | Daemon stays zero-config on a free auto tunnel; a tiny **stable shim** (Cloudflare Worker `*.workers.dev` — recommended — or Pages / GitHub Pages) is the registered OAuth redirect and bounces login back to the daemon's current URL (§7). No domain, no ngrok. Tunnel client bundled as a pinned binary. A stable *dashboard* URL comes later, once you own a domain. |
+| **Tunnel** | **`cloudflared` quick or named tunnel** + stable OAuth callback for Quick Tunnels | Quick Tunnels stay zero-config and rotating; the relay returns OAuth to their announced origin without proxying the dashboard. Named tunnels use their stable callback directly. Tunnel client bundled as a pinned binary. |
 | **Auth** | **"Sign in with Connections"** — public OIDC (AEGIS) at `accounts.connections.icu`; daemon verifies the login token and trusts one owner `sub` | Stand-alone relying party using connections.icu's **public** OAuth — like "Log in with Google." No shared secret, no Connections-repo coupling, no homegrown password/PIN. See §7. |
 | **Transport / sync** | **SSE** daemon→phone, **REST** phone→daemon | v2 decided this. SSE auto-reconnects through cloudflared with no WebSocket upgrade; maps cleanly onto the event-driven watcher. Commands are request/response → REST. |
 | **Frontend** | **Vue 3 + Vite**, PWA, **embedded in the binary**; **import pre-built libraries, minimal hand-written UI** | Static files bundled at `bun --compile` time; daemon serves them — no second server. **Owner directive: lean on smart pre-built libs, write minimal UI to maintain.** Stack: **reka-ui** (shadcn-vue–style component kit, `src/components/ui/`) · **Tailwind v4** (`@tailwindcss/vite`) · **@vueuse/core** (composables — `useEventSource` handles SSE+reconnect, `useColorMode`, `useLocalStorage`) · **@formkit/auto-animate** (zero-config list/card transitions — solves "no layout shift on SSE updates" for free) · **@lucide/vue** icons · **vue-sonner** toasts · **Pinia** state · **vite-plugin-pwa** (auto manifest + service worker). |
@@ -267,8 +268,8 @@ outside SQLite.
 | `GET` | `/api/identities` | list | — |
 | `POST` `PUT` `DELETE` | `/api/identities[/:id]` | CRUD | PAT → keychain, never DB |
 | `GET` | `/api/events` | SSE stream | session cookie |
-| `GET` | `/oauth/login` | start "Sign in with Connections" (PKCE; `state` embeds daemon URL) | unauth → redirects to AEGIS via the shim |
-| `GET` | `/oauth/finish` | shim bounces here: code → token → JWKS verify → set session | checks owner `sub` |
+| `GET` | `/oauth/login` | start "Sign in with Connections" (PKCE; signed `state` binds origin, callback, relay id) | returns 503 until a Quick Tunnel callback route is announced |
+| `GET` | `/oauth/finish` | stable callback returns here: code → token → JWKS verify → set session | checks state, PKCE and owner `sub` |
 | `GET` | `/api/auth/me` | current session → `{ ok, sub, email }` | session cookie |
 | `POST` | `/api/auth/logout` | clear daemon session | session cookie |
 
@@ -335,49 +336,35 @@ RepoYeti is registered once as a **third-party OAuth app** (relying party) → i
    that browser/device (a `__Host-` cookie or short-lived token — standard relying-party behavior; the
    IdP authenticates, the app keeps the session). Refresh tokens keep it alive without re-login.
 
-### Login return = a fixed redirect "shim" — **DECIDED** (keeps the daemon on the free tunnel)
+### Login return through the stable callback
 
-> **⚠️ SUPERSEDED (kept for design history).** This shim squared a *rotating* tunnel URL with a fixed
-> OAuth redirect. RepoYeti has since moved to a **named Cloudflare tunnel** with a stable host
-> (`app.repoyeti.com`), so the daemon registers and uses its **own** `/oauth/callback` directly and
-> the shim is retired. The shipped design + runbook is in **§15 (Remote access)**; the text below
-> documents the original rotating-tunnel approach for reference.
+OAuth requires an exact registered redirect URI, while a free Quick Tunnel receives a new
+`*.trycloudflare.com` hostname at every start. RepoYeti registers
+`https://app.repoyeti.com/oauth/callback` and uses the existing signed relay announcement to find
+the current daemon without making the relay a dashboard proxy.
 
-The login page must return to a **registered, stable** redirect URI — but the daemon sits on a free,
-**rotating** quick-tunnel URL (AEGIS is redirect-based PKCE; no device-code flow exists). Squaring this
-**without buying a domain or running ngrok**: register a tiny **fixed redirect shim** (a free, stable
-edge URL you already have) and have it **bounce the login back to the daemon's current address.**
+Flow (daemon-side PKCE — the browser never holds tokens):
 
-Flow (daemon-side PKCE — the phone never handles tokens):
-1. Phone opens the daemon, taps "Sign in with Connections" → `GET /oauth/login` on the daemon.
-2. The daemon makes PKCE + a signed `state` that **embeds its own current tunnel URL**, and redirects
-   the phone to `accounts.connections.icu/oauth/authorize?…&redirect_uri=<SHIM>&state=…`.
-3. AEGIS authenticates the user → redirects the phone to the **shim** (`<SHIM>?code&state`).
-4. The shim reads `state`, checks the embedded daemon URL matches an **allowed pattern**, and
-   **302-redirects** the phone to `<daemon-current-url>/oauth/finish?code&state`.
-5. The daemon (`/oauth/finish`) verifies `state` (HMAC + CSRF nonce), exchanges `code` + its PKCE
-   `code_verifier` at `/oauth/token` (with `redirect_uri=<SHIM>`), verifies the `id_token` via the
-   **public JWKS**, checks the owner `sub`, and sets a `__Host-` session. Done.
+1. A Quick Tunnel announces `(relay id, current HTTPS origin, timestamp)` with Ed25519 during startup.
+2. `/oauth/login` resolves that ready route, creates PKCE, and signs state containing the nonce,
+   browser origin, exact redirect URI, and relay id. Until the announcement succeeds it returns 503
+   before contacting Connections.
+3. Connections returns `code` and `state` to `https://app.repoyeti.com/oauth/callback`.
+4. The Worker extracts only the relay id from state. It does not validate the daemon-owned HMAC and
+   never trusts an origin supplied by the request; it resolves a previously signed HTTPS destination
+   from KV and redirects only `code` and `state` to `<origin>/oauth/finish`.
+5. The daemon verifies the HMAC and nonce, exchanges the code using the exact redirect URI signed at
+   login plus its in-memory PKCE verifier, verifies the `id_token`, checks the owner, and sets the
+   session cookie. Legacy local states without an explicit redirect retain origin-based completion.
 
-**The only thing that must be stable + registered is the shim** — pick a free one you already have:
-- **Cloudflare Worker** (`https://repoyeti-auth.<account>.workers.dev`) — *recommended*: server-side 302,
-  validates the target host, no client JS, free, stable, **no custom domain**. ~30 lines; I can deploy it.
-- **Cloudflare Pages** (`https://<proj>.pages.dev`) or **GitHub Pages** (`https://<user>.github.io/…`) —
-  same idea as a tiny static page that reads `state` and redirects in-browser.
+The Worker can observe the transient authorization code, but PKCE prevents it from redeeming that
+code without the verifier. Callback responses use `no-store`. A forged state cannot make the Worker
+an open redirect because only an existing relay id selects a destination, and the daemon rejects a
+foreign or tampered state at `/oauth/finish`.
 
-**Security:** the `code` is **PKCE-bound** to the daemon's `code_verifier` (held server-side) and
-single-use, so intercepting it at the shim is useless; `state` is HMAC-signed and CSRF-checked by the
-daemon; the shim only forwards to daemon URLs matching an allowed pattern (no open redirect). The shim
-sees a transient, unusable code and nothing else.
-
-**Upgrade path:** once you own a domain, give the daemon a stable URL, register its own `/oauth/callback`
-directly, and the shim disappears (the *dashboard* URL stops rotating too).
-
-**Desktop fallback (Path B):** register `http://127.0.0.1:<port>/oauth/callback` and log in once at the
-machine — no shim, no tunnel — after which the phone is trusted.
-
-RepoYeti stays **stand-alone** throughout — it only ever calls the public `accounts.connections.icu/oauth/*`
-URLs; the shim is a dumb bounce on a free host, not a coupling to Connections.
+Loopback, named tunnels, and other non-Quick-Tunnel origins keep the direct
+`<origin>/oauth/callback` flow. Selecting the direct Cloudflare address disables only the stable
+dashboard URL; the one startup announcement required for OAuth still occurs.
 
 ### What an attacker with only the tunnel URL can do
 
@@ -647,14 +634,14 @@ repoyeti/
 ├─ web/                      # Vue 3 + Vite + Tailwind PWA
 │  ├─ src/ … (App, RepoCard, IdentitySelector, sse client)
 │  └─ vite.config.ts         # build → embedded static assets
-├─ shim/                     # OAuth redirect shim — now DEAD reference code (named tunnel + own /oauth/callback)
+├─ relay/                    # stable address + Quick Tunnel OAuth callback Worker
 ├─ vendor/cloudflared/       # pinned per-platform binaries
 └─ scripts/build.ts          # vite build → bun --compile per target
 ```
 
 The daemon is the **primary artifact**; `web/` builds into it; `vendor/cloudflared/` ships with it;
-`shim/` is retired (the named tunnel + the daemon's own `/oauth/callback` replaced it — see
-§15, Remote access); a future `tray/` (Tauri) would spawn the same binary unchanged.
+`relay/` contains the separately deployed redirect Worker used by stable links and Quick Tunnel
+OAuth return routing (see §15); a future `tray/` (Tauri) would spawn the same binary unchanged.
 `scripts/check-boundaries.ts` enforces the layering: `read ⊥ service`, `vcs ⊥ service`, `cli ⊥
 service/read/git`, and the MCP core/tools/backend touch the service only through their adapters.
 
@@ -668,11 +655,10 @@ service/read/git`, and the MCP core/tools/backend touch the service only through
   Studio path** — RepoYeti is a stand-alone relying party that only calls the public
   `accounts.connections.icu/oauth/*` URLs and verifies tokens via the public JWKS; it shares no secret
   with and imports nothing from the Connections repo. (Owner directive: public API, auth only, stand-alone.)
-- **DECIDED: free quick tunnel + a fixed redirect shim** (§7). The daemon stays zero-config on the free
-  rotating tunnel; a tiny stable shim (Cloudflare Worker `*.workers.dev`, recommended — or Pages/GitHub
-  Pages) is the registered OAuth redirect and bounces login back to the daemon, so the **phone logs in
-  directly** with no domain and no ngrok. PKCE + signed `state` keep the bounce safe. The *dashboard* URL
-  still rotates until a real domain is bought (then the shim is dropped).
+- **Quick Tunnels use the stable relay callback** (§7). The daemon announces its current HTTPS origin
+  with Ed25519 once per tunnel startup; the Worker resolves only that id and returns `code` + `state`
+  to `/oauth/finish`. PKCE and daemon-signed state complete the trust boundary. This announcement is
+  required even when the owner displays the direct Cloudflare address.
 - **Bun, not Node** — single-binary compile + built-in SQLite kills the worst Windows packaging pain.
 - **Tauri deferred to last** — the CLI binary + phone browser is the whole product.
 - **"Behind" is intentionally stale** — never auto-fetch on watch events.
@@ -689,17 +675,14 @@ Connections" (public OIDC). It imports nothing from the Connections repo. To lig
 1. **A registered RepoYeti OAuth app.** Create a "Sign in with Connections" app → yields a public
    **`client_id`** (and, if registered confidential, a `client_secret` that stays only on the daemon).
    Scopes: `openid profile email`.
-2. **The redirect URI** = the fixed **shim** URL (§7), e.g. `https://repoyeti-auth.<account>.workers.dev/cb`
-   (Cloudflare Worker, recommended) or a `*.pages.dev` / `*.github.io` page. **This is the only stable URL
-   that gets registered;** the daemon itself stays on the free rotating tunnel. (Optionally also register
-   `http://127.0.0.1:<port>/oauth/callback` for the Path-B desktop fallback.)
+2. **Registered redirect URIs:** `https://app.repoyeti.com/oauth/callback` for Quick Tunnels and the
+   appropriate loopback callback for local login. Named/custom-domain clients may additionally
+   register their own stable callback.
 3. **The trusted owner identity** — the `sub` (or email) RepoYeti should accept. Get it from
    `/oauth/userinfo` after a test login, or from the owner's account record. → daemon config/keychain.
-4. **The redirect shim (free; I can build + deploy it).** A ~30-line **Cloudflare Worker** (or static
-   Pages/GitHub page) that reads `state`, validates the daemon URL against an allowed pattern, and 302s
-   the login back to the daemon. Lives on a free `*.workers.dev` / `*.pages.dev` / `*.github.io` URL —
-   **no custom domain, not connections.icu's zone.** I can write + deploy the Worker via the Cloudflare
-   API. It's dropped entirely once you own a domain and the daemon registers its own callback.
+4. **The relay Worker.** Deploy `relay/worker.js` with KV and `/oauth/callback` support before a daemon
+   release that depends on it. The same signed announcement identity serves stable links and OAuth;
+   the callback never accepts a free-form destination from `state`.
 
 That's it — no AWS Secrets Manager entry, no Connections-repo change, no shared M2M secret. Everything
 the daemon needs (issuer, client_id, redirect, scopes) is public OIDC config; the only sensitive item
@@ -1088,16 +1071,13 @@ model; the only diff-specific tool, claw-compactor, is Python and can't live in 
 
 ---
 
-## 15. Remote access — named Cloudflare tunnel (runbook)
+## 15. Remote access — Quick and named Cloudflare tunnels
 
 
-> **TL;DR.** RepoYeti is reachable from a phone at **`https://app.repoyeti.com`** via a **named
-> Cloudflare tunnel** (not the old rotating, DNS-blocked `*.trycloudflare.com` quick tunnel). The
-> tunnel + DNS were provisioned **through the Connections vault** (no raw Cloudflare token ever
-> touched this machine). Login is done **the right way** — the daemon registers and uses its **own**
-> `/oauth/callback`, and the old redirect "shim" Worker is **deleted**. The Cloudflare layer is
-> verified; the only thing not yet runtime-proven is a live end-to-end sign-in (needs the daemon
-> running + one real login).
+> **TL;DR.** Owners may choose RepoYeti's stable address, a direct rotating
+> `*.trycloudflare.com` address, or a named tunnel on their own domain. Every Quick Tunnel uses
+> `https://app.repoyeti.com/oauth/callback` only for the OAuth return; named and loopback origins
+> complete directly. Dashboard traffic is never proxied by the relay.
 
 ---
 
@@ -1136,18 +1116,22 @@ isn't currently listening — which itself proves the ingress is correct).
 - **UI:** the Remote-access modal overflow (long URL pushing the copy button off the card) was a CSS-grid
   `min-width:auto` trap — fixed with `min-w-0` on the link block in `web/src/components/RemoteAccess.vue`.
 
-### Login — the right way (no shim)
-The old design used a **rotating** tunnel URL, so OAuth (which needs a fixed registered redirect) used a tiny
-"shim" Worker that bounced the login back to the daemon's current address. **With a stable domain that's
-obsolete.** Now:
+### Login callback selection
+
 - **IdP registration** (Connections `developer_app_registrations`, a registered public `client_id`):
   `redirect_uris = [ https://app.repoyeti.com/oauth/callback , http://127.0.0.1:7171/oauth/callback ]`.
   (The previous entry was malformed — `…/cb%20and`, old `gitmob-auth` name — and would have failed login.)
-- **Daemon** (`src/auth.ts`): `/oauth/login` sends `redirect_uri = <its own origin>/oauth/callback`;
-  `/oauth/callback` exchanges with the same value, derived from the **HMAC-signed `state`** (so it can't be
-  tampered). The IdP allow-list + the signed origin double-gate against open redirects.
-- **Shim retired:** the `gitmob-auth` Worker (it was never re-deployed under the new name) was **deleted** from
-  the Lunawerx Cloudflare account. `shim/` in this repo is now dead reference code.
+- **Quick Tunnel startup** (`src/runtime.ts`): announces the generated HTTPS origin to the callback
+  relay, even when stable-address forwarding is disabled. Login stays at 503 until that announcement
+  succeeds.
+- **Daemon login** (`src/auth.ts`): signs the initiating origin, exact redirect URI, nonce, and relay
+  id into state. `/oauth/finish` exchanges the code with exactly that redirect URI and the in-memory
+  PKCE verifier. Old local states without the redirect field remain accepted.
+- **Worker callback** (`relay/worker.js`): extracts only the relay id, resolves its Ed25519-announced
+  HTTPS origin from KV, and forwards only `code` and `state`. It can observe the transient code but
+  cannot redeem it without the verifier.
+- **Direct completion:** named/custom-domain and loopback origins keep
+  `<origin>/oauth/callback`; no relay lookup is needed.
 
 ### Headless agents — an optional Bearer API token (no browser needed)
 A **remote or headless AI agent** can't complete the browser-based OIDC dance. For that case the
@@ -1163,22 +1147,19 @@ owner can mint an **optional API token** and the agent authenticates with a Bear
   signed-in owner *or* the explicit token. The token is purely additive, for the headless case.
 
 ### To bring it fully live
-1. Run RepoYeti with **remote access on** (it reads `~/.repoyeti/config.json` and runs the named-tunnel
-   connector itself; `cloudflared` is installed).
-2. **Sign in once** over `app.repoyeti.com` to claim ownership (a request over the tunnel always requires the
-   owner session — the security invariant). This is the one step not yet runtime-verified.
+1. Run RepoYeti with **remote access on** using the RepoYeti address, direct Cloudflare address, or a
+   configured named tunnel.
+2. **Sign in once** to claim ownership. The complete Worker/daemon/PKCE/session journey is covered by
+   integration tests; a live IdP login remains a release smoke test.
 
 ### Security notes
 - A request arriving over the tunnel **always** requires a signed-in owner, in any mode (loopback can "continue
   local"). Enabling remote refuses until an owner is claimed (no stranger races TOFU on a fresh tunnel).
-- The named-tunnel host is a normal `repoyeti.com` record — **not** on any trycloudflare blocklist.
+- A named-tunnel host avoids networks that block `trycloudflare.com`; Quick Tunnel addressing cannot.
 
 ### Open
-- **Live sign-in not yet proven** (needs the daemon running). If the IdP rejects the redirect URI, it's an app-
-  registration cache TTL — re-try shortly.
-- **Google Cloud** (used elsewhere via the operator) still needs a re-connect for a fresh token — unrelated to
-  this tunnel; see the Connections doc §8.
-- Daemon code edits (`auth.ts`, `config.ts`, `tunnel.ts`, `runtime.ts`) are in the working tree.
+- **Live-provider smoke test:** after Worker-first rollout, verify one real login for each supported
+  address mode. This repository's automated suite uses a simulated standards-compatible IdP.
 
 ---
 
