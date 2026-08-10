@@ -4,6 +4,36 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-08-10
+
+Remote sign-in works again, and the app works offline again. Thanks to Renan Franca
+([@renanfranca](https://github.com/renanfranca)) for reporting all three issues and contributing
+the sign-in fix.
+
+### Fixed
+
+- **Signing in from your phone over a Quick Tunnel works.** Sign-in used to be rejected with
+  "redirect_uri is not registered" because every tunnel gets a fresh temporary address and the
+  login service only accepts a registered one. Login now returns through RepoYeti's stable
+  callback, which forwards it to wherever your daemon currently lives. The callback only ever
+  passes the login response along; your dashboard and Git traffic never touch it, and it cannot
+  read your session. Contributed by Renan Franca.
+- **The dashboard loads offline again.** A dependency pin had silently emptied the offline cache
+  at build time, so the installed app only cached a handful of static files instead of the app
+  itself. The pin is gone, its security intent is preserved, and the full app shell is cached
+  again.
+- **A tunnel that cannot start now says why.** If `cloudflared` is missing, RepoYeti prints what
+  is wrong and how to install it instead of sitting at "Starting cloudflared tunnel…" forever,
+  and keeps serving locally. Docs no longer claim the tunnel client is bundled: it never was, on
+  any install.
+- **Running from a source clone is reproducible.** The quick start now leads with the prebuilt
+  release, and the clone path includes the dashboard's separate install and build steps that a
+  fresh checkout needs before the daemon has a UI to serve.
+- **Turning the share-link relay off is honest about the one announcement sign-in still needs.**
+  A Quick Tunnel must tell the stable callback where it lives or sign-in cannot return; that
+  announcement now logs itself instead of happening silently, and a named tunnel avoids it
+  entirely.
+
 ## [0.20.0] - 2026-08-09
 
 A security and hardening release from a full-codebase audit, followed by adversarial review rounds
