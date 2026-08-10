@@ -42,9 +42,21 @@ async function register(identity = createRelayIdentity(), origin = "https://one.
   return { identity, res };
 }
 
+test("health advertises stable OAuth callback support for deployment checks", async () => {
+  const res = await worker.fetch(new Request("https://relay.example/health"), env);
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, capabilities: ["oauth-callback-v1"] });
+});
+
 test("a first announce registers the daemon and pins its key", async () => {
   const { identity, res } = await register();
   expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({
+    ok: true,
+    url: `https://relay.example/r/${identity.id}`,
+    capabilities: ["oauth-callback-v1"],
+  });
   const stored = JSON.parse(env.RELAY.map.get(`d:${identity.id}`)!);
   expect(stored.origin).toBe("https://one.trycloudflare.com");
   expect(stored.publicKey).toBe(identity.publicKey);

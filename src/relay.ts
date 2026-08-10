@@ -18,6 +18,8 @@
  */
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 
+export const OAUTH_CALLBACK_CAPABILITY = "oauth-callback-v1";
+
 /** Public shape of this daemon's relay identity. The private key never leaves this module. */
 export interface RelayIdentity {
   /** Stable, random, 32 hex chars. Appears in every share URL, so it is an identifier, not a secret. */
@@ -80,6 +82,8 @@ export interface AnnounceResult {
   ok: boolean;
   /** The permanent URL this daemon is reachable at, when the relay accepted us. */
   url?: string;
+  /** Optional protocol features declared by the Worker that accepted this announcement. */
+  capabilities?: readonly string[];
   error?: string;
 }
 
@@ -123,9 +127,21 @@ export async function announce(
         publicKey: identity.publicKey,
       }),
     });
-    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; url?: string; error?: string };
+    const body = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      url?: string;
+      capabilities?: unknown;
+      error?: string;
+    };
     if (!res.ok || !body.ok) return { ok: false, error: body.error ?? `relay returned ${res.status}` };
-    return { ok: true, url: body.url ?? `${base}/r/${identity.id}` };
+    const capabilities = Array.isArray(body.capabilities)
+      ? body.capabilities.filter((capability): capability is string => typeof capability === "string")
+      : undefined;
+    return {
+      ok: true,
+      url: body.url ?? `${base}/r/${identity.id}`,
+      ...(capabilities ? { capabilities } : {}),
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

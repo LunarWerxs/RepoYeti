@@ -346,10 +346,14 @@ the current daemon without making the relay a dashboard proxy.
 Flow (daemon-side PKCE — the browser never holds tokens):
 
 1. A Quick Tunnel announces `(relay id, current HTTPS origin, timestamp)` with Ed25519 during startup.
+   A successful response must declare `oauth-callback-v1`, proving that the same Worker which
+   accepted the route also implements the registered callback. `/health` exposes the same capability.
 2. `/oauth/login` resolves that ready route, creates PKCE, and signs state containing the nonce,
    browser origin, exact redirect URI, and relay id. A failed startup announcement is retried after
    1, 3, and 10 seconds. Until one succeeds, login returns 503 before contacting Connections; after
-   the bounded retries are exhausted, the page asks the owner to restart RepoYeti.
+   the bounded retries are exhausted, the page asks the owner to restart RepoYeti. Missing,
+   malformed, or unknown capability declarations are terminal instead: login returns an
+   update-required 503 immediately because retrying cannot upgrade a deployed Worker.
 3. Connections returns `code` and `state` to `https://app.repoyeti.com/oauth/callback`.
 4. The Worker extracts only the relay id from state. It does not validate the daemon-owned HMAC and
    never trusts an origin supplied by the request; it resolves a previously signed HTTPS destination
@@ -681,9 +685,10 @@ Connections" (public OIDC). It imports nothing from the Connections repo. To lig
    register their own stable callback.
 3. **The trusted owner identity** — the `sub` (or email) RepoYeti should accept. Get it from
    `/oauth/userinfo` after a test login, or from the owner's account record. → daemon config/keychain.
-4. **The relay Worker.** Deploy `relay/worker.js` with KV and `/oauth/callback` support before a daemon
-   release that depends on it. The same signed announcement identity serves stable links and OAuth;
-   the callback never accepts a free-form destination from `state`.
+4. **The relay Worker.** `relay/worker.js` implements `/oauth/callback` and declares
+   `oauth-callback-v1` through `/health` and successful `/announce` responses. The same signed
+   identity serves stable links and OAuth, but an older Worker can still operate `/r/:id` while
+   Quick Tunnel login remains safely blocked.
 
 That's it — no AWS Secrets Manager entry, no Connections-repo change, no shared M2M secret. Everything
 the daemon needs (issuer, client_id, redirect, scopes) is public OIDC config; the only sensitive item
@@ -1124,13 +1129,15 @@ isn't currently listening — which itself proves the ingress is correct).
   (The previous entry was malformed — `…/cb%20and`, old `gitmob-auth` name — and would have failed login.)
 - **Quick Tunnel startup** (`src/runtime.ts`): announces the generated HTTPS origin to the callback
   relay, even when stable-address forwarding is disabled. Login stays at 503 until that announcement
-  succeeds.
+  succeeds and its response declares `oauth-callback-v1`. Missing, malformed, or unknown capability
+  sets are terminally incompatible and do not consume transient retry delays.
 - **Daemon login** (`src/auth.ts`): signs the initiating origin, exact redirect URI, nonce, and relay
   id into state. `/oauth/finish` exchanges the code with exactly that redirect URI and the in-memory
   PKCE verifier. Old local states without the redirect field remain accepted.
 - **Worker callback** (`relay/worker.js`): extracts only the relay id, resolves its Ed25519-announced
   HTTPS origin from KV, and forwards only `code` and `state`. It can observe the transient code but
-  cannot redeem it without the verifier.
+  cannot redeem it without the verifier. `/health` and successful `/announce` responses advertise
+  `oauth-callback-v1` so callers can inspect protocol compatibility.
 - **Direct completion:** named/custom-domain and loopback origins keep
   `<origin>/oauth/callback`; no relay lookup is needed.
 
@@ -1150,17 +1157,13 @@ owner can mint an **optional API token** and the agent authenticates with a Bear
 ### To bring it fully live
 1. Run RepoYeti with **remote access on** using the RepoYeti address, direct Cloudflare address, or a
    configured named tunnel.
-2. **Sign in once** to claim ownership. The complete Worker/daemon/PKCE/session journey is covered by
-   integration tests; a live IdP login remains a release smoke test.
+2. **Sign in once** to claim ownership. Integration tests cover the Worker/daemon/PKCE/session
+   journey with a simulated standards-compatible IdP.
 
 ### Security notes
 - A request arriving over the tunnel **always** requires a signed-in owner, in any mode (loopback can "continue
   local"). Enabling remote refuses until an owner is claimed (no stranger races TOFU on a fresh tunnel).
 - A named-tunnel host avoids networks that block `trycloudflare.com`; Quick Tunnel addressing cannot.
-
-### Open
-- **Live-provider smoke test:** after Worker-first rollout, verify one real login for each supported
-  address mode. This repository's automated suite uses a simulated standards-compatible IdP.
 
 ---
 

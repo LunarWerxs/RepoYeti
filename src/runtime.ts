@@ -17,6 +17,7 @@ import { broadcast } from "./bus.ts";
 import {
   announce,
   createRelayIdentity,
+  OAUTH_CALLBACK_CAPABILITY,
   publicKeyFor,
   relayShareUrl,
   type AnnounceResult,
@@ -53,7 +54,7 @@ interface OAuthCallbackRoute {
   origin: string;
   redirectUri: string;
   relayId: string;
-  status: "ready" | "retrying" | "failed";
+  status: "ready" | "retrying" | "failed" | "incompatible";
   error?: string;
 }
 
@@ -125,6 +126,7 @@ export async function publishRemoteRoutes(
   let callbackResult: AnnounceResult;
   for (let attempt = 0; ; attempt++) {
     callbackResult = await announce(callbackBase, identity, origin, fetchImpl);
+    const callbackCompatible = callbackResult.capabilities?.includes(OAUTH_CALLBACK_CAPABILITY) ?? false;
     // A stopped or replaced tunnel must not become login-ready just because its older announce
     // finished last. Only the newest publication attempt may update process-wide route state.
     if (generation !== remoteRouteGeneration) return;
@@ -133,11 +135,17 @@ export async function publishRemoteRoutes(
       redirectUri,
       relayId: identity.id,
       status: callbackResult.ok
-        ? "ready"
+        ? callbackCompatible
+          ? "ready"
+          : "incompatible"
         : attempt < retryDelays.length
           ? "retrying"
           : "failed",
-      ...(callbackResult.ok ? {} : { error: callbackResult.error ?? "announce failed" }),
+      ...(callbackResult.ok
+        ? callbackCompatible
+          ? {}
+          : { error: `relay does not support ${OAUTH_CALLBACK_CAPABILITY}` }
+        : { error: callbackResult.error ?? "announce failed" }),
     };
     if (callbackResult.ok || attempt >= retryDelays.length) break;
     if (!(await waitForRemoteRouteRetry(retryDelays[attempt]!))) return;
@@ -146,7 +154,7 @@ export async function publishRemoteRoutes(
 
   if (sameRelay) {
     relayAnnounced = callbackResult.ok;
-    relayError = oauthCallbackRoute.error ?? null;
+    relayError = callbackResult.ok ? null : (callbackResult.error ?? "announce failed");
     broadcast("daemon_status", {
       relay: redactRelay(cfg),
       relayUrl: getRelayBase(cfg),
@@ -177,7 +185,7 @@ export function getOAuthCallback(
   };
 }
 
-export type OAuthCallbackStatus = "ready" | "pending" | "retrying" | "failed";
+export type OAuthCallbackStatus = "ready" | "pending" | "retrying" | "failed" | "incompatible";
 
 /** Browser-facing readiness without exposing raw relay errors to an unauthenticated request. */
 export function getOAuthCallbackStatus(cfg: RepoYetiConfig, origin: string): OAuthCallbackStatus {

@@ -268,8 +268,10 @@ export interface HandleLoginOptions extends AuthOptions {
   resolveRedirect?: (origin: string) => Promise<{ redirectUri: string; relayId?: string }>;
 }
 
+export type OAuthCallbackUnavailableReason = "temporary" | "failed" | "incompatible";
+
 export class OAuthCallbackUnavailableError extends Error {
-  constructor(readonly exhausted: boolean) {
+  constructor(readonly reason: OAuthCallbackUnavailableReason) {
     super("Quick Tunnel OAuth callback is unavailable");
   }
 }
@@ -283,7 +285,16 @@ export async function handleLogin(c: Context, oauth: OAuthConfig, opts?: HandleL
       ? await opts.resolveRedirect(origin)
       : { redirectUri: `${origin}/oauth/callback` };
   } catch (error) {
-    if (error instanceof OAuthCallbackUnavailableError && error.exhausted) {
+    if (error instanceof OAuthCallbackUnavailableError && error.reason === "incompatible") {
+      return c.html(
+        errPage(
+          "The remote sign-in service needs to be updated before this RepoYeti version can authenticate through a Quick Tunnel (missing oauth-callback-v1).",
+          { href: "/", label: "Return to RepoYeti" },
+        ),
+        503,
+      );
+    }
+    if (error instanceof OAuthCallbackUnavailableError && error.reason === "failed") {
       return c.html(
         errPage(
           "Remote sign-in could not prepare its callback route. Restart RepoYeti and try again.",

@@ -12,6 +12,7 @@ import {
   hasLocalBypass,
   type AuthOptions,
   type HandleLoginOptions,
+  type OAuthCallbackUnavailableReason,
   OAuthCallbackUnavailableError,
 } from "../../auth.ts";
 import { rememberTokens, clearTokens, pullNow } from "../../connections-sync.ts";
@@ -110,7 +111,10 @@ export function register(app: Hono, { cfg }: Deps): void {
     resolveRedirect: async (origin) => {
       const callback = getOAuthCallback(cfg, origin);
       if (!callback) {
-        throw new OAuthCallbackUnavailableError(getOAuthCallbackStatus(cfg, origin) === "failed");
+        const status = getOAuthCallbackStatus(cfg, origin);
+        const reason: OAuthCallbackUnavailableReason =
+          status === "failed" || status === "incompatible" ? status : "temporary";
+        throw new OAuthCallbackUnavailableError(reason);
       }
       return callback;
     },

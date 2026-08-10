@@ -39,6 +39,7 @@
  */
 
 const ID_RE = /^[a-z0-9]{16,64}$/i;
+const CAPABILITIES = ["oauth-callback-v1"];
 /** Reject an announce whose timestamp is far from ours — a captured one can't be replayed later. */
 const MAX_SKEW_MS = 5 * 60 * 1000;
 
@@ -162,7 +163,7 @@ export default {
         `d:${id}`,
         JSON.stringify({ publicKey: key, origin: cleanOrigin, updatedAt: Date.now() }),
       );
-      return json({ ok: true, url: `${url.origin}/r/${id}` });
+      return json({ ok: true, url: `${url.origin}/r/${id}`, capabilities: CAPABILITIES });
     }
 
     // ── resolve a daemon for another RepoYeti installation ─────────────────────
@@ -227,7 +228,7 @@ export default {
       return new Response(forwardPage(target), { headers: html() });
     }
 
-    if (url.pathname === "/health") return json({ ok: true });
+    if (url.pathname === "/health") return json({ ok: true, capabilities: CAPABILITIES });
     return new Response("Not found", { status: 404 });
   },
 };

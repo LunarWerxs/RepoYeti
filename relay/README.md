@@ -133,15 +133,20 @@ Transient announcement failures are retried by the daemon after 1, 3, and 10 sec
 to the active tunnel generation: replacing or stopping the tunnel cancels the pending timer, and
 requests to the public `/oauth/login` route never trigger additional KV writes.
 
+Successful announcements declare `oauth-callback-v1`. Quick Tunnel OAuth becomes ready only when
+the response that accepted its route contains that capability; an older Worker may keep serving a
+stable `/r/:id` address, but login fails safely before Connections opens. Missing, malformed, and
+unknown capability declarations are terminal and do not consume the transient retry schedule.
+
 ## Endpoints
 
 | Method | Path            | Purpose                                                        |
 | ------ | --------------- | -------------------------------------------------------------- |
-| `POST` | `/announce`     | Daemon publishes its current origin (signed).                    |
+| `POST` | `/announce`     | Publish current origin; success declares protocol capabilities.   |
 | `GET`  | `/oauth/callback` | Resolve relay id from signed state; forward only `code` + `state`. |
 | `GET`  | `/r/:id`        | Forwarding page; re-attaches the URL fragment client-side.       |
 | `GET`  | `/r/:id/<path>` | Plain 302 for links that carry no secret (e.g. "open my board"). |
-| `GET`  | `/health`       | Liveness.                                                        |
+| `GET`  | `/health`       | Liveness and protocol capabilities.                              |
 
 ## Known limit
 
@@ -149,9 +154,3 @@ This fixes **addresses changing**. It does not fix `trycloudflare.com` being DNS
 school and corporate networks, because the forward still lands there. For a link that resolves
 everywhere, use a named tunnel on your own domain — RepoYeti supports that directly, and then you
 do not need the relay at all.
-
-## Rollout order
-
-Deploy the Worker with `/oauth/callback` support before releasing a daemon that sends Quick Tunnel
-logins there. No KV migration is required. For rollback, revert the daemon first; the additional
-Worker endpoint is inert and backward-compatible for older daemons.

@@ -17,6 +17,8 @@ import {
   shareLinkFor,
   getRelayBase,
   getOAuthCallback,
+  getOAuthCallbackStatus,
+  getRelayStatus,
   publishRemoteRoutes,
 } from "../src/runtime.ts";
 import { createRelayIdentity, publicKeyFor } from "../src/relay.ts";
@@ -170,7 +172,7 @@ test("a direct Quick Tunnel still publishes the stable OAuth callback route once
   let announcedAt = "";
   const fetchImpl = (async (input: string | URL | Request) => {
     announcedAt = String(input);
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, capabilities: ["oauth-callback-v1"] }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -206,6 +208,62 @@ test("a failed Quick Tunnel callback announce leaves remote login unavailable", 
   expect(getOAuthCallback(cfg, "https://offline-yeti.trycloudflare.com")).toBeNull();
 });
 
+test("missing, malformed, or unknown Worker capabilities stop Quick Tunnel OAuth without retries", async () => {
+  const cfg = base({
+    relay: { enabled: false },
+    oauth: {
+      issuer: "https://accounts.connections.icu",
+      clientId: "public-client",
+      redirectUri: "https://app.repoyeti.com/oauth/callback",
+    },
+  });
+  for (const [index, capabilities] of [undefined, { oauth: true }, ["future-capability"]].entries()) {
+    let attempts = 0;
+    const fetchImpl = (async () => {
+      attempts++;
+      return new Response(JSON.stringify({ ok: true, ...(capabilities === undefined ? {} : { capabilities }) }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    const origin = `https://legacy-${index}.trycloudflare.com`;
+
+    await publishRemoteRoutes(cfg, origin, fetchImpl, { retryDelaysMs: [0, 0, 0] });
+
+    expect(attempts).toBe(1);
+    expect(getOAuthCallback(cfg, origin)).toBeNull();
+    expect(getOAuthCallbackStatus(cfg, origin)).toBe("incompatible");
+  }
+});
+
+test("an old Worker can keep the stable address live while Quick Tunnel OAuth stays incompatible", async () => {
+  const identity = createRelayIdentity();
+  const cfg = base({
+    mode: "remote",
+    relay: { enabled: true, url: "https://app.repoyeti.com", identity },
+    oauth: {
+      issuer: "https://accounts.connections.icu",
+      clientId: "public-client",
+      redirectUri: "https://app.repoyeti.com/oauth/callback",
+    },
+  });
+  const origin = "https://stable-legacy.trycloudflare.com";
+
+  await publishRemoteRoutes(
+    cfg,
+    origin,
+    (async () =>
+      new Response(JSON.stringify({ ok: true, url: `https://app.repoyeti.com/r/${identity.id}` }), {
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch,
+    { retryDelaysMs: [0, 0, 0] },
+  );
+  const status = getRelayStatus();
+
+  expect(status.announced).toBe(true);
+  expect(status.error).toBeNull();
+  expect(getOAuthCallbackStatus(cfg, origin)).toBe("incompatible");
+});
+
 test("a transient Quick Tunnel callback failure retries without a daemon restart", async () => {
   const cfg = base({
     relay: { enabled: false },
@@ -223,7 +281,7 @@ test("a transient Quick Tunnel callback failure retries without a daemon restart
           status: 400,
           headers: { "content-type": "application/json" },
         })
-      : new Response(JSON.stringify({ ok: true }), {
+      : new Response(JSON.stringify({ ok: true, capabilities: ["oauth-callback-v1"] }), {
           headers: { "content-type": "application/json" },
         });
   }) as unknown as typeof fetch;
@@ -267,7 +325,7 @@ test("a replaced Quick Tunnel cancels the previous origin's pending callback ret
     cfg,
     "https://new-yeti.trycloudflare.com",
     (async () =>
-      new Response(JSON.stringify({ ok: true }), {
+      new Response(JSON.stringify({ ok: true, capabilities: ["oauth-callback-v1"] }), {
         headers: { "content-type": "application/json" },
       })) as unknown as typeof fetch,
   );

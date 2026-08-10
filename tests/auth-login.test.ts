@@ -259,6 +259,39 @@ test("an exhausted Quick Tunnel callback failure tells the owner to restart inst
   expect(body).toContain("Return to RepoYeti");
 });
 
+test("an incompatible Worker stops before Connections and tells the owner it needs an update", async () => {
+  const origin = "https://legacy-yeti.trycloudflare.com";
+  const cfg: RepoYetiConfig = {
+    roots: [],
+    port: 7171,
+    maxDepth: 6,
+    maxRepos: 200,
+    mode: "remote",
+    relay: { enabled: false },
+    oauth: { ...OAUTH, redirectUri: "https://app.repoyeti.com/oauth/callback" },
+  };
+  await publishRemoteRoutes(
+    cfg,
+    origin,
+    (async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch,
+    { retryDelaysMs: [0, 0, 0] },
+  );
+
+  const res = await createApp(cfg).request(`${origin}/oauth/login`);
+  const body = await res.text();
+
+  expect(res.status).toBe(503);
+  expect(body).toContain("sign-in service needs to be updated");
+  expect(body).toContain("oauth-callback-v1");
+  expect(body).not.toContain("Try again shortly");
+  expect(body).not.toContain("Restart RepoYeti");
+  expect(body).toContain('href="/"');
+  expect(body).toContain("Return to RepoYeti");
+});
+
 test("RepoYeti's public login route consumes the callback announced for its Quick Tunnel", async () => {
   const cfg: RepoYetiConfig = {
     roots: [],
@@ -273,7 +306,7 @@ test("RepoYeti's public login route consumes the callback announced for its Quic
     cfg,
     "https://snowy-yeti.trycloudflare.com",
     (async () =>
-      new Response(JSON.stringify({ ok: true }), {
+      new Response(JSON.stringify({ ok: true, capabilities: ["oauth-callback-v1"] }), {
         headers: { "content-type": "application/json" },
       })) as unknown as typeof fetch,
   );
