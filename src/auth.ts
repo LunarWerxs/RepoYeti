@@ -240,7 +240,10 @@ export function handleContinueLocal(c: Context, opts?: AuthOptions): Response {
 }
 
 // ── HTML for the auth-complete error page ──────────────────────────────────────
-function errPage(message: string): string {
+function errPage(
+  message: string,
+  action: { href: string; label: string } = { href: "/oauth/login", label: "Try again" },
+): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RepoYeti — sign in</title>
 <body style="margin:0;background:#0e0e12;color:#e6e6ea;font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh">
@@ -248,7 +251,7 @@ function errPage(message: string): string {
 <div style="font-size:40px">🔒</div>
 <h2 style="margin:12px 0 8px">Can't sign you in</h2>
 <p style="color:#9a9aa6;font-size:14px;line-height:1.5">${message}</p>
-<a href="/oauth/login" style="display:inline-block;margin-top:14px;background:#3ddc84;color:#06210f;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:9px">Try again</a>
+<a href="${action.href}" style="display:inline-block;margin-top:14px;background:#3ddc84;color:#06210f;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:9px">${action.label}</a>
 </div></body>`;
 }
 
@@ -265,6 +268,12 @@ export interface HandleLoginOptions extends AuthOptions {
   resolveRedirect?: (origin: string) => Promise<{ redirectUri: string; relayId?: string }>;
 }
 
+export class OAuthCallbackUnavailableError extends Error {
+  constructor(readonly exhausted: boolean) {
+    super("Quick Tunnel OAuth callback is unavailable");
+  }
+}
+
 export async function handleLogin(c: Context, oauth: OAuthConfig, opts?: HandleLoginOptions): Promise<Response> {
   const o = oauth;
   const origin = publicOrigin(c);
@@ -273,7 +282,16 @@ export async function handleLogin(c: Context, oauth: OAuthConfig, opts?: HandleL
     resolved = opts?.resolveRedirect
       ? await opts.resolveRedirect(origin)
       : { redirectUri: `${origin}/oauth/callback` };
-  } catch {
+  } catch (error) {
+    if (error instanceof OAuthCallbackUnavailableError && error.exhausted) {
+      return c.html(
+        errPage(
+          "Remote sign-in could not prepare its callback route. Restart RepoYeti and try again.",
+          { href: "/", label: "Return to RepoYeti" },
+        ),
+        503,
+      );
+    }
     return c.html(errPage("Remote sign-in is temporarily unavailable. Try again shortly."), 503);
   }
   const doc = await discover(o.issuer, opts?.fetchImpl ?? authFetch);

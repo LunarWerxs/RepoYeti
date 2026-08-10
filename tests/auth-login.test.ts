@@ -227,6 +227,38 @@ test("login returns 503 before contacting Connections when the Quick Tunnel call
   expect(discoveryCalled).toBe(false);
 });
 
+test("an exhausted Quick Tunnel callback failure tells the owner to restart instead of retrying forever", async () => {
+  const origin = "https://failed-yeti.trycloudflare.com";
+  const cfg: RepoYetiConfig = {
+    roots: [],
+    port: 7171,
+    maxDepth: 6,
+    maxRepos: 200,
+    mode: "remote",
+    relay: { enabled: false },
+    oauth: { ...OAUTH, redirectUri: "https://app.repoyeti.com/oauth/callback" },
+  };
+  await publishRemoteRoutes(
+    cfg,
+    origin,
+    (async () =>
+      new Response(JSON.stringify({ ok: false, error: "stale timestamp" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch,
+    { retryDelaysMs: [] },
+  );
+
+  const res = await createApp(cfg).request(`${origin}/oauth/login`);
+  const body = await res.text();
+
+  expect(res.status).toBe(503);
+  expect(body).toContain("could not prepare its callback route");
+  expect(body).toContain("Restart RepoYeti");
+  expect(body).toContain('href="/"');
+  expect(body).toContain("Return to RepoYeti");
+});
+
 test("RepoYeti's public login route consumes the callback announced for its Quick Tunnel", async () => {
   const cfg: RepoYetiConfig = {
     roots: [],

@@ -129,6 +129,9 @@ relay off in Settings deliberately keeps it for that reason.
 Choosing the direct Cloudflare address disables the stable `/r/:id` address, but a Quick Tunnel
 still sends one signed announcement at startup for OAuth return routing. The announcement contains
 only `(id, origin, timestamp, signature)`: no repository names, paths, or share tokens.
+Transient announcement failures are retried by the daemon after 1, 3, and 10 seconds. Retries belong
+to the active tunnel generation: replacing or stopping the tunnel cancels the pending timer, and
+requests to the public `/oauth/login` route never trigger additional KV writes.
 
 ## Endpoints
 

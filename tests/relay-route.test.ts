@@ -200,9 +200,85 @@ test("a failed Quick Tunnel callback announce leaves remote login unavailable", 
     cfg,
     "https://offline-yeti.trycloudflare.com",
     (async () => new Response("unavailable", { status: 503 })) as unknown as typeof fetch,
+    { retryDelaysMs: [] },
   );
 
   expect(getOAuthCallback(cfg, "https://offline-yeti.trycloudflare.com")).toBeNull();
+});
+
+test("a transient Quick Tunnel callback failure retries without a daemon restart", async () => {
+  const cfg = base({
+    relay: { enabled: false },
+    oauth: {
+      issuer: "https://accounts.connections.icu",
+      clientId: "public-client",
+      redirectUri: "https://app.repoyeti.com/oauth/callback",
+    },
+  });
+  let attempts = 0;
+  const fetchImpl = (async () => {
+    attempts++;
+    return attempts === 1
+      ? new Response(JSON.stringify({ ok: false, error: "stale timestamp" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        })
+      : new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        });
+  }) as unknown as typeof fetch;
+
+  await publishRemoteRoutes(cfg, "https://recovered-yeti.trycloudflare.com", fetchImpl, {
+    retryDelaysMs: [0],
+  });
+
+  expect(attempts).toBe(2);
+  expect(getOAuthCallback(cfg, "https://recovered-yeti.trycloudflare.com")).toEqual({
+    redirectUri: "https://app.repoyeti.com/oauth/callback",
+    relayId: cfg.relay?.identity?.id,
+  });
+});
+
+test("a replaced Quick Tunnel cancels the previous origin's pending callback retries", async () => {
+  const cfg = base({
+    relay: { enabled: false },
+    oauth: {
+      issuer: "https://accounts.connections.icu",
+      clientId: "public-client",
+      redirectUri: "https://app.repoyeti.com/oauth/callback",
+    },
+  });
+  let oldAttempts = 0;
+  const oldPublish = publishRemoteRoutes(
+    cfg,
+    "https://old-yeti.trycloudflare.com",
+    (async () => {
+      oldAttempts++;
+      return new Response(JSON.stringify({ ok: false, error: "unavailable" }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch,
+    { retryDelaysMs: [10] },
+  );
+  while (oldAttempts === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+
+  await publishRemoteRoutes(
+    cfg,
+    "https://new-yeti.trycloudflare.com",
+    (async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch,
+  );
+  await oldPublish;
+
+  expect(oldAttempts).toBe(1);
+  expect(getOAuthCallback(cfg, "https://old-yeti.trycloudflare.com")).toBeNull();
+  expect(getOAuthCallback(cfg, "https://new-yeti.trycloudflare.com")).toEqual({
+    redirectUri: "https://app.repoyeti.com/oauth/callback",
+    relayId: cfg.relay?.identity?.id,
+  });
 });
 
 // ── the origin links are handed out on ─────────────────────────────────────────────

@@ -347,8 +347,9 @@ Flow (daemon-side PKCE — the browser never holds tokens):
 
 1. A Quick Tunnel announces `(relay id, current HTTPS origin, timestamp)` with Ed25519 during startup.
 2. `/oauth/login` resolves that ready route, creates PKCE, and signs state containing the nonce,
-   browser origin, exact redirect URI, and relay id. Until the announcement succeeds it returns 503
-   before contacting Connections.
+   browser origin, exact redirect URI, and relay id. A failed startup announcement is retried after
+   1, 3, and 10 seconds. Until one succeeds, login returns 503 before contacting Connections; after
+   the bounded retries are exhausted, the page asks the owner to restart RepoYeti.
 3. Connections returns `code` and `state` to `https://app.repoyeti.com/oauth/callback`.
 4. The Worker extracts only the relay id from state. It does not validate the daemon-owned HMAC and
    never trusts an origin supplied by the request; it resolves a previously signed HTTPS destination

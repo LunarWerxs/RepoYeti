@@ -78,6 +78,9 @@ bun run src/index.ts start --tunnel
 Quick Tunnel sign-in uses the registered `https://app.repoyeti.com/oauth/callback` only to return
 the OAuth response to the current daemon. Dashboard and Git traffic still go directly through the
 Cloudflare tunnel, including when you choose the temporary `*.trycloudflare.com` address.
+If that callback announcement fails during startup, RepoYeti retries it three times with bounded
+backoff. Login remains at a safe 503 while recovery is in progress and asks for a restart only after
+those retries are exhausted.
 
 Prefer a prebuilt copy? Grab your platform from
 [Releases](https://github.com/LunarWerxs/RepoYeti/releases). On Windows, download

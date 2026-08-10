@@ -12,12 +12,13 @@ import {
   hasLocalBypass,
   type AuthOptions,
   type HandleLoginOptions,
+  OAuthCallbackUnavailableError,
 } from "../../auth.ts";
 import { rememberTokens, clearTokens, pullNow } from "../../connections-sync.ts";
 import { deleteSecret, API_TOKEN } from "../../secrets.ts";
 import { effectiveGuest } from "../../auth.ts";
 import { clearGuestCookie } from "../../share/index.ts";
-import { getOAuthCallback } from "../../runtime.ts";
+import { getOAuthCallback, getOAuthCallbackStatus } from "../../runtime.ts";
 
 export function register(app: Hono, { cfg }: Deps): void {
   // Public: lets the PWA decide whether to show the "Sign in with Connections" screen,
@@ -108,7 +109,9 @@ export function register(app: Hono, { cfg }: Deps): void {
     ...authOpts,
     resolveRedirect: async (origin) => {
       const callback = getOAuthCallback(cfg, origin);
-      if (!callback) throw new Error("Quick Tunnel OAuth callback is not ready");
+      if (!callback) {
+        throw new OAuthCallbackUnavailableError(getOAuthCallbackStatus(cfg, origin) === "failed");
+      }
       return callback;
     },
   };

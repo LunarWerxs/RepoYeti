@@ -19,6 +19,7 @@ import {
   createRelayIdentity,
   publicKeyFor,
   relayShareUrl,
+  type AnnounceResult,
   type RelayIdentity,
 } from "./relay.ts";
 
@@ -52,11 +53,37 @@ interface OAuthCallbackRoute {
   origin: string;
   redirectUri: string;
   relayId: string;
-  error: string | null;
+  status: "ready" | "retrying" | "failed";
+  error?: string;
 }
 
 let oauthCallbackRoute: OAuthCallbackRoute | null = null;
 let remoteRouteGeneration = 0;
+const OAUTH_CALLBACK_RETRY_DELAYS_MS = [1_000, 3_000, 10_000] as const;
+let pendingRemoteRouteRetry: { timer: ReturnType<typeof setTimeout>; cancel: () => void } | null = null;
+
+export interface PublishRemoteRoutesOptions {
+  retryDelaysMs?: readonly number[];
+}
+
+function cancelRemoteRouteRetry(): void {
+  pendingRemoteRouteRetry?.cancel();
+}
+
+function waitForRemoteRouteRetry(delayMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (retry: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      pendingRemoteRouteRetry = null;
+      resolve(retry);
+    };
+    const timer = setTimeout(() => finish(true), delayMs);
+    pendingRemoteRouteRetry = { timer, cancel: () => finish(false) };
+  });
+}
 
 function isQuickTunnelOrigin(origin: string): boolean {
   try {
@@ -72,7 +99,9 @@ export async function publishRemoteRoutes(
   cfg: RepoYetiConfig,
   origin: string,
   fetchImpl: typeof fetch = fetch,
+  options: PublishRemoteRoutesOptions = {},
 ): Promise<void> {
+  cancelRemoteRouteRetry();
   const generation = ++remoteRouteGeneration;
   if (!isQuickTunnelOrigin(origin)) {
     oauthCallbackRoute = null;
@@ -92,20 +121,32 @@ export async function publishRemoteRoutes(
   const identity = await ensureRelayIdentity(cfg);
   if (generation !== remoteRouteGeneration) return;
   const sameRelay = relay.enabled && relay.url.replace(/\/+$/, "") === callbackBase;
-  const callbackResult = await announce(callbackBase, identity, origin, fetchImpl);
-  // A stopped or replaced tunnel must not become login-ready just because its older announce
-  // finished last. Only the newest publication attempt may update process-wide route state.
-  if (generation !== remoteRouteGeneration) return;
-  oauthCallbackRoute = {
-    origin,
-    redirectUri,
-    relayId: identity.id,
-    error: callbackResult.ok ? null : (callbackResult.error ?? "announce failed"),
-  };
+  const retryDelays = options.retryDelaysMs ?? OAUTH_CALLBACK_RETRY_DELAYS_MS;
+  let callbackResult: AnnounceResult;
+  for (let attempt = 0; ; attempt++) {
+    callbackResult = await announce(callbackBase, identity, origin, fetchImpl);
+    // A stopped or replaced tunnel must not become login-ready just because its older announce
+    // finished last. Only the newest publication attempt may update process-wide route state.
+    if (generation !== remoteRouteGeneration) return;
+    oauthCallbackRoute = {
+      origin,
+      redirectUri,
+      relayId: identity.id,
+      status: callbackResult.ok
+        ? "ready"
+        : attempt < retryDelays.length
+          ? "retrying"
+          : "failed",
+      ...(callbackResult.ok ? {} : { error: callbackResult.error ?? "announce failed" }),
+    };
+    if (callbackResult.ok || attempt >= retryDelays.length) break;
+    if (!(await waitForRemoteRouteRetry(retryDelays[attempt]!))) return;
+    if (generation !== remoteRouteGeneration) return;
+  }
 
   if (sameRelay) {
     relayAnnounced = callbackResult.ok;
-    relayError = oauthCallbackRoute.error;
+    relayError = oauthCallbackRoute.error ?? null;
     broadcast("daemon_status", {
       relay: redactRelay(cfg),
       relayUrl: getRelayBase(cfg),
@@ -126,7 +167,7 @@ export function getOAuthCallback(
   if (
     oauthCallbackRoute?.origin !== origin ||
     oauthCallbackRoute.redirectUri !== cfg.oauth?.redirectUri ||
-    oauthCallbackRoute.error
+    oauthCallbackRoute.status !== "ready"
   ) {
     return null;
   }
@@ -134,6 +175,20 @@ export function getOAuthCallback(
     redirectUri: oauthCallbackRoute.redirectUri,
     relayId: oauthCallbackRoute.relayId,
   };
+}
+
+export type OAuthCallbackStatus = "ready" | "pending" | "retrying" | "failed";
+
+/** Browser-facing readiness without exposing raw relay errors to an unauthenticated request. */
+export function getOAuthCallbackStatus(cfg: RepoYetiConfig, origin: string): OAuthCallbackStatus {
+  if (!isQuickTunnelOrigin(origin)) return "ready";
+  if (
+    oauthCallbackRoute?.origin !== origin ||
+    oauthCallbackRoute.redirectUri !== cfg.oauth?.redirectUri
+  ) {
+    return "pending";
+  }
+  return oauthCallbackRoute.status;
 }
 
 /**
@@ -287,6 +342,7 @@ export function stopManagedTunnel(): void {
   tunnelHandle = null;
   tunnelStarting = false;
   tunnelUrl = null;
+  cancelRemoteRouteRetry();
   remoteRouteGeneration++;
   oauthCallbackRoute = null;
   // The relay is still pointing at the address we just abandoned, so "registered" is no longer a
