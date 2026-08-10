@@ -122,6 +122,16 @@ export async function publishRemoteRoutes(
   const identity = await ensureRelayIdentity(cfg);
   if (generation !== remoteRouteGeneration) return;
   const sameRelay = relay.enabled && relay.url.replace(/\/+$/, "") === callbackBase;
+  // With the relay toggled OFF, this announce is the one call that still leaves the machine, and it
+  // used to be zero. It has to happen — sign-in cannot return to a rotating hostname without it —
+  // but it must not be silent, or "relay off" quietly stops being a true statement about network
+  // behavior. Same (id, origin, ts, signature) payload as a relay announce; nothing else is sent.
+  // An owner who wants no announcement at all uses a named tunnel, which completes OAuth directly.
+  if (!relay.enabled) {
+    console.log(
+      `repoyeti: announcing this tunnel's address to ${callbackBase} so Quick Tunnel sign-in can return (share-link relay stays off; a named tunnel avoids this entirely)`,
+    );
+  }
   const retryDelays = options.retryDelaysMs ?? OAUTH_CALLBACK_RETRY_DELAYS_MS;
   let callbackResult: AnnounceResult;
   for (let attempt = 0; ; attempt++) {
