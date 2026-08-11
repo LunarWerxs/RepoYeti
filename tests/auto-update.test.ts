@@ -9,6 +9,7 @@ import {
   AUTO_UPDATE_INTERVAL_MIN_S,
   AUTO_UPDATE_INTERVAL_MAX_S,
   AUTO_UPDATE_INTERVAL_DEFAULT_S,
+  AUTO_UPDATE_MAX_OPS_DEFERRALS,
 } from "../src/auto-update.ts";
 
 // The auto-update orchestrator's decision logic, driven through injected hooks so nothing actually
@@ -210,4 +211,154 @@ test("nothing is announced or applied when already up to date", async () => {
   });
   const r = await runAutoUpdateOnce();
   expect(r.reason).toBe("up-to-date");
+});
+
+// ── busy-deferral: never restart out from under work in flight ────────────────────────────
+
+test("defers the apply when an MCP approval is pending", async () => {
+  let applied = 0;
+  let relaunched = 0;
+  setAutoUpdateEnabled(true); // testing the apply path
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => {
+      applied++;
+      return applyResult({});
+    },
+    relaunch: () => {
+      relaunched++;
+    },
+    hasPendingApprovals: () => true,
+  });
+  const r = await runAutoUpdateOnce();
+  expect(r.reason).toBe("deferred");
+  expect(r.applied).toBe(false);
+  expect(r.relaunched).toBe(false);
+  expect(applied).toBe(0);
+  expect(relaunched).toBe(0);
+});
+
+test("defers the apply when the op-queue has an active operation", async () => {
+  let applied = 0;
+  setAutoUpdateEnabled(true); // testing the apply path
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => {
+      applied++;
+      return applyResult({});
+    },
+    relaunch: () => {},
+    hasActiveOperations: () => true,
+  });
+  const r = await runAutoUpdateOnce();
+  expect(r.reason).toBe("deferred");
+  expect(r.applied).toBe(false);
+  expect(applied).toBe(0);
+});
+
+test("does not defer the notify path when work is in flight", async () => {
+  // Busy-deferral only guards the unattended apply — being told about an update is always safe.
+  setUpdateNotifyEnabled(true);
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => applyResult({}),
+    relaunch: () => {},
+    hasPendingApprovals: () => true,
+    hasActiveOperations: () => true,
+  });
+  const r = await runAutoUpdateOnce();
+  expect(r.reason).toBe("notified");
+});
+
+test("applies once nothing is busy", async () => {
+  let applied = 0;
+  let relaunched = 0;
+  setAutoUpdateEnabled(true); // testing the apply path
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => {
+      applied++;
+      return applyResult({ restartRequired: true });
+    },
+    relaunch: () => {
+      relaunched++;
+    },
+    hasPendingApprovals: () => false,
+    hasActiveOperations: () => false,
+  });
+  const r = await runAutoUpdateOnce();
+  expect(r.applied).toBe(true);
+  expect(r.relaunched).toBe(true);
+  expect(applied).toBe(1);
+  expect(relaunched).toBe(1);
+});
+
+test("op-queue busyness defers only AUTO_UPDATE_MAX_OPS_DEFERRALS times, then applies anyway", async () => {
+  // Background read churn can keep the op-queue warm nearly continuously on a many-repo daemon;
+  // an unattended updater that can be starved forever is the worse bug, so the cap wins.
+  let applied = 0;
+  setAutoUpdateEnabled(true); // testing the apply path
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => {
+      applied++;
+      return applyResult({});
+    },
+    relaunch: () => {},
+    hasPendingApprovals: () => false,
+    hasActiveOperations: () => true, // never goes idle
+  });
+  for (let i = 0; i < AUTO_UPDATE_MAX_OPS_DEFERRALS; i++) {
+    expect((await runAutoUpdateOnce()).reason).toBe("deferred");
+    expect(applied).toBe(0);
+  }
+  const r = await runAutoUpdateOnce();
+  expect(r.applied).toBe(true);
+  expect(applied).toBe(1);
+});
+
+test("a pending approval defers past the ops cap — its own auto-deny timeout bounds it instead", async () => {
+  let applied = 0;
+  setAutoUpdateEnabled(true); // testing the apply path
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => {
+      applied++;
+      return applyResult({});
+    },
+    relaunch: () => {},
+    hasPendingApprovals: () => true,
+    hasActiveOperations: () => false,
+  });
+  for (let i = 0; i < AUTO_UPDATE_MAX_OPS_DEFERRALS + 3; i++) {
+    expect((await runAutoUpdateOnce()).reason).toBe("deferred");
+  }
+  expect(applied).toBe(0);
+});
+
+test("going idle resets the ops-deferral budget", async () => {
+  // Defer twice busy, once idle (applies), then busy again — the counter must start over, not
+  // remember the two spent deferrals from before the idle window.
+  let busy = true;
+  let applied = 0;
+  setAutoUpdateEnabled(true); // testing the apply path
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => {
+      applied++;
+      return applyResult({});
+    },
+    relaunch: () => {},
+    hasPendingApprovals: () => false,
+    hasActiveOperations: () => busy,
+  });
+  expect((await runAutoUpdateOnce()).reason).toBe("deferred");
+  expect((await runAutoUpdateOnce()).reason).toBe("deferred");
+  busy = false;
+  expect((await runAutoUpdateOnce()).applied).toBe(true);
+  busy = true;
+  for (let i = 0; i < AUTO_UPDATE_MAX_OPS_DEFERRALS; i++) {
+    expect((await runAutoUpdateOnce()).reason).toBe("deferred");
+  }
+  expect(applied).toBe(1);
 });

@@ -23,8 +23,22 @@
  * Timer shape mirrors auto-commit.ts / remote-sync.ts: a self-rescheduling setTimeout (never
  * setInterval) so a slow apply can't stack. Primed + toggled live from src/http/app.ts + PUT
  * /api/settings; started/stopped in src/cli/lifecycle.ts.
+ *
+ * The apply half also DEFERS whenever work is in flight: a pending MCP approval
+ * (src/approvals.ts) or an active op-queue entry (src/opqueue.ts) means an agent or the owner is
+ * mid-operation on this daemon right now. A deferral retries in AUTO_UPDATE_BUSY_RETRY_S, not a
+ * full check interval — "wait for idle" means keep looking for idle, not "try again in six hours".
+ * The op-queue signal also counts routine background reads (watch-triggered refreshes), which on a
+ * many-repo daemon can stay warm nearly continuously, so it is trusted for at most
+ * AUTO_UPDATE_MAX_OPS_DEFERRALS consecutive retries before the apply proceeds anyway — an
+ * unattended updater that can be starved forever is the worse bug. Pending approvals are exempt
+ * from that cap: their own auto-deny timeout bounds them. Only the unattended apply defers this
+ * way — the notify half above is never held back, since telling the owner an update exists is
+ * always safe.
  */
 import { broadcast } from "./bus.ts";
+import { listPending } from "./approvals.ts";
+import { hasActiveOperations } from "./opqueue.ts";
 import { applyUpdate, checkForUpdate } from "./updater.ts";
 
 /** Check cadence bounds (seconds): 15 min floor, 7 day ceiling, default 6 h. */
@@ -38,24 +52,43 @@ export function clampAutoUpdateInterval(secs: number): number {
   return Math.min(AUTO_UPDATE_INTERVAL_MAX_S, Math.max(AUTO_UPDATE_INTERVAL_MIN_S, Math.round(secs)));
 }
 
+/** A busy-deferred apply retries this soon (capped by the configured interval when it's shorter). */
+export const AUTO_UPDATE_BUSY_RETRY_S = 300;
+/** Consecutive op-queue deferrals tolerated before applying anyway — see the header. */
+export const AUTO_UPDATE_MAX_OPS_DEFERRALS = 6;
+
 // ── injectable side-effects (real impls by default; lifecycle wires `relaunch`, tests swap all) ──
 export interface AutoUpdateHooks {
   check: typeof checkForUpdate;
   apply: typeof applyUpdate;
   /** Restart the daemon so the freshly-pulled code takes over. Wired by src/cli/lifecycle.ts. */
   relaunch: () => void;
+  /** Whether an agent has a mutating MCP call awaiting approval right now. Real impl reads
+   *  src/approvals.ts; tests fake it so the busy-deferral case doesn't need a real pending approval. */
+  hasPendingApprovals: () => boolean;
+  /** Whether a git/file mutation is queued or running through the per-repo op-queue right now.
+   *  Real impl reads src/opqueue.ts; tests fake it the same way as hasPendingApprovals. */
+  hasActiveOperations: () => boolean;
 }
 function defaultRelaunch(): void {
   // No relaunch handler wired (e.g. createApp() in a test) — the update is applied on disk and takes
   // effect on the next manual restart. Never exit here; we don't own a successor.
   console.warn("repoyeti: auto-update applied, but no relaunch handler is wired — restart to apply the new code.");
 }
-const realHooks: AutoUpdateHooks = { check: checkForUpdate, apply: applyUpdate, relaunch: defaultRelaunch };
+const realHooks: AutoUpdateHooks = {
+  check: checkForUpdate,
+  apply: applyUpdate,
+  relaunch: defaultRelaunch,
+  hasPendingApprovals: () => listPending().length > 0,
+  hasActiveOperations,
+};
 let hooks: AutoUpdateHooks = realHooks;
 /** Override the side-effect hooks (lifecycle sets `relaunch`; tests inject fakes for all three so
  *  nothing pulls/spawns/exits). Passing `{}` restores the real hooks. */
 export function setAutoUpdateHooks(h: Partial<AutoUpdateHooks>): void {
   hooks = { ...realHooks, ...h };
+  // A fresh hook set is a fresh world (boot, or a test's arrange step) — no deferral history.
+  opsDeferrals = 0;
 }
 
 // ── runtime state (mirrors cfg.autoUpdate*; primed at boot in app.ts, toggled on the settings route) ──
@@ -66,6 +99,7 @@ let started = false; // true only after the daemon finishes booting (startAutoUp
 let timer: ReturnType<typeof setTimeout> | null = null;
 let ticking = false;
 let applying = false; // an apply is in flight — never overlap checks/applies
+let opsDeferrals = 0; // consecutive op-queue busy-deferrals — capped, see the header
 
 export function autoUpdateEnabled(): boolean {
   return enabled;
@@ -139,6 +173,25 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
     return { checked: true, applied: false, relaunched: false, reason: status.reason ?? "cannot-apply" };
   }
 
+  // Busy-deferral: never restart the daemon out from under work in flight. A pending MCP approval
+  // means an agent has a mutating call waiting on this daemon RIGHT NOW — defer, uncapped, because
+  // the approval's own auto-deny timeout bounds how long that state can last. An active op-queue
+  // entry means a git/file op is running this instant; that signal also counts routine background
+  // reads, which on a many-repo daemon can stay warm nearly continuously, so it is honored for at
+  // most AUTO_UPDATE_MAX_OPS_DEFERRALS consecutive retries before the apply proceeds anyway (the
+  // relaunch shuts down gracefully; an updater that can be starved forever is the worse bug).
+  // Deferrals retry in AUTO_UPDATE_BUSY_RETRY_S (see runTick), not a full interval. Only reached
+  // on the apply path (the notify branch above already returned), so this never delays telling the
+  // owner an update exists — only the unattended relaunch waits.
+  if (hooks.hasPendingApprovals()) {
+    return { checked: true, applied: false, relaunched: false, reason: "deferred" };
+  }
+  if (hooks.hasActiveOperations() && opsDeferrals < AUTO_UPDATE_MAX_OPS_DEFERRALS) {
+    opsDeferrals++;
+    return { checked: true, applied: false, relaunched: false, reason: "deferred" };
+  }
+  opsDeferrals = 0;
+
   applying = true;
   try {
     broadcast("auto_update_applying", { from: status.currentCommit, to: status.remoteCommit });
@@ -158,20 +211,25 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
 }
 
 // ── timer plumbing (mirrors auto-commit.ts) ───────────────────────────────────────────────────
-function schedule(): void {
-  timer = setTimeout(() => void runTick(), intervalSecs * 1000);
+function schedule(delaySecs: number = intervalSecs): void {
+  timer = setTimeout(() => void runTick(), delaySecs * 1000);
 }
 async function runTick(): Promise<void> {
   timer = null;
   ticking = true;
+  let deferred = false;
   try {
-    await runAutoUpdateOnce();
+    deferred = (await runAutoUpdateOnce()).reason === "deferred";
   } catch {
     /* a round failing is non-fatal — we just try again next window */
   } finally {
     ticking = false;
   }
-  if (started && (enabled || notifyEnabled) && !timer) schedule();
+  // A busy-deferred apply means "wait for idle", so look for idle SOON — waiting a whole check
+  // interval (default 6h) would turn a 30-second busy blip into a half-day update delay.
+  if (started && (enabled || notifyEnabled) && !timer) {
+    schedule(deferred ? Math.min(AUTO_UPDATE_BUSY_RETRY_S, intervalSecs) : intervalSecs);
+  }
 }
 /** Bring the timer in line with the current enabled/started state (idempotent). */
 function reconcile(): void {

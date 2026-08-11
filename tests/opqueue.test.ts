@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { enqueue } from "../src/opqueue.ts";
+import { enqueue, hasActiveOperations } from "../src/opqueue.ts";
 
 test("serializes operations on the same key (no races)", async () => {
   const order: number[] = [];
@@ -33,4 +33,19 @@ test("different keys run independently", async () => {
   });
   await Promise.all([slow, fast]);
   expect(order[0]).toBe("fast"); // k2 not blocked by k1
+});
+
+test("hasActiveOperations reflects an op queued or running, and clears once it settles", async () => {
+  expect(hasActiveOperations()).toBe(false);
+  let release = () => {};
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const p = enqueue("busy-key", async () => {
+    await gate;
+  });
+  expect(hasActiveOperations()).toBe(true);
+  release();
+  await p;
+  expect(hasActiveOperations()).toBe(false);
 });

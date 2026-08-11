@@ -8,10 +8,26 @@
  */
 const chains = new Map<string, Promise<unknown>>();
 
+// Count of calls currently queued or executing across every repo, incremented when `enqueue` is
+// called and decremented once `fn` settles. Every git/file op funnels through here — reads
+// (readStatus, log, …) and mutations (commit, push, discard, stage, …) alike — so this is the one
+// cheap, always-current "is anything happening right now" signal. Auto-update's busy-deferral
+// (src/auto-update.ts) reads it so it never restarts the daemon out from under work in flight;
+// counting reads too is intentionally conservative — the worst case is deferring one extra tick.
+let active = 0;
+
+/** Whether any operation is currently queued or running through `enqueue`, across all repos. */
+export function hasActiveOperations(): boolean {
+  return active > 0;
+}
+
 export function enqueue<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const prev = chains.get(key) ?? Promise.resolve();
+  active++;
   // Run `fn` whether or not the previous op resolved or rejected.
-  const next = prev.then(fn, fn);
+  const next = prev.then(fn, fn).finally(() => {
+    active--;
+  });
   // Keep a non-rejecting tail so the chain survives a failed op.
   chains.set(
     key,
