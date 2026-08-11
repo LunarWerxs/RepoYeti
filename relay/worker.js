@@ -43,10 +43,10 @@ const CAPABILITIES = ["oauth-callback-v1"];
 /** Reject an announce whose timestamp is far from ours — a captured one can't be replayed later. */
 const MAX_SKEW_MS = 5 * 60 * 1000;
 
-const json = (body, status = 200) =>
+const json = (body, status = 200, extraHeaders = {}) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
+    headers: { "content-type": "application/json", "cache-control": "no-store", ...extraHeaders },
   });
 
 /** Canonical bytes that get signed. Field order is fixed here and in the daemon; a mismatch just
@@ -169,7 +169,10 @@ export default {
     // ── resolve a daemon for another RepoYeti installation ─────────────────────
     // The normal /r/:id page necessarily reveals this origin to the visitor's browser. This JSON
     // form exposes nothing additional; it lets a peer daemon redeem the same invitation without
-    // executing the fragment-forwarding page.
+    // executing the fragment-forwarding page. CORS is open because the daemon's own PWA also
+    // reads it cross-origin to find where its daemon moved after a quick-tunnel restart (the
+    // installed app is pinned to the dead origin, so the fetch necessarily comes from there) —
+    // and the response holds exactly what the /r/:id page already tells any visitor.
     if (url.pathname.startsWith("/resolve/") && request.method === "GET") {
       const id = url.pathname.split("/")[2] ?? "";
       if (!ID_RE.test(id)) return json({ ok: false, error: "not found" }, 404);
@@ -177,7 +180,7 @@ export default {
       if (!raw) return json({ ok: false, error: "not found" }, 404);
       const target = safeOrigin(JSON.parse(raw).origin);
       if (!target) return json({ ok: false, error: "not found" }, 404);
-      return json({ ok: true, origin: target });
+      return json({ ok: true, origin: target }, 200, { "access-control-allow-origin": "*" });
     }
 
     // ── stable OAuth callback for rotating Quick Tunnels ───────────────────────

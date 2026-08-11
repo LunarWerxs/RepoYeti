@@ -13,6 +13,7 @@ import type {
   UpdateStatus,
 } from "../types";
 import { useSelfUpdate } from "@/lib/useSelfUpdate";
+import { armSelfHeal, disarmSelfHeal, rememberRelayHome } from "@/lib/relay-home";
 import { dismissViewerForRepo } from "@/lib/file-viewer";
 import { useRepoActions, type StatusKey } from "./repo";
 import { useAi } from "./ai";
@@ -666,6 +667,7 @@ export const useStore = defineStore("repoyeti", () => {
       relayUrl.value = s.relayUrl ?? null;
       relayAnnounced.value = s.relayAnnounced === true;
       relayError.value = s.relayError ?? null;
+      rememberRelayHome(s.relayUrl, s.relayAnnounced === true);
       diffStatsEnabled.value = s.diffStats;
       changesStatDisplay.value = s.changesStatDisplay ?? "numbers";
       changesCharsEnabled.value = s.changesChars ?? true;
@@ -766,6 +768,12 @@ export const useStore = defineStore("repoyeti", () => {
           if (isOpen && hasConnectedOnce && !connected.value) void loadAll();
           connected.value = isOpen;
           if (isOpen) hasConnectedOnce = true;
+          // PWA self-heal (see lib/relay-home.ts): a stream that stays dead on a rotating
+          // quick-tunnel origin usually means the tunnel restarted onto a new hostname — ask
+          // the relay where the daemon went and follow it, instead of reconnecting forever
+          // into a hostname that no longer exists.
+          if (isOpen) disarmSelfHeal();
+          else armSelfHeal();
         },
         { immediate: true },
       ),
@@ -879,6 +887,7 @@ export const useStore = defineStore("repoyeti", () => {
           // so the relay's registered state rides the same event rather than needing a poll.
           if (payload.relayUrl !== undefined) relayUrl.value = (payload.relayUrl as string | null) ?? null;
           if (typeof payload.relayAnnounced === "boolean") relayAnnounced.value = payload.relayAnnounced;
+          rememberRelayHome(relayUrl.value, relayAnnounced.value);
           if (payload.relayError !== undefined) {
             relayError.value =
               typeof payload.relayError === "string" ? payload.relayError : null;
