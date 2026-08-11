@@ -132,7 +132,7 @@ No force-push, no `reset --hard`, no rebase. A phone is a lousy place to rewrite
 
 ## Privacy
 
-The daemon pings Connections Studio for update checks, at most once a day. That ping carries a random install id, the running version, and a coarse OS tag (e.g. `win11-26100`). Country is derived server-side from the request, and no IP address is stored. It never sends a hostname, username, file path, account, or anything about your repos.
+The daemon pings Connections Studio for update checks, at most once a day. That ping carries a random install id, the running version, and a coarse OS tag (e.g. `win11-26100`). From that request, the server also derives and stores a coarse location (country, region, city, timezone), your network's ASN, locale, and a truncated user agent, but never an IP address. It never sends a hostname, username, file path, account, or anything about your repos.
 
 Set `REPOYETI_NO_PING=1` to opt out entirely.
 
