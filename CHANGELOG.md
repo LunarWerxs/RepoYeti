@@ -4,6 +4,26 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.3] - 2026-08-10
+
+### Added
+
+- **An anonymous install ping, so we know RepoYeti is actually being used.** A compiled release
+  already checked `studio.connections.icu/v1/app/repoyeti/latest` for updates; that same request now
+  carries an `X-Install-Id` header (a random id persisted locally) and doubles as the install ping,
+  so it costs zero extra network calls. A source checkout has no update check of its own, so daemon
+  boot now fires the same ping directly, throttled to at most once every 24h. The ping carries only
+  a random install id, the running version, and a coarse OS tag; see the [Privacy](README.md#privacy)
+  section for exactly what the server derives from the request itself. Set `REPOYETI_NO_PING=1` to
+  opt out entirely; it is already off under `NODE_ENV=test`, `CI`, and `REPOYETI_DEV=1`.
+
+### Removed
+
+- **The old `REPOYETI_PULSE_URL` / `CONNECTIONS_PULSE_URL` "product pulse" is gone.** That collector
+  (`POST /api/pulse`, and the web app's `app_opened` beacon) was never actually stood up anywhere, so
+  in production it never sent a single event. The install ping above replaces it with something that
+  is actually live.
+
 ## [0.20.2] - 2026-08-10
 
 ### Added
