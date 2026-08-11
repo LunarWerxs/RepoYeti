@@ -130,6 +130,12 @@ Smart Commit and AI commit messages are bring-your-own-key (there's no bundled k
 
 No force-push, no `reset --hard`, no rebase. A phone is a lousy place to rewrite history, so those live at your desk. Pulls are fast-forward-only, and everything runs as the git identity you set for that repo. Local state stays in `~/.repoyeti/`; nothing is written into your repos.
 
+## Privacy
+
+The daemon pings Connections Studio for update checks, at most once a day. That ping carries a random install id, the running version, and a coarse OS tag (e.g. `win11-26100`). Country is derived server-side from the request, and no IP address is stored. It never sends a hostname, username, file path, account, or anything about your repos.
+
+Set `REPOYETI_NO_PING=1` to opt out entirely.
+
 ## Built with
 
 Bun · `bun:sqlite` · Hono · `simple-git` on the daemon, and a Vue 3 + Tailwind PWA on the front end. Sign-in is "Sign in with Connections" (OIDC / PKCE, zero setup). A pluggable VCS backend also supports [Lore](src/vcs/lore.ts) behind `REPOYETI_LORE=1`.

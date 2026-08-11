@@ -9,13 +9,13 @@ import {
   rmSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { VERSION } from "./config.ts";
+import { buildPingRequest, ensureInstallId, pingDisabled, recordPingResult } from "./app-ping.ts";
+import { VERSION, loadConfig } from "./config.ts";
 import type { UpdateApplyResult, UpdateStatus } from "./updater.ts";
 
 const SERVICE = "repoyeti";
 const REPO = "LunarWerxs/RepoYeti";
 const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
-const LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 export interface ReleaseAsset {
   name: string;
@@ -83,14 +83,33 @@ function baseStatus(overrides: Partial<UpdateStatus>): UpdateStatus {
   };
 }
 
+/**
+ * The Connections Studio app-ping proxy (APP_PING_URL, see src/app-ping.ts): relays GitHub's
+ * releases/latest JSON for LunarWerxs/RepoYeti verbatim — identical shape to
+ * api.github.com/repos/${REPO}/releases/latest, so every field this file reads is unchanged — and
+ * logs one anonymous install-count row per hit (random install id + running version + coarse OS;
+ * never an IP or hostname; opt out with REPOYETI_NO_PING=1). This IS the update check: nothing
+ * here makes an extra network call for the ping, it just carries a couple of extra headers/query
+ * params on the request the app already made. Release *binaries* still download straight from
+ * GitHub via the asset URLs the payload carries (trustedAssetUrl below still pins github.com).
+ */
 async function latestRelease(): Promise<Release> {
-  const response = await fetch(LATEST_API, {
-    headers: {
-      accept: "application/vnd.github+json",
-      "user-agent": `${SERVICE}/${VERSION}`,
-    },
-  });
-  if (!response.ok) throw new Error(`GitHub Releases API returned HTTP ${response.status}`);
+  const disabled = pingDisabled();
+  const cfg = loadConfig();
+  if (!disabled) ensureInstallId(cfg);
+  const { url, headers } = buildPingRequest(cfg);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { accept: "application/vnd.github+json", "user-agent": `${SERVICE}/${VERSION}`, ...headers },
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (error) {
+    if (!disabled) recordPingResult(cfg, false);
+    throw error;
+  }
+  if (!disabled) recordPingResult(cfg, response.ok);
+  if (!response.ok) throw new Error(`release check returned HTTP ${response.status}`);
   return (await response.json()) as Release;
 }
 
@@ -118,7 +137,7 @@ export async function checkForUpdate(options: { fresh?: boolean } = {}): Promise
   } catch (error) {
     return baseStatus({
       ok: false,
-      reason: `couldn't check GitHub Releases (${error instanceof Error ? error.message : String(error)}).`,
+      reason: `couldn't check for updates (${error instanceof Error ? error.message : String(error)}).`,
     });
   }
 }

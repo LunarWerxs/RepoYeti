@@ -11,6 +11,7 @@ import { connect } from "node:net";
 import { resolve } from "node:path";
 import qrcode from "qrcode-terminal";
 import { checkAiKeys } from "../ai-keycheck.ts";
+import { fireBootPing } from "../app-ping.ts";
 import { startAutoCommit, stopAutoCommit } from "../auto-commit.ts";
 import { setAutoUpdateHooks, startAutoUpdate, stopAutoUpdate } from "../auto-update.ts";
 import { broadcast } from "../bus.ts";
@@ -37,6 +38,7 @@ import {
 } from "../db.ts";
 import { discoverStream } from "../discovery.ts";
 import { findFreePort } from "../find-free-port.mjs";
+import { checkForUpdate as checkGithubReleasePing } from "../github-updater.ts";
 import { createApp } from "../http/app.ts";
 import {
   clearInstanceInfo,
@@ -260,6 +262,15 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   // leftover can't make a freshly-launched tray quit the instant it starts; only a genuine
   // in-session UI shutdown (POST /api/shutdown) writes a fresh one. See src/instance.ts.
   clearShutdownRequest();
+
+  // Anonymous install/update-check ping to Connections Studio (see src/app-ping.ts) — fired here,
+  // in the DAEMON boot path, so a headless/tray-only daemon nobody ever dashboards into still gets
+  // counted. Fire-and-forget: never awaited, so it cannot delay anything below; throttled to at
+  // most once per 24h via a persisted timestamp, and skipped entirely under REPOYETI_NO_PING=1,
+  // NODE_ENV=test, CI, or REPOYETI_DEV=1. Calls github-updater.ts's checkForUpdate directly (not
+  // src/updater.ts's compiled/source dispatch) so a source checkout — which has no
+  // api.github.com-based check of its own — still gets pinged, not only compiled releases.
+  fireBootPing(() => checkGithubReleasePing({ fresh: true }));
 
   // "Sync my settings with Connections" — load the persisted refresh token, then (if the owner
   // enabled sync) pull the cloud copy in the BACKGROUND so a fresh machine converges without

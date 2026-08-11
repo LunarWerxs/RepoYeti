@@ -295,12 +295,16 @@ export interface TunnelConfig {
   token?: string;
 }
 
-export interface PulseConfig {
-  /** Connections-compatible event collector URL. Absent means pulse is inert (nothing is ever
-   *  sent). Env REPOYETI_PULSE_URL / CONNECTIONS_PULSE_URL override this when set. */
-  endpoint?: string;
-  /** Anonymous per-install id. Generated only after pulse is configured and first used. */
+export interface AppPingConfig {
+  /** Anonymous per-install id (crypto-random UUID), generated once and persisted here. Sent as
+   *  the X-Install-Id header on the Connections Studio app-ping / update-check request. Never
+   *  derived from a hostname, username, or any other machine identifier. See src/app-ping.ts. */
   installId?: string;
+  /** Unix-ms timestamp of the last ping attempt (success or failure), throttling the boot-time
+   *  ping to at most one real network hit per 24h. */
+  lastPingAt?: number;
+  /** Set once this install's FIRST ping ever succeeds — after that, `&new=1` is never sent again. */
+  reported?: boolean;
 }
 
 /**
@@ -492,8 +496,9 @@ export interface RepoYetiConfig {
    * should not phone anywhere by default. Only (id, origin, timestamp, signature) is ever sent.
    */
   relay?: RelayConfig;
-  /** Optional product pulse, forwarded to a Connections-compatible endpoint when configured. */
-  pulse?: PulseConfig;
+  /** Anonymous install/update-check ping to Connections Studio (opt out with REPOYETI_NO_PING=1).
+   *  See src/app-ping.ts. */
+  appPing?: AppPingConfig;
   /** Optional "Sync my settings with Connections" state (off by default). See CloudSyncConfig. */
   cloudSync?: CloudSyncConfig;
   /** Bring-your-own-key AI config (optional). */

@@ -29,8 +29,6 @@ import {
 
 export type { StatusKey };
 
-let appOpenedPulsed = false;
-
 export const useStore = defineStore("repoyeti", () => {
   const repos = ref<Repo[]>([]);
   /** Peer working-tree presence, decrypted by the daemon. */
@@ -638,10 +636,6 @@ export const useStore = defineStore("repoyeti", () => {
       await Promise.allSettled(background);
     } finally {
       loading.value = false;
-      if (!appOpenedPulsed && !isGuest.value) {
-        appOpenedPulsed = true;
-        void recordPulse("app_opened"); // owner-only telemetry; a guest is 403'd on /api/pulse
-      }
       if (!isGuest.value) void checkForUpdate(); // owner-only: /api/updates
     }
   }
@@ -658,14 +652,6 @@ export const useStore = defineStore("repoyeti", () => {
       if (loadAllInFlight === request) loadAllInFlight = null;
     }).catch(() => undefined);
     return request;
-  }
-
-  async function recordPulse(event: string, properties?: Record<string, unknown>): Promise<void> {
-    try {
-      await api.recordPulse(event, properties);
-    } catch {
-      /* pulse is non-critical */
-    }
   }
 
   /** Fetch runtime status (access mode + the remote-access tunnel URL, if any). Best-effort. */
@@ -1022,7 +1008,6 @@ export const useStore = defineStore("repoyeti", () => {
     updateApplying,
     checkForUpdate,
     applyUpdate,
-    recordPulse,
     busy,
     historyRevisionByRepo,
     bumpHistoryRevision,

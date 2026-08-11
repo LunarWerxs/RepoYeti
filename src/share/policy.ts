@@ -136,7 +136,6 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/portable-window",
   "GET /api/updates",
   "POST /api/updates/apply",
-  "POST /api/pulse",
   // auth plane
   "GET /api/auth/status", // guests get a projection instead (routes/auth.ts)
   "GET /api/auth/me", // ditto
