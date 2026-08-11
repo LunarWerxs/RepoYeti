@@ -14,7 +14,7 @@ import { checkAiKeys } from "../ai-keycheck.ts";
 import { fireBootPing } from "../app-ping.ts";
 import { startAutoCommit, stopAutoCommit } from "../auto-commit.ts";
 import { setAutoUpdateHooks, startAutoUpdate, stopAutoUpdate } from "../auto-update.ts";
-import { broadcast } from "../bus.ts";
+import { addListener, broadcast, removeListener, type BusListener } from "../bus.ts";
 import { startCollaborationSync, stopCollaborationSync } from "../collaboration.ts";
 import {
   accessMode,
@@ -22,6 +22,7 @@ import {
   authEnforced,
   hydrateSecrets,
   loadConfig,
+  relayEffective,
   type RepoYetiConfig,
   saveConfig,
   tunnelStartProblem,
@@ -302,12 +303,57 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   const ownerClaimed = !!(liveCfg.oauth?.ownerSub || liveCfg.oauth?.ownerEmail);
   if (wantTunnel || (accessMode(liveCfg) === "remote" && ownerClaimed)) {
     console.log("\nStarting cloudflared tunnel…");
+    const showQr = (label: string, url: string): void => {
+      console.log(`\n  ▸ ${label}  ${url}\n`);
+      qrcode.generate(url, { small: true });
+      console.log("  Scan to open on your phone, then Sign in with Connections.\n");
+    };
     startManagedTunnel(
       liveCfg,
       (tunnelUrl) => {
-        console.log(`\n  ▸ Remote URL:  ${tunnelUrl}\n`);
-        qrcode.generate(tunnelUrl, { small: true });
-        console.log("  Scan to open on your phone, then Sign in with Connections.\n");
+        // With the relay on (the default), the scannable code must be the STABLE
+        // `<relay>/r/<id>` address, not the raw quick-tunnel URL: the raw hostname rotates on
+        // every restart, so a phone that bookmarks it loses access the moment the daemon is
+        // updated (issue #15). The stable address only goes live once the relay announce is
+        // accepted, which runtime.ts reports over the bus as a `daemon_status` event carrying
+        // `relayAnnounced` — subscribe here, BEFORE publishRemoteRoutes fires (onReady runs
+        // synchronously inside onUrl), so the terminal state can't be missed.
+        if (!relayEffective(liveCfg).enabled) {
+          // Named tunnel or explicit opt-out: the URL is already the one to keep (named) or the
+          // one the owner chose (opted out) — QR it immediately, exactly as before.
+          showQr("Remote URL:", tunnelUrl);
+          return;
+        }
+        console.log(`\n  ▸ Remote URL:  ${tunnelUrl}  (rotates on every restart)\n`);
+        let settled = false;
+        const finish = (print: () => void): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(fallback);
+          removeListener(onStatus);
+          print();
+        };
+        // Belt and braces: announce retries run 1s+3s+10s, so if no terminal relay state has
+        // arrived well past that, print the raw QR rather than leave nothing scannable.
+        const fallback = setTimeout(() => finish(() => showQr("Remote URL:", tunnelUrl)), 20_000);
+        const onStatus: BusListener = (event, _data, payload) => {
+          if (event !== "daemon_status" || typeof payload !== "object" || payload === null) return;
+          const p = payload as { relayAnnounced?: boolean; relayUrl?: string | null; relayError?: string | null };
+          // Tunnel-only status broadcasts carry no relayAnnounced; only a terminal announce does.
+          if (typeof p.relayAnnounced !== "boolean") return;
+          finish(() => {
+            if (p.relayAnnounced && p.relayUrl) {
+              showQr("Stable URL:", p.relayUrl);
+              console.log("  This address survives restarts and updates — safe to bookmark.\n");
+            } else {
+              showQr("Remote URL:", tunnelUrl);
+              console.error(
+                `  ⚠ Stable address unavailable (${p.relayError ?? "announce failed"}) — this URL changes on restart.\n`,
+              );
+            }
+          });
+        };
+        addListener(onStatus);
       },
       // The daemon keeps serving locally when the tunnel dies, so this is a warning, not a fatal
       // error — but it must reach the terminal, or --tunnel just appears to hang.
