@@ -24,6 +24,16 @@
   "runtimeCandidates": ["~\\.bun\\bin\\bun.exe", "%APPDATA%\\npm\\node_modules\\bun\\bin\\bun.exe"],
   "runtimeFallback": "bun",
 
+  "_compiled": [
+    "Release layout (the -with-tray zip): a compiled repoyeti.exe sits at the app root, so run THAT",
+    "instead of bun + src/, and don't require bun on PATH at all. A source checkout has no exe at",
+    "the root, so this key simply doesn't resolve there and the bun path above stays in force.",
+    "Resolving it also disables firstRun, whose three steps bootstrap a checkout and would each",
+    "fire in a bundle that ships everything already built."
+  ],
+  "compiledExe": "repoyeti.exe",
+  "startCommandCompiled": "\"{COMPILED}\" start --port {PORT}",
+
   "firstRun": [
     { "missing": "node_modules", "run": "bun install" },
     { "missing": "web\\node_modules", "run": "cd /d web && bun install" },
@@ -42,7 +52,8 @@
   "startupWaitSec": 60,
   "workerWaitSec": 60,
 
-  "notServingHint": "RepoYeti started but isn't serving.\n\nThe most likely cause is that no scan root is configured. Open a terminal in this folder and run:\n\n    bun run src\\index.ts add-root <path-to-your-git-projects>\n\nthen click RepoYeti again. (Other causes: a failed web build, or no free port.)",
+  "_hint": "Layout-neutral on purpose: one static config serves both a source checkout and a release bundle, and the bundle has no src/ to point a bun command at.",
+  "notServingHint": "RepoYeti started but isn't serving.\n\nThe most likely cause is that no scan root is configured. Open a terminal in this folder and add one:\n\n    repoyeti.exe add-root <path-to-your-git-projects>\n\n(from a source checkout: bun run src\\index.ts add-root <path>)\n\nthen click RepoYeti again. (Other causes: a failed web build, or no free port.)",
 
   "portableWindowSize": { "width": 840, "height": 760 },
   "portableWindowSizeHint": true

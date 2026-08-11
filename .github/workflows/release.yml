@@ -74,6 +74,31 @@ jobs:
           if ($listing.Count -ne 1 -or $listing[0] -ne "repoyeti.exe") {
             throw "archive must contain only repoyeti.exe"
           }
+          # A THIRD Windows asset: the same executable plus the misc/ tray toolkit, for anyone who
+          # wants the notification-area icon rather than a bare window. RepoYeti draws no tray icon
+          # itself - misc/lunarwerx-tray.exe does, as a separate launcher - so without these files a
+          # downloaded build simply cannot have one, whatever the app's settings say.
+          #
+          # Deliberately a SEPARATE asset, so the single-file invariant asserted just above (and the
+          # auto-updater that depends on it) is untouched. The updater matches its asset by exact
+          # name, so this one can never be picked up by mistake.
+          $tray = "repoyeti-windows-x64-with-tray"
+          New-Item -ItemType Directory -Path "tmp/$tray/misc" -Force | Out-Null
+          Copy-Item -LiteralPath "dist/repoyeti.exe" -Destination "tmp/$tray/"
+          $trayFiles = @(
+            "lunarwerx-tray.exe", "RepoYeti-Tray.json", "RepoYeti.ico",
+            "Create-Shortcut.ps1", "New-TrayShortcut.ps1",
+            "Tray-Host.ps1", "RepoYeti-Tray.ps1", "Tray-Launch.vbs"
+          )
+          foreach ($f in $trayFiles) { Copy-Item -LiteralPath "misc/$f" -Destination "tmp/$tray/misc/" }
+          # The toolkit is the entire point of this asset, and a bundle missing it still looks fine,
+          # so assert rather than hope.
+          foreach ($f in $trayFiles) {
+            if (-not (Test-Path -LiteralPath "tmp/$tray/misc/$f" -PathType Leaf)) {
+              throw "tray bundle is missing misc/$f"
+            }
+          }
+          Compress-Archive -Path "tmp/$tray" -DestinationPath "out/$tray.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}

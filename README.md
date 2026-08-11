@@ -67,6 +67,11 @@ runtime to install. On Windows that's `repoyeti-windows-x64.exe`; run it directl
 embedded in the executable, so there is no `web` or `node_modules` folder to keep beside it. The
 one-file ZIP remains available for the automatic updater.
 
+Want a system-tray icon? Take `repoyeti-windows-x64-with-tray.zip` instead, run
+`misc\Create-Shortcut.ps1` once, and launch from the shortcut it creates. The icon is drawn by a
+small separate launcher (`misc\lunarwerx-tray.exe`), so running `repoyeti.exe` on its own never
+produces one.
+
 ```sh
 repoyeti add-root ~/code   # point it at where your repos live
 repoyeti start             # daemon on 127.0.0.1:7171
