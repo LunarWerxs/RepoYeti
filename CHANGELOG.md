@@ -4,6 +4,24 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.5] - 2026-08-11
+
+### Added
+
+- **The installed PWA finds its own daemon after a tunnel rotation.** An installed app is pinned
+  to the origin it was installed from, and a quick tunnel re-hosts the daemon on a fresh hostname
+  every restart, so after an update the app opened onto a dead origin and the only fix was
+  reinstalling it ([#15](https://github.com/LunarWerxs/RepoYeti/issues/15)). The shell now
+  remembers its permanent `app.repoyeti.com/r/<id>` address while connected, and when its
+  connection stays dead on a `*.trycloudflare.com` origin it asks the relay where the daemon
+  moved and navigates itself there, path and hash intact. Inert on localhost and on stable or
+  custom domains.
+- **An opted-in auto-update now waits for the daemon to be idle.** The unattended apply defers
+  while an MCP approval is pending or a git operation is in flight, retrying in five minutes
+  rather than a full check interval, and background read churn can only postpone it six times in
+  a row before it proceeds anyway. Being told an update exists is never delayed, only the
+  unattended restart.
+
 ## [0.20.4] - 2026-08-11
 
 ### Fixed
