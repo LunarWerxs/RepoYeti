@@ -4,6 +4,19 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.4] - 2026-08-11
+
+### Fixed
+
+- **`start --tunnel` now QR-codes the address worth bookmarking.** The permanent
+  `app.repoyeti.com/r/<id>` address has been the default stable front door for a while, but the
+  terminal only ever printed the raw `*.trycloudflare.com` URL, which rotates on every restart, so
+  a phone that scanned the QR lost access the moment the daemon was updated
+  ([#15](https://github.com/LunarWerxs/RepoYeti/issues/15)). The terminal now prints the raw URL
+  immediately (marked as rotating) and draws the QR once the stable address is live; if the relay
+  is off, fails, or takes too long, it falls back to the raw URL so something scannable always
+  appears. Named tunnels and relay opt-outs behave exactly as before.
+
 ## [0.20.3] - 2026-08-10
 
 ### Added
