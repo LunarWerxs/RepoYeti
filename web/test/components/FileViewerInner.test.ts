@@ -8,6 +8,14 @@ import { i18n } from "@/i18n";
 import { viewerMode } from "@/lib/file-viewer";
 
 vi.mock("@/lib/file-icons", () => ({ fileVisual: () => "span" }));
+// FileViewerInner async-imports MonacoViewer/MonacoDiffViewer (defineAsyncComponent), and their
+// import of monaco-setup pulls in the whole monaco-editor package. That transform can finish AFTER
+// this file's environment is torn down — an intermittent EnvironmentTeardownError in CI on commits
+// that touched no web code. Mocking it resolves the lazy chain from the registry instead.
+vi.mock("@/lib/monaco-setup", () => ({
+  getMonaco: vi.fn(async () => ({}) as never),
+  monacoThemeFor: vi.fn(() => "vs-dark"),
+}));
 vi.mock("@/lib/binary-preview", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/binary-preview")>()),
   binaryPreviewUrl: (_target: unknown, kind: string) =>
