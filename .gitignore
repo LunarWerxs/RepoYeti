@@ -100,3 +100,6 @@ relay/.wrangler/
 /HANDOFF.md
 /*_HANDOFF.md
 /*-HANDOFF.md
+
+# Local AI memory for this repo. Deliberately NOT published.
+/.claude/memory/
