@@ -28,6 +28,22 @@ import { mkScratchDir, fileUrl } from "./helpers/scratch.ts";
 
 const noAiConfig = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
+/**
+ * Allowance for the two rounds that drive a REAL remote round-trip.
+ *
+ * `tracked()` below spawns a dozen-odd git processes (bare init, seed init, add, commit, remote
+ * add, push, clone) before the assertions even start, and the round then fetches, pulls and pushes
+ * over that remote. Measured on Windows, three runs: the sync round takes 3.0-3.9s and the
+ * pull-first/push-after round 4.2-6.3s — so the 5s default was BELOW the honest cost of one of
+ * them and barely above the other, and both failed intermittently for no reason but process
+ * spawn time. A CI runner is slower than a dev box, so the allowance carries real headroom over
+ * the worst observed run rather than hugging it.
+ *
+ * The three local-only tests keep the default: they never leave the working copy and run in
+ * well under a second, so a slow one there would be a genuine signal.
+ */
+const REMOTE_ROUND_TIMEOUT_MS = 30_000;
+
 function capture(): { events: Array<{ event: string; payload: unknown }>; stop: () => void } {
   const events: Array<{ event: string; payload: unknown }> = [];
   const listener = (event: string, _data: string, payload: unknown): void =>
@@ -103,7 +119,7 @@ test("the sync round warns about a fresh fall-behind, and keep-in-sync fast-forw
   expect((await $`git -C ${work} show HEAD:a.txt`.text()).trim()).toBe("upstream two");
   // Resolved repos are NOT also warned about — the warning is for what the owner must act on.
   expect(synced.events.some((e) => e.event === "repo_behind")).toBe(false);
-});
+}, REMOTE_ROUND_TIMEOUT_MS);
 
 test("the auto-commit round commits an opted-in repo and leaves the tree clean", async () => {
   const dir = mkScratchDir("gm-round-ac-");
@@ -201,7 +217,7 @@ test("with pull-first and push-after on, the round publishes what it committed",
     setAutoCommitPull(false);
     setAutoCommitPush(false);
   }
-});
+}, REMOTE_ROUND_TIMEOUT_MS);
 
 test("a repo that opted out is never touched by the round", async () => {
   const dir = mkScratchDir("gm-round-optout-");
