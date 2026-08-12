@@ -19,7 +19,7 @@ cd web && bun install && bun run dev # web dev server on :4319 (proxies /api →
 # daemon
 bun test
 bun run typecheck
-bun run check            # lint + code/boundary checks
+bun run check            # lint + code/boundary/test-timeout checks
 bun run check:coverage   # coverage gate
 
 # web
@@ -36,6 +36,12 @@ git config core.hooksPath .githooks   # one-time, per clone
 ```
 
 Bypass a single commit with `git commit --no-verify`; disable with `git config --unset core.hooksPath`.
+
+Please leave the `--timeout 20000` on the `test` script alone. Nearly every test here shells out to
+git, and a subprocess test times the machine rather than its own assertions: a cold Windows CI
+runner has been measured at roughly 10x a dev box on that class, against bun's 5s default. One
+repo-wide allowance is the right answer at this scale, and dropping it would put 231 tests back on
+5s. `bun run check:spawntimeout` stands down while the flag is there and names all 231 if it goes.
 
 Please keep the git-action safety guards intact — operations return first-class error codes
 (`DIRTY_WORKING_TREE`, `NON_FAST_FORWARD`, `DETACHED_HEAD`, `SSH_AUTH_FAILED`, …) and never
