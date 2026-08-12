@@ -6,6 +6,7 @@ import type {
   IncomingResult,
   LogAuthorFilter,
   LogResult,
+  RepoStatus,
   StashList,
   TagList,
 } from "../types";
@@ -28,6 +29,8 @@ export function useGitOps(
   asResult: (e: unknown) => ActionResult,
   isRepoLive: (repoId: string) => boolean,
   onHistoryChanged: (repoId: string) => void = () => {},
+  /** Reconcile the repo's status from a mutating action's own response — see repo.ts. */
+  applyActionStatus: (repoId: string, result: { status?: RepoStatus | null }) => void = () => {},
 ) {
   // ── branches / history / stash (lazily loaded per repo when a section opens) ──
   const branchesByRepo = reactive<Record<string, BranchList>>({});
@@ -104,6 +107,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "checkout";
     try {
       const r = await api.checkout(repoId, branch);
+      applyActionStatus(repoId, r);
       await loadBranches(repoId);
       if (r.ok) onHistoryChanged(repoId);
       return r;
@@ -118,6 +122,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "branch";
     try {
       const r = await api.createBranch(repoId, name, switchTo);
+      applyActionStatus(repoId, r);
       await loadBranches(repoId);
       if (r.ok) onHistoryChanged(repoId);
       return r;
@@ -132,6 +137,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "branch";
     try {
       const r = await api.deleteBranch(repoId, name);
+      applyActionStatus(repoId, r);
       await loadBranches(repoId);
       if (r.ok) onHistoryChanged(repoId);
       return r;
@@ -255,6 +261,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "stash";
     try {
       const r = await api.stashSave(repoId, message);
+      applyActionStatus(repoId, r);
       await Promise.all([loadStashes(repoId), loadChanges(repoId)]);
       return r;
     } catch (e) {
@@ -268,6 +275,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "stash";
     try {
       const r = await api.stashPop(repoId, index);
+      applyActionStatus(repoId, r);
       await Promise.all([loadStashes(repoId), loadChanges(repoId)]);
       return r;
     } catch (e) {
@@ -281,6 +289,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "stash";
     try {
       const r = await api.stashDrop(repoId, index);
+      applyActionStatus(repoId, r);
       await loadStashes(repoId);
       return r;
     } catch (e) {
@@ -295,6 +304,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "discard";
     try {
       const r = await api.discard(repoId, path);
+      applyActionStatus(repoId, r);
       await loadChanges(repoId);
       return { ok: r.ok, code: r.code, message: r.message ?? "discarded" };
     } catch (e) {
@@ -310,6 +320,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "delete";
     try {
       const r = await api.deleteFile(repoId, path, recursive);
+      applyActionStatus(repoId, r);
       await loadChanges(repoId);
       return { ok: r.ok, code: r.code, message: r.message ?? "deleted" };
     } catch (e) {
@@ -325,6 +336,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "stage";
     try {
       const r = await api.stage(repoId, path);
+      applyActionStatus(repoId, r);
       await loadChanges(repoId);
       return { ok: r.ok, code: r.code, message: r.message ?? "staged" };
     } catch (e) {
@@ -354,6 +366,7 @@ export function useGitOps(
     gitOpBusy[repoId] = "gitignore";
     try {
       const r = await api.addToGitignore(repoId, path);
+      applyActionStatus(repoId, r);
       await loadChanges(repoId);
       return { ok: r.ok, code: r.code, message: r.message ?? "ignored", alreadyIgnored: r.alreadyIgnored };
     } catch (e) {
@@ -397,7 +410,9 @@ export function useGitOps(
   async function setRemote(repoId: string, url: string, name?: string): Promise<ActionResult> {
     gitOpBusy[repoId] = "remote";
     try {
-      return await api.setRemote(repoId, url, name);
+      const r = await api.setRemote(repoId, url, name);
+      applyActionStatus(repoId, r);
+      return r;
     } catch (e) {
       return asResult(e);
     } finally {
@@ -407,7 +422,9 @@ export function useGitOps(
   async function removeRemote(repoId: string, name?: string): Promise<ActionResult> {
     gitOpBusy[repoId] = "remote";
     try {
-      return await api.removeRemote(repoId, name);
+      const r = await api.removeRemote(repoId, name);
+      applyActionStatus(repoId, r);
+      return r;
     } catch (e) {
       return asResult(e);
     } finally {

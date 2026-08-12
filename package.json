@@ -1,6 +1,6 @@
 {
   "name": "repoyeti",
-  "version": "0.20.6",
+  "version": "0.20.7",
   "description": "System-wide remote git manager — a background daemon with a mobile dashboard.",
   "type": "module",
   "license": "MIT",
@@ -31,6 +31,7 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
+    "install:all": "bun install && bun install --cwd web",
     "start": "bun run src/index.ts start",
     "dev": "bun run scripts/dev.ts",
     "status": "bun run src/index.ts status",

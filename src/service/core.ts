@@ -14,7 +14,7 @@ import { authForRepo } from "../gh-account.ts";
 import type { GitHubAuth } from "../git.ts";
 import type { VcsBackend } from "../vcs/types.ts";
 import type { ActionResult } from "../git-actions.ts";
-import type { Identity, RepoView } from "../db.ts";
+import type { Identity, RepoStatus, RepoView } from "../db.ts";
 
 /** Per-repo last-status signature (sans timestamp) so a no-op read doesn't emit. */
 export const lastStatusSig = new Map<string, string>();
@@ -31,7 +31,7 @@ export async function refreshRepo(
   absPath: string,
   markFetched = false,
   reuseDiff = false,
-): Promise<void> {
+): Promise<RepoStatus> {
   const previous = getRepo(id)?.status;
   const backend = backendFor(getRepo(id)?.vcs ?? "git");
   const wantsDiff = diffStatsEnabled();
@@ -41,14 +41,32 @@ export async function refreshRepo(
   else status.fetchedAt = previous?.fetchedAt ?? null;
   const { updatedAt: _omit, ...sig } = status;
   const signature = JSON.stringify(sig);
-  if (lastStatusSig.get(id) === signature) return;
+  // The freshly READ status is returned either way. The signature check decides whether anyone
+  // needs TELLING, which is a different question from what the caller that just mutated the repo
+  // should hand back to the client that asked for the mutation.
+  if (lastStatusSig.get(id) === signature) return status;
   lastStatusSig.set(id, signature);
   setRepoStatus(id, status);
   broadcast("repo_state_changed", { id, status });
+  return status;
 }
 
 export interface ActionOutcome extends ActionResult {
   repoId: string;
+  /**
+   * The repo's status as of immediately after the action, for the client that requested it.
+   *
+   * The `repo_state_changed` broadcast still fans this out to every OTHER connected client, but
+   * the initiator must not have to wait for its own SSE frame to see what it just did. That was
+   * issue #17: a push left the button green until a manual Refresh, because Refresh was the one
+   * action that patched status straight from its HTTP response and push relied on the broadcast
+   * coming back around. The stream is best-effort by construction — it has no replay, and
+   * http/routes/events.ts closes it outright when a slow client makes it drop frames — so an
+   * action's own result is the only channel that can be relied on by the caller.
+   *
+   * Absent when the action never reached a refresh (unknown repo, submodule, identity block).
+   */
+  status?: RepoStatus | null;
 }
 
 type VcsAction = (
@@ -114,9 +132,14 @@ export async function runAction(
     const blocked = await precondition?.(backend, repo.absPath, identity, auth);
     return blocked ?? action(backend, repo.absPath, identity, auth);
   });
-  // Reflect the new reality (ahead/behind/dirty) to all clients.
-  await refreshRepo(repoId, repo.absPath, markFetched && result.ok, reuseDiffAfter && result.ok);
-  return { ...result, repoId };
+  // Reflect the new reality (ahead/behind/dirty) to all clients — and hand it back to this one.
+  const status = await refreshRepo(
+    repoId,
+    repo.absPath,
+    markFetched && result.ok,
+    reuseDiffAfter && result.ok,
+  );
+  return { ...result, repoId, status };
 }
 
 /**

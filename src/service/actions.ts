@@ -18,6 +18,7 @@ import {
   type CommitGroupResult,
 } from "../git-actions.ts";
 import type { ActionResult } from "../contract.ts";
+import type { RepoStatus } from "../db.ts";
 import { runAction, refreshRepo, accountAuthFor, type ActionOutcome } from "./core.ts";
 import { guardRepo } from "./guards.ts";
 import { resolveRepoPath } from "./files.ts";
@@ -149,6 +150,8 @@ export interface DiscardResult {
   message?: string;
   /** Repo-relative path that was discarded (normalised to forward slashes). */
   path?: string;
+  /** Post-action status for the initiating client — see ActionOutcome.status in service/core.ts. */
+  status?: RepoStatus | null;
 }
 
 /**
@@ -175,8 +178,8 @@ export async function discardFile(repoId: string, relPath: string): Promise<Disc
   const result = await enqueue(repoId, () => backend.discardFile(repo.absPath, r.clean));
   // Refresh AFTER the queue slot releases (refreshRepo enqueues again → would deadlock if nested).
   if (result.ok) {
-    await refreshRepo(repo.id, repo.absPath);
-    return { ok: true, code: "OK", path: r.clean };
+    const status = await refreshRepo(repo.id, repo.absPath);
+    return { ok: true, code: "OK", path: r.clean, status };
   }
   return { ok: false, code: result.code === "ERROR" ? "ERROR" : "DISCARD_FAILED", message: result.message };
 }
@@ -192,6 +195,8 @@ export interface DeleteFileResult {
   /** Files actually removed — only set for a recursive folder delete (undefined, not 1, for the
    *  single-file case), so the UI can toast a real count for the folder case specifically. */
   deleted?: number;
+  /** Post-action status for the initiating client — see ActionOutcome.status in service/core.ts. */
+  status?: RepoStatus | null;
 }
 
 /**
@@ -308,8 +313,8 @@ export async function deleteFile(repoId: string, relPath: string, recursive = fa
   const result = await enqueue(repoId, () => backend.deleteFile(repo.absPath, r.clean, recursive));
   // Refresh AFTER the queue slot releases (refreshRepo enqueues again → would deadlock if nested).
   if (result.ok) {
-    await refreshRepo(repo.id, repo.absPath);
-    return { ok: true, code: "OK", path: r.clean, deleted: result.deleted };
+    const status = await refreshRepo(repo.id, repo.absPath);
+    return { ok: true, code: "OK", path: r.clean, deleted: result.deleted, status };
   }
   return { ok: false, code: result.code === "ERROR" ? "ERROR" : "DELETE_FAILED", message: result.message };
 }
@@ -321,6 +326,8 @@ export interface StageResult {
   message?: string;
   /** Repo-relative path that was staged (normalised to forward slashes). */
   path?: string;
+  /** Post-action status for the initiating client — see ActionOutcome.status in service/core.ts. */
+  status?: RepoStatus | null;
 }
 
 /**
@@ -344,8 +351,8 @@ export async function stageFile(repoId: string, relPath: string): Promise<StageR
   const result = await enqueue(repoId, () => backend.stageFile(repo.absPath, r.clean));
   // Refresh AFTER the queue slot releases (refreshRepo enqueues again → would deadlock if nested).
   if (result.ok) {
-    await refreshRepo(repo.id, repo.absPath);
-    return { ok: true, code: "OK", path: r.clean };
+    const status = await refreshRepo(repo.id, repo.absPath);
+    return { ok: true, code: "OK", path: r.clean, status };
   }
   return { ok: false, code: result.code === "ERROR" ? "ERROR" : "STAGE_FAILED", message: result.message };
 }
@@ -359,6 +366,8 @@ export interface GitignoreResult {
   pattern?: string;
   /** True when the pattern was already ignored — a no-op, still reported as ok. */
   alreadyIgnored?: boolean;
+  /** Post-action status for the initiating client — see ActionOutcome.status in service/core.ts. */
+  status?: RepoStatus | null;
 }
 
 /**
@@ -411,8 +420,8 @@ export async function addToGitignore(repoId: string, relPath: string): Promise<G
   });
   if (!result.ok) return { ok: false, code: "ERROR", message: result.message };
   // Refresh AFTER the queue slot releases (refreshRepo enqueues again → would deadlock if nested).
-  await refreshRepo(repo.id, repo.absPath);
-  return { ok: true, code: "OK", pattern, alreadyIgnored: result.alreadyIgnored };
+  const status = await refreshRepo(repo.id, repo.absPath);
+  return { ok: true, code: "OK", pattern, alreadyIgnored: result.alreadyIgnored, status };
 }
 
 // ── smart commit (AI multi-commit splitter) ─────────────────────────────────────────
@@ -431,6 +440,8 @@ export interface SmartCommitOutcome {
   /** The sync (pull/push) code/message when sync was requested and didn't fully succeed. */
   syncCode?: ActionCode;
   syncMessage?: string;
+  /** Post-action status for the initiating client — see ActionOutcome.status in service/core.ts. */
+  status?: RepoStatus | null;
 }
 
 // ── shared path validation for the two staging entry points (smart-commit + commit-selected) ──
@@ -546,8 +557,8 @@ export async function smartCommitRepo(
   });
 
   // Refresh AFTER the slot releases (refreshRepo enqueues again → nesting would deadlock).
-  await refreshRepo(repo.id, repo.absPath, outcome.ok && outcome.synced === true);
-  return { ...outcome, repoId };
+  const status = await refreshRepo(repo.id, repo.absPath, outcome.ok && outcome.synced === true);
+  return { ...outcome, repoId, status };
 }
 
 /**
@@ -562,7 +573,7 @@ export async function commitSelectedRepo(
   repoId: string,
   message: string,
   paths: string[],
-): Promise<ActionResult & { repoId: string }> {
+): Promise<ActionResult & { repoId: string; status?: RepoStatus | null }> {
   const g = guardRepo<"SUBMODULE_NOT_ACTIONABLE", { repoId: string }>(repoId, "SUBMODULE_NOT_ACTIONABLE", { repoId });
   if (g.fail) return g.fail;
   const repo = g.repo;
@@ -593,6 +604,6 @@ export async function commitSelectedRepo(
       : { ok: res.ok, code: res.code, message: res.message };
   });
 
-  await refreshRepo(repo.id, repo.absPath);
-  return { ...outcome, repoId };
+  const status = await refreshRepo(repo.id, repo.absPath);
+  return { ...outcome, repoId, status };
 }

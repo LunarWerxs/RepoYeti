@@ -28,7 +28,6 @@ import { isPreviewableMarkdown } from "@/lib/markdown-preview";
 import { cn } from "@/lib/utils";
 import type { EditorTheme } from "@/lib/monaco-setup";
 import { useTheme } from "@/lib/theme";
-import { useTooltipConfig } from "@/lib/tooltip-config";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -60,7 +59,6 @@ const props = withDefaults(
 defineEmits<{ close: [] }>();
 
 const store = useStore();
-const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 // Monaco is heavy — load it (and its chunk) only when a file is actually shown.
 const Spinner = (): ReturnType<typeof h> =>
@@ -559,16 +557,20 @@ onBeforeUnmount(() => {
       <!-- overflow menu: Edit · word wrap · word-level diff · split/unified · Open with.
            Stays visible in BOTH Content and Diff views whenever not mid-edit (word wrap has no gate). -->
       <DropdownMenu v-if="!editing">
-        <DropdownMenuTrigger as-child>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            :title="tooltipsEnabled ? $t('fileViewer.viewOptions') : undefined"
-            :aria-label="$t('fileViewer.viewOptions')"
-          >
-            <MoreVertical />
-          </Button>
-        </DropdownMenuTrigger>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <!-- inert wrapper: two reka `as-child` triggers (Tooltip + DropdownMenu) must never
+                 merge onto one element, or the menu stops opening — see ViewOptions.vue. -->
+            <span class="inline-flex">
+              <DropdownMenuTrigger as-child>
+                <Button variant="ghost" size="icon-sm" :aria-label="$t('fileViewer.viewOptions')">
+                  <MoreVertical />
+                </Button>
+              </DropdownMenuTrigger>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("fileViewer.viewOptions") }}</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent align="end" class="w-52">
           <DropdownMenuItem v-if="showEditControls && !store.isGuest" @select="startEdit">
             <Pencil :size="14" />

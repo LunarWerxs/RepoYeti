@@ -16,6 +16,7 @@
 //             branch-scope tabs already use, so nothing new is introduced here)
 import { SlidersHorizontal } from "@lucide/vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 
 export interface ViewOptionChoice {
@@ -47,9 +48,10 @@ const props = withDefaults(
     rows: ViewOptionRow[];
     /** Accessible name + tooltip for the trigger, e.g. "History view options". */
     label: string;
-    /** Accepted for call-site symmetry with the surrounding toolbar buttons; the trigger always
-     *  labels itself with a native `title` (see the template), so this changes nothing. Kept so
-     *  callers don't have to special-case this one control. */
+    /** Accepted for call-site symmetry with the surrounding toolbar buttons. It changes nothing
+     *  here: the trigger's tooltip lives under the app's TooltipProvider, which already resolves
+     *  the shared "show tooltips" switch for every tooltip beneath it (see ui/tooltip/
+     *  TooltipProvider.vue). Kept so callers don't have to special-case this one control. */
     tooltips?: boolean;
   }>(),
   { tooltips: true },
@@ -63,22 +65,38 @@ const emit = defineEmits<{
 
 <template>
   <!--
-    The trigger labels itself with a NATIVE title, not a reka Tooltip.
-    This was `<Tooltip><TooltipTrigger as-child><PopoverTrigger>`, and the menu would not open on a
-    real click. Two `as-child` trigger components merging onto ONE element is the bug: both Tooltip
-    and Popover write `data-state` and both bind pointer handlers, so whichever merges last wins and
-    the open/close state the styles read is no longer the one the click drives. It is also exactly
-    the construct the rest of this app avoids — FileViewerInner's ⋮ menu and the tree/list button
-    beside this one each put ONE trigger on an element and use a plain `title` for the label.
+    The label is a real Tooltip, so a finger can reach it (press and hold — see ui/tooltip/touch.ts).
+    It used to be a native `title`, which no touch device has ever shown: on a phone this control was
+    simply an unexplained slider icon.
+
+    The SPAN is the point. The original bug was `<Tooltip><TooltipTrigger as-child><PopoverTrigger>`,
+    where two `as-child` triggers merged onto ONE element: both Tooltip and Popover write
+    `data-state` and bind pointer handlers, so whichever merged last won and the state the styles
+    read was no longer the one the click drove — the menu stopped opening. An inert wrapper keeps
+    that from being possible: the Tooltip merges onto the span, the Popover keeps its own button, and
+    neither ever sees the other's attributes. It must be a real box (`inline-flex`), not
+    `display: contents`, because reka positions the tooltip off the trigger's bounding rect and a
+    box-less element measures 0×0 at the origin.
+
+    Tap and hold stay separate on their own: the popover opens on CLICK, and a completed hold
+    swallows the click that ends it (touch.ts swallowNextClick, capture phase on document, and the
+    inner button is inside the span it scopes to). So a quick tap still opens the menu in one tap,
+    and a hold shows the label without opening anything.
   -->
   <Popover>
-    <PopoverTrigger
-      class="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 data-[state=open]:bg-accent data-[state=open]:text-foreground"
-      :aria-label="label"
-      :title="label"
-    >
-      <SlidersHorizontal :size="14" />
-    </PopoverTrigger>
+    <Tooltip>
+      <TooltipTrigger as-child>
+        <span class="inline-flex">
+          <PopoverTrigger
+            class="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 data-[state=open]:bg-accent data-[state=open]:text-foreground"
+            :aria-label="label"
+          >
+            <SlidersHorizontal :size="14" />
+          </PopoverTrigger>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{{ label }}</TooltipContent>
+    </Tooltip>
     <PopoverContent class="w-64 p-1" align="end">
       <div class="px-2 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
         {{ label }}

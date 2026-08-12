@@ -6,6 +6,7 @@ import { enableAutoUnmount, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/api";
+import DiffBar from "@/components/DiffBar.vue";
 import LogPanel from "@/components/LogPanel.vue";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { i18n } from "@/i18n";
@@ -976,7 +977,93 @@ describe("LogPanel.vue", () => {
     await flush();
     expect(wrapper.text()).toContain("f000.ts");
   });
+
+  it("#18 compact row renders a DiffBar when the Changes display is 'bars'", async () => {
+    historyChangesDisplay.value = "bars";
+    stubNarrowResizeObserver();
+    const store = useStore();
+    store.logByRepo[repoId] = {
+      ok: true,
+      code: "OK",
+      hasMore: false,
+      commits: [
+        {
+          ...entry("compact1", "compact bars"),
+          stat: { filesChanged: 4, addedLines: 120, removedLines: 30 },
+        },
+      ],
+    };
+
+    const wrapper = mount(
+      {
+        components: { LogPanel, TooltipProvider },
+        props: ["repoId"],
+        template: '<TooltipProvider><LogPanel :repo-id="repoId" /></TooltipProvider>',
+      },
+      { props: { repoId }, global: { plugins: [i18n] } },
+    );
+    await wrapper.findAll("button").find((b) => b.text().includes("History"))!.trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const row = wrapper.get('[data-history-row="compact1"]');
+    expect(row.findComponent(DiffBar).exists()).toBe(true);
+    expect(row.text()).not.toContain("+120");
+  });
+
+  it("#18 compact row renders raw totals when the Changes display is 'numbers'", async () => {
+    historyChangesDisplay.value = "numbers";
+    stubNarrowResizeObserver();
+    const store = useStore();
+    store.logByRepo[repoId] = {
+      ok: true,
+      code: "OK",
+      hasMore: false,
+      commits: [
+        {
+          ...entry("compact2", "compact numbers"),
+          stat: { filesChanged: 4, addedLines: 120, removedLines: 30 },
+        },
+      ],
+    };
+
+    const wrapper = mount(
+      {
+        components: { LogPanel, TooltipProvider },
+        props: ["repoId"],
+        template: '<TooltipProvider><LogPanel :repo-id="repoId" /></TooltipProvider>',
+      },
+      { props: { repoId }, global: { plugins: [i18n] } },
+    );
+    await wrapper.findAll("button").find((b) => b.text().includes("History"))!.trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const row = wrapper.get('[data-history-row="compact2"]');
+    expect(row.findComponent(DiffBar).exists()).toBe(false);
+    expect(row.text()).toContain("+120");
+  });
 });
+
+// Same ResizeObserver-stub approach the "wide Changes column" test above uses, just reporting a
+// width under the compact breakpoint (640) instead of over it.
+function stubNarrowResizeObserver(): void {
+  let resizeCallback: ResizeObserverCallback | null = null;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+      observe(): void {
+        resizeCallback?.(
+          [{ contentRect: { width: 320 } } as ResizeObserverEntry],
+          this as unknown as ResizeObserver,
+        );
+      }
+      disconnect(): void {}
+      unobserve(): void {}
+    },
+  );
+}
 
 // Small helper to let the toggleCommit async handler's awaited api call resolve and its
 // follow-up reactive update flush before assertions.

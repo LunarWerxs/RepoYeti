@@ -594,6 +594,14 @@ export interface ActionResult {
   code: ApiCode;
   message: string;
   repoId?: string;
+  /**
+   * The repo's status as of immediately after the action (mirrors ActionOutcome.status in
+   * src/service/core.ts). The daemon has already re-read it by the time it answers, so the client
+   * that asked for the mutation can reconcile from the response instead of waiting for its own
+   * `repo_state_changed` frame to come back — which is what left the Push button green until a
+   * manual Refresh (issue #17). Absent on outcomes that never reached a refresh.
+   */
+  status?: RepoStatus | null;
 }
 
 // ── bring-your-own-key AI (mirrors src/config.ts redactAi + src/ai.ts) ──────────
@@ -879,6 +887,8 @@ export interface SmartCommitResult {
   synced?: boolean;
   syncCode?: ApiCode;
   syncMessage?: string;
+  /** Post-action status for the initiating client — see ActionResult.status above. */
+  status?: RepoStatus | null;
 }
 
 export interface UpdateStatus {

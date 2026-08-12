@@ -237,7 +237,8 @@ async function bulkRemove(): Promise<void> {
             <Button
               variant="secondary"
               size="sm"
-              class="h-7"
+              class="h-7 relative before:absolute before:-inset-y-1.5 before:content-['']"
+              :aria-label="$t('repo.pin')"
               :disabled="busy || !selectionCount"
               @click="bulkPin"
             >
@@ -256,7 +257,8 @@ async function bulkRemove(): Promise<void> {
             <Button
               variant="secondary"
               size="sm"
-              class="h-7"
+              class="h-7 relative before:absolute before:-inset-y-1.5 before:content-['']"
+              :aria-label="$t('repo.star')"
               :disabled="busy || !selectionCount"
               @click="bulkStar"
             >
@@ -274,7 +276,8 @@ async function bulkRemove(): Promise<void> {
             <Button
               variant="secondary"
               size="sm"
-              class="h-7"
+              class="h-7 relative before:absolute before:-inset-y-1.5 before:content-['']"
+              :aria-label="$t('repo.hide')"
               :disabled="busy || !selectionCount"
               @click="bulkHide"
             >
@@ -292,7 +295,8 @@ async function bulkRemove(): Promise<void> {
             <Button
               variant="destructive"
               size="sm"
-              class="h-7"
+              class="h-7 relative before:absolute before:-inset-y-1.5 before:content-['']"
+              :aria-label="$t('repo.remove.action')"
               :disabled="busy || !selectionCount"
               @click="removeOpen = true"
             >
@@ -310,6 +314,7 @@ async function bulkRemove(): Promise<void> {
             <Button
               variant="ghost"
               size="icon-sm"
+              class="relative before:absolute before:-inset-y-2 before:content-['']"
               :aria-label="$t('bulk.exit')"
               :disabled="busy"
               @click="stopSelecting"

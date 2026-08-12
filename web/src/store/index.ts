@@ -36,6 +36,18 @@ export const useStore = defineStore("repoyeti", () => {
   const collaborationSnapshots = ref<CollaborationSnapshot[]>([]);
   const loading = ref(true);
   const connected = ref(false);
+  /**
+   * An UNATTENDED auto-update is mid-flight on the daemon (see src/auto-update.ts).
+   *
+   * Both events were already in the SSE subscription list and neither had a handler, so the
+   * payloads arrived and were dropped on the floor. That matters most for exactly the setup this
+   * was reported from — auto-update on, watched from a phone — where the daemon can go away for
+   * minutes with the dashboard showing nothing at all, then silently reconnect on a new build.
+   * `autoUpdateRestarting` stays true until the reconnect clears it: the daemon is on its way down
+   * at that point, so the stream drop that follows is expected, not a fault to report.
+   */
+  const autoUpdateApplying = ref(false);
+  const autoUpdateRestarting = ref(false);
   const { updateStatus, updateChecking, updateApplying, checkForUpdate, applyUpdate } =
     useSelfUpdate<UpdateStatus, UpdateApplyResult>(api);
 
@@ -244,6 +256,7 @@ export const useStore = defineStore("repoyeti", () => {
     getRepoStatus,
     hasRepo,
     patchRepo,
+    applyActionStatus,
     upsertRepo,
     queueRepoAdded,
     flushPendingRepoInserts,
@@ -291,7 +304,7 @@ export const useStore = defineStore("repoyeti", () => {
     readConflict,
     resolveConflict,
     applyConflict,
-  } = useAi(busy, loadChanges, asResult, bumpHistoryRevision);
+  } = useAi(busy, loadChanges, asResult, bumpHistoryRevision, applyActionStatus);
 
   const {
     branchesByRepo,
@@ -327,6 +340,7 @@ export const useStore = defineStore("repoyeti", () => {
     asResult,
     hasRepo,
     bumpHistoryRevision,
+    applyActionStatus,
   );
 
   /** All large per-repo client caches share the lifecycle of the dashboard card. */
@@ -635,6 +649,13 @@ export const useStore = defineStore("repoyeti", () => {
           loadSyncStatus(), // applies synced appearance
           loadApprovals(), // already-pending MCP approvals
           loadIdentityRules(), // Identity Firewall rules
+          // Collaboration snapshots have no polling fallback — they are pure SSE, on purpose (the
+          // event replaced a 2.5s HTTP poll). That makes them the one slice of state a dropped
+          // frame strands permanently: this used to be fetched ONLY at the first connect(), so a
+          // phone that backgrounded through a `collaboration_snapshots_changed` came back showing a
+          // collaborator who had long since gone. loadAll() is also the reconnect resync, so
+          // hydrating here is what makes the reconnect actually whole.
+          loadCollaborations(),
         );
       } else {
         identities.value = [];
@@ -771,7 +792,13 @@ export const useStore = defineStore("repoyeti", () => {
           // The daemon has no event replay/Last-Event-ID, so anything broadcast while this
           // client was offline (a phone backgrounding and returning, a flaky network) is lost
           // for good unless something re-hydrates from scratch on reconnect.
-          if (isOpen && hasConnectedOnce && !connected.value) void loadAll();
+          if (isOpen && hasConnectedOnce && !connected.value) {
+            // Whatever update was in flight has landed (or failed and left the old build running);
+            // either way the daemon answering now is the authority, and loadAll refetches it.
+            autoUpdateApplying.value = false;
+            autoUpdateRestarting.value = false;
+            void loadAll();
+          }
           connected.value = isOpen;
           if (isOpen) hasConnectedOnce = true;
           // PWA self-heal (see lib/relay-home.ts): a stream that stays dead on a rotating
@@ -881,6 +908,11 @@ export const useStore = defineStore("repoyeti", () => {
             canApply: payload.canApply !== false,
             reason: typeof payload.reason === "string" ? payload.reason : null,
           });
+        } else if (event.value === "auto_update_applying") {
+          autoUpdateApplying.value = true;
+        } else if (event.value === "auto_update_restarting") {
+          autoUpdateApplying.value = false;
+          autoUpdateRestarting.value = true;
         } else if (event.value === "daemon_status") {
           // daemon_status is a PATCH, not a snapshot. The relay announces after the tunnel comes
           // up and emits only relay fields; treating an absent tunnelUrl as null erased the healthy
@@ -1021,6 +1053,8 @@ export const useStore = defineStore("repoyeti", () => {
     updateStatus,
     updateChecking,
     updateApplying,
+    autoUpdateApplying,
+    autoUpdateRestarting,
     checkForUpdate,
     applyUpdate,
     busy,

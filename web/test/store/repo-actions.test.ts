@@ -3,7 +3,7 @@ import { ref } from "vue";
 
 import { api } from "@/api";
 import { useRepoActions } from "@/store/repo";
-import type { ActionName, ActionResult, Repo } from "@/types";
+import type { ActionName, ActionResult, Repo, RepoStatus } from "@/types";
 
 function repo(id = "repo-1", over: Partial<Repo> = {}): Repo {
   return {
@@ -23,6 +23,20 @@ function repo(id = "repo-1", over: Partial<Repo> = {}): Repo {
     autoCommit: false,
     status: null,
     updatedAt: 1,
+    ...over,
+  };
+}
+
+function status(over: Partial<RepoStatus> = {}): RepoStatus {
+  return {
+    branch: "main",
+    detached: false,
+    dirty: 0,
+    ahead: 0,
+    behind: 0,
+    remote: "origin",
+    error: null,
+    fetchedAt: 1,
     ...over,
   };
 }
@@ -131,5 +145,41 @@ describe("assignIdentity / assignRepoAccount: rollback on failure", () => {
     await h.assignRepoAccount("repo-1", "github.com", "new");
     expect(h.repos.value[0]?.syncAccountHost).toBe("github.com");
     expect(h.repos.value[0]?.syncAccountLogin).toBe("new");
+  });
+});
+
+// Issue #17. doAction used to leave push/pull/fetch waiting on an SSE repo_state_changed frame
+// to learn their own result, which left the Push button green until a manual Refresh — the one
+// action that already patched from its own response. doAction now calls applyActionStatus(repoId,
+// result) after every mutating call, so the initiator reconciles from its own http response.
+describe("doAction: reconciles status from the action's own response (#17)", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("patches status from the result, with no SSE event involved", async () => {
+    const h = harness([repo("repo-1", { status: status({ ahead: 1 }) })]);
+    vi.spyOn(api, "push").mockResolvedValue({
+      ok: true,
+      code: "OK",
+      message: "pushed",
+      status: status({ ahead: 0 }),
+    });
+
+    const result = await h.doAction("repo-1", "push");
+
+    expect(result.ok).toBe(true);
+    expect(h.repos.value[0]?.status?.ahead).toBe(0);
+  });
+
+  it("leaves the existing status untouched when the result carries no status key", async () => {
+    const seeded = status({ ahead: 1 });
+    const h = harness([repo("repo-1", { status: seeded })]);
+    vi.spyOn(api, "push").mockResolvedValue({ ok: true, code: "OK", message: "pushed" });
+
+    await h.doAction("repo-1", "push");
+
+    // untouched — applyActionStatus early-returns on result.status === undefined. toEqual, not
+    // toBe: repos.value[0] is a reactive proxy wrapping `seeded`, not the same object reference.
+    expect(h.repos.value[0]?.status).toEqual(seeded);
+    expect(h.repos.value[0]?.status?.ahead).toBe(1);
   });
 });

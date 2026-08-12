@@ -33,7 +33,7 @@ import {
   moveFile,
   forceRefresh,
 } from "../../service/index.ts";
-import { requireId, remoteEditingBlocked } from "../respond.ts";
+import { requireId, remoteEditingBlocked, withGuestStatus } from "../respond.ts";
 
 type ImageResult = Awaited<ReturnType<typeof readImagePreview>>;
 
@@ -236,7 +236,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const p = await parseBody(c, DiscardSchema);
     if (!p.ok) return p.res;
     const result = await discardFile(id, p.data.path);
-    if (result.ok) return c.json(result);
+    if (result.ok) return c.json(withGuestStatus(c, cfg, result));
     const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
     return c.json(result, status);
   });
@@ -255,7 +255,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const p = await parseBody(c, DeleteFileSchema);
     if (!p.ok) return p.res;
     const result = await deleteFile(id, p.data.path, p.data.recursive);
-    if (result.ok) return c.json(result);
+    if (result.ok) return c.json(withGuestStatus(c, cfg, result));
     const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
     return c.json(result, status);
   });
@@ -341,7 +341,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const p = await parseBody(c, StageSchema);
     if (!p.ok) return p.res;
     const result = await stageFile(id, p.data.path);
-    if (result.ok) return c.json(result);
+    if (result.ok) return c.json(withGuestStatus(c, cfg, result));
     const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
     return c.json(result, status);
   });
@@ -357,7 +357,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const p = await parseBody(c, GitignoreAddSchema);
     if (!p.ok) return p.res;
     const result = await addToGitignore(id, p.data.path);
-    if (result.ok) return c.json(result);
+    if (result.ok) return c.json(withGuestStatus(c, cfg, result));
     const status: ContentfulStatusCode =
       result.code === "NOT_FOUND" ? 404 : result.code === "UNSUPPORTED" ? 400 : statusForCode(result.code as ApiErrorCode);
     return c.json(result, status);
