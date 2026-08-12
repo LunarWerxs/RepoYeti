@@ -39,7 +39,7 @@ test("different keys run independently", async () => {
 async function until(cond: () => boolean, ms = 2000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!cond()) {
-    if (Date.now() > deadline) throw new Error("condition never held within " + ms + "ms");
+    if (Date.now() > deadline) throw new Error(`condition never held within ${ms}ms`);
     await Bun.sleep(5);
   }
 }
