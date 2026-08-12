@@ -35,7 +35,22 @@ test("different keys run independently", async () => {
   expect(order[0]).toBe("fast"); // k2 not blocked by k1
 });
 
+/** Wait for `cond`, rather than demanding it of one instant. Throws rather than hanging. */
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("condition never held within " + ms + "ms");
+    await Bun.sleep(5);
+  }
+}
+
 test("hasActiveOperations reflects an op queued or running, and clears once it settles", async () => {
+  // The counter is module state, and bun shares one module graph across every test file in the
+  // process, so this is NOT a private fixture: any op another file has in flight is counted here
+  // too, including ones nobody awaited (the watcher enqueues status reads off a debounce). Demanding
+  // that this exact instant be idle is therefore a race, and it lost on macOS on 2026-08-12, on a
+  // commit that touched none of this. Drain first, then the assertions below mean what they say.
+  await until(() => !hasActiveOperations());
   expect(hasActiveOperations()).toBe(false);
   let release = () => {};
   const gate = new Promise<void>((r) => {
