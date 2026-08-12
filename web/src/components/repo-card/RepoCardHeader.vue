@@ -300,7 +300,12 @@ const detectedReason = computed(() => {
 
     <!-- status indicators — ONE set that morphs between bare "icon + count" text
          (collapsed) and filled pills with a trailing word (expanded); see statusChip
-         / statusWord. Order mirrors the pull→push flow: behind, ahead, dirty, clean. -->
+         / statusWord. Order mirrors the pull→push flow: behind, ahead, dirty, clean.
+         These pills are inert spans, so their tooltips look like they should open on a tap the way
+         an InfoHint does. They must not: the whole header row is a button that expands the card
+         (@click above), and tap-to-disclose swallows the click that would have expanded it. On
+         touch they keep the default press-and-hold. -->
+
     <div class="flex shrink-0 items-center gap-1.5 text-[12px] font-medium">
       <Tooltip v-if="st && st.behind > 0">
         <TooltipTrigger as-child>

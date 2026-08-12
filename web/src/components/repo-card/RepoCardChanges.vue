@@ -538,7 +538,11 @@ async function onCopyPath(path: string): Promise<void> {
       <TooltipContent>{{ $t("repo.actions.refresh") }}</TooltipContent>
     </Tooltip>
     <Tooltip>
-      <TooltipTrigger as-child>
+      <!-- touch="tap": this icon is pure signal — nothing here or above it responds to a click, so
+           a tap can safely BE the disclosure, the way it is for an InfoHint. The status pills in
+           RepoCardHeader look like the same case and are NOT: they sit inside the header row that
+           expands the card, and eating that tap would cost more than the tooltip is worth. -->
+      <TooltipTrigger as-child touch="tap">
         <span :class="cn('inline-flex shrink-0', hasRemote ? 'text-info/80' : 'text-muted-foreground/50')">
           <Cloud v-if="hasRemote" :size="16" />
           <CloudOff v-else :size="16" />

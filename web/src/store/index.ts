@@ -104,6 +104,11 @@ export const useStore = defineStore("repoyeti", () => {
   const relayError = ref<string | null>(null);
   // Access mode + local/remote auth state (see /api/auth/status).
   const mode = ref<AccessMode>("local");
+  // Version of the DAEMON this dashboard is talking to — not of the bundle it is running. With
+  // auto-update on, the phone is often the only place the owner can see what actually got
+  // installed, so Settings shows this rather than a build-time constant baked into the SPA.
+  // Empty until the first /api/status lands; the guest projection carries it too.
+  const serverVersion = ref("");
 
   // Owner setting: show added/removed line + char counts per file and per repo. Sourced
   // from /api/status and kept live via the `settings_changed` SSE event. Off by default.
@@ -659,6 +664,7 @@ export const useStore = defineStore("repoyeti", () => {
   async function loadStatus(): Promise<void> {
     try {
       const s = await api.status();
+      serverVersion.value = s.version ?? "";
       mode.value = s.mode;
       tunnelActive.value = s.tunnelActive;
       tunnelUrl.value = s.tunnelUrl;
@@ -1125,6 +1131,7 @@ export const useStore = defineStore("repoyeti", () => {
     canContinueLocal,
     localBypass,
     continueLocal,
+    serverVersion,
     setMode,
     setTunnel,
     setRelay,

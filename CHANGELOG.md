@@ -4,6 +4,26 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.6] - 2026-08-11
+
+### Added
+
+- **Tooltips answer to a finger now.** reka-ui ignores touch pointers on hover, so on a phone every
+  tooltip in the dashboard was unreachable. Worst of all `InfoHint`, whose text is the only place a
+  setting's description exists, which made that copy effectively invisible on mobile
+  ([#16](https://github.com/LunarWerxs/RepoYeti/issues/16)). Info icons now open on a single tap and
+  close on a tap outside, Escape, or a scroll; every other tooltip opens on a press-and-hold. A
+  plain tap on an action button still just runs the action: the hold is what reveals, and the click
+  it ends with is swallowed so nothing fires behind the tooltip. Sliding a finger abandons the hold,
+  so scrolling past a tooltipped control is unaffected, as is mouse hover, keyboard focus, and the
+  app-wide "show tooltips" switch. Info icons also gained a finger-sized tap target around their
+  14px glyph, at no cost to layout.
+- **Settings shows the version actually running.** With auto-update enabled, the terminal and
+  `/api/health` were the only ways to tell which build was live, neither of them reachable from an
+  installed PWA ([#15](https://github.com/LunarWerxs/RepoYeti/issues/15)). General, then Updates,
+  now leads with it and flags an update the daemon has already found. It reports the DAEMON's
+  version rather than the page's, so it stays honest after a self-update and reconnect.
+
 ## [0.20.5] - 2026-08-11
 
 ### Added
