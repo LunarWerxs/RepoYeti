@@ -46,8 +46,9 @@
     "check:kit": "node ../lunarwerx-ui/sync.mjs --check --app repoyeti",
     "lint": "biome lint .",
     "format": "biome format --write .",
-    "check": "bun run check:codes && bun run check:boundaries && bun run check:libtypes && bun run check:bytes && bun run check:gitenv && bun run lint",
-    "build": "bun run scripts/build.ts"
+    "check": "bun run check:codes && bun run check:boundaries && bun run check:libtypes && bun run check:bytes && bun run check:gitenv && bun run check:spawntimeout && bun run lint",
+    "build": "bun run scripts/build.ts",
+    "check:spawntimeout": "bun scripts/checks/spawn-test-without-timeout.mjs"
   },
   "dependencies": {
     "@cnct/connect": "^1.2.0",
