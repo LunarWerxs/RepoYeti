@@ -100,8 +100,7 @@ once. Without that step the daemon starts and serves `web app not built`.
 git clone https://github.com/LunarWerxs/RepoYeti.git
 cd RepoYeti
 
-bun install                     # daemon deps
-bun install --cwd web           # dashboard deps (separate package.json)
+bun run install:all             # daemon deps + dashboard deps (web/ is a separate package)
 bun run --cwd web build:fast    # compile the dashboard into web/dist
 
 bun run src/index.ts add-root ~/code

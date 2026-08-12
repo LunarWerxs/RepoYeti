@@ -1,6 +1,6 @@
 import { ref, reactive, computed, watch, type Ref } from "vue";
 import { api } from "../api";
-import type { ActionName, ActionResult, ChangedFile, Repo } from "../types";
+import type { ActionName, ActionResult, ChangedFile, Repo, RepoStatus } from "../types";
 
 /** Sync-status filter keys (multi-select; OR semantics). */
 export type StatusKey = "dirty" | "ahead" | "behind" | "clean" | "error";
@@ -387,6 +387,24 @@ export function useRepoActions(
   const hasRepo = (repoId: string): boolean => findRepo(repoId) !== undefined;
 
   // ── actions ─────────────────────────────────────────────────────────────────
+  /**
+   * Reconcile this client from a mutating action's OWN response.
+   *
+   * `refresh` always did this — it patched status straight from what it got back — and that is
+   * precisely why Refresh was the workaround for a Push button that stayed green (issue #17).
+   * Every other action left the initiator waiting on the `repo_state_changed` broadcast to loop
+   * back to it, and that stream is best-effort: it has no replay, a phone that backgrounds mid-
+   * action misses the frame outright, and http/routes/events.ts deliberately kills a stream whose
+   * client fell behind. Reconciling here makes SSE what it should be — how OTHER clients find out
+   * — rather than how this one learns the result of something it just did itself.
+   *
+   * Idempotent with the broadcast: both write the same server-computed status, in either order.
+   */
+  function applyActionStatus(repoId: string, result: { status?: RepoStatus | null }): void {
+    if (result.status === undefined) return; // older daemon, or an outcome that never refreshed
+    patchRepo(repoId, { status: result.status });
+  }
+
   // (commit is separate — it needs a message — see `commit()` below)
   async function doAction(
     repoId: string,
@@ -401,6 +419,7 @@ export function useRepoActions(
         return { ok: true, code: "OK", message: "refreshed" };
       }
       const result = await api[name](repoId);
+      applyActionStatus(repoId, result);
       if (result.ok && (name === "fetch" || name === "pull")) onHistoryChanged(repoId);
       return result;
     } catch (e) {
@@ -441,6 +460,7 @@ export function useRepoActions(
     busy[repoId] = "commit";
     try {
       const result = await api.commit(repoId, message, amend);
+      applyActionStatus(repoId, result);
       if (result.ok) onHistoryChanged(repoId);
       return result;
     } catch (e) {
@@ -452,12 +472,13 @@ export function useRepoActions(
 
   // Per-file staging: commit ONLY `paths` (the rest stay pending), so the changes tree must be
   // reloaded afterward to drop the committed files (unlike a full commit, which empties the tree
-  // and hides the section). The SSE status push refreshes the dirty count; this refreshes the list.
+  // and hides the section). The action's own status reconciles the dirty count; this refreshes the list.
   async function commitSelected(repoId: string, message: string, paths: string[]): Promise<ActionResult> {
     if (busy[repoId]) return { ok: false, code: "BUSY", message: "Another action is already running for this repo." };
     busy[repoId] = "commit";
     try {
       const result = await api.commitSelected(repoId, message, paths);
+      applyActionStatus(repoId, result);
       if (result.ok) onHistoryChanged(repoId);
       return result;
     } catch (e) {
@@ -638,6 +659,7 @@ export function useRepoActions(
     getRepoStatus,
     hasRepo,
     patchRepo,
+    applyActionStatus,
     upsertRepo,
     queueRepoAdded,
     flushPendingRepoInserts,

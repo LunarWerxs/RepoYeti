@@ -36,23 +36,45 @@ function mountOptions(overrides: Record<string, unknown> = {}) {
   );
 }
 
+// Issue #16 follow-up. The label was a native `title`, which no touch device has ever shown — on a
+// phone this control was an unexplained slider icon. It is a real Tooltip now, reachable by press
+// and hold, wrapped as Popover > Tooltip > TooltipTrigger(as-child) > span > PopoverTrigger.
+//
+// The span is the load-bearing part, and the reason this describe exists. An earlier attempt merged
+// the Tooltip and Popover `as-child` triggers onto ONE element: both write `data-state` and both
+// bind pointer handlers, whichever merged last won, and the menu stopped opening on a real click.
+// The inert wrapper makes that impossible — so the click assertion below is the guard that matters,
+// not the label ones.
 describe("ViewOptions trigger", () => {
-  it("labels the trigger with a NATIVE title, never a nested reka Tooltip", () => {
+  it("labels itself with a Tooltip a finger can reach, not a native title", () => {
     const w = mountOptions();
     const trigger = w.get("button");
     expect(trigger.attributes("aria-label")).toBe("History view options");
-    // This is the regression guard for "the menu doesn't open". Wrapping the PopoverTrigger in a
-    // TooltipTrigger stacks two `as-child` triggers on one element: both write `data-state` and
-    // both bind pointer handlers, and the popover stopped opening on a real click. The label is a
-    // plain title now, exactly like the ⋮ menu in FileViewerInner.
-    expect(trigger.attributes("title")).toBe("History view options");
-    expect(w.findAll('[data-slot="tooltip-trigger"]')).toHaveLength(0);
+    expect(trigger.attributes("title")).toBeUndefined();
+    // The Tooltip is on the wrapper span, NOT merged onto the popover's own button.
+    const tooltipTrigger = w.get('[data-slot="tooltip-trigger"]');
+    expect(tooltipTrigger.element.tagName).toBe("SPAN");
+    expect(tooltipTrigger.element.contains(trigger.element)).toBe(true);
     w.unmount();
   });
 
-  it("keeps the native title regardless of the app-wide tooltip switch", () => {
+  it("still opens the popover on a plain click", async () => {
+    const w = mountOptions();
+    await w.get("button").trigger("click");
+    await w.vm.$nextTick();
+    expect(document.body.textContent).toContain("Activity graph");
+    w.unmount();
+  });
+
+  it("opens on a plain click with the app-wide tooltip switch off, too", async () => {
+    // `tooltips` is accepted for call-site symmetry and does nothing here (the app's
+    // TooltipProvider resolves the shared switch for every tooltip beneath it). What must hold
+    // either way is that the menu still opens in one click.
     const w = mountOptions({ tooltips: false });
-    expect(w.get("button").attributes("title")).toBe("History view options");
+    expect(w.get("button").attributes("aria-label")).toBe("History view options");
+    await w.get("button").trigger("click");
+    await w.vm.$nextTick();
+    expect(document.body.textContent).toContain("Activity graph");
     w.unmount();
   });
 });

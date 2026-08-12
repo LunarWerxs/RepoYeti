@@ -280,14 +280,22 @@ defineExpose({ loadRecentMsgs, recentMsgs });
       <div class="absolute top-1 right-1 flex items-center gap-0.5">
         <!-- recent commit messages, tucked behind a small history dropdown -->
         <DropdownMenu v-if="recentMsgs.length">
-          <DropdownMenuTrigger
-            class="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-            :title="tooltipsEnabled ? $t('repo.commit.recent') : undefined"
-            :aria-label="$t('repo.commit.recent')"
-            @click.stop
-          >
-            <History :size="16" />
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <!-- inert wrapper: two reka `as-child` triggers (Tooltip + DropdownMenu) must never
+                   merge onto one element, or the menu stops opening — see ViewOptions.vue. -->
+              <span class="inline-flex">
+                <DropdownMenuTrigger
+                  class="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                  :aria-label="$t('repo.commit.recent')"
+                  @click.stop
+                >
+                  <History :size="16" />
+                </DropdownMenuTrigger>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{{ $t("repo.commit.recent") }}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="end" class="max-w-[min(22rem,80vw)]">
             <DropdownMenuLabel>{{ $t("repo.commit.recent") }}</DropdownMenuLabel>
             <DropdownMenuItem

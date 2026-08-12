@@ -4,6 +4,62 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.7] - 2026-08-12
+
+### Fixed
+
+- **A pushed repo stops looking unpushed.** After a successful push the button stayed green, as
+  though the commits were still waiting, until someone hit Refresh
+  ([#17](https://github.com/LunarWerxs/RepoYeti/issues/17)). The daemon was right all along. It
+  re-reads status after every action and broadcasts it, but the client that pressed the button
+  had to wait for its own event to travel back over SSE, and Refresh was the one action that read
+  its status straight from its own HTTP response. Every mutating action now answers with the state
+  it produced, and the initiating client reconciles from that. The broadcast is still what tells
+  the OTHER clients. This matters most where the stream is least reliable: a phone that
+  backgrounds mid-action misses the frame outright, and a stream whose client falls behind is
+  deliberately closed rather than left silently lossy. Fetch, pull, commit, smart commit, checkout,
+  branch, stash, tag, remote edits, and the per-file stage/discard/delete/ignore actions all
+  reconcile the same way now. A share-link guest's copy is redacted exactly as the broadcast
+  already was, so the second delivery path cannot leak a credentialed remote URL.
+- **"Visual bars" works on a phone.** The History panel switches to a compact two-line row below
+  640px, and that row rendered numeric totals unconditionally, so choosing Visual bars did nothing
+  in the only layout a phone ever shows ([#18](https://github.com/LunarWerxs/RepoYeti/issues/18)).
+  It honours the setting now, on a narrower track since it shares a line with the author, age and
+  hash rather than owning a column.
+- **The History view-options button explains itself to a finger.** It labelled itself with a native
+  `title`, which no touch device has ever displayed, leaving an unexplained slider icon on mobile
+  ([#16](https://github.com/LunarWerxs/RepoYeti/issues/16)). It is a real tooltip now, reachable by
+  press-and-hold. The tooltip sits on an inert wrapper rather than on the popover's own button:
+  merging two reka `as-child` triggers onto one element is what broke the menu's click the last
+  time this was attempted, and a quick tap must keep opening the menu in one tap.
+- **Three more controls explain themselves on a phone.** The same native-`title` problem, found by
+  sweeping for it rather than waiting for it to be reported: the branch switcher, the delete-branch
+  button, the file viewer's overflow menu, and the commit box's recent-messages menu all labelled
+  themselves with a `title` a touch device never renders. All four are press-and-hold tooltips now.
+  The changed-files tree's row actions were left alone deliberately: that list runs to 2000 rows
+  with every row in the DOM, and a tooltip instance per row is the exact thing measured as making
+  it janky, so those need a different approach rather than this one.
+- **Updating from source rebuilds the dashboard.** A source install's auto-update ran `bun install`
+  at the repo root, which does not reach `web/`. That is a separate package with its own lockfile,
+  not a workspace. The dashboard was then built against the previous commit's dependencies, or not
+  at all, so a successful update could leave the PWA on the old build
+  ([#16](https://github.com/LunarWerxs/RepoYeti/issues/16)). Both installs now run as one step, so
+  the engine's rollback path gets the fix too. Packaged installs are untouched; they never build.
+- **A reconnect re-hydrates collaboration presence.** Peer presence is pure SSE with no polling
+  fallback, and was fetched only at the first connect, so a frame missed while a phone was
+  backgrounded stranded a departed collaborator on screen indefinitely. The reconnect resync now
+  covers it like everything else.
+- **An unattended update is visible while it happens.** The daemon announces both phases of a
+  background auto-update; the dashboard subscribed to those events and had no handler for either,
+  so it showed nothing at all while the daemon went away for minutes. Settings now reads "Updating"
+  and then "Restarting", which also explains the disconnect that follows instead of letting it read
+  as a fault.
+- **The mobile bulk-action bar is labelled and reachable.** Below 640px the Pin/Star/Hide/Remove
+  buttons drop their text labels, which left them with no accessible name at all, and their 24–28px
+  hit areas were under a finger's target, on a touch-only flow. They carry `aria-label`s now, and
+  a pseudo-element grows each target to 40px vertically without moving anything (sideways would
+  overlap the neighbour, and one of these neighbours is Remove).
+
 ## [0.20.6] - 2026-08-11
 
 ### Added

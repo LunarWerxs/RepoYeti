@@ -8,7 +8,9 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { jsonError, statusForCode } from "../contract.ts";
 import { parseBody, RepoPathSchema } from "../schemas.ts";
 import { getRepo } from "../db.ts";
-import { isRemoteRequest } from "../auth.ts";
+import type { RepoStatus } from "../db.ts";
+import { isRemoteRequest, effectiveGuest } from "../auth.ts";
+import { guestStatus } from "../share/redact.ts";
 import type { RepoYetiConfig } from "../config.ts";
 import type { ActionOutcome } from "../service/index.ts";
 
@@ -31,13 +33,41 @@ export const withRepo = async (
   return fn(id);
 };
 
+/**
+ * Serialise a mutating action's outcome, redacting its `status` for a share-link guest.
+ *
+ * `ActionOutcome.status` (service/core.ts) hands the caller the repo state its own action just
+ * produced, so the initiating client doesn't have to wait for the SSE broadcast to come back
+ * around. That status carries `remote`, whose URL may embed a credential — the same reason
+ * share/events.ts projects the `repo_state_changed` broadcast through `guestStatus`. A guest may
+ * commit and sync, so these routes really are reachable by one: adding a second delivery channel
+ * for a status means adding it to the redaction too, or the new channel quietly leaks what the
+ * old one was careful about.
+ */
+export function withGuestStatus<T extends { status?: RepoStatus | null }>(
+  c: Context,
+  cfg: RepoYetiConfig,
+  r: T,
+): T {
+  return r.status && effectiveGuest(c, cfg) ? { ...r, status: guestStatus(r.status) } : r;
+}
+
+export function actionJson(
+  c: Context,
+  cfg: RepoYetiConfig,
+  r: ActionOutcome,
+  okStatus: ContentfulStatusCode = 200,
+): Response {
+  return c.json(withGuestStatus(c, cfg, r), r.ok ? okStatus : statusForCode(r.code));
+}
+
 /** Safe git action wrapper: parse the id, run `fn(id)`, map the outcome's ok/code to a status. */
-export const action = (fn: (id: string) => Promise<ActionOutcome>) => async (c: Context) => {
-  const id = requireId(c);
-  if (id instanceof Response) return id;
-  const r = await fn(id);
-  return c.json(r, r.ok ? 200 : statusForCode(r.code));
-};
+export const action =
+  (cfg: RepoYetiConfig, fn: (id: string) => Promise<ActionOutcome>) => async (c: Context) => {
+    const id = requireId(c);
+    if (id instanceof Response) return id;
+    return actionJson(c, cfg, await fn(id));
+  };
 
 /** "Point to Folder" (register existing) + "Create New" (git init) body wrapper. */
 export const repoFromPath =

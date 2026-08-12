@@ -40,7 +40,13 @@ const gitEngine = createUpdater({
   serviceName: "repoyeti",
   appLabel: "RepoYeti",
   updateRepoEnvVar: "REPOYETI_UPDATE_REPO",
-  installCmd: ["bun", "install"],
+  // `bun install` at the root does NOT reach web/: there is no `workspaces` field in package.json,
+  // so the dashboard is a separate package with its own lockfile. A plain root install therefore
+  // left web/node_modules on the PREVIOUS commit's dependencies, and `buildCmd` below either built
+  // the dashboard against stale deps or failed outright — which is how a source install could pull
+  // new code and keep serving the old PWA (issue #16). Both installs run as one script so the
+  // engine's rollback path, which re-runs installCmd for the previous commit, gets the fix too.
+  installCmd: ["bun", "run", "install:all"],
   buildCmd: ["bun", "run", "--cwd", "web", "build"],
 });
 

@@ -1,12 +1,12 @@
-# RepoYeti — Architecture & Build Spec
+# RepoYeti: Architecture & Build Spec
 
-> _(Formerly `MARCHING_ORDERS.md` — promoted to the durable architecture doc; the §-numbered
+> _(Formerly `MARCHING_ORDERS.md`, promoted to the durable architecture doc; the §-numbered
 > security model, secrets/identity protocol, and acceptance criteria below remain the source of truth.)_
 >
 > **What this file is.** The single, decisive build spec for the **smallest version that
-> actually works end-to-end on a phone**. It distilled three earlier input briefs — a
+> actually works end-to-end on a phone**. It distilled three earlier input briefs: a
 > hard-constraints architecture brief, an opinion prompt, and a Gemini "winning stack"
-> response — into one source of truth; those briefs were removed once their content was
+> response, into one source of truth; those briefs were removed once their content was
 > fully absorbed here. Decisions below are made, not surveyed. Where the briefs left
 > something OPEN, it is now closed. Where they over-scoped, it is now cut.
 >
@@ -16,10 +16,10 @@
 
 > **✅ Implementation status (built & verified).** Phases 1–5 are implemented in `src/` + `web/` and
 > verified at runtime (see [README.md](README.md)). Two deliberate deviations from the plan below:
-> (1) **stage-all + commit from the phone is now IN v1** (the §3 "OUT" deferral is lifted — it's atomic
+> (1) **stage-all + commit from the phone is now IN v1** (the §3 "OUT" deferral is lifted: it's atomic
 > and can't create the half-merged state the guards prevent), and **register/create repo are built**;
 > (2) **PAT/HTTPS-token auth + OS-keychain (keytar)** stay deferred (SSH-key injection covers the common
-> case), and **Phase 6 (Tauri tray)** is deferred — the CLI binary + phone browser is the whole product.
+> case), and **Phase 6 (Tauri tray)** is deferred; the CLI binary + phone browser is the whole product.
 > The only thing between "built" and a live remote login is a single owner-gated end-to-end sign-in.
 >
 > **Current remote-login design.** RepoYeti supports named tunnels and rotating Quick Tunnels.
@@ -34,9 +34,9 @@
 
 **RepoYeti is a single Bun-compiled daemon binary.** It discovers your git repos, watches them
 cheaply, serves a mobile PWA, drives git operations with per-operation identity injection, and
-exposes itself over a zero-config Cloudflare tunnel — gated by app-layer auth so the tunnel URL
+exposes itself over a zero-config Cloudflare tunnel, gated by app-layer auth so the tunnel URL
 alone is worthless. **The CLI binary + a phone browser is the entire product.** The Tauri tray,
-named tunnels, TOTP, workspaces UI, and on-phone staging are all deferred — none of them are on
+named tunnels, TOTP, workspaces UI, and on-phone staging are all deferred: none of them are on
 the path to a working demo, and the tray in particular can be added later **without touching a
 single line of daemon code.**
 
@@ -51,7 +51,7 @@ machine (Mac / Windows / Linux) that:
 
 - recursively discovers all git repos under chosen root(s),
 - tracks each repo's state (branch, dirty count, ahead / behind, remote, errors) **event-driven, not polled**,
-- manages multiple git identities (personal / work / client — name + email + SSH key + optional PAT),
+- manages multiple git identities (personal / work / client: name + email + SSH key + optional PAT),
 - exposes a high-density, dark, mobile-first **PWA dashboard** over a **secure zero-config remote URL**,
 - and lets you trigger **safe** git actions (fetch / pull / push / assign-identity / register / create) from the phone.
 
@@ -77,32 +77,32 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 |---|---|---|
 | **Runtime** | **Bun (LTS)** | `bun --compile` → single self-contained binary; built-in `bun:sqlite` kills the `better-sqlite3` native-addon build churn on Windows; built-in HTTP server + file watchers; TS-first, no `tsc` step. |
 | **Git engine** | **`simple-git`** over the system `git` binary | Reuses the user's installed, optimized git. Its per-call `env` option maps *directly* onto `GIT_SSH_COMMAND` / `GIT_AUTHOR_*` injection. No JS git reimplementation to trust. |
-| **HTTP framework** | **Hono** | Tiny, TS-native. Its middleware model makes auth **structural** — a single `app.use()` gates the whole router, so you *cannot* add an unauthenticated route by accident. |
+| **HTTP framework** | **Hono** | Tiny, TS-native. Its middleware model makes auth **structural**: a single `app.use()` gates the whole router, so you *cannot* add an unauthenticated route by accident. |
 | **Storage** | **`bun:sqlite`**, WAL mode, `synchronous=NORMAL` | Only store that survives concurrent writers (watcher + API + git ops). One file: `repoyeti.db`. Retry on `SQLITE_BUSY`; fall back to `journal_mode=DELETE` if WAL won't open (Windows AV). |
 | **Tunnel** | **`cloudflared` quick or named tunnel** + stable OAuth callback for Quick Tunnels | Quick Tunnels stay zero-config and rotating; the relay returns OAuth to their announced origin without proxying the dashboard. Named tunnels use their stable callback directly. The tunnel client is NOT vendored: the release is a single executable (release.yml asserts a one-file archive), so `cloudflared` must be on `PATH` for `--tunnel` in every install. `resolveCloudflaredExecutable` still prefers a sibling `vendor/` copy if one is ever placed there. |
-| **Auth** | **"Sign in with Connections"** — public OIDC (AEGIS) at `accounts.connections.icu`; daemon verifies the login token and trusts one owner `sub` | Stand-alone relying party using connections.icu's **public** OAuth — like "Log in with Google." No shared secret, no Connections-repo coupling, no homegrown password/PIN. See §7. |
+| **Auth** | **"Sign in with Connections"**, public OIDC (AEGIS) at `accounts.connections.icu`; daemon verifies the login token and trusts one owner `sub` | Stand-alone relying party using connections.icu's **public** OAuth, like "Log in with Google." No shared secret, no Connections-repo coupling, no homegrown password/PIN. See §7. |
 | **Transport / sync** | **SSE** daemon→phone, **REST** phone→daemon | v2 decided this. SSE auto-reconnects through cloudflared with no WebSocket upgrade; maps cleanly onto the event-driven watcher. Commands are request/response → REST. |
-| **Frontend** | **Vue 3 + Vite**, PWA, **embedded in the binary**; **import pre-built libraries, minimal hand-written UI** | Static files bundled at `bun --compile` time; daemon serves them — no second server. **Owner directive: lean on smart pre-built libs, write minimal UI to maintain.** Stack: **reka-ui** (shadcn-vue–style component kit, `src/components/ui/`) · **Tailwind v4** (`@tailwindcss/vite`) · **@vueuse/core** (composables — `useEventSource` handles SSE+reconnect, `useColorMode`, `useLocalStorage`) · **@formkit/auto-animate** (zero-config list/card transitions — solves "no layout shift on SSE updates" for free) · **@lucide/vue** icons · **vue-sonner** toasts · **Pinia** state · **vite-plugin-pwa** (auto manifest + service worker). |
-| **Secrets** | **OS keychain via `keytar`** | SSH key *paths* in SQLite (the daemon never reads key bytes — only passes the path to `ssh -i`). Git PATs, the owner's Connections OAuth tokens, and any confidential `client_secret` in keychain by handle, resolved at call time. |
+| **Frontend** | **Vue 3 + Vite**, PWA, **embedded in the binary**; **import pre-built libraries, minimal hand-written UI** | Static files bundled at `bun --compile` time; daemon serves them, no second server. **Owner directive: lean on smart pre-built libs, write minimal UI to maintain.** Stack: **reka-ui** (shadcn-vue–style component kit, `src/components/ui/`) · **Tailwind v4** (`@tailwindcss/vite`) · **@vueuse/core** (composables: `useEventSource` handles SSE+reconnect, `useColorMode`, `useLocalStorage`) · **@formkit/auto-animate** (zero-config list/card transitions, solving "no layout shift on SSE updates" for free) · **@lucide/vue** icons · **vue-sonner** toasts · **Pinia** state · **vite-plugin-pwa** (auto manifest + service worker). |
+| **Secrets** | **OS keychain via `keytar`** | SSH key *paths* in SQLite (the daemon never reads key bytes, only passes the path to `ssh -i`). Git PATs, the owner's Connections OAuth tokens, and any confidential `client_secret` in keychain by handle, resolved at call time. |
 | **Packaging** | `bun --compile` per platform, shipped via **npm** | `npm install -g repoyeti && repoyeti start`. ~25-35 MB incl. embedded frontend. `cloudflared` is a separate PATH dependency, not bundled. Tauri tray deferred to Phase 6. |
 
 ---
 
 ## 3. Scope
 
-### IN (v1 — required for the success loop)
+### IN (v1, required for the success loop)
 
 - **Discovery:** recursive BFS from **one** configured root, max depth 6, skip `node_modules`,
   nested `.git`, and common build dirs; cap at **200 repos** on Linux (inotify budget). `source=auto`.
 - **Manual targeting:** `POST /api/repos/register` (existing absolute path, `source=pinned`) and
   `POST /api/repos/create` (`mkdir` + `git init`, `source=created`).
-- **Watchers:** one watcher per repo on **`.git/HEAD` and `.git/index` only** — never the working
+- **Watchers:** one watcher per repo on **`.git/HEAD` and `.git/index` only**, never the working
   tree. On event → recompute that repo's status → write SQLite → emit SSE.
 - **Per-repo operation queue:** a `Map<repoId, Promise>` chain serializing *all* git ops on a repo.
-  This is a **Phase 1 architectural primitive**, not a later optimization — it is what prevents the
+  This is a **Phase 1 architectural primitive**, not a later optimization: it is what prevents the
   forbidden mid-merge race.
 - **Status:** branch, dirty count, **ahead (local)**, **behind (from last fetch only, timestamped)**,
-  remote URL, and exact HEAD/upstream identities — via `git status --porcelain=v2 --branch -z`
+  remote URL, and exact HEAD/upstream identities, via `git status --porcelain=v2 --branch -z`
   plus one `for-each-ref` invalidation snapshot.
 - **SSE:** `GET /api/events` streaming `repo_state_changed` + `daemon_status`; session-gated; client
   uses `EventSource` (auto-reconnect).
@@ -116,10 +116,10 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 - **PWA:** flat repo list sorted by name; per-repo card = branch badge + dirty count + ahead/behind
   (with fetch timestamp) + identity selector + fetch/pull/push buttons; dark terminal theme;
   Add-to-Home-Screen manifest.
-- **CLI:** `repoyeti start | stop | status | add-root <path> | set-owner <sub|email>` (`set-owner` sets the trusted Connections identity; OAuth `client_id`/redirect come from config — see §13). _Since v1 the CLI has grown beyond lifecycle: it now also has **git verbs** (`repos`/`status <repo>`/`log`/`branches`/`branch`/`checkout`/`commit`/`diff`/`drift`/`stash`/`push`/`pull`/`fetch`) that drive the running daemon over its loopback HTTP API, plus **`repoyeti mcp`** (an MCP stdio server for AI agents) and **`repoyeti token`** (mint/revoke the optional API token). See the new "Agent & CLI surfaces" note under §4._
+- **CLI:** `repoyeti start | stop | status | add-root <path> | set-owner <sub|email>` (`set-owner` sets the trusted Connections identity; OAuth `client_id`/redirect come from config, see §13). _Since v1 the CLI has grown beyond lifecycle: it now also has **git verbs** (`repos`/`status <repo>`/`log`/`branches`/`branch`/`checkout`/`commit`/`diff`/`drift`/`stash`/`push`/`pull`/`fetch`) that drive the running daemon over its loopback HTTP API, plus **`repoyeti mcp`** (an MCP stdio server for AI agents) and **`repoyeti token`** (mint/revoke the optional API token). See the new "Agent & CLI surfaces" note under §4._
 - **Robustness:** port-conflict auto-increment; 30s op timeout; structured error codes.
 
-### OUT (explicitly deferred — do not build in v1)
+### OUT (explicitly deferred, do not build in v1)
 
 | Deferred | When | Why it's safe to cut |
 |---|---|---|
@@ -135,7 +135,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | Diff viewer · merge-conflict UI · rebase · `reset --hard` · `push --force` | **never** | Out of scope by design. Daemon surfaces "resolve at your desk" and stops. |
 | SVN / Mercurial · cloud-synced accounts · native installers | post-v1 | Not on the path. |
 | WebSockets | **never** | SSE is strictly sufficient; enforce this against drift. |
-| Self-hosted frp/bore/chisel relay | **never** | Converts "self-contained tool" into "infra operator" — contradicts the whole point. Note the opt-in share-link relay (`relay/`) is deliberately NOT this: it stores one id→origin row and answers with a redirect, so no repository traffic passes through it and whoever runs it never becomes custodian of anyone's source. |
+| Self-hosted frp/bore/chisel relay | **never** | Converts "self-contained tool" into "infra operator"; contradicts the whole point. Note the opt-in share-link relay (`relay/`) is deliberately NOT this: it stores one id→origin row and answers with a redirect, so no repository traffic passes through it and whoever runs it never becomes custodian of anyone's source. |
 
 **Auto-updater is not on this table; it shipped.** Self-update (git-based check/apply) is fully
 wired; see §16 for the `updater-engine` design and the `useSelfUpdate` composable, not this list.
@@ -174,18 +174,22 @@ wired; see §16 for the `updater-engine` design and the `useSelfUpdate` composab
   SQLite updated → SSE `repo_state_changed` pushed → PWA patches that one card (no full re-render).
 - *Commands (phone→daemon):* PWA `POST`s a REST action with `Authorization: Bearer <jwt>` → auth
   middleware verifies → op-queue serializes the git call → conflict guard preflights → `simple-git`
-  runs with injected identity → result returned + SSE follow-up.
+  runs with injected identity → status re-read → result returned **carrying that status**, plus an
+  SSE `repo_state_changed` for everyone else. The caller reconciles from its own response and never
+  waits on the broadcast to learn what it just did: the stream has no replay, so a client that
+  blinked during its own action would otherwise stay stale until a manual refresh (issue #17).
+  A share-link guest's copy of that status goes through the same redaction the broadcast uses.
 
 ### Agent & CLI surfaces (one orchestration core, several front doors)
 
-There are now **three** ways to reach the same git operations — the HTTP routes, the CLI verbs, and
-the MCP tools — and they all funnel into the **one service orchestration layer** (`src/service/`),
+There are now **three** ways to reach the same git operations: the HTTP routes, the CLI verbs, and
+the MCP tools, and they all funnel into the **one service orchestration layer** (`src/service/`),
 so every guard (op-queue serialization, FF-only pull, no-force push, dirty-tree refusal, identity
 injection) holds no matter which door a request comes through. The layering:
 
-- **HTTP routes** (`src/http/routes/*`) — the canonical surface; the PWA and any external caller use it.
+- **HTTP routes** (`src/http/routes/*`): the canonical surface; the PWA and any external caller use it.
 - **CLI verbs** (`src/cli/git.ts`) and **MCP-stdio** (`repoyeti mcp`) are **thin HTTP clients to the
-  loopback daemon** — they never touch git or the service layer in-process; they locate the live
+  loopback daemon**: they never touch git or the service layer in-process; they locate the live
   daemon and call its `127.0.0.1` API (single-instance respected). A boundary check enforces that
   `cli/*` and the MCP core/tools import no service/read/git layer.
 - **MCP-HTTP** (`POST /api/mcp`) uses an **in-process adapter** into the service layer and is gated
@@ -254,18 +258,18 @@ outside SQLite.
 
 ---
 
-## 6. API surface (every route requires the trusted owner — or, since §17, a scoped share link)
+## 6. API surface (every route requires the trusted owner, or a scoped share link as of §17)
 
 | Method | Route | Purpose | Guards |
 |---|---|---|---|
-| `GET` | `/api/repos` | list repos + last status | — |
+| `GET` | `/api/repos` | list repos + last status | none |
 | `POST` | `/api/repos/register` | pin existing abs path | path exists + is a git repo |
 | `POST` | `/api/repos/create` | `mkdir` + `git init` | path not exists |
 | `POST` | `/api/repos/:id/fetch` | `git fetch` (updates behind) | op-queue |
 | `POST` | `/api/repos/:id/pull` | FF-only pull | **409 `DIRTY_WORKING_TREE`** if dirty; FF-only |
 | `POST` | `/api/repos/:id/push` | push current branch | **409 `NON_FAST_FORWARD`** if diverged; `--force` → **403** |
-| `POST` | `/api/repos/:id/identity` | assign identity to repo | — |
-| `GET` | `/api/identities` | list | — |
+| `POST` | `/api/repos/:id/identity` | assign identity to repo | none |
+| `GET` | `/api/identities` | list | none |
 | `POST` `PUT` `DELETE` | `/api/identities[/:id]` | CRUD | PAT → keychain, never DB |
 | `GET` | `/api/events` | SSE stream | session cookie |
 | `GET` | `/oauth/login` | start "Sign in with Connections" (PKCE; signed `state` binds origin, callback, relay id) | returns 503 until a Quick Tunnel callback route is announced |
@@ -278,7 +282,7 @@ Auth is a single Hono middleware: every `/api/*` route requires a valid daemon s
 static PWA shell + manifest, the two `/oauth/*` endpoints that run the login dance, and `GET /s/:token`
 (share-link redemption, §17). See §7.
 
-That same middleware is also where a **share-link guest** is admitted — always after every owner check
+That same middleware is also where a **share-link guest** is admitted, always after every owner check
 has failed, so it can only ever let in a caller who would otherwise have received a flat 401, and only
 to the allowlisted routes in `src/share/policy.ts`, on repos their link covers. See §17.
 
@@ -298,10 +302,10 @@ UI can render the right state.
 
 ---
 
-## 7. Security model — "Sign in with Connections" (public OIDC), non-negotiable
+## 7. Security model: "Sign in with Connections" (public OIDC), non-negotiable
 
 > **Decision (owner directive):** RepoYeti is a **stand-alone codebase**. It uses connections.icu for
-> **authentication only**, through the **public API** — never any internal/first-party mechanism. The
+> **authentication only**, through the **public API**, never any internal/first-party mechanism. The
 > earlier Studio-`introspection_secret` design is **dropped** (that's the internal first-party path).
 > RepoYeti authenticates the owner via **"Sign in with Connections"**, connections.icu's public,
 > standards-compliant **OpenID Connect** provider (AEGIS), exactly like any "Log in with Google" app.
@@ -329,11 +333,11 @@ RepoYeti is registered once as a **third-party OAuth app** (relying party) → i
 2. The daemon catches the redirect (`?code&state`), exchanges the code at `/oauth/token`, and gets an
    **RS256 `id_token`** + access token.
 3. The daemon **verifies the `id_token`** against the provider's **public JWKS** (from the discovery
-   doc) — checks signature, `iss`, `aud` (its `client_id`), expiry — and/or calls `/oauth/userinfo`.
+   doc), checking signature, `iss`, `aud` (its `client_id`), and expiry, and/or calls `/oauth/userinfo`.
    **No shared secret is involved; verification uses public keys only.**
 4. The daemon accepts **only if** the verified `sub` (or `email`) equals the **single owner** this
    daemon is configured to trust → otherwise `AUTH_WRONG_OWNER`. It then runs an ordinary session for
-   that browser/device (a `__Host-` cookie or short-lived token — standard relying-party behavior; the
+   that browser/device (a `__Host-` cookie or short-lived token, standard relying-party behavior; the
    IdP authenticates, the app keeps the session). Refresh tokens keep it alive without re-login.
 
 ### Login return through the stable callback
@@ -343,7 +347,7 @@ OAuth requires an exact registered redirect URI, while a free Quick Tunnel recei
 `https://app.repoyeti.com/oauth/callback` and uses the existing signed relay announcement to find
 the current daemon without making the relay a dashboard proxy.
 
-Flow (daemon-side PKCE — the browser never holds tokens):
+Flow (daemon-side PKCE; the browser never holds tokens):
 
 1. A Quick Tunnel announces `(relay id, current HTTPS origin, timestamp)` with Ed25519 during startup.
    A successful response must declare `oauth-callback-v1`, proving that the same Worker which
@@ -374,15 +378,15 @@ dashboard URL; the one startup announcement required for OAuth still occurs.
 ### What an attacker with only the tunnel URL can do
 
 Hit any endpoint → **401, empty body** (no surface, no version, no repo data). To get further they
-must complete a real **Sign-in-with-Connections** login **as the trusted owner** — i.e. pass the
+must complete a real **Sign-in-with-Connections** login **as the trusted owner**, i.e. pass the
 owner's own Connections/Cognito login (and its MFA). A valid login by a *different* Connections user
 is rejected (`AUTH_WRONG_OWNER`). The daemon holds only a public `client_id` and the user's own
 tokens; there is **no shared secret** whose leak would matter. Tunnel compromise stays neutralized at
 the application layer.
 
 > **`GET /api/status` used to be the exception, and was fixed** (§17). It sat in the gate's public
-> allowlist and returned the whole settings dump — tunnel config, MCP rails, auto-commit schedule,
-> default editor, version — to anyone who knew the tunnel URL, flatly contradicting the paragraph
+> allowlist and returned the whole settings dump (tunnel config, MCP rails, auto-commit schedule,
+> default editor, version) to anyone who knew the tunnel URL, flatly contradicting the paragraph
 > above. Nothing needed it public (the PWA calls it only after the gate passes; the sign-in screen
 > runs on `/api/auth/status` alone), so it is now gated like every other route. `/api/auth/status`
 > and `/api/auth/me` remain public and are safe to be: both only echo the caller's *own* verified
@@ -390,11 +394,11 @@ the application layer.
 
 ### The one deliberate exception: share links (§17)
 
-The claim above — *the only way in is an owner login* — is **no longer the whole truth**, by owner
+The claim above, *the only way in is an owner login*, is **no longer the whole truth**, by owner
 decision. A **share link** is a second, strictly-lesser credential: a secret URL the owner mints and
 hands to someone else, with a permission tier, a repo scope, and an expiry. Anyone holding the link
 gets in without any Connections account, exactly like a Google Drive "anyone with the link" share.
-That is the intent, not a weakness — but it means **the URL is now a credential**, and the
+That is the intent, not a weakness, but it means **the URL is now a credential**, and the
 properties that keep it honest are enumerated in §17. If you are auditing this daemon, read §17 as
 part of this section, not as a feature note.
 
@@ -408,19 +412,19 @@ part of this section, not as a feature note.
 - **The owner's Connections tokens** (access/refresh/id) live server-side on the **daemon** (keychain),
   refreshed as needed; the phone holds only the daemon's own session cookie, never the raw Connections
   tokens.
-- **SSH keys:** the daemon **never reads key bytes** — it stores the *path* in SQLite and passes it
+- **SSH keys:** the daemon **never reads key bytes**: it stores the *path* in SQLite and passes it
   to `ssh -i <path>`. Losing the DB does not leak keys.
 - **Git PATs:** OS keychain by handle; resolved into a process env var **immediately before** the git
   subprocess call, never assigned to a module-level variable, logged, or serialized.
 - **GitHub account tokens (per-repo sync)** follow that same PAT rule, and are the one place RepoYeti
   reads a token it does not own. `gh auth git-credential` serves **only gh's active account**, so a
-  repo that syncs as any other account cannot authenticate through it — the failure is a confusing
+  repo that syncs as any other account cannot authenticate through it: the failure is a confusing
   `could not read Password for 'https://<login>@github.com'` naming an account `gh auth status`
   lists as signed in. The alternative (flipping the machine's active account around every network
   op) mutates global state every other tool shares, races across concurrent ops, and never restores.
   So `gh-cli.ts ghTokenFor` reads that one account's token and `git.ts credentialConfigArgs` hands
   it to a single git child: **env var only, never argv** (a `-c` flag is world-readable in a process
-  listing), never disk, never a log, never an HTTP response, and **never cached** — per the bullet
+  listing), never disk, never a log, never an HTTP response, and **never cached**: per the bullet
   above, a cache would be exactly the module-level variable that rule forbids. The helper is keyed
   to `credential.https://<host>.helper`, not the bare `credential.helper`, so it is structurally
   incapable of answering for a host the account does not belong to. See `src/gh-account.ts` for how
@@ -443,7 +447,7 @@ part of this section, not as a feature note.
 
 ### Identity injection (never break the user's desk)
 
-Per-operation only — **the global `~/.gitconfig` is never touched, and repo-local `.git/config` is
+Per-operation only: **the global `~/.gitconfig` is never touched, and repo-local `.git/config` is
 never mutated except on an explicit user "persist identity" action:**
 
 ```bash
@@ -461,7 +465,7 @@ GIT_SSH_COMMAND="ssh -i <ssh_key_path> -o IdentitiesOnly=yes -o BatchMode=yes" \
 - **Push:** non-FF → **409 `NON_FAST_FORWARD`**; `--force` → **403** unconditionally.
 - **The daemon never leaves a repo mid-merge.** Every unsafe state surfaces as a clear status, not an action.
 - Binds to **`127.0.0.1` only**; the *only* network path in is the authenticated tunnel.
-- All git invocations use **parameterized argument arrays** via `simple-git` — never a shell string.
+- All git invocations use **parameterized argument arrays** via `simple-git`, never a shell string.
 - **The ambient environment is scrubbed, not forwarded.** `safeGitEnv()` (`src/git.ts`) deletes
   `BLOCKED_GIT_ENV`: every var that names a program git would execute (askpass, editor, pager,
   external diff, ssh, proxy) or a path it would read config/binaries/templates from. Two reasons,
@@ -474,7 +478,7 @@ GIT_SSH_COMMAND="ssh -i <ssh_key_path> -o IdentitiesOnly=yes -o BatchMode=yes" \
 
 ---
 
-## 8. Known traps — engineer around these (surfaced by adversarial review)
+## 8. Known traps: engineer around these (surfaced by adversarial review)
 
 These were not in the original briefs; they will bite if ignored.
 
@@ -501,7 +505,7 @@ These were not in the original briefs; they will bite if ignored.
    top-level repo. Skip or mark `is_submodule=1` and exclude from the watcher budget.
 5. **Windows WAL × antivirus** locks `-wal`/`-shm` files. Use `synchronous=NORMAL`, retry on
    `SQLITE_BUSY` (exp backoff, ≤5), and fall back to `journal_mode=DELETE` if WAL won't open.
-6. **Bundle `cloudflared`** as a pinned per-platform binary inside the package — do **not** rely on a
+6. **Bundle `cloudflared`** as a pinned per-platform binary inside the package; do **not** rely on a
    system install. Tunnel failure must be **non-fatal** (keep serving localhost + warn).
 7. **Port conflict.** If the default port is taken, auto-increment to the next free port and print the
    actual port used.
@@ -515,13 +519,13 @@ These were not in the original briefs; they will bite if ignored.
 > Ordering is **non-negotiable**: auth lands *before* any network exposure. Shipping a tunnel before
 > auth would directly violate the v2 non-negotiable.
 
-- **Phase 1 — Core daemon skeleton + op queue (localhost only, no auth, no tunnel).**
+- **Phase 1: Core daemon skeleton + op queue (localhost only, no auth, no tunnel).**
   Discovery → watchers (`.git/HEAD`,`.git/index`) → status engine → `bun:sqlite` → `GET /api/repos`.
   Build the per-repo operation queue here. **Run the `keytar` + `bun --compile` spike on all 3 platforms.**
   *Done when:* `repoyeti start` locally; `GET /api/repos` returns accurate branch/dirty/ahead-behind
   within 1s of a local commit.
 
-- **Phase 2 — "Sign in with Connections" (public OIDC).**
+- **Phase 2: "Sign in with Connections" (public OIDC).**
   `/oauth/login` (Authorization Code + PKCE → `accounts.connections.icu/oauth/authorize`,
   `scope=openid profile email`) + `/oauth/callback` (exchange at `/oauth/token`, verify the RS256
   `id_token` against the public JWKS from the discovery doc, confirm `sub`/`email` === trusted owner,
@@ -530,25 +534,25 @@ These were not in the original briefs; they will bite if ignored.
   *Done when:* every `/api/*` route 401s until a Sign-in-with-Connections login as the owner completes;
   a login by a different Connections user → `AUTH_WRONG_OWNER`; URL-only attacker reads nothing.
   **(Builds against the public OIDC discovery doc; lights up once the owner registers the app + supplies
-  `client_id` and trusted `sub` — §13.)**
+  `client_id` and trusted `sub`, see §13.)**
 
-- **Phase 3 — Identity management + safe git ops.**
+- **Phase 3: Identity management + safe git ops.**
   Identity CRUD (PAT → keychain); per-op `GIT_SSH_COMMAND` (`IdentitiesOnly`+`BatchMode`) + `git -c`;
   fetch/pull(FF-only, dirty preflight)/push(no-force, non-FF guard); 30s hang timeout.
   *Done when:* on the LAN, assign identity + tap Pull → daemon runs with that identity, result via SSE in ≤2s.
 
-- **Phase 4 — cloudflared tunnel + mobile PWA.**
+- **Phase 4: cloudflared tunnel + mobile PWA.**
   Spawn cloudflared child; capture + print URL; emit `daemon_status` SSE. Embed Vue 3 PWA; wire SSE to
   watcher; flat repo cards + identity selector + action buttons; PWA manifest.
   *Done when:* `repoyeti start` → terminal prints the HTTPS URL (QR) → phone on LTE pastes its Connections
   key → full dashboard works. **← This is the v1 finish line (the success loop from §1).**
 
-- **Phase 5 — Hardening + distribution.**
+- **Phase 5: Hardening + distribution.**
   Zod input validation; inotify-limit guard + 30s targeted-poll fallback; named-CF-tunnel upgrade path
   (`repoyeti.connections.icu` via Cloudflare, see §13); `bun --compile` for Win/Mac/Linux; `npm publish`;
   stage+commit-from-phone patch; workspace UI; multi-root; "sign out everywhere"; optional Path-A named tunnel.
 
-- **Phase 6 — Tauri tray (explicitly deferred).**
+- **Phase 6: Tauri tray (explicitly deferred).**
   Thin Rust tray that spawns the **unchanged** daemon binary as a sidecar, monitors it, surfaces the
   dashboard URL + Sign-in status in the menu. Proves "100% shared core": CLI and tray run the identical binary.
 
@@ -558,11 +562,11 @@ These were not in the original briefs; they will bite if ignored.
 
 1. `repoyeti start` on a laptop with 3+ repos prints the tunnel URL, local URL, and a QR of the tunnel URL within 10s.
 2. A phone **on LTE** (not the laptop's WiFi) opens the dashboard URL, taps **"Sign in with Connections"**,
-   logs in as the owner, and reaches the dashboard — **no port forwarding, no router config**. (Path B: the
+   logs in as the owner, and reaches the dashboard: **no port forwarding, no router config**. (Path B: the
    owner completes the Connections login once at the laptop; the phone is then trusted.)
 3. Dashboard shows every repo's branch, dirty count, and ahead count within 2s of load; behind count shows
    the last-fetch value with a timestamp label.
-4. A local commit on the laptop updates the phone's dirty + ahead counts within 3s via SSE — **no reload**.
+4. A local commit on the laptop updates the phone's dirty + ahead counts within 3s via SSE, **no reload**.
 5. From the phone, selecting an identity and tapping Pull runs `git pull` with `GIT_SSH_COMMAND` pointing at
    that identity's key (`IdentitiesOnly=yes`); result (success or structured error) shows within 5s.
 6. Pull is fast-forward-only and runs even on a dirty tree: it fast-forwards and preserves the local
@@ -585,7 +589,7 @@ These were not in the original briefs; they will bite if ignored.
 
 > **This grew past the flat tree in the original plan.** A maintainability reorg split the three
 > god-files (`index.ts` / `daemon.ts` / `service.ts`) into layered directories. The layering is
-> **structure, not behavior** — the same operations, just one public seam each.
+> **structure, not behavior**: the same operations, just one public seam each.
 
 ```
 repoyeti/
@@ -655,27 +659,27 @@ service/read/git`, and the MCP core/tools/backend touch the service only through
 
 ## 12. Decisions explicitly closed (so they aren't re-litigated)
 
-- **SQLite, not JSON** — concurrent writers. (All three briefs agree.)
-- **SSE, not WebSockets** — server-push, event-driven, auto-reconnect through cloudflared.
+- **SQLite, not JSON**: concurrent writers. (All three briefs agree.)
+- **SSE, not WebSockets**: server-push, event-driven, auto-reconnect through cloudflared.
 - **Auth = "Sign in with Connections" (public OIDC), not a homegrown credential and not the internal
-  Studio path** — RepoYeti is a stand-alone relying party that only calls the public
+  Studio path**: RepoYeti is a stand-alone relying party that only calls the public
   `accounts.connections.icu/oauth/*` URLs and verifies tokens via the public JWKS; it shares no secret
   with and imports nothing from the Connections repo. (Owner directive: public API, auth only, stand-alone.)
 - **Quick Tunnels use the stable relay callback** (§7). The daemon announces its current HTTPS origin
   with Ed25519 once per tunnel startup; the Worker resolves only that id and returns `code` + `state`
   to `/oauth/finish`. PKCE and daemon-signed state complete the trust boundary. This announcement is
   required even when the owner displays the direct Cloudflare address.
-- **Bun, not Node** — single-binary compile + built-in SQLite kills the worst Windows packaging pain.
-- **Tauri deferred to last** — the CLI binary + phone browser is the whole product.
-- **"Behind" is intentionally stale** — never auto-fetch on watch events.
+- **Bun, not Node**: single-binary compile + built-in SQLite kills the worst Windows packaging pain.
+- **Tauri deferred to last**: the CLI binary + phone browser is the whole product.
+- **"Behind" is intentionally stale**: never auto-fetch on watch events.
 
 ---
 
-## 13. connections.icu integration — what the owner provisions
+## 13. connections.icu integration: what the owner provisions
 
 RepoYeti is a **stand-alone relying party** that uses connections.icu **only** for "Sign in with
 Connections" (public OIDC). It imports nothing from the Connections repo. To light up auth end-to-end
-(everything else builds without it), the owner provides — all via the **public developer console**
+(everything else builds without it), the owner provides, all via the **public developer console**
 (`studio.connections.icu` → developer apps), not by editing the Connections monorepo:
 
 1. **A registered RepoYeti OAuth app.** Create a "Sign in with Connections" app → yields a public
@@ -684,14 +688,14 @@ Connections" (public OIDC). It imports nothing from the Connections repo. To lig
 2. **Registered redirect URIs:** `https://app.repoyeti.com/oauth/callback` for Quick Tunnels and the
    appropriate loopback callback for local login. Named/custom-domain clients may additionally
    register their own stable callback.
-3. **The trusted owner identity** — the `sub` (or email) RepoYeti should accept. Get it from
+3. **The trusted owner identity**: the `sub` (or email) RepoYeti should accept. Get it from
    `/oauth/userinfo` after a test login, or from the owner's account record. → daemon config/keychain.
 4. **The relay Worker.** `relay/worker.js` implements `/oauth/callback` and declares
    `oauth-callback-v1` through `/health` and successful `/announce` responses. The same signed
    identity serves stable links and OAuth, but an older Worker can still operate `/r/:id` while
    Quick Tunnel login remains safely blocked.
 
-That's it — no AWS Secrets Manager entry, no Connections-repo change, no shared M2M secret. Everything
+That's it: no AWS Secrets Manager entry, no Connections-repo change, no shared M2M secret. Everything
 the daemon needs (issuer, client_id, redirect, scopes) is public OIDC config; the only sensitive item
 is an optional confidential `client_secret`, which lives in the daemon keychain.
 
@@ -704,8 +708,8 @@ moment the owner registers the app and supplies the `client_id` + trusted `sub`.
 ## 14. Smart Commit (AI multi-commit splitter)
 
 
-> **Goal.** One tap turns a pile of uncommitted changes — the kind several AI agents
-> produce when they edit a repo in parallel — into a set of small, logically-scoped,
+> **Goal.** One tap turns a pile of uncommitted changes (the kind several AI agents
+> produce when they edit a repo in parallel) into a set of small, logically-scoped,
 > well-named commits instead of one giant dump. The AI reads the whole working tree,
 > decides *what happened* as a whole and per file, proposes an ordered set of commits,
 > and (after you review/edit) creates them. Optional one-tap sync afterward.
@@ -717,7 +721,7 @@ moment the owner registers the app and supplies the `client_id` + trusted `sub`.
 
 ### 1. The one decision that shapes everything: granularity
 
-**v1 splits at the FILE level — whole files are grouped into commits; a file is never
+**v1 splits at the FILE level: whole files are grouped into commits; a file is never
 split across two commits.**
 
 Why not line/hunk level (the "even smarter" option)?
@@ -726,16 +730,16 @@ Why not line/hunk level (the "even smarter" option)?
   header): *"the daemon never leaves a repo in an unsafe / half-merged state."* Hunk-level
   staging means programmatically applying a **subset of a file's hunks** to the index
   (`git apply --cached` of a partial patch). That can fail/conflict and leave a file
-  **partially staged** — exactly the stranded state the whole product is designed to avoid.
-  The gap analysis already files hunk-level staging under **Tier 3 — rejected by design**.
-- File-level staging is the opposite: **Tier 2 — planned** ("`git add <paths>` then commit
+  **partially staged**, exactly the stranded state the whole product is designed to avoid.
+  The gap analysis already files hunk-level staging under **Tier 3: rejected by design**.
+- File-level staging is the opposite: **Tier 2: planned** ("`git add <paths>` then commit
   without `-A`"). Every individual commit is atomic; if the sequence is interrupted, the
-  result is "some commits made, the rest still uncommitted in the working tree" — a
+  result is "some commits made, the rest still uncommitted in the working tree", a
   perfectly normal, safe, recoverable git state.
 - It's not an intelligence limit. The model is plenty capable of per-file intent. The
   limiter is **execution safety on a phone with no undo**.
 - **Prior art agrees.** GitKraken's shipping *AI Commit Composer* (Jan 2026) groups at
-  **file level only** — you can't split one file's hunks across commits in its UI either.
+  **file level only**: you can't split one file's hunks across commits in its UI either.
   This is the proven, safe shape.
 
 **Mixed-concern files** (one file with two unrelated changes) are handled the
@@ -788,7 +792,7 @@ op-queue mutation vs. routes vs. store/UI).
 
 #### Why two endpoints (plan and execute are decoupled)
 The AI plan is a *suggestion*. The user edits it freely in the browser. Execution takes
-the **edited** plan, not the AI's original — so the server re-validates the submitted
+the **edited** plan, not the AI's original, so the server re-validates the submitted
 groups against the live working tree before touching anything. This also means a flaky/slow
 provider can never block or corrupt a commit: planning and committing are independent calls.
 
@@ -839,7 +843,7 @@ exact final text, and the server commits it verbatim (same as the existing commi
 
 ### 5. AI layer (`src/ai.ts`)
 
-Add a sibling to `generateCommitMessage` — **`generateCommitPlan`** — reusing the existing
+Add a sibling to `generateCommitMessage`, **`generateCommitPlan`**, reusing the existing
 adapter map, `requestJson`, and per-provider `buildBody`/`extractCompletion`. No adapter is
 rewritten; we add **structured-JSON support** as an optional adapter capability.
 
@@ -854,11 +858,11 @@ rewritten; we add **structured-JSON support** as an optional adapter capability.
   - OpenAI-compatible (openai/deepseek/groq/openrouter): add
     `response_format: { type: "json_object" }`.
   - Gemini: add `generationConfig.responseMimeType: "application/json"`.
-  - Anthropic: no native flag needed — prompt-enforced JSON; we parse defensively.
+  - Anthropic: no native flag needed; prompt-enforced JSON; we parse defensively.
   Bump the request timeout (→ ~40s). `max_tokens` is **not** a flat bump: `planMaxTokens(fileCount,
   style)` sizes the reservation to the change-set *and* the commit style, capped at 4096. Providers
   gate on the reservation (Groq answers "Limit 12000, Requested 12994" before generating a token),
-  so an oversized one is rejected outright and degrades to the heuristic plan — while an undersized
+  so an oversized one is rejected outright and degrades to the heuristic plan, while an undersized
   one starves the bodies, which is how `- generate plane pwa` shipped. The rate is per-FILE because
   the worst split rule 2 can produce is one commit per file, and each of those still needs a body.
 - **Parsing.** A dedicated parser: strip an accidental ```` ```json ```` fence, `JSON.parse`,
@@ -876,7 +880,7 @@ A pure function `heuristicPlan(input)` groups files **without a model**:
   manifest's bucket;
 - templated conventional subjects (`chore(<scope>): update N files`, `test(<scope>): …`,
   `docs: …`), `degraded: true`.
-The UI shows a banner: *"AI couldn't structure this — here's a basic grouping. Edit before
+The UI shows a banner: *"AI couldn't structure this: here's a basic grouping. Edit before
 committing."* This guarantees Smart Commit **always produces an editable plan**, even with
 no key configured (though the button is gated on `aiEnabled` for the AI path).
 
@@ -896,7 +900,7 @@ Read-only, bounded, never mutates the index (same discipline as `collectCommitDi
 
 #### Mutate: `gitCommitGroups(absPath, identity, commits): Promise<CommitGroupsResult>`
 The heart of execution. **All of it runs inside a single op-queue slot** (the service
-wrapper enqueues once — never per commit — and refreshes *after* the slot releases, per the
+wrapper enqueues once, never per commit, and refreshes *after* the slot releases, per the
 documented same-key-nesting deadlock rule).
 
 ```
@@ -921,37 +925,37 @@ for (const c of commits) {
   rename's group includes both `from` and `to` so the deletion of the old path is staged
   with the addition of the new one.
 
-> Note on `git reset` (mixed): it only moves the index pointer back to HEAD — it **never
+> Note on `git reset` (mixed): it only moves the index pointer back to HEAD: it **never
 > touches the working tree** and is fully reversible (just re-stage). This is categorically
 > different from the forbidden `reset --hard`. It guarantees each group's commit contains
 > exactly that group's files regardless of any pre-existing staged state.
 
 ---
 
-### 7. Service layer (`src/service/` — `reads.ts` + `actions.ts`)
+### 7. Service layer (`src/service/`: `reads.ts` + `actions.ts`)
 
-- `planCommitInput(repoId)` — like `collectRepoDiff`: enqueue a `readStatus` (refuse
+- `planCommitInput(repoId)`, like `collectRepoDiff`: enqueue a `readStatus` (refuse
   submodule / `NOTHING_TO_COMMIT`), then `collectCommitPlanInput`. Read-only.
-- `smartCommitRepo(repoId, commits, sync)` —
+- `smartCommitRepo(repoId, commits, sync)`:
   1. Look up repo + identity; guard NOT_FOUND / submodule.
   2. **Re-validate** the submitted `commits` against a fresh `readChanges`: every path is
      currently changed, paths are disjoint across commits, and the union covers the changed
      set (extra/vanished paths → `PLAN_STALE`, prompting the UI to re-plan).
-  3. `enqueue(repoId, () => gitCommitGroups(...))` — one slot for the whole sequence.
+  3. `enqueue(repoId, () => gitCommitGroups(...))`: one slot for the whole sequence.
   4. If `sync` and all commits succeeded: reuse the existing pull-ff + push legs.
   5. `refreshRepo` **after** the slot releases.
   Returns `{ ok, committed: [...], remaining, synced?, code }`.
 
 ### 8. Contract + schemas + routes
 
-- **`src/contract.ts`** — new codes (mirrored in `web/src/types.ts`):
+- **`src/contract.ts`**: new codes (mirrored in `web/src/types.ts`):
   `PLAN_STALE` (409), `EMPTY_PLAN` (400), `PLAN_PATHS_INVALID` (400),
-  `AI_PLAN_FAILED` (502, when AI structuring fails *and* fallback is disabled — normally we
+  `AI_PLAN_FAILED` (502, when AI structuring fails *and* fallback is disabled, normally we
   fall back instead). Reuse `AI_*`, `NOTHING_TO_COMMIT`, `DETACHED_HEAD`, `NO_*`.
-- **`src/schemas.ts`** —
+- **`src/schemas.ts`**:
   `CommitPlanSchema = { provider?: string }` (mirror of `CommitMessageSchema`);
   `SmartCommitSchema = { commits: [{ message: nonEmpty, paths: string[].min(1) }].min(1), sync?: boolean }`.
-- **HTTP routes (`src/http/routes/`)** — (the old monolithic `daemon.ts` is now split into per-domain route modules)
+- **HTTP routes (`src/http/routes/`)** (the old monolithic `daemon.ts` is now split into per-domain route modules)
   - `ai.ts`: `POST /api/repos/:id/commit-plan` → resolve provider/key/model → `planCommitInput` →
     `generateCommitPlan` (fall back to `heuristicPlan` on AI failure) → `{ ok, plan }`.
     409 on `NOTHING_TO_COMMIT`.
@@ -960,11 +964,11 @@ for (const c of commits) {
 
 ### 9. Web (`web/`)
 
-- **`api.ts`** — `ai.commitPlan(repoId, provider?)` and `smartCommit(repoId, commits, sync?)`.
-- **`types.ts`** — `CommitGroup`, `CommitPlan`, the new codes.
-- **`store.ts`** — `genCommitPlan(repoId)`, `smartCommit(repoId, commits, sync)`, and plan
+- **`api.ts`**: `ai.commitPlan(repoId, provider?)` and `smartCommit(repoId, commits, sync?)`.
+- **`types.ts`**: `CommitGroup`, `CommitPlan`, the new codes.
+- **`store.ts`**: `genCommitPlan(repoId)`, `smartCommit(repoId, commits, sync)`, and plan
   state (the in-progress plan per repo so the editor is reactive).
-- **UI** — a new **`SmartCommitPlan.vue`** (a responsive Sheet/dialog, matching the existing
+- **UI**: a new **`SmartCommitPlan.vue`** (a responsive Sheet/dialog, matching the existing
   shadcn-vue Sheet pattern used by Settings/Identity) opened from a **Smart Commit** button
   beside the existing commit box in `RepoCard.vue` (visible when `aiEnabled` and there are
   changes). The **full editor**:
@@ -974,14 +978,14 @@ for (const c of commits) {
   - **merge** two cards, **split** a card, **delete** a card (its files → Unassigned),
     **regenerate** the whole plan or one card's message;
   - a live preview of each final `type(scope): subject` line;
-  - header: a **commit-message style** picker (conventional / concise / detailed) — the same
+  - header: a **commit-message style** picker (conventional / concise / detailed), the same
     owner setting as Settings → AI, surfaced here because this is where its effect shows;
     changing it saves and re-drafts the plan;
   - footer: a split **Commit all** button whose **▾** picks plain vs. **& sync** (mirrors the
     Commit/Auto split buttons on the card; the chevron is dropped when there's no remote), plus
     **Cancel** (discards the plan, no git change); a banner when `degraded`/`truncated`; an
     "Unassigned" group blocks commit.
-- **`locales/en.json`** — all new strings (i18n scaffolding is retained even though the app
+- **`locales/en.json`**: all new strings (i18n scaffolding is retained even though the app
   ships English-only).
 
 ### 10. Safety analysis (invariant compliance)
@@ -992,37 +996,37 @@ for (const c of commits) {
 | Interrupted mid-sequence | Each commit is atomic. Partial result reported; remaining changes sit safely in the working tree. No rollback needed, nothing lost. |
 | Plan stale (tree changed between plan and execute) | Server re-validates submitted paths vs. live `readChanges`; mismatch → `PLAN_STALE`, UI re-plans. |
 | Op-queue race / deadlock | Whole sequence in **one** `enqueue(repoId)` slot; `refreshRepo` only **after** it releases. |
-| AI key leakage | Unchanged daemon-proxy model — the key never leaves the host; the browser only ever sees paths + messages. |
+| AI key leakage | Unchanged daemon-proxy model: the key never leaves the host; the browser only ever sees paths + messages. |
 | Identity / config mutation | Per-commit `-c user.*` injection; global/repo config untouched. |
 | Push divergence | `sync` reuses the existing pull-ff + non-force push guards (409/403). Splitting changes none of that. |
 | Provider returns garbage | Strict zod validation + one retry + deterministic fallback. Never executes an unvalidated plan. |
-| Reversibility from the phone | Commits are **local** until you choose `sync` — no worse than today's commit button. (Auto-branching for extra safety is a possible future, deliberately not in v1; it's off-pattern for RepoYeti.) |
+| Reversibility from the phone | Commits are **local** until you choose `sync`, no worse than today's commit button. (Auto-branching for extra safety is a possible future, deliberately not in v1; it's off-pattern for RepoYeti.) |
 
 ### 11. Edge cases
 
-- **Untracked / new files** — staged via `git add -- <path>`; counted as additions in stats.
-- **Deletions** — `git add -- <deletedpath>` stages the removal (git ≥2.0).
-- **Renames** — old+new path travel together in one group (reader exposes `from`).
-- **Binary / large files** — flagged in the plan input (no textual diff sent); grouped by
+- **Untracked / new files**: staged via `git add -- <path>`; counted as additions in stats.
+- **Deletions**: `git add -- <deletedpath>` stages the removal (git ≥2.0).
+- **Renames**: old+new path travel together in one group (reader exposes `from`).
+- **Binary / large files**: flagged in the plan input (no textual diff sent); grouped by
   path/stat; can be isolated by the model or the user.
-- **Lockfiles** — prompt rule pins them to their manifest's group; fallback buckets them with
+- **Lockfiles**: prompt rule pins them to their manifest's group; fallback buckets them with
   the manifest's directory.
-- **>2000 changed files** — `getChanges` already caps at `MAX_CHANGED_FILES`; Smart Commit
+- **>2000 changed files**: `getChanges` already caps at `MAX_CHANGED_FILES`; Smart Commit
   shows the same "N of M" truncation and operates on the visible set (banner warns).
-- **Single logical change** — the AI may legitimately return one group; the UI still lets you
+- **Single logical change**: the AI may legitimately return one group; the UI still lets you
   "Commit all" (== a normal commit) so the button is never a dead end.
 
 ### 12. Implementation plan (build order)
 
-1. **AI core** — `ai.ts`: `generateCommitPlan` + JSON-mode adapter capability + zod plan
+1. **AI core** (`ai.ts`): `generateCommitPlan` + JSON-mode adapter capability + zod plan
    schema + `parseCommitPlan` + `heuristicPlan`. Unit-test parsing/validation/fallback.
-2. **Git core** — `git-actions.ts`: `collectCommitPlanInput` + `gitCommitGroups`; enrich the
+2. **Git core** (`git-actions.ts`): `collectCommitPlanInput` + `gitCommitGroups`; enrich the
    changed-file reader with rename `from`. Test multi-commit execution on a real temp repo.
-3. **Service + contract + schemas** — `planCommitInput`, `smartCommitRepo`, new codes/schemas.
-4. **Daemon routes** — `commit-plan`, `smart-commit`. HTTP route tests (incl. `PLAN_STALE`).
-5. **Web data layer** — `api.ts`, `types.ts`, `store.ts`.
-6. **Web UI** — `SmartCommitPlan.vue` + `RepoCard.vue` button + `en.json`.
-7. **Verify** — `bun test` green; `vue-tsc`/build green; runtime smoke test over HTTP.
+3. **Service + contract + schemas**: `planCommitInput`, `smartCommitRepo`, new codes/schemas.
+4. **Daemon routes**: `commit-plan`, `smart-commit`. HTTP route tests (incl. `PLAN_STALE`).
+5. **Web data layer**: `api.ts`, `types.ts`, `store.ts`.
+6. **Web UI**: `SmartCommitPlan.vue` + `RepoCard.vue` button + `en.json`.
+7. **Verify**: `bun test` green; `vue-tsc`/build green; runtime smoke test over HTTP.
 
 ### 12b. YOLO mode (shipped)
 
@@ -1030,9 +1034,9 @@ A global owner setting (`cfg.ai.yolo`, Settings → AI) flips the Smart Commit b
 **plan → review → execute** to **plan → execute** with no editor: it generates the plan and
 commits it immediately. For an owner who trusts the AI and won't edit the plan. Guard rails
 that stay on even in YOLO:
-- **Never auto-pushes** — committing is local and undoable at the desk; pushing is outward-facing,
+- **Never auto-pushes**: committing is local and undoable at the desk; pushing is outward-facing,
   so it's left to an explicit Push/Sync tap.
-- **Nothing is silently dropped** — any planner `leftovers` are committed as a final
+- **Nothing is silently dropped**: any planner `leftovers` are committed as a final
   `chore: miscellaneous changes` commit.
 - Same server-side re-validation (`PLAN_STALE`/`PLAN_PATHS_INVALID`) and single-op-queue-slot
   execution as the reviewed path.
@@ -1041,15 +1045,15 @@ The button shows a small **YOLO** tag when the mode is on.
 ### 12c. Token efficiency (shipped)
 
 The planner's diff is **token-trimmed** so more change-sets fit a provider's rate limit (the free
-Groq tier is 6000 tokens/min) and every call is cheaper — without any external dependency or model:
-- **Minimal-context diffs** (`git diff -U1 --diff-algorithm=minimal`) — the changed lines plus one
+Groq tier is 6000 tokens/min) and every call is cheaper, without any external dependency or model:
+- **Minimal-context diffs** (`git diff -U1 --diff-algorithm=minimal`): the changed lines plus one
   line each side (*message* generation still uses git's full 3-line default). This was `-U0`, on the
   reasoning that grouping doesn't need context. Grouping doesn't; the message this same call writes
   does. With zero context a file whose only edit was deleting an unused local arrived as a lone
   deletion under a header naming the enclosing function, and the model reported the *function* as
-  removed in 4 of 6 measured runs — a fair reading of the only evidence it had. One line of context
+  removed in 4 of 6 measured runs, a fair reading of the only evidence it had. One line of context
   puts the surviving signature back on screen and that drops to 0 of 6.
-- **Noise folding** (`isNoisyPath`) — the diff *bodies* of lockfiles, `*.min.js/.css`, `*.map`,
+- **Noise folding** (`isNoisyPath`): the diff *bodies* of lockfiles, `*.min.js/.css`, `*.map`,
   `*.snap`, `*.lock` are dropped; the file **list** still carries them (with stat) so grouping a
   lockfile *with its manifest* still works. The model only needs to *know* they changed, not read
   thousands of generated lines.
@@ -1057,7 +1061,7 @@ Groq tier is 6000 tokens/min) and every call is cheaper — without any external
 Measured ~99.9% diff reduction on a lockfile-heavy change (136 KB → 151 chars), with the AI plan
 still `degraded:false`. (Concept borrowed from claw-compactor's "diff folding"; implemented as ~40
 lines in `collectCommitPlanInput`, kept in that one function so a future TS compressor can drop in.
-A generic compressor like LLMLingua was rejected — it can corrupt code semantics and needs a bundled
+A generic compressor like LLMLingua was rejected: it can corrupt code semantics and needs a bundled
 model; the only diff-specific tool, claw-compactor, is Python and can't live in the Bun binary.)
 
 ### 13. Future (deferred, additive)
@@ -1066,7 +1070,7 @@ model; the only diff-specific tool, claw-compactor, is Python and can't live in 
   full diff, then a synthesis call). Evaluated 2026-07 and deliberately NOT adopted: it is the one
   design that structurally cannot produce a terse body, but it costs ~4× gated tokens per plan
   (roughly 11 Smart Commits/day instead of ~40 against a 100k tokens/day free tier), and the
-  cheaper structural fix — `body` as a JSON array with one element per non-trivial file — measured
+  cheaper structural fix (`body` as a JSON array with one element per non-trivial file) measured
   3.5× longer bodies for ~8% more tokens. Revisit only if bodies still read thin after that, or if
   the owner moves to a paid tier where the 4× stops mattering.
 - **Hunk-level "deep split"** opt-in (would require an explicit decision to relax the
@@ -1078,7 +1082,7 @@ model; the only diff-specific tool, claw-compactor, is Python and can't live in 
 
 ---
 
-## 15. Remote access — Quick and named Cloudflare tunnels
+## 15. Remote access: Quick and named Cloudflare tunnels
 
 
 > **TL;DR.** Owners may choose RepoYeti's stable address, a direct rotating
@@ -1096,13 +1100,13 @@ DNS-blocked** (it's abused for malware/phishing), so phones on filtered networks
 ### The tunnel (live, verified at the Cloudflare layer)
 | Thing | Value |
 |---|---|
-| Cloudflare account | **`36d7c731fd0352ef08ea7e46d2d20793`** (Lunawerx@gmail.com) — owns the `repoyeti.com` zone (`a71592246b44b2282bd071ae0e8ca095`) |
+| Cloudflare account | **`36d7c731fd0352ef08ea7e46d2d20793`** (Lunawerx@gmail.com), owns the `repoyeti.com` zone (`a71592246b44b2282bd071ae0e8ca095`) |
 | Tunnel id | **`ce2ba43f-73f3-49d8-9e89-72d2e419d0bd`** (named `repoyeti`, remotely-managed) |
 | Public hostname | `app.repoyeti.com` → `http://localhost:7171` (ingress configured in the tunnel) |
 | DNS | proxied CNAME `app.repoyeti.com → ce2ba43f-…​.cfargotunnel.com` |
 | Connector | `cloudflared` (2025.8.1, installed) running with the connector token |
 
-**How it was provisioned:** entirely through the **Connections vault** — `connections_execute` against the
+**How it was provisioned:** entirely through the **Connections vault**: `connections_execute` against the
 Cloudflare catalog endpoints (`cfd_tunnel` create/configure/token, `dns_records` create, `zones` lookup), with
 the Cloudflare credential injected server-side, value-blind. See the Connections repo
 `docs/architecture/mcp-catalog-executor.md` §7 for the exact mechanism (and the catalog bugs that had to be
@@ -1110,10 +1114,10 @@ fixed first to make it work at all).
 
 **Verified:** the connector registers at Cloudflare's edge (4 QUIC connections) and a request to
 `https://app.repoyeti.com` routes through the tunnel to `localhost:7171` (returns 502 only because the daemon
-isn't currently listening — which itself proves the ingress is correct).
+isn't currently listening, which itself proves the ingress is correct).
 
 ### Daemon side (code + config)
-- **Named-tunnel support** (this was new — the quick tunnel was the only option before):
+- **Named-tunnel support** (this was new; the quick tunnel was the only option before):
   `src/tunnel.ts` → `startNamedTunnel()` (`cloudflared tunnel run --token …`, advertises `https://<hostname>`
   on first edge connection); `src/config.ts` → `TunnelConfig` + `namedTunnel()` resolver (token is a keychain
   secret, env override `CF_TUNNEL_TOKEN`); `src/runtime.ts` → `startManagedTunnel(cfg)` picks named vs quick.
@@ -1121,13 +1125,13 @@ isn't currently listening — which itself proves the ingress is correct).
   `"tunnel": { "provider":"named", "hostname":"app.repoyeti.com", "token":"<connector token>" }`.
   The token moves to the OS keychain on boot and is stripped from disk.
 - **UI:** the Remote-access modal overflow (long URL pushing the copy button off the card) was a CSS-grid
-  `min-width:auto` trap — fixed with `min-w-0` on the link block in `web/src/components/RemoteAccess.vue`.
+  `min-width:auto` trap, fixed with `min-w-0` on the link block in `web/src/components/RemoteAccess.vue`.
 
 ### Login callback selection
 
 - **IdP registration** (Connections `developer_app_registrations`, a registered public `client_id`):
   `redirect_uris = [ https://app.repoyeti.com/oauth/callback , http://127.0.0.1:7171/oauth/callback ]`.
-  (The previous entry was malformed — `…/cb%20and`, old `gitmob-auth` name — and would have failed login.)
+  (The previous entry was malformed (`…/cb%20and`, old `gitmob-auth` name) and would have failed login.)
 - **Quick Tunnel startup** (`src/runtime.ts`): announces the generated HTTPS origin to the callback
   relay, even when stable-address forwarding is disabled. Login stays at 503 until that announcement
   succeeds and its response declares `oauth-callback-v1`. Missing, malformed, or unknown capability
@@ -1142,14 +1146,14 @@ isn't currently listening — which itself proves the ingress is correct).
 - **Direct completion:** named/custom-domain and loopback origins keep
   `<origin>/oauth/callback`; no relay lookup is needed.
 
-### Headless agents — an optional Bearer API token (no browser needed)
+### Headless agents: an optional Bearer API token (no browser needed)
 A **remote or headless AI agent** can't complete the browser-based OIDC dance. For that case the
 owner can mint an **optional API token** and the agent authenticates with a Bearer header:
 - `repoyeti token new` mints + prints the token **once** (`POST /api/auth/token`); `repoyeti token
   revoke` deletes it; `repoyeti token show` reports only whether one is configured.
 - Then send `Authorization: Bearer <token>` (or set `REPOYETI_TOKEN` for the CLI verbs and
   `repoyeti mcp`).
-- It's a **separate, local credential** (constant-time compared, kept in the OS keychain) — it never
+- It's a **separate, local credential** (constant-time compared, kept in the OS keychain); it never
   touches connections.icu and exists only on this daemon.
 - **Off by default, and it never weakens the default posture.** When no token is set, auth is
   byte-for-byte the OIDC-only behavior described above; a request over the tunnel still requires a
@@ -1181,7 +1185,7 @@ plumbing.
   branching), `i18n-core` (the `createAppI18n` factory), and `theme` (`useTheme`), plus shadcn-style
   UI primitives and `styles/kit-*.css` design tokens (unified content width `--container-max: 800px`).
 - **Server libs** (each app's `serverLib` dir): `mcp-stdio` (the zero-dep, Bun+Node JSON-RPC 2.0 / MCP
-  dispatch + stdio loop — RepoYeti's `src/mcp/core.ts` + `stdio.ts` are thin adapters over it),
+  dispatch + stdio loop; RepoYeti's `src/mcp/core.ts` + `stdio.ts` are thin adapters over it),
   `instance-pointer` (the `runtime.json` live-instance pointer), `updater-engine` (git check/apply
   self-update), and `find-free-port` (the bind-and-walk port picker `src/cli/lifecycle.ts` uses).
 
@@ -1198,7 +1202,7 @@ plumbing.
   `auto`, it holds the exact height the element is about to settle at (`releasedHeight`) for the
   length of the transition, so the reset glides instead of snapping. Consumers: the changed-files
   tree grip, the History viewport grip, and the file-viewer edge grip.
-- **AI is bring-your-own-key** — no bundled key (Groq revokes any key committed to a public repo, so a
+- **AI is bring-your-own-key**: no bundled key (Groq revokes any key committed to a public repo, so a
   shipped one is dead on arrival). Owners add their own in Settings → AI; Groq is the *suggested*
   provider (`AI_CATALOG` `suggested` flag). Keys live in the OS keychain, never in `config.json`.
 
@@ -1211,16 +1215,16 @@ pattern described in §13.
 
 ---
 
-*Marching orders end. Phase 1 starts with the watcher→SQLite→HTTP loop and the keytar spike — prove
+*Marching orders end. Phase 1 starts with the watcher→SQLite→HTTP loop and the keytar spike, prove
 those two and the rest is wiring. Auth (Phase 2) is a standard "Sign in with Connections" OIDC relying
 party (§7/§13) and lights up the moment the owner registers the RepoYeti OAuth app.*
 
 ---
 
-## 17. Share links — the guest principal
+## 17. Share links: the guest principal
 
 > **Owner decision (2026-07-15).** Two people work the same codebase on opposite shifts, both leave
-> AI agents running overnight, and each wants to see — and sometimes flush — the other's uncommitted
+> AI agents running overnight, and each wants to see, and sometimes flush, the other's uncommitted
 > work without waiting for them to wake up. So: a **share link**. A secret URL, like a Google Drive
 > "anyone with the link" share, that opens the owner's dashboard for someone with **no Connections
 > account and no sign-in**.
@@ -1233,9 +1237,9 @@ owner login is still the only way to become the **owner**. A share link is a dif
 
 | | |
 |---|---|
-| **The credential** | 32 random bytes (`randomBytes`, base64url) in the URL: `https://<tunnel>/s/<token>`. Guessing is not a threat model at 256 bits — there is no rate limit and none is needed. |
+| **The credential** | 32 random bytes (`randomBytes`, base64url) in the URL: `https://<tunnel>/s/<token>`. Guessing is not a threat model at 256 bits: there is no rate limit and none is needed. |
 | **At rest** | `sha256(token)` in `shares.token_hash`, which is the only thing redemption ever consults, **plus the plaintext in `shares.token`** so the panel can offer *Copy link* on a share it minted earlier. That second column is an owner-made trade, taken with the cost stated: a copy of `repoyeti.db` is now a set of working links, where before it was a set of useless digests. It is defensible only because that file never leaves the machine (settings sync ships an allowlist of config keys and no secrets, see `src/connections-sync.ts`) and reading it already means running as the owner, who can mint a fresh link through the API regardless. Cleared on revoke; NULL for links minted before this existed, which is why those rows show *Copy* greyed out rather than not at all. |
-| **Tiers** | `view` — repos, uncommitted files, diffs, history. `control` — plus the sync loop (fetch/pull/push/stage/commit/commit-selected) and Smart Commit (which spends the **owner's** AI key — an explicit owner call). |
+| **Tiers** | `view`: repos, uncommitted files, diffs, history. `control`: plus the sync loop (fetch/pull/push/stage/commit/commit-selected) and Smart Commit (which spends the **owner's** AI key, an explicit owner call). |
 | **Scope** | Named repos, or "all repos" (which includes ones discovered later). A per-repo link never widens on its own. |
 | **Expiry** | 1 hour / day / week / month / year / never. Enforced on every request, not just at redemption. |
 | **Revocation** | One `UPDATE`; effective on the guest's **very next request**. |
@@ -1243,15 +1247,15 @@ owner login is still the only way to become the **owner**. A share link is a dif
 ### The five properties that make it safe
 
 1. **Default-deny, enforced at the one chokepoint.** `src/share/policy.ts` is an *allowlist* keyed by
-   route pattern; anything absent is owner-only. It is enforced in `authMiddleware` — the single
-   `app.use("/api/*")` every request crosses — because there is **no deeper chokepoint**: `db.getRepo(id)`
+   route pattern; anything absent is owner-only. It is enforced in `authMiddleware`, the single
+   `app.use("/api/*")` every request crosses, because there is **no deeper chokepoint**: `db.getRepo(id)`
    takes only an id and knows nothing about the caller, and routes reach it three inconsistent ways
    (respond.ts's helpers, a second lookup in the service layer, and two hand-rolled lookups in
    `tags.ts` / `files.ts` that bypass the helpers). Enforcing scope anywhere else would silently miss those.
 2. **A new route is denied AND noticed.** `tests/share-policy.test.ts` walks the live Hono routing
    table and fails unless **every** route appears in exactly one of two lists (guest-allowed, or
    explicitly owner-only). Default-deny already makes an unclassified route safe; the guard is what
-   makes it *visible*. It reads `app.routes`, **not** openapi.ts's `META` — `META` looks like the
+   makes it *visible*. It reads `app.routes`, **not** openapi.ts's `META`: `META` looks like the
    registry but isn't (buildOpenApiDoc emits a fallback for anything missing, so its own drift guard
    passes while `META` silently lacks ~11 real routes).
 3. **Revocation is why there are rows.** Owner sessions are stateless signed cookies (`db.ts` says so:
@@ -1261,7 +1265,7 @@ owner login is still the only way to become the **owner**. A share link is a dif
 4. **The guest sees a projection, not the truth.** `GET /api/repos` is scope-filtered; `/api/status`
    returns display knobs only (never the tunnel/MCP/auto-commit/editor config); `/api/auth/status`
    carries no owner identity; SSE is filtered per-connection against both the share's scope **and** an
-   event allowlist (`src/share/events.ts`) — the raw bus carries `settings_changed`, `daemon_status`,
+   event allowlist (`src/share/events.ts`): the raw bus carries `settings_changed`, `daemon_status`,
    `scan_*` and `approval_pending`, none of which is a guest's business. Credentials embedded in a
    remote URL (`https://user:ghp_x@…`) are stripped from everything a guest sees.
 
@@ -1294,10 +1298,10 @@ owner login is still the only way to become the **owner**. A share link is a dif
    > Measured, not assumed. Owner and guest streams captured over one 12-second window while a scan
    > ran: the **owner** received 48 `repo_added` (each carrying a repo's absolute path), 51
    > `repo_state_changed`, `settings_changed`, `scan_started`, `scan_progress`. The **guest**, scoped
-   > to one repo, received 2 `repo_state_changed` — its own — and nothing else. That's the shape of
+   > to one repo, received 2 `repo_state_changed`, its own, and nothing else. That's the shape of
    > the leak this filter exists to prevent.
 5. **The audit trail exists because git can't answer.** A guest's commits are authored as the **owner**
-   (their machine, their tree, their identity — the owner chose this), so git history genuinely cannot
+   (their machine, their tree, their identity: the owner chose this), so git history genuinely cannot
    distinguish "my brother pushed this" from "I did". `share_events` can, and is written for every
    guest mutation, allowed or denied.
 
@@ -1313,14 +1317,14 @@ all settings/roots/mode/tunnel/updates/shutdown · share administration itself (
 would be privilege escalation).
 
 **`amend` is the one body-level exception.** Commit and amend are the same route, split only by a
-flag, so the route-level policy cannot separate them — `routes/git-ops.ts` refuses `amend` for a
+flag, so the route-level policy cannot separate them: `routes/git-ops.ts` refuses `amend` for a
 guest explicitly. Amend rewrites the previous commit, possibly the owner's own unrelated work; a
 plain commit is additive and recoverable, an amend is neither.
 
 ### Operational notes
 
 - A link is worthless without a tunnel (`mode: remote`). The Sharing panel says so rather than
-  minting a link that can't be opened, and builds the URL against the tunnel origin — not the
+  minting a link that can't be opened, and builds the URL against the tunnel origin, not the
   `localhost` the owner is probably reading it on.
 - **Owner always wins.** A browser holding both an owner session and a guest cookie is the owner. The
   practical consequence: to preview what a guest sees, open the link in a private window, **over the
@@ -1331,19 +1335,19 @@ plain commit is additive and recoverable, an amend is neither.
   page still renders the owner's dashboard. To reproduce the guest gate locally without a tunnel,
   front the daemon with a proxy that injects `cf-connecting-ip`, which is the one thing the tunnel
   adds.
-- Rotating the signing key ("sign out everywhere") also invalidates every guest cookie — but not the
+- Rotating the signing key ("sign out everywhere") also invalidates every guest cookie, but not the
   links themselves, which are rows; the next `/s/<token>` open issues a fresh cookie. Revoke to kill
   a link.
 - **`share_events` is capped at 500 rows per share**, pruned on write, because the table is written
-  by the guest's own requests — without a bound the link-holder decides how big it gets. Pruned by
+  by the guest's own requests: without a bound the link-holder decides how big it gets. Pruned by
   `rowid`, deliberately: `at` is millisecond-resolution, so a hammering client's rows share one
   timestamp and an `at`-based prune would delete nothing in exactly the case the cap exists for.
   The cap is per-share, so a noisy link can't evict a quiet one's history.
-- The daemon's own PWA must not fetch owner-only endpoints as a guest. Not a security rule — an
+- The daemon's own PWA must not fetch owner-only endpoints as a guest. Not a security rule, an
   audit-legibility one: each such fetch writes a "denied" row and buries the real entries. See the
   `isGuest` branches in the web store's `loadAll` and `AppShell.onMounted`.
 
-## 18. Live collaboration — peer working-tree presence
+## 18. Live collaboration: peer working-tree presence
 
 A share's `collaborative` flag is independent of its `view` / `control` permission. The permission
 still governs what the guest may do to the owner's checkout; collaboration lets the guest map a
@@ -1403,7 +1407,7 @@ keychain-backed key and return only their generated result.
 This is the only AI feature in RepoYeti whose output is **source code** rather than a commit
 message, and every design decision below follows from that one fact. A bad commit message is
 prose the owner reads before it lands; its worst case is embarrassing. A bad merge is a file that
-compiles, passes review by looking plausible, and is wrong — with nothing downstream positioned
+compiles, passes review by looking plausible, and is wrong, with nothing downstream positioned
 to catch it. So the feature is built to make a wrong merge *visible*, not to make merging fast.
 
 ### The pipeline (three steps, three routes, deliberately)
@@ -1418,7 +1422,7 @@ to catch it. So the feature is built to make a wrong merge *visible*, not to mak
 Splitting propose from apply is what keeps the model's text out of the working tree by
 construction rather than by care. `conflict-apply` takes the resolution text from the CLIENT, so
 an owner editing the proposal before accepting it travels the same validated path as the raw
-proposal — hand-resolution is a first-class case, not a degraded one.
+proposal, hand-resolution is a first-class case, not a degraded one.
 
 ### The five guarantees
 
@@ -1433,7 +1437,7 @@ proposal — hand-resolution is a first-class case, not a degraded one.
    both sides and the ancestor, independently of whatever confidence the model claimed. The
    strongest check is `dropped-shared-lines`: a line BOTH sides kept, missing from the result. The
    review UI renders the audit *above* the code and shows the dropped lines themselves.
-4. **A resolution carrying conflict markers is refused** — in the reply parser, and again in the
+4. **A resolution carrying conflict markers is refused**: in the reply parser, and again in the
    service layer, because apply accepts client text. "Applied" can never mean "the markers moved".
 5. **A stale proposal is refused.** The read returns a content hash the apply must echo; a file
    that changed underneath is rejected rather than merged into bytes nobody reviewed.
@@ -1441,7 +1445,7 @@ proposal — hand-resolution is a first-class case, not a degraded one.
 ### Context quality
 
 Git only writes `|||||||` ancestor markers under `merge.conflictStyle=diff3`, which is not the
-default — so most conflicted files show only two sides. That absence matters: without the
+default, so most conflicted files show only two sides. That absence matters: without the
 ancestor, a model cannot distinguish "they added this" from "we deleted it". So the service
 reconstructs diff3 output from index stages 1/2/3 via `git merge-file -p --diff3` in a temp
 directory, and grafts the ancestor text across **only** where the reconstructed regions match the
@@ -1453,7 +1457,7 @@ gets no base, rather than a description of a file they no longer have. `git chec
 
 `looksSmallTierModel` flags model ids that look like small/fast tiers (`mini`, `flash`, `haiku`,
 `nano`, `≤13b`, …) and the UI escalates its warning for them. It is two-valued on purpose: a
-non-match means "not recognised as small", never "good enough for this" — any "capable" list
+non-match means "not recognised as small", never "good enough for this": any "capable" list
 would be wrong within a quarter. Several of `AI_CATALOG`'s own `recommended` models match, which
 is the intended result: they were chosen for cheap commit messages, and this call is not that.
 The warning is advice, not a gate. Owner's key, owner's repo, owner's call.
@@ -1463,7 +1467,7 @@ The warning is advice, not a gate. Owner's key, owner's repo, owner's call.
 Owner-only, all four routes, and enforced by absence from `GUEST_ROUTES` (the gate default-denies)
 with the routes' own checks as a second line. A `control` guest may already draft commit messages,
 because that spends the owner's tokens on prose the owner still reads. Spending them on the
-owner's *source*, to produce a merge whose blast radius a guest — who sees only part of the repo —
+owner's *source*, to produce a merge whose blast radius a guest (who sees only part of the repo)
 cannot assess, is a different trade, and there is no budget that makes it a good one.
 
 ### No fallback

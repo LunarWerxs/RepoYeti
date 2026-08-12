@@ -1130,6 +1130,8 @@
     "versionUnknown": "Unknown",
     "versionUpdateAvailable": "Update available",
     "versionRestartPending": "Restart to finish",
+    "versionUpdating": "Updating…",
+    "versionRestarting": "Restarting…",
     "autoCommitFailed": "Could not change auto-commit settings",
     "cardMcpApprovalGate": "MCP Safety Rail",
     "mcpApprovalGate": "Require approval for agent actions",

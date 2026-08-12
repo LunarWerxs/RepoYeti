@@ -40,6 +40,7 @@ import type {
   LoreServer,
   PendingApproval,
   Repo,
+  RepoStatus,
   ResolvedRepoAccount,
   Share,
   ShareCreated,
@@ -738,7 +739,7 @@ export const api = {
     req<ActionResult>("DELETE", `/api/repos/${id}/remote`, name ? { name } : {}),
   /** Discard one changed file's working-tree changes (destructive — confirm in the UI). */
   discard: (id: string, path: string) =>
-    req<{ ok: boolean; code: string; message?: string; path?: string }>(
+    req<{ ok: boolean; code: string; message?: string; path?: string; status?: RepoStatus | null }>(
       "POST",
       `/api/repos/${id}/discard`,
       { path },
@@ -747,7 +748,7 @@ export const api = {
    *  a file to its committed state, which for a tracked file puts it straight back. This removes
    *  it and stages the deletion. Directories are refused by the daemon. */
   deleteFile: (id: string, path: string, recursive = false) =>
-    req<{ ok: boolean; code: string; message?: string; path?: string; deleted?: number }>(
+    req<{ ok: boolean; code: string; message?: string; path?: string; deleted?: number; status?: RepoStatus | null }>(
       "POST",
       `/api/repos/${id}/delete-file`,
       // `recursive` is opt-in on the daemon too: without it a directory path is refused
@@ -757,14 +758,14 @@ export const api = {
   /** Stage one changed file's working-tree change into the index (non-destructive; doesn't
    *  commit — GitHub-Desktop-style per-file "Stage"). */
   stage: (id: string, path: string) =>
-    req<{ ok: boolean; code: string; message?: string; path?: string }>(
+    req<{ ok: boolean; code: string; message?: string; path?: string; status?: RepoStatus | null }>(
       "POST",
       `/api/repos/${id}/stage`,
       { path },
     ),
   /** Append a path to the repo's .gitignore (idempotent; anchored to the repo root). */
   addToGitignore: (id: string, path: string) =>
-    req<{ ok: boolean; code: string; message?: string; pattern?: string; alreadyIgnored?: boolean }>(
+    req<{ ok: boolean; code: string; message?: string; pattern?: string; alreadyIgnored?: boolean; status?: RepoStatus | null }>(
       "POST",
       `/api/repos/${id}/gitignore`,
       { path },

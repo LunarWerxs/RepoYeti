@@ -14,6 +14,7 @@ import type {
   ConflictListEntry,
   ConflictResolveResponse,
   DiffDetail,
+  RepoStatus,
   SmartCommitResult,
 } from "../types";
 
@@ -27,6 +28,7 @@ export function useAi(
   loadChanges: (repoId: string) => Promise<void>,
   asResult: (e: unknown) => ActionResult,
   onHistoryChanged: (repoId: string) => void = () => {},
+  applyActionStatus: (repoId: string, result: { status?: RepoStatus | null }) => void = () => {},
 ) {
   // BYOK AI settings (redacted — never holds a key). `aiEnabled` gates the Generate button.
   // Style defaults to Conventional Commits; it's pickable from Settings → AI and from the
@@ -240,6 +242,7 @@ export function useAi(
     busy[repoId] = "commit";
     try {
       const r = await api.smartCommit(repoId, commits, sync);
+      applyActionStatus(repoId, r);
       await loadChanges(repoId); // some/all files were just committed
       if (
         r.committed?.some(

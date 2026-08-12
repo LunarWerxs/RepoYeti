@@ -10,7 +10,6 @@ import { GitBranch, ChevronDown, Loader2, Trash2, Plus } from "@lucide/vue";
 import { useStore } from "../store";
 import { cn } from "@/lib/utils";
 import { useRepoFeedback } from "@/lib/repo-feedback";
-import { useTooltipConfig } from "@/lib/tooltip-config";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -33,7 +32,6 @@ const props = defineProps<{ repoId: string; branch: string | null; detached: boo
 const store = useStore();
 const { t } = useI18n();
 const { toastResult } = useRepoFeedback();
-const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 const branchList = computed(() => store.branchesByRepo[props.repoId]);
 const otherBranches = computed(() => (branchList.value?.branches ?? []).filter((b) => !b.current));
@@ -82,21 +80,29 @@ async function confirmDelete(): Promise<void> {
   <!-- branch switcher: current branch + dropdown to switch / delete, ＋ to create -->
   <div class="flex items-center gap-2">
     <DropdownMenu>
-      <DropdownMenuTrigger
-        class="mono flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-[12px] text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
-        :title="tooltipsEnabled ? $t('repo.branches.manageTooltip') : undefined"
-        :aria-label="$t('repo.branches.manageTooltip')"
-        :disabled="gitBusy === 'checkout' || gitBusy === 'branch'"
-      >
-        <Loader2
-          v-if="gitBusy === 'checkout' || gitBusy === 'branch'"
-          :size="13"
-          class="shrink-0 animate-spin"
-        />
-        <GitBranch v-else :size="13" :class="cn('shrink-0', detached && 'text-warning')" />
-        <span class="truncate">{{ detached ? "detached" : (currentBranch ?? "—") }}</span>
-        <ChevronDown :size="13" class="shrink-0 opacity-60" />
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <!-- inert wrapper: two reka `as-child` triggers (Tooltip + DropdownMenu) must never merge
+               onto one element, or the menu stops opening — see ViewOptions.vue for the full story. -->
+          <span class="inline-flex min-w-0 max-w-full">
+            <DropdownMenuTrigger
+              class="mono flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-[12px] text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
+              :aria-label="$t('repo.branches.manageTooltip')"
+              :disabled="gitBusy === 'checkout' || gitBusy === 'branch'"
+            >
+              <Loader2
+                v-if="gitBusy === 'checkout' || gitBusy === 'branch'"
+                :size="13"
+                class="shrink-0 animate-spin"
+              />
+              <GitBranch v-else :size="13" :class="cn('shrink-0', detached && 'text-warning')" />
+              <span class="truncate">{{ detached ? "detached" : (currentBranch ?? "—") }}</span>
+              <ChevronDown :size="13" class="shrink-0 opacity-60" />
+            </DropdownMenuTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{{ $t("repo.branches.manageTooltip") }}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" class="w-64">
         <DropdownMenuLabel>{{ $t("repo.branches.switchLabel") }}</DropdownMenuLabel>
         <div v-if="!branchList" class="flex items-center gap-2 px-2 py-1.5 text-[12px] text-muted-foreground">
@@ -121,15 +127,19 @@ async function confirmDelete(): Promise<void> {
               <span v-if="b.ahead">↑{{ b.ahead }}</span><span v-if="b.behind"> ↓{{ b.behind }}</span>
             </span>
           </button>
-          <button
-            type="button"
-            class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 pointer-coarse:opacity-100 outline-none transition group-hover/br:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
-            :title="tooltipsEnabled ? $t('repo.branches.deleteTooltip') : undefined"
-            :aria-label="$t('repo.branches.deleteTooltip')"
-            @click="askDelete(b.name)"
-          >
-            <Trash2 :size="13" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 pointer-coarse:opacity-100 outline-none transition group-hover/br:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
+                :aria-label="$t('repo.branches.deleteTooltip')"
+                @click="askDelete(b.name)"
+              >
+                <Trash2 :size="13" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{{ $t("repo.branches.deleteTooltip") }}</TooltipContent>
+          </Tooltip>
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

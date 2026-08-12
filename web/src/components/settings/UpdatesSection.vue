@@ -57,7 +57,18 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
     <SettingsRow :label="$t('settings.version')">
       <template #info><InfoHint :text="$t('settings.versionHint')" /></template>
       <template #control>
-        <Badge v-if="restartPending" variant="warning">
+        <!-- An UNATTENDED update runs with nobody at the terminal, which is the whole point of the
+             setting — so the one surface that can report it is this row, on whatever device is
+             looking. The daemon announces both phases over SSE (src/auto-update.ts); until now the
+             dashboard subscribed to them and ignored them. "Restarting" also explains the
+             disconnect that is about to follow, so it does not read as a failure. -->
+        <Badge v-if="store.autoUpdateRestarting" variant="warning">
+          {{ $t("settings.versionRestarting") }}
+        </Badge>
+        <Badge v-else-if="store.autoUpdateApplying" variant="info">
+          {{ $t("settings.versionUpdating") }}
+        </Badge>
+        <Badge v-else-if="restartPending" variant="warning">
           {{ $t("settings.versionRestartPending") }}
         </Badge>
         <Badge v-else-if="updateAvailable" variant="info">

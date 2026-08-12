@@ -1334,14 +1334,31 @@ watch(historyActivityScale, () => {
                   <div class="truncate text-[10.5px] text-muted-foreground">
                     {{ item.commit!.authorName }} · {{ fromNow(item.commit!.date) }} ·
                     <span class="mono text-info/70">{{ item.commit!.shortHash }}</span>
-                    <!-- no room for a column here, so the totals ride on the meta line instead -->
+                    <!-- no room for a column here, so the totals ride on the meta line instead —
+                         and they honour the same "Change totals" view option the wide layout does.
+                         This branch used to be numbers-only, so picking "Visual bars" on a phone
+                         changed nothing in the only layout a phone ever sees (issue #18). The track
+                         is narrower than the wide column's default `w-16`: it shares a line with the
+                         author, the age and the hash rather than owning a column of its own. -->
                     <template v-if="hasStat(item.commit!)">
                       ·
-                      <span v-if="item.commit!.stat!.addedLines" class="mono text-success">+{{ compactN(item.commit!.stat!.addedLines) }}</span>
-                      <span v-if="item.commit!.stat!.removedLines" class="mono text-destructive">−{{ compactN(item.commit!.stat!.removedLines) }}</span>
-                      <span class="mono inline-flex items-center gap-0.5 text-muted-foreground/70">
-                        <Files :size="9" />{{ compactN(item.commit!.stat!.filesChanged) }}
-                      </span>
+                      <DiffBar
+                        v-if="historyChangesDisplay === 'bars'"
+                        :added="item.commit!.stat!.addedLines"
+                        :removed="item.commit!.stat!.removedLines"
+                        :max="maxChangeChurn"
+                        :files="item.commit!.stat!.filesChanged"
+                        :label="statTitle(item.commit!)"
+                        width="w-10"
+                        class="align-middle"
+                      />
+                      <template v-else>
+                        <span v-if="item.commit!.stat!.addedLines" class="mono text-success">+{{ compactN(item.commit!.stat!.addedLines) }}</span>
+                        <span v-if="item.commit!.stat!.removedLines" class="mono text-destructive">−{{ compactN(item.commit!.stat!.removedLines) }}</span>
+                        <span class="mono inline-flex items-center gap-0.5 text-muted-foreground/70">
+                          <Files :size="9" />{{ compactN(item.commit!.stat!.filesChanged) }}
+                        </span>
+                      </template>
                     </template>
                   </div>
                 </button>

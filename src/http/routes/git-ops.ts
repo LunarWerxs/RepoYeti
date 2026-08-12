@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
-import { jsonError, statusForCode } from "../../contract.ts";
+import { jsonError } from "../../contract.ts";
 import { parseBody, CommitSchema, CommitSelectedSchema, SmartCommitSchema } from "../../schemas.ts";
 import {
   fetchRepo,
@@ -12,15 +12,15 @@ import {
   smartCommitRepo,
   forceRefresh,
 } from "../../service/index.ts";
-import { action, requireId } from "../respond.ts";
+import { action, requireId, actionJson } from "../respond.ts";
 import { effectiveGuest } from "../../auth.ts";
 import { guestRepoView } from "../../share/redact.ts";
 
 export function register(app: Hono, { cfg }: Deps): void {
   // ── safe git actions ───────────────────────────────────────────────────────
-  app.post("/api/repos/:id/fetch", action(fetchRepo));
-  app.post("/api/repos/:id/pull", action(pullRepo));
-  app.post("/api/repos/:id/push", action(pushRepo));
+  app.post("/api/repos/:id/fetch", action(cfg, fetchRepo));
+  app.post("/api/repos/:id/pull", action(cfg, pullRepo));
+  app.post("/api/repos/:id/push", action(cfg, pushRepo));
   app.post("/api/repos/:id/commit", async (c) => {
     const id = requireId(c);
     if (id instanceof Response) return id;
@@ -41,7 +41,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const r = p.data.expectedFingerprint
       ? await commitRepoWithFingerprint(id, message, p.data.expectedFingerprint)
       : await commitRepo(id, message, amend);
-    return c.json(r, r.ok ? 200 : statusForCode(r.code));
+    return actionJson(c, cfg, r);
   });
 
   // Per-file staging: commit ONLY the selected paths in one ordinary commit (Smart Commit does this
@@ -54,7 +54,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const message = (p.data.message ?? "").trim();
     if (!message) return jsonError(c, "NO_MESSAGE", "commit message required");
     const r = await commitSelectedRepo(id, message, p.data.paths);
-    return c.json(r, r.ok ? 200 : statusForCode(r.code));
+    return actionJson(c, cfg, r);
   });
 
   // Smart commit: execute an (owner-edited) multi-commit plan — stage each group's files and
@@ -66,7 +66,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     const p = await parseBody(c, SmartCommitSchema);
     if (!p.ok) return p.res;
     const r = await smartCommitRepo(id, p.data.commits, p.data.sync === true);
-    return c.json(r, r.ok ? 200 : statusForCode(r.code));
+    return actionJson(c, cfg, r);
   });
 
   // The one guest-reachable route that returns a whole repo record. It MUST project through
