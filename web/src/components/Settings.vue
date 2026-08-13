@@ -110,7 +110,21 @@ watch(
     </template>
 
     <div class="flex flex-col gap-4">
-      <SettingsTabs v-model="tab" :tabs="tabs" />
+      <!-- Pinned, not scrolled away with the content (the artifact in issue #20's screenshot).
+           SettingsPanel's body is deliberately pulled up UNDERNEATH its glassy title bar
+           (-mt-12/pt-15 in shell/Sidebar.vue) so rows shimmer through it as they scroll. That
+           reads as intended for rows of settings; for the tab row it read as a bug — it slid up
+           behind "Settings", then past it into the panel's clipped top edge, leaving two labels
+           superimposed and the tabs sheared in half.
+           -top-3 is not arbitrary: a sticky offset is measured from the scrollport's PADDING box,
+           which pt-15 already puts 12px below the h-12 header, so -12px parks this flush on the
+           header's bottom edge with no strip of scrolling content showing between them. The
+           negative inline margin lets the background span the body's padding, so rows pass
+           underneath rather than appearing beside it. Below the header's z-10, so if the two ever
+           do meet, this still goes under the title rather than over it. -->
+      <div class="bg-background sticky -top-3 z-[9] -mx-3.5 px-3.5 py-1.5">
+        <SettingsTabs v-model="tab" :tabs="tabs" />
+      </div>
 
       <!-- Lazy per open: only the active tab mounts initially. Tabs visited during this open stay
            mounted behind v-show so partially-filled forms survive tab switches; the visited set

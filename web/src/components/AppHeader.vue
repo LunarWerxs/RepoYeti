@@ -18,9 +18,7 @@ import {
 import { useStore } from "../store";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 import { startSelecting } from "@/lib/repo-selection";
-
-/** Where this app comes from. Canonical owner/repo casing — see docs/STABLE_ADDRESS.md. */
-const SOURCE_URL = "https://github.com/LunarWerxs/RepoYeti";
+import { SOURCE_URL } from "@/lib/links";
 
 defineProps<{ connected: boolean; repoCount: number }>();
 const emit = defineEmits<{
@@ -70,7 +68,7 @@ async function pullFromNotification(n: { behind?: BehindRepo[] }): Promise<void>
 /** Re-open the update offer from its bell entry (the prompt owns the actual install). */
 function openUpdatePrompt(): void {
   notifOpen.value = false;
-  store.updatePromptOpen = true;
+  store.openUpdatePrompt();
 }
 
 function onNotifClick(n: { kind?: "scan" | "ai-key" | "behind" | "update" }): void {

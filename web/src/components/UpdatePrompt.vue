@@ -60,7 +60,14 @@ function later(): void {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-md">
+    <!-- z-[60], because this is now raised from INSIDE the Settings panel (its version badge, see
+         UpdatesSection.vue) and that panel is itself a dialog at the shared z-50. Equal z-index
+         hands the decision to DOM order, and the portal that mounts last won — so the offer opened,
+         took focus, and rendered completely hidden behind the panel.
+         The shadow goes with it: only the OVERLAY dims, and the overlay stays at z-50 under the
+         panel, so over a full-width panel (mobile) the ring alone left this reading as an inline
+         card rather than something on top. -->
+    <DialogContent class="z-[60] shadow-xl sm:max-w-md">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <Sparkles :size="16" class="shrink-0 text-primary" />

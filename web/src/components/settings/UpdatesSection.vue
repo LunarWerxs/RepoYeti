@@ -4,6 +4,7 @@
 // never belonged under one header.)
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
+import { FileText } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
@@ -11,6 +12,7 @@ import SettingsRow from "@/shell/SettingsRow.vue";
 import InfoHint from "@/shell/InfoHint.vue";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { CHANGELOG_URL } from "@/lib/links";
 
 const store = useStore();
 const { t } = useI18n();
@@ -71,9 +73,38 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
         <Badge v-else-if="restartPending" variant="warning">
           {{ $t("settings.versionRestartPending") }}
         </Badge>
-        <Badge v-else-if="updateAvailable" variant="info">
+        <!-- The one state with something to DO about it, so this badge is a button (issue #20).
+             On an installed PWA, Settings is often the whole interface — being told an update
+             exists with no action beside it means waiting hours for the scheduled apply, with no
+             terminal to fall back on. It opens the existing offer and installs nothing itself:
+             `store.openUpdatePrompt()` is shared with the bell entry so both prepare that dialog
+             from the same authoritative status. -->
+        <Badge
+          v-else-if="updateAvailable"
+          as="button"
+          type="button"
+          variant="info"
+          data-testid="update-available"
+          :title="$t('settings.versionUpdateAvailableAction')"
+          class="cursor-pointer hover:bg-info/20 dark:hover:bg-info/30"
+          @click="store.openUpdatePrompt()"
+        >
           {{ $t("settings.versionUpdateAvailable") }}
         </Badge>
+        <!-- "What changed?" is the question the version number provokes, and the answer lives one
+             tap away rather than on a machine with a terminal. The changelog FILE, not Releases:
+             a source checkout updates off the branch and can be ahead of any published release. -->
+        <a
+          :href="CHANGELOG_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="changelog-link"
+          :aria-label="$t('settings.versionChangelog')"
+          :title="$t('settings.versionChangelog')"
+          class="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          <FileText :size="15" />
+        </a>
         <span data-testid="running-version" class="font-mono tabular-nums text-foreground">
           {{ version || $t("settings.versionUnknown") }}
         </span>

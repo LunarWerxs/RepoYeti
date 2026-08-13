@@ -578,6 +578,23 @@ export const useStore = defineStore("repoyeti", () => {
   });
 
   /**
+   * Open the update offer from wherever the update was NOTICED — its bell entry, or the Settings
+   * version badge. One entry point, because two callers preparing the same dialog is how they
+   * start preparing it differently.
+   *
+   * The blocked reason is re-derived from `/api/updates` (the same status the badge is drawn
+   * from) instead of being left at whatever the last `update_available` announcement set. That
+   * payload can be hours old: a tree that has been committed since would otherwise open a dialog
+   * still refusing to install, and one dirtied since would offer an install that then fails. Only
+   * when there is no status at all is the announcement's reason kept — it beats saying nothing.
+   */
+  function openUpdatePrompt(): void {
+    const status = updateStatus.value;
+    if (status) updateBlockedReason.value = status.canApply ? null : status.reason;
+    updatePromptOpen.value = true;
+  }
+
+  /**
    * This browser is holding a share link rather than owning this daemon.
    *
    * Everything a guest can't do is enforced by the daemon (src/share/policy.ts) — these two flags
@@ -908,6 +925,12 @@ export const useStore = defineStore("repoyeti", () => {
             canApply: payload.canApply !== false,
             reason: typeof payload.reason === "string" ? payload.reason : null,
           });
+          // Re-read /api/updates so the Settings version badge learns about this too. It is drawn
+          // from `updateStatus`, which is filled once at boot (loadAllOnce) and never again — so
+          // an announcement that arrived while the dashboard was open used to leave the bell
+          // offering an update the Version row still said did not exist. Owner-only, same gate as
+          // the boot check; single-flight, and the daemon caches the answer for 5 minutes.
+          if (!isGuest.value) void checkForUpdate();
         } else if (event.value === "auto_update_applying") {
           autoUpdateApplying.value = true;
         } else if (event.value === "auto_update_restarting") {
@@ -1263,6 +1286,7 @@ export const useStore = defineStore("repoyeti", () => {
     clearNotifications,
     updatePromptOpen,
     updateBlockedReason,
+    openUpdatePrompt,
     notifyUpdateAvailable,
     clearUpdateNotification,
     pullBehind,

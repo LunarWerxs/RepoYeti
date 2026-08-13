@@ -95,6 +95,64 @@ test("an update that can't be installed says why and refuses to install", async 
   expect(applyCalls).toBe(0);
 });
 
+test("the Settings version badge is a second way in to the same offer", async ({ page }) => {
+  // Issue #20: on an installed PWA, Settings is often the only interface there is — being told an
+  // update exists with nothing to click beside it means waiting hours for the scheduled apply,
+  // with no terminal to fall back on. Worth an E2E because the offer is a MODAL raised from
+  // inside the Settings push panel, which no unit test lays out.
+  //
+  // The Version row is drawn from /api/updates, and it compares the installed version against the
+  // running daemon's — a stub inventing a currentVersion reads as "Restart to finish" instead, a
+  // different (and equally real) state. So take the version from the daemon that's answering.
+  const { version } = (await (await page.request.get("/api/status")).json()) as { version: string };
+  await page.route("**/api/updates", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        service: "repoyeti",
+        currentVersion: version,
+        currentCommit: "1111111",
+        remoteCommit: "2222222",
+        branch: "main",
+        upstream: "origin/main",
+        remote: "origin",
+        dirty: false,
+        updateAvailable: true,
+        canApply: true,
+        checkedAt: 0,
+        reason: null,
+      }),
+    });
+  });
+  await stubEvents(page, (n) => (n === 0 ? updateFrame(true, null) : ""));
+
+  await page.goto("/");
+
+  // Dismiss the offer that arrives on its own — Settings is the way BACK to it under test here.
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Later" }).click();
+  await expect(dialog).toBeHidden();
+
+  // Header ⋮ → Settings, which opens on General (where the Version row lives).
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+
+  const badge = page.getByTestId("update-available");
+  await expect(badge).toBeVisible();
+  await badge.click();
+
+  // It opens the existing offer rather than installing — the dialog still owns that decision.
+  await expect(dialog.getByRole("button", { name: "Update now" })).toBeVisible();
+
+  // And the changelog is reachable from the same row, so "what changed?" is answerable here too.
+  await expect(page.getByTestId("changelog-link")).toHaveAttribute(
+    "href",
+    "https://github.com/LunarWerxs/RepoYeti/blob/main/CHANGELOG.md",
+  );
+});
+
 test("a re-announced update doesn't reopen a prompt that was dismissed", async ({ page }) => {
   // Every reconnect re-announces — the scheduled check running again a few hours later.
   //

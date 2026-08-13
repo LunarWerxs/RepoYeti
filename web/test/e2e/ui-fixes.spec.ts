@@ -43,6 +43,50 @@ test("settings tab indicator sits exactly on its tab", async ({ page }) => {
   }
 });
 
+test("the settings tabs stay put when the panel is scrolled", async ({ page }) => {
+  // Reported off a phone screenshot in issue #20: "Settings" and "General" superimposed. The
+  // panel's body is deliberately pulled up underneath its translucent title bar so rows shimmer
+  // through as they scroll — but the TAB ROW was in that scroller too, so it slid up behind the
+  // title and then past it into the panel's clipped top edge. Only a laid-out browser shows this.
+  // Short as well as narrow, so the panel definitely overflows. At a phone's full height the
+  // General tab can just fit, and then this test scrolls nothing and passes on an unfixed build.
+  await page.setViewportSize({ width: 420, height: 420 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+
+  const tablist = page.getByRole("tablist").first();
+  await expect(tablist).toBeVisible();
+
+  const overlap = async (): Promise<number> =>
+    await page.evaluate(() => {
+      const list = document.querySelector('[role="tablist"]')!.getBoundingClientRect();
+      const header = document.querySelector('[data-slot="sidebar"] header')!.getBoundingClientRect();
+      return header.bottom - list.top; // > 0 means the tabs have gone under the title
+    });
+
+  expect(await overlap()).toBeLessThanOrEqual(0);
+
+  // Scroll well past where the tab row used to disappear, and again to the very bottom.
+  const body = page.locator('[data-slot="sidebar"] > div').first();
+  for (const top of [140, 1e6]) {
+    const moved = await body.evaluate((el, y) => {
+      el.scrollTo({ top: y, behavior: "instant" });
+      return el.scrollTop;
+    }, top);
+    expect(moved, "the panel has to actually scroll for this to prove anything").toBeGreaterThan(0);
+    await page.waitForTimeout(200);
+    expect(await overlap(), `tabs slid under the title at scrollTop ${top}`).toBeLessThanOrEqual(0);
+  }
+
+  // Still the control it was, not just a decoration parked under the header.
+  await tablist.getByRole("tab", { name: "Advanced" }).click();
+  await expect(tablist.getByRole("tab", { name: "Advanced" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+});
+
 test("multi-select mode selects repos and raises the bulk bar", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
   await page.goto("/");

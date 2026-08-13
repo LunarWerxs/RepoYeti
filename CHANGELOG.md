@@ -4,6 +4,39 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.8] - 2026-08-13
+
+### Added
+
+- **The "Update available" badge installs the update.** Settings already told you a newer build
+  existed and then left you with nothing to press
+  ([#20](https://github.com/LunarWerxs/RepoYeti/issues/20)). The scheduled apply is hours away by
+  design, and on an installed PWA that Settings screen is often the only interface there is, with
+  no terminal beside it. The badge is a button now: it opens the same offer the bell entry opens, and
+  that dialog still owns the install, so tapping the badge changes nothing on disk. Both entry
+  points go through one action that re-derives "can this be installed right now?" from the live
+  status rather than from whatever the last announcement said, so a tree committed since that
+  announcement no longer opens a dialog refusing to install. The announcement also re-reads the
+  update status now: it was read once at startup and never again, so an update announced while the
+  dashboard was open reached the bell while the Version row went on saying there was nothing to
+  install, and the badge that opens the offer never appeared at all.
+- **A changelog link sits beside the version.** "What changed?" is the question a version number
+  provokes, and the answer was on a machine with a terminal. It points at `CHANGELOG.md` on the
+  branch rather than the Releases page: a source checkout updates off the branch and routinely
+  sits ahead of any published release, so the file is what matches the build you are running.
+
+### Fixed
+
+- **The Settings tabs stay put when the panel is scrolled.** On a phone the tab row slid up behind
+  the panel's title and then past it into the panel's clipped top edge, leaving "Settings" and
+  "General" superimposed and the tabs sheared in half. That is the artifact visible in
+  [#20](https://github.com/LunarWerxs/RepoYeti/issues/20)'s screenshot. The panel's body is
+  deliberately tucked underneath its translucent title bar so rows shimmer through as they scroll,
+  which reads as intended for rows of settings and as a bug for a control. The tab row is pinned
+  under the title now, and stays usable while a long tab scrolls beneath it. It reproduces on any
+  window short enough to make the panel overflow, not only on a phone. At a phone's full height
+  the General tab can just fit, which is why it was hard to catch by hand.
+
 ## [0.20.7] - 2026-08-12
 
 ### Fixed

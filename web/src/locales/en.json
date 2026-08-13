@@ -1129,6 +1129,8 @@
     "versionHint": "The version of RepoYeti currently running on the machine this dashboard is connected to — not the version of this page. Handy when updates install themselves and you're nowhere near the terminal.",
     "versionUnknown": "Unknown",
     "versionUpdateAvailable": "Update available",
+    "versionUpdateAvailableAction": "Review and install this update",
+    "versionChangelog": "What's new in RepoYeti",
     "versionRestartPending": "Restart to finish",
     "versionUpdating": "Updating…",
     "versionRestarting": "Restarting…",
