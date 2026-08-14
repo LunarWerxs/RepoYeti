@@ -101,6 +101,17 @@ onMounted(async () => {
     scrollBeyondLastLine: false,
     fontSize: 13,
     renderSideBySide: props.split,
+    // ⛔ Monaco defaults this to TRUE, and the default is wrong for a git client. With it on, two
+    // lines differing only in leading/trailing whitespace are declared IDENTICAL - so a
+    // whitespace-only change renders as a completely empty diff: no highlights, no
+    // hideUnchangedRegions folding, just the whole file side by side looking untouched. Meanwhile
+    // the changed-file row next to it says "+1 -1", because git counts the line. The viewer and
+    // the list disagreed about whether the file had changed at all, and the viewer was the one
+    // lying. Reproduced on a one-character change (a trailing space removed by a formatter):
+    // git reported +1/-1, the API returned genuinely different sides, and the diff editor drew
+    // zero insert/delete decorations. Trailing whitespace is a real edit here - it is what a
+    // codemod leaves behind and what a formatter then strips - so we show it.
+    ignoreTrimWhitespace: false,
     wordWrap: props.wordWrap ? "on" : "off",
     useInlineViewWhenSpaceIsLimited: true,
     renderSideBySideInlineBreakpoint: 700,
