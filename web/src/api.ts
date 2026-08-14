@@ -772,10 +772,10 @@ export const api = {
     ),
   /** Changed-file list. `total`/`truncated` are set when the server capped an oversized
    *  list (MAX_CHANGED_FILES) so the UI can show a "showing N of M" notice. */
-  changes: (id: string) =>
+  changes: (id: string, opts: { all?: boolean } = {}) =>
     req<{ files: ChangedFile[]; total?: number; truncated?: boolean }>(
       "GET",
-      `/api/repos/${id}/changes`,
+      `/api/repos/${id}/changes${opts.all ? "?all=1" : ""}`,
     ),
   fileContent: (id: string, path: string, ref?: "work" | "head", signal?: AbortSignal) =>
     req<FileContent>(

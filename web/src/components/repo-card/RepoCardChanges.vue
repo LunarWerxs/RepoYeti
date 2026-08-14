@@ -754,17 +754,37 @@ async function onCopyPath(path: string): Promise<void> {
         @delete-file="askDelete"
         @delete-folder="askDeleteFolder"
       />
-      <!-- Server capped an oversized changed-file list (MAX_CHANGED_FILES) — say so. -->
+      <!-- Server capped an oversized changed-file list (MAX_CHANGED_FILES) — say so, and offer
+           the way through. A repo-wide codemod really does dirty 13,000 files, and a notice with
+           no escape reads as "the rest is unreachable". The button re-reads with the cap lifted
+           and then stays lifted for this repo, so the refresh after a commit does not snap the
+           list back to the first 2000. -->
       <div
         v-if="store.changesMeta[repo.id]?.truncated"
-        class="px-2.5 py-1.5 text-[11.5px] text-warning/80"
+        class="flex flex-wrap items-center gap-x-2 gap-y-1 px-2.5 py-1.5 text-[11.5px] text-warning/80"
       >
-        {{
-          $t("repo.changes.truncated", {
-            shown: store.changesByRepo[repo.id]?.length ?? 0,
-            total: store.changesMeta[repo.id]?.total,
-          })
-        }}
+        <span>
+          {{
+            $t("repo.changes.truncated", {
+              shown: store.changesByRepo[repo.id]?.length ?? 0,
+              total: store.changesMeta[repo.id]?.total,
+            })
+          }}
+        </span>
+        <button
+          v-if="!store.changesShowAll[repo.id]"
+          type="button"
+          class="underline underline-offset-2 hover:text-warning focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-warning/60 rounded-sm"
+          :disabled="store.changesLoading[repo.id]"
+          :title="$t('repo.changes.truncatedViewAllHint', { total: store.changesMeta[repo.id]?.total })"
+          @click="store.loadChanges(repo.id, { all: true })"
+        >
+          {{
+            store.changesLoading[repo.id]
+              ? $t("repo.changes.truncatedLoadingAll", { total: store.changesMeta[repo.id]?.total })
+              : $t("repo.changes.truncatedViewAll")
+          }}
+        </button>
       </div>
       </div>
     </div>

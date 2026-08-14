@@ -180,15 +180,23 @@ export interface ChangesResult {
  *  truncated head plus a marker so the client can show "N of M" instead of freezing. */
 export const MAX_CHANGED_FILES = 2000;
 
-export async function getChanges(repoId: string): Promise<ChangesResult> {
+/** Opt-in ceiling for a caller that has asked for the whole list. The cap above exists to keep
+ *  the DEFAULT read cheap, not to make a big change-set unviewable - a repo-wide codemod really
+ *  does dirty 13,000 files, and "showing 2000 of 13350" with no way through is a dead end. This
+ *  second, much higher bound still refuses a pathological tree (a mis-cloned repo with hundreds
+ *  of thousands of dirty paths) rather than shipping an unbounded payload. */
+export const MAX_CHANGED_FILES_EXPANDED = 100_000;
+
+export async function getChanges(repoId: string, opts: { all?: boolean } = {}): Promise<ChangesResult> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  const cap = opts.all ? MAX_CHANGED_FILES_EXPANDED : MAX_CHANGED_FILES;
   try {
     const all = await enqueue(repoId, () => backendFor(repo.vcs).readChanges(repo.absPath, diffStatsEnabled()));
-    if (all.length > MAX_CHANGED_FILES) {
-      return { ok: true, code: "OK", files: all.slice(0, MAX_CHANGED_FILES), total: all.length, truncated: true };
+    if (all.length > cap) {
+      return { ok: true, code: "OK", files: all.slice(0, cap), total: all.length, truncated: true };
     }
-    return { ok: true, code: "OK", files: all };
+    return { ok: true, code: "OK", files: all, total: all.length };
   } catch (e) {
     return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
   }

@@ -42,7 +42,18 @@ let revealTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Re-arm the hold-until-diff-ready gate for the model currently set on the editor. The
  *  timer is a safety net so we always reveal — even if the diff resolves to "no changes"
- *  or the event is missed for any reason — rather than leaving the editor stuck hidden. */
+ *  or the event is missed for any reason — rather than leaving the editor stuck hidden.
+ *
+ *  ⛔ The safety net used to fire at 600ms flat, which is the bug this shape fixes. The diff runs
+ *  in a worker, and on a big file or a loaded machine it routinely takes longer than that - so the
+ *  net won the race and revealed the editor in exactly the state the comment above calls the thing
+ *  to avoid: the whole file un-collapsed, no hideUnchangedRegions folding, no add/remove
+ *  highlights. It reads as "the diff viewer is not showing the diff", because for that window it
+ *  genuinely is not. A 600ms REVEAL and a 600ms DIFF are not the same deadline and must not share
+ *  a number: the event is the real signal, so wait much longer for it, and only fall back when
+ *  something has actually gone wrong. */
+const DIFF_REVEAL_FALLBACK_MS = 5000;
+
 function revealOnFirstDiff(): void {
   ready.value = false;
   diffListener?.dispose();
@@ -57,7 +68,9 @@ function revealOnFirstDiff(): void {
     }
   };
   diffListener = editor?.onDidUpdateDiff(reveal) ?? null;
-  revealTimer = setTimeout(reveal, 600);
+  // No listener means no event is ever coming, so the fallback IS the path - reveal promptly
+  // rather than holding a blank pane for five seconds.
+  revealTimer = setTimeout(reveal, diffListener ? DIFF_REVEAL_FALLBACK_MS : 0);
 }
 
 /** Fresh original+modified models. Both URIs carry the filename (→ correct grammar); the

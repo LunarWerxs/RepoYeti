@@ -125,7 +125,9 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/repos/:id/changes", async (c) => {
     const id = requireId(c);
     if (id instanceof Response) return id;
-    const result = await getChanges(id);
+    // ?all=1 lifts the default cap for a caller that clicked "view all" on the truncation
+    // notice. Opt-in, so an ordinary card render still pays the cheap bounded read.
+    const result = await getChanges(id, { all: c.req.query("all") === "1" });
     if (result.ok)
       return c.json({ files: result.files ?? [], total: result.total, truncated: result.truncated });
     return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not read changes");

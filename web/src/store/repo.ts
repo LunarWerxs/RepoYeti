@@ -429,14 +429,19 @@ export function useRepoActions(
     }
   }
 
-  async function loadChanges(repoId: string): Promise<void> {
+  /** Repos whose changed-file list the user has explicitly asked to see in full. Sticky, so the
+   *  refresh after a commit/stage does not silently snap a expanded list back to the first 2000. */
+  const changesShowAll = reactive<Record<string, true>>({});
+
+  async function loadChanges(repoId: string, opts: { all?: boolean } = {}): Promise<void> {
     if (!findRepo(repoId)) return;
+    if (opts.all) changesShowAll[repoId] = true;
     if (changesLoading[repoId]) return; // don't stack concurrent reads for the same repo
     const request = Symbol(repoId);
     changesRequests.set(repoId, request);
     changesLoading[repoId] = true;
     try {
-      const res = await api.changes(repoId);
+      const res = await api.changes(repoId, { all: changesShowAll[repoId] === true });
       if (changesRequests.get(repoId) !== request || !findRepo(repoId)) return;
       changesByRepo[repoId] = res.files ?? [];
       if (res.truncated) changesMeta[repoId] = { total: res.total ?? res.files.length, truncated: true };
@@ -636,6 +641,7 @@ export function useRepoActions(
     changesByRepo,
     changesLoading,
     changesMeta,
+    changesShowAll,
     loadChanges,
     filterQuery,
     filterIdentity,
