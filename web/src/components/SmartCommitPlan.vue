@@ -457,7 +457,7 @@ async function execute(sync: boolean): Promise<void> {
                 <ChevronDown :size="13" class="opacity-60" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-52">
+            <DropdownMenuContent align="end" class="max-w-52">
               <DropdownMenuLabel>{{ $t("settings.aiStyle") }}</DropdownMenuLabel>
               <DropdownMenuRadioGroup :model-value="style" @update:model-value="onStyle">
                 <DropdownMenuRadioItem value="conventional">{{ $t("settings.aiStyleConventional") }}</DropdownMenuRadioItem>
@@ -600,7 +600,7 @@ async function execute(sync: boolean): Promise<void> {
                   <ChevronDown :size="16" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" class="w-52">
+              <DropdownMenuContent align="end" class="max-w-52">
                 <DropdownMenuItem @select="execute(false)">
                   <GitCommitHorizontal :size="15" />
                   <span>{{ $t("repo.smartCommit.commitAll") }}</span>

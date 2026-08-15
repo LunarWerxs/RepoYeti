@@ -94,7 +94,7 @@ async function confirmDrop(): Promise<void> {
       <span>{{ stashes.length }}</span>
       <ChevronDown :size="14" class="opacity-60" />
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" class="w-72">
+    <DropdownMenuContent align="end" class="max-w-72">
       <DropdownMenuLabel>{{ $t("repo.stash.menuLabel") }}</DropdownMenuLabel>
       <div
         v-for="s in stashes"

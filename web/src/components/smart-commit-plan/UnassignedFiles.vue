@@ -93,7 +93,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
               <MoreVertical :size="13" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" class="max-h-72 w-60 overflow-y-auto">
+          <DropdownMenuContent align="start" class="max-h-72 max-w-60 overflow-y-auto">
             <DropdownMenuLabel>{{ $t("repo.smartCommit.moveTo") }}</DropdownMenuLabel>
             <DropdownMenuItem v-for="(other, oi) in groups" :key="other.key" @select="emit('move-file', f, other.key)">
               <GitCommitHorizontal :size="14" />

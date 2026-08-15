@@ -163,7 +163,7 @@ function pullFromMenu(): void {
         <ChevronDown />
       </Button>
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" class="w-48">
+    <DropdownMenuContent align="end" class="max-w-48">
       <!-- The primary action is repeated here, as it is in the commit menu: having opened the
            menu, you should not have to close it again to do the obvious thing. -->
       <DropdownMenuItem

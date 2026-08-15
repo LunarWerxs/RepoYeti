@@ -367,7 +367,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
               <ChevronDown :size="16" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="w-56">
+          <DropdownMenuContent align="end" class="max-w-56">
             <!-- With files checked the menu splits into two labelled scopes. It used to offer only
                  whole-tree Push/Sync, so anyone who wanted "commit and sync just these files" had
                  to reach past the plain-commit primary button into a menu whose only sync entry
@@ -444,7 +444,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
               <ChevronDown :size="16" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="w-52">
+          <DropdownMenuContent align="end" class="max-w-52">
             <DropdownMenuItem @select="runSmart(false)">
               <Sparkles :size="15" />
               <span>{{ $t("repo.smartCommit.menuCommit") }}</span>

@@ -397,7 +397,7 @@ const detectedReason = computed(() => {
         <span v-else-if="identity">{{ identityInitials(identity.displayName) }}</span>
         <User v-else :size="15" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" class="w-64">
+      <DropdownMenuContent align="end" class="max-w-64">
         <!-- which GitHub account this repo pushes / pulls as (auto-switched on sync) -->
         <template v-if="store.ghAccounts.length">
           <DropdownMenuLabel>{{ $t("repo.syncAccount.dropdownLabel") }}</DropdownMenuLabel>

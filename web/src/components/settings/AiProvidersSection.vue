@@ -629,7 +629,7 @@ async function onDiffDetail(detail: string): Promise<void> {
             {{ $t("settings.addProvider") }}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" class="w-60">
+        <DropdownMenuContent align="start" class="max-w-60">
           <DropdownMenuLabel>{{ $t("settings.addProviderLabel") }}</DropdownMenuLabel>
           <DropdownMenuItem v-for="p in addableProviders" :key="p.id" @select="beginAdd(p.id)">
             <span class="min-w-0 flex-1 truncate">{{ p.label }}</span>

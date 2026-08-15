@@ -202,7 +202,7 @@ const manageOpen = ref(false);
     >
       <MoreVertical :size="15" />
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" class="w-44">
+    <DropdownMenuContent align="end" class="max-w-44">
       <!-- Open the repo folder in an external editor (local sessions only). -->
       <template v-if="store.canContinueLocal">
         <DropdownMenuSub>
@@ -210,7 +210,7 @@ const manageOpen = ref(false);
             <ExternalLink :size="15" />
             <span>{{ $t("repo.openWith") }}</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent class="w-48">
+          <DropdownMenuSubContent class="max-w-48">
             <DropdownMenuItem v-for="e in folderEditors" :key="e.id" @select="openRepoWith(e.id)">
               <span class="truncate">{{ e.label }}</span>
             </DropdownMenuItem>

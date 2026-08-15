@@ -130,7 +130,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
             <MoreVertical :size="15" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" class="w-48">
+        <DropdownMenuContent align="end" class="max-w-48">
           <DropdownMenuItem :disabled="index === 0" @select="emit('move-up')">
             <ArrowUp :size="15" /><span>{{ $t("repo.smartCommit.moveUp") }}</span>
           </DropdownMenuItem>
@@ -197,7 +197,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
               <MoreVertical :size="13" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" class="max-h-72 w-60 overflow-y-auto">
+          <DropdownMenuContent align="start" class="max-h-72 max-w-60 overflow-y-auto">
             <DropdownMenuLabel>{{ $t("repo.smartCommit.moveTo") }}</DropdownMenuLabel>
             <DropdownMenuItem
               v-for="(other, oi) in groups"

@@ -104,7 +104,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
                   <ChevronDown class="opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" class="w-56">
+              <DropdownMenuContent align="start" class="max-w-56">
                 <DropdownMenuLabel>{{ $t("filters.filterByIdentity") }}</DropdownMenuLabel>
                 <DropdownMenuItem @select="store.filterIdentity = undefined">
                   {{ $t("filters.anyIdentity") }}
@@ -141,7 +141,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
                   <ChevronDown class="opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" class="w-48">
+              <DropdownMenuContent align="start" class="max-w-48">
                 <DropdownMenuLabel>{{ $t("filters.filterByStatus") }}</DropdownMenuLabel>
                 <!-- toggle several; OR semantics. .prevent keeps the menu open. -->
                 <DropdownMenuCheckboxItem

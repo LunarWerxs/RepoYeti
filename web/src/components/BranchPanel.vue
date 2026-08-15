@@ -103,7 +103,7 @@ async function confirmDelete(): Promise<void> {
         </TooltipTrigger>
         <TooltipContent>{{ $t("repo.branches.manageTooltip") }}</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="start" class="w-64">
+      <DropdownMenuContent align="start" class="max-w-64">
         <DropdownMenuLabel>{{ $t("repo.branches.switchLabel") }}</DropdownMenuLabel>
         <div v-if="!branchList" class="flex items-center gap-2 px-2 py-1.5 text-[12px] text-muted-foreground">
           <Loader2 :size="13" class="animate-spin" />{{ $t("repo.branches.loading") }}

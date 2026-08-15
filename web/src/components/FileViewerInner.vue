@@ -571,7 +571,7 @@ onBeforeUnmount(() => {
           </TooltipTrigger>
           <TooltipContent>{{ $t("fileViewer.viewOptions") }}</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent align="end" class="w-52">
+        <DropdownMenuContent align="end" class="max-w-52">
           <DropdownMenuItem v-if="showEditControls && !store.isGuest" @select="startEdit">
             <Pencil :size="14" />
             {{ $t("fileViewer.edit") }}
