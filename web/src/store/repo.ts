@@ -379,9 +379,49 @@ export function useRepoActions(
     }
   });
 
+  /**
+   * The repo's REFS moved: a different branch is checked out, HEAD detached/attached, or the set
+   * of refs itself changed (a branch created, deleted, renamed, or moved by a fetch).
+   *
+   * `historyRefsHash` is the daemon's hash over the ref set, so it catches every branch/tag
+   * mutation — including ones that leave the current branch alone, which is exactly the case a
+   * `branch !== branch` test misses (issue #22: branches deleted externally stayed in the
+   * selector). Deliberately NOT keyed on ahead/behind: those churn on every fetch, and the ref
+   * hash already moves whenever a ref's oid does.
+   */
+  function isRefStateChange(previous: Repo["status"], next: Repo["status"]): boolean {
+    if (!previous || !next) return false;
+    return (
+      previous.branch !== next.branch ||
+      previous.detached !== next.detached ||
+      (previous.historyRefsHash ?? null) !== (next.historyRefsHash ?? null)
+    );
+  }
+
+  /**
+   * Late-bound because the ref-derived caches live in the git-ops module, which is constructed
+   * AFTER this one (it needs `loadChanges` from here). index.ts wires it once both exist — the
+   * same shape as the daemon's setAutoUpdateHooks.
+   */
+  let onRefStateChanged: (repoId: string) => void = () => {};
+  function setRefStateHook(fn: (repoId: string) => void): void {
+    onRefStateChanged = fn;
+  }
+
+  /**
+   * The single funnel every status update goes through — the manual Refresh button, each action's
+   * own response (applyActionStatus), and the `repo_state_changed` SSE frame. Reconciling here
+   * rather than at those three call sites is the point: issue #22 was two of them updating status
+   * while the cached branch list kept showing a branch that no longer existed, and a fourth caller
+   * added later would have re-opened it.
+   */
   function patchRepo(id: string, patch: Partial<Repo>): void {
     const r = findRepo(id);
-    if (r) Object.assign(r, patch);
+    if (!r) return;
+    const refsMoved =
+      patch.status !== undefined && isRefStateChange(r.status, patch.status as Repo["status"]);
+    Object.assign(r, patch);
+    if (refsMoved) onRefStateChanged(id);
   }
   const getRepoStatus = (repoId: string): Repo["status"] => findRepo(repoId)?.status ?? null;
   const hasRepo = (repoId: string): boolean => findRepo(repoId) !== undefined;
@@ -665,6 +705,7 @@ export function useRepoActions(
     getRepoStatus,
     hasRepo,
     patchRepo,
+    setRefStateHook,
     applyActionStatus,
     upsertRepo,
     queueRepoAdded,

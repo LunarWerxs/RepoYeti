@@ -258,6 +258,7 @@ export const useStore = defineStore("repoyeti", () => {
     getRepoStatus,
     hasRepo,
     patchRepo,
+    setRefStateHook,
     applyActionStatus,
     upsertRepo,
     queueRepoAdded,
@@ -314,6 +315,7 @@ export const useStore = defineStore("repoyeti", () => {
     stashesByRepo,
     gitOpBusy,
     loadBranches,
+    reloadRefCaches,
     switchBranch,
     createBranch,
     deleteBranch,
@@ -344,6 +346,13 @@ export const useStore = defineStore("repoyeti", () => {
     bumpHistoryRevision,
     applyActionStatus,
   );
+
+  // Close the loop the two modules cannot close themselves: repo.ts owns the one funnel every
+  // status update passes through, git-ops owns the caches derived from refs, and git-ops is built
+  // second because it needs loadChanges. So the hook is wired here, once both exist. Without it a
+  // branch checked out or deleted outside RepoYeti left the selector stale until a full page
+  // reload (issue #22).
+  setRefStateHook(reloadRefCaches);
 
   /** All large per-repo client caches share the lifecycle of the dashboard card. */
   function clearRepoCaches(repoId: string): void {

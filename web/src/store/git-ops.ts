@@ -103,6 +103,23 @@ export function useGitOps(
     }
   }
 
+  /**
+   * The repo's refs moved, so anything derived from them is stale. Re-read the caches that are
+   * ALREADY loaded and leave the rest alone: these lists are lazily fetched when a card's section
+   * opens, and fetching for a repo nobody has expanded would put load on the git read gate for a
+   * list no one is looking at.
+   *
+   * Fixes issue #22 — a branch checked out, updated or deleted OUTSIDE RepoYeti left the branch
+   * selector showing the old branch and offering branches that no longer exist, and only a full
+   * page reload cleared it. Wired to every status update through repo.ts's patchRepo, so the
+   * manual Refresh button, an action's own response and the SSE frame all reconcile identically.
+   */
+  function reloadRefCaches(repoId: string): void {
+    if (!isRepoLive(repoId)) return;
+    if (Object.hasOwn(branchesByRepo, repoId)) void loadBranches(repoId);
+    if (Object.hasOwn(tagsByRepo, repoId)) void loadTags(repoId);
+  }
+
   async function switchBranch(repoId: string, branch: string): Promise<ActionResult> {
     gitOpBusy[repoId] = "checkout";
     try {
@@ -469,6 +486,7 @@ export function useGitOps(
     stashesByRepo,
     gitOpBusy,
     loadBranches,
+    reloadRefCaches,
     switchBranch,
     createBranch,
     deleteBranch,
