@@ -131,6 +131,7 @@ export const useStore = defineStore("repoyeti", () => {
   const changesCharsEnabled = ref(true);
   // Owner setting: allow editing/saving files over the remote tunnel (local edits always on).
   const remoteEditing = ref(true);
+  const remoteBrowse = ref(true);
   // Owner setting: changed files larger than this (bytes, either side) open as a compact
   // patch in the viewer's Diff tab instead of a side-by-side load. From /api/status, kept
   // live via `settings_changed`; 512 KB until status loads.
@@ -468,6 +469,7 @@ export const useStore = defineStore("repoyeti", () => {
     setChangesStatDisplay,
     setChangesChars,
     setRemoteEditing,
+    setRemoteBrowse,
     setDiffPatchBytes,
     setDiffPatchEnabled,
     setSyncCheck,
@@ -552,6 +554,7 @@ export const useStore = defineStore("repoyeti", () => {
     changesStatDisplay,
     changesCharsEnabled,
     remoteEditing,
+    remoteBrowse,
     diffPatchBytes,
     diffPatchEnabled,
     syncCheckEnabled,
@@ -717,6 +720,7 @@ export const useStore = defineStore("repoyeti", () => {
       changesStatDisplay.value = s.changesStatDisplay ?? "numbers";
       changesCharsEnabled.value = s.changesChars ?? true;
       remoteEditing.value = s.remoteEditing;
+      remoteBrowse.value = s.remoteBrowse !== false;
       diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
       diffPatchEnabled.value = s.diffPatchEnabled ?? true;
       syncCheckEnabled.value = s.syncCheck ?? false;
@@ -962,6 +966,7 @@ export const useStore = defineStore("repoyeti", () => {
           }
           if (typeof payload.changesChars === "boolean") changesCharsEnabled.value = payload.changesChars;
           if (typeof payload.remoteEditing === "boolean") remoteEditing.value = payload.remoteEditing;
+          if (typeof payload.remoteBrowse === "boolean") remoteBrowse.value = payload.remoteBrowse;
           if (typeof payload.diffPatchBytes === "number") diffPatchBytes.value = payload.diffPatchBytes;
           if (typeof payload.diffPatchEnabled === "boolean") diffPatchEnabled.value = payload.diffPatchEnabled;
           if (typeof payload.syncCheck === "boolean") syncCheckEnabled.value = payload.syncCheck;
@@ -1210,7 +1215,9 @@ export const useStore = defineStore("repoyeti", () => {
     setChangesStatDisplay,
     setChangesChars,
     remoteEditing,
+    remoteBrowse,
     setRemoteEditing,
+    setRemoteBrowse,
     diffPatchBytes,
     setDiffPatchBytes,
     diffPatchEnabled,

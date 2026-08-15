@@ -136,6 +136,14 @@ async function setRemoteEditing(v: boolean): Promise<void> {
   }
 }
 
+async function setRemoteBrowse(v: boolean): Promise<void> {
+  try {
+    await store.setRemoteBrowse(v);
+  } catch {
+    toast.error(t("remote.browseFailed"));
+  }
+}
+
 async function copyLink(): Promise<void> {
   if (!remoteUrl.value) return;
   try {
@@ -224,6 +232,27 @@ async function copyExistingShare(): Promise<void> {
           :model-value="store.remoteEditing"
           :aria-label="$t('remote.editLabel')"
           @update:model-value="(v: boolean) => setRemoteEditing(v)"
+        />
+      </label>
+
+      <!-- browsing-over-remote policy. Deliberately its own switch rather than riding on the
+           editing one: editing WRITES, this ENUMERATES — the All-files browser walks the working
+           directory including gitignored paths, which is where .env files live. Reading your
+           diffs from a phone and letting the tunnel list every file on the machine are different
+           decisions. (Share-link guests never get this at all; both routes are owner-only.) -->
+      <label
+        v-if="isRemote"
+        class="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-secondary/30 px-3 py-2.5"
+      >
+        <span class="flex min-w-0 flex-col gap-0.5">
+          <span class="text-[13px] font-medium text-foreground">{{ $t("remote.browseLabel") }}</span>
+          <span class="text-[12px] text-muted-foreground">{{ $t("remote.browseHint") }}</span>
+        </span>
+        <Switch
+          class="shrink-0"
+          :model-value="store.remoteBrowse"
+          :aria-label="$t('remote.browseLabel')"
+          @update:model-value="(v: boolean) => setRemoteBrowse(v)"
         />
       </label>
 

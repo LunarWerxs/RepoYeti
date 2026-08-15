@@ -60,6 +60,7 @@ const PREF_KEYS = [
   "changesStatDisplay",
   "changesChars",
   "remoteEditing",
+  "remoteBrowse",
   "diffPatchBytes",
   "diffPatchEnabled",
   "syncIntervalSecs",

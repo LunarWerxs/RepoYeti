@@ -299,6 +299,50 @@ describe("RepoCardChanges changes ⇄ all-files panel", () => {
     expect(wrapper.findComponent({ name: "RepoFileTree" }).exists()).toBe(true);
   });
 
+  it("hides the browse toggle from a share-link guest", () => {
+    const store = useStore();
+    // `isGuest` is a computed over shareViewer, so the viewer is what has to be set.
+    store.shareViewer = { label: "link", perm: "view", expiresAt: null, collaborative: false };
+    expect(store.isGuest).toBe(true);
+    wrapper = mountFor(cleanRepo);
+
+    // Both tree routes are owner-only, so the button would only ever offer a guest a 403.
+    expect(wrapper.find('[aria-label="Browse all files"]').exists()).toBe(false);
+  });
+
+  it("hides it on a REMOTE session once browsing over the tunnel is off", () => {
+    const store = useStore();
+    store.canContinueLocal = false; // i.e. this request did not come from loopback
+    store.remoteBrowse = false;
+    wrapper = mountFor(cleanRepo);
+
+    expect(wrapper.find('[aria-label="Browse all files"]').exists()).toBe(false);
+  });
+
+  it("keeps it on a LOCAL session even when remote browsing is off", () => {
+    const store = useStore();
+    store.canContinueLocal = true;
+    store.remoteBrowse = false;
+    wrapper = mountFor(cleanRepo);
+
+    // The switch is about the tunnel. It must never lock the owner out of their own machine.
+    expect(wrapper.find('[aria-label="Browse all files"]').exists()).toBe(true);
+  });
+
+  it("falls back to the changed files if browsing is revoked while 'all' is persisted", () => {
+    setChangesPanelMode(repoId, "all");
+    const store = useStore();
+    store.canContinueLocal = false;
+    store.remoteBrowse = false;
+
+    wrapper = mountFor(cleanRepo);
+
+    // The preference syncs across devices, so it can arrive on a session that may not use it.
+    // Stranding someone in a panel that can only 403 would be worse than ignoring the pref.
+    expect(wrapper.findComponent({ name: "RepoFileTree" }).exists()).toBe(false);
+    expect(wrapper.text()).toContain("No changes");
+  });
+
   it("comes back to the changed files when toggled off", async () => {
     wrapper = mountFor(cleanRepo);
     await wrapper.get('[aria-label="Browse all files"]').trigger("click");

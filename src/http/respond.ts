@@ -96,6 +96,23 @@ export const remoteEditingBlocked = (c: Context, cfg: RepoYetiConfig): Response 
       )
     : null;
 
+/**
+ * The same shape for working-tree BROWSING (the "All files" mode's two routes). Separate from
+ * the editing gate because it is a different risk: editing writes, this ENUMERATES — including
+ * gitignored paths, which is where `.env` files live. Someone happy to read diffs from a phone
+ * may still not want the tunnel able to list every file on the machine.
+ *
+ * Loopback is never blocked, and share-link guests never reach these routes at all (both are
+ * owner-only in src/share/policy.ts), so this governs the owner's own remote sessions.
+ */
+export const remoteBrowseBlocked = (c: Context, cfg: RepoYetiConfig): Response | null =>
+  isRemoteRequest(c) && cfg.remoteBrowse === false
+    ? c.json(
+        { ok: false, code: "BROWSE_REMOTE_DISABLED", message: "browsing all files over remote access is turned off" },
+        403,
+      )
+    : null;
+
 /** A conservative git-URL check: a known scheme, or the scp-like `user@host:path` form. Rejects
  *  a leading dash (flag injection) and bare local paths (which would dodge the root confinement). */
 export function looksLikeGitUrl(u: string): boolean {

@@ -376,6 +376,18 @@ export interface RepoYetiConfig {
    */
   remoteEditing?: boolean;
   /**
+   * Allow the "All files" working-tree browser over the remote tunnel. Local (loopback)
+   * browsing is always allowed. Defaults to true (absent = enabled).
+   *
+   * Separate from `remoteEditing` because it is a different risk. Editing is about WRITING;
+   * this is about the one read surface that ENUMERATES — it walks the working directory,
+   * gitignored paths included, which is exactly where `.env` files and local credentials sit.
+   * Someone happy to read their diffs from a phone may still not want the tunnel able to list
+   * every file on the machine. (Share-link guests never get this at all — both tree routes are
+   * owner-only in src/share/policy.ts; this knob is about the OWNER'S own remote sessions.)
+   */
+  remoteBrowse?: boolean;
+  /**
    * File-viewer Diff-tab threshold (bytes): a changed file larger than this on either side
    * ships as a compact server-computed `git diff` patch instead of both whole copies for a
    * side-by-side view. Owner setting (the Settings UI writes it); clamped on read. See

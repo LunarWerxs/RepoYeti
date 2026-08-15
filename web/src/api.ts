@@ -167,6 +167,8 @@ export interface RuntimeStatus {
   minContentSearch: number;
   /** Whether editing/saving files is allowed over the remote tunnel (owner setting). */
   remoteEditing: boolean;
+  /** Allow the "All files" browser over the remote tunnel (loopback is always allowed). */
+  remoteBrowse: boolean;
   /** Diff-tab threshold (bytes): changed files larger than this open as a compact patch. */
   diffPatchBytes: number;
   /** Whether large files may use the compact patch view at all (false = always side-by-side). */
@@ -448,6 +450,8 @@ export const api = {
   /** Toggle whether files can be edited over the remote tunnel (owner setting; persisted). */
   setRemoteEditing: (enabled: boolean) =>
     req<{ ok: boolean; remoteEditing: boolean }>("PUT", "/api/settings", { remoteEditing: enabled }),
+  setRemoteBrowse: (enabled: boolean) =>
+    req<{ ok: boolean; remoteBrowse: boolean }>("PUT", "/api/settings", { remoteBrowse: enabled }),
   /** Set the large-file Diff threshold in bytes (owner setting; server clamps + persists). */
   setDiffPatchBytes: (bytes: number) =>
     req<{ ok: boolean; diffPatchBytes: number }>("PUT", "/api/settings", { diffPatchBytes: bytes }),

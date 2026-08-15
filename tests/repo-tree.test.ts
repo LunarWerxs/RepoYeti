@@ -402,6 +402,64 @@ test("GET /api/repos/:id/tree-search serves matches", async () => {
   expect(body.entries.map((e) => e.path)).toEqual(["src/widget.ts"]);
 });
 
+// ── browsing over remote access ──────────────────────────────────────────────
+// The All-files routes are the one read surface that ENUMERATES, ignored paths included, so the
+// owner gets a switch to keep it on this machine. Loopback must never be affected by it.
+// (Share-link guests are covered separately: both routes are owner-only in src/share/policy.ts.)
+
+/** A request carrying the header cloudflared adds, i.e. one that arrived through the tunnel. */
+const remoteHeaders = { "cf-connecting-ip": "203.0.113.7" };
+
+test("remote browsing is allowed by default", async () => {
+  const dir = await gitRepo();
+  mkdirSync(join(dir, "src"));
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+  const app = createApp(localCfg()); // remoteBrowse absent = enabled
+
+  const res = await app.request(`/api/repos/${id}/tree`, { headers: remoteHeaders });
+
+  expect(res.status).toBe(200);
+});
+
+test("remoteBrowse:false blocks BOTH tree routes over remote access", async () => {
+  const dir = await gitRepo();
+  mkdirSync(join(dir, "src"));
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+  const app = createApp({ ...localCfg(), remoteBrowse: false });
+
+  for (const path of [`/api/repos/${id}/tree`, `/api/repos/${id}/tree-search?q=src`]) {
+    const res = await app.request(path, { headers: remoteHeaders });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("BROWSE_REMOTE_DISABLED");
+  }
+});
+
+test("remoteBrowse:false never blocks a LOCAL request", async () => {
+  const dir = await gitRepo();
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "a.ts"), "x");
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+  const app = createApp({ ...localCfg(), remoteBrowse: false });
+
+  // No tunnel headers = loopback. Turning the switch off must not lock the owner out of their
+  // own machine — that is the entire distinction the setting draws.
+  expect((await app.request(`/api/repos/${id}/tree`)).status).toBe(200);
+  expect((await app.request(`/api/repos/${id}/tree-search?q=a.ts`)).status).toBe(200);
+});
+
+test("the browse switch is independent of the editing one", async () => {
+  const dir = await gitRepo();
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+
+  // Editing off, browsing untouched → browsing still works remotely.
+  const editingOff = createApp({ ...localCfg(), remoteEditing: false });
+  expect((await editingOff.request(`/api/repos/${id}/tree`, { headers: remoteHeaders })).status).toBe(200);
+
+  // Browsing off, editing untouched → browsing is blocked.
+  const browsingOff = createApp({ ...localCfg(), remoteBrowse: false });
+  expect((await browsingOff.request(`/api/repos/${id}/tree`, { headers: remoteHeaders })).status).toBe(403);
+});
+
 test("GET /api/repos/:id/tree rejects traversal with a 4xx, not a listing", async () => {
   const dir = await gitRepo();
   const id = mustUpsertRepo(dir, "repo", "auto", false);

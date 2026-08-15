@@ -190,8 +190,17 @@ function flattenLeaves(nodes: TreeNode[], acc: TreeNode[] = []): TreeNode[] {
 // deliberately NOT gated on the repo being dirty: a clean repo is exactly when you want to read
 // the code, so its toggle sits in the always-visible header row rather than inside the
 // dirty-gated changes section.
+// Who may browse at all: never a share-link guest (both tree routes are owner-only), and not the
+// owner's own REMOTE session once they've turned browsing over the tunnel off. `canContinueLocal`
+// is the daemon's own "this request came from loopback" signal, so a local session is unaffected
+// by that switch — the same shape FileViewerInner uses for the remote-editing gate.
+const canBrowseFiles = computed(
+  () => !store.isGuest && (store.canContinueLocal || store.remoteBrowse),
+);
 const panelMode = computed(() => changesPanelMode(props.repo.id));
-const isBrowsing = computed(() => panelMode.value === "all");
+// A persisted "all" must not strand someone in a panel they can no longer load — if browsing is
+// revoked mid-session (or the preference followed them to a remote device), fall back to changes.
+const isBrowsing = computed(() => canBrowseFiles.value && panelMode.value === "all");
 const browser = provideFileBrowser(props.repo.id);
 function togglePanelMode(): void {
   setChangesPanelMode(props.repo.id, isBrowsing.value ? "changes" : "all");
@@ -639,8 +648,9 @@ async function onCopyPath(path: string): Promise<void> {
          Owner-only, matching the route: GET /api/repos/:id/tree is in policy.ts's OWNER_ONLY
          list because enumerating a working tree (ignored paths included) is a bigger capability
          than reading one named file. Rendering the button for a guest would only offer them a
-         403. -->
-    <Tooltip v-if="!store.isGuest">
+         403 — and the same goes for the owner's own REMOTE session once they've turned browsing
+         over the tunnel off (Settings → Remote access). -->
+    <Tooltip v-if="canBrowseFiles">
       <TooltipTrigger as-child>
         <button
           type="button"

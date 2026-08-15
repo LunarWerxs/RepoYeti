@@ -139,6 +139,9 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
         // refuses PUT /api/repos/:id/file outright), so the editor must render read-only.
         diffStats: diffStatsEnabled(),
         remoteEditing: false,
+        // Pinned FALSE for the same reason: both "All files" routes are owner-only
+        // (src/share/policy.ts), so a guest cannot browse the tree however this is set.
+        remoteBrowse: false,
         // Pure work-tree rendering knobs (numbers-vs-bars, char-delta on/off) — harmless to hand
         // to a guest, unlike remoteEditing above which is pinned false because a guest genuinely
         // cannot write files. Included so the guest's viewer renders identically to the owner's.
@@ -175,6 +178,7 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       relayError: getRelayStatus().error,
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
+      remoteBrowse: cfg.remoteBrowse !== false,
       // Work-tree display knobs — see the guest branch above for why these are safe to share.
       // Absent-key defaults live here (single source of truth, matches the config.ts doc comment).
       changesStatDisplay: cfg.changesStatDisplay ?? "numbers",
@@ -290,6 +294,11 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       cfg.remoteEditing = b.remoteEditing;
       saveConfig(cfg);
       broadcast("settings_changed", { remoteEditing: cfg.remoteEditing });
+    }
+    if (typeof b.remoteBrowse === "boolean") {
+      cfg.remoteBrowse = b.remoteBrowse;
+      saveConfig(cfg);
+      broadcast("settings_changed", { remoteBrowse: cfg.remoteBrowse });
     }
     if (typeof b.diffPatchBytes === "number" && Number.isFinite(b.diffPatchBytes)) {
       // setDiffPatchBytes clamps → persist the clamped value, not the raw input.
@@ -487,6 +496,7 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       ok: true,
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
+      remoteBrowse: cfg.remoteBrowse !== false,
       changesStatDisplay: cfg.changesStatDisplay ?? "numbers",
       changesChars: cfg.changesChars !== false,
       diffPatchBytes: getDiffPatchBytes(),

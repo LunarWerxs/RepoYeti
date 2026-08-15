@@ -66,6 +66,7 @@ export function useSettings(deps: {
   changesStatDisplay: Ref<ChangesStatDisplay>;
   changesCharsEnabled: Ref<boolean>;
   remoteEditing: Ref<boolean>;
+  remoteBrowse: Ref<boolean>;
   diffPatchBytes: Ref<number>;
   diffPatchEnabled: Ref<boolean>;
   syncCheckEnabled: Ref<boolean>;
@@ -105,6 +106,7 @@ export function useSettings(deps: {
     changesStatDisplay,
     changesCharsEnabled,
     remoteEditing,
+    remoteBrowse,
     diffPatchBytes,
     diffPatchEnabled,
     syncCheckEnabled,
@@ -273,6 +275,17 @@ export function useSettings(deps: {
       await api.setRemoteEditing(enabled);
     } catch (e) {
       remoteEditing.value = !enabled; // roll back
+      throw e;
+    }
+  }
+
+  /** Toggle the "All files" browser over remote access (optimistic; rolls back on failure). */
+  async function setRemoteBrowse(enabled: boolean): Promise<void> {
+    remoteBrowse.value = enabled;
+    try {
+      await api.setRemoteBrowse(enabled);
+    } catch (e) {
+      remoteBrowse.value = !enabled; // roll back
       throw e;
     }
   }
@@ -653,6 +666,7 @@ export function useSettings(deps: {
     changesStatDisplay,
     changesCharsEnabled,
     remoteEditing,
+    remoteBrowse,
     diffPatchBytes,
     diffPatchEnabled,
     syncCheckEnabled,
@@ -715,6 +729,7 @@ export function useSettings(deps: {
     setChangesStatDisplay,
     setChangesChars,
     setRemoteEditing,
+    setRemoteBrowse,
     setDiffPatchBytes,
     setDiffPatchEnabled,
     setSyncCheck,

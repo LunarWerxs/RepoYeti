@@ -35,7 +35,7 @@ import {
   moveFile,
   forceRefresh,
 } from "../../service/index.ts";
-import { requireId, remoteEditingBlocked, withGuestStatus } from "../respond.ts";
+import { requireId, remoteBrowseBlocked, remoteEditingBlocked, withGuestStatus } from "../respond.ts";
 
 type ImageResult = Awaited<ReturnType<typeof readImagePreview>>;
 
@@ -141,6 +141,8 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/repos/:id/tree", async (c) => {
     const id = requireId(c);
     if (id instanceof Response) return id;
+    const blocked = remoteBrowseBlocked(c, cfg);
+    if (blocked) return blocked;
     const result = await listRepoTree(id, c.req.query("path") ?? "");
     if (result.ok)
       return c.json({
@@ -157,6 +159,9 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/repos/:id/tree-search", async (c) => {
     const id = requireId(c);
     if (id instanceof Response) return id;
+    // Same gate as the listing: a path search enumerates the tree just as surely as walking it.
+    const blocked = remoteBrowseBlocked(c, cfg);
+    if (blocked) return blocked;
     // ?ignored=1 opts back into gitignored paths. Absent = the cheap, exact, git-answered set.
     const result = await searchRepoTree(id, c.req.query("q") ?? "", {
       includeIgnored: c.req.query("ignored") === "1",

@@ -15,6 +15,7 @@ export function useSettingsCloudSync(prefs: {
   changesStatDisplay: Ref<ChangesStatDisplay>;
   changesCharsEnabled: Ref<boolean>;
   remoteEditing: Ref<boolean>;
+  remoteBrowse: Ref<boolean>;
   diffPatchBytes: Ref<number>;
   diffPatchEnabled: Ref<boolean>;
   syncCheckEnabled: Ref<boolean>;
@@ -32,6 +33,7 @@ export function useSettingsCloudSync(prefs: {
     changesStatDisplay,
     changesCharsEnabled,
     remoteEditing,
+    remoteBrowse,
     diffPatchBytes,
     diffPatchEnabled,
     syncCheckEnabled,
@@ -200,6 +202,7 @@ export function useSettingsCloudSync(prefs: {
       changesStatDisplay,
       changesCharsEnabled,
       remoteEditing,
+      remoteBrowse,
       diffPatchBytes,
       diffPatchEnabled,
       syncCheckEnabled,

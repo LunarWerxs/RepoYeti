@@ -79,3 +79,24 @@ test("PUT /api/settings still applies every OTHER field when changesStatDisplay 
   // …and the bad value itself was still refused, not persisted.
   expect(status.changesStatDisplay).toBe("numbers");
 });
+
+// The "All files" browser's remote gate is a sibling of remoteEditing, and rides the same
+// best-effort per-field PUT — so it gets the same round-trip proof rather than being assumed.
+test("PUT /api/settings round-trips remoteBrowse, and it defaults to enabled", async () => {
+  const app = createApp(localCfg());
+
+  // Absent in config = allowed, matching remoteEditing's convention.
+  expect((await (await app.request("/api/status")).json()).remoteBrowse).toBe(true);
+
+  const put = await app.request("/api/settings", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ remoteBrowse: false }),
+  });
+  expect(put.status).toBe(200);
+
+  const status = await (await app.request("/api/status")).json();
+  expect(status.remoteBrowse).toBe(false);
+  // Independent of the editing switch — turning browsing off must not touch it.
+  expect(status.remoteEditing).toBe(true);
+});

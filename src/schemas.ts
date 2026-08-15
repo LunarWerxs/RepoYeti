@@ -60,6 +60,7 @@ export const SettingsUpdateSchema = z.object({
   changesStatDisplay: z.unknown().optional(),
   changesChars: z.boolean().optional().catch(undefined),
   remoteEditing: z.boolean().optional().catch(undefined),
+  remoteBrowse: z.boolean().optional().catch(undefined),
   diffPatchBytes: z.number().finite().optional().catch(undefined),
   diffPatchEnabled: z.boolean().optional().catch(undefined),
   syncCheck: z.boolean().optional().catch(undefined),
