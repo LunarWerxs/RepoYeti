@@ -1,0 +1,37 @@
+# Source files with NO test executing a single line of them.
+#
+# Read by scripts/check-coverage.ts on the Linux CI leg. This is a RATCHET, not a target: these
+# were already untested when the check was added on 2026-08-15, and recording them once is what
+# lets the gate fail on the NEXT one instead of going red on day one and being deleted.
+#
+# The percentage floor cannot see any of these. Bun instruments a module only when a test loads it,
+# so a file nothing imports is absent from the coverage denominator rather than harmful to it.
+#
+# To ADD a line here you need a reason a reader would accept, written next to it. "No test yet" is
+# not one. If a file here gains coverage, check:coverage prints it as prunable; delete the line.
+#
+# Regenerate the whole list by deleting this file and reading the Linux leg's check:coverage output.
+
+# Process entrypoints. These parse argv, wire a process together and hand off; a test that loaded
+# one would be testing bun's module loader. Their behaviour is covered through the daemon and route
+# tests that exercise what they construct, and end to end by scripts/smoke-release.ts, which boots
+# the compiled binary for real and asserts it serves.
+src/cli/main.ts
+src/index.ts
+
+# CLI verbs that drive the daemon over HTTP rather than in process (check-boundaries.ts enforces
+# that they cannot import the service layer). What they call is covered at the route level.
+src/cli/lifecycle.ts
+src/cli/token.ts
+
+# Dependency wiring only: constructs and hands back the collaborators the routes use. It has no
+# branch of its own to get wrong, and every consumer is covered.
+src/http/deps.ts
+
+# Opens the dashboard in the user's browser. Its whole body is a platform shell-out, so a test
+# would assert the mock it was handed.
+src/open-ui.ts
+
+# The VcsBackend contract. Types plus the small amount of glue that survives type erasure; the two
+# real backends are each covered directly.
+src/vcs/types.ts
