@@ -40,8 +40,14 @@ jobs:
           git config --global user.name "RepoYeti CI"
           git config --global user.email "ci@users.noreply.github.com"
       - run: bun run check:coverage # runs the suite with coverage + an overall-% floor
-      - run: bun audit # dependency CVE scan
-        continue-on-error: true # advisory only — surfaces advisories without failing on upstream CVEs
+      # Advisory by design: an upstream CVE published overnight must not turn the branch red on its
+      # own. `|| true` rather than continue-on-error, because continue-on-error still posts a FAILED
+      # annotation onto an otherwise-green run, and a red mark nobody can act on is how you learn to
+      # scroll past red. The findings are in this step's log either way. bash, not the Windows
+      # default pwsh, where `true` is not a command.
+      - name: Dependency advisories (advisory only, never fails the run)
+        shell: bash
+        run: bun audit || true
 
   web:
     name: web (i18n + build)
@@ -67,8 +73,9 @@ jobs:
       # covers (GHSA-55q2-fjhq-7xh7) on 2026-08-14, sitting there unreported. Advisory-only, to
       # match the root step: an upstream CVE landing overnight should not turn the branch red on
       # its own, it should be visible.
-      - run: bun audit
-        continue-on-error: true
+      - name: Dependency advisories (advisory only, never fails the run)
+        shell: bash
+        run: bun audit || true
       - run: bun run test # Vitest: pure-lib units + component render + store smoke (no server needed)
       - run: bun run build # vue-tsc type-check + production bundle (re-runs i18n:check)
       # The Playwright SSE E2E (test:e2e) is intentionally NOT in CI — it needs a live daemon + a
