@@ -29,15 +29,28 @@ jobs:
   # red on it, and the tag built green regardless. Tagging is precisely the moment nobody is
   # watching a run, so the gate belongs here rather than resting on someone noticing a red badge.
   preflight:
-    name: preflight (typecheck + tests)
-    runs-on: ubuntu-latest
+    name: preflight (${{ matrix.os }})
+    # The SAME three OSes the build matrix ships, because a release that tests on one of them is a
+    # release that tests the wrong one: this is a Windows-first app, and the Windows-only code
+    # (the PE GUI-subsystem stamp in scripts/build.ts, detached spawn, the instance pointer, tray
+    # host, path handling) plus every `test.skipIf(!isWin)` case never executed in the release path
+    # at all. The build matrix compiles all three but runs no tests. Public repo, so hosted runners
+    # are free; the only cost is the windows leg's wall-clock, paid once per release.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
-      - run: bun install --cwd web --frozen-lockfile
+      # The web half is OS-independent (vue-tsc, i18n, jsdom vitest), so it runs once on Linux
+      # rather than three times identically.
+      - if: runner.os == 'Linux'
+        run: bun install --cwd web --frozen-lockfile
       # Deleting a bad release un-publishes the binaries; it does NOT un-tell the fleet. Every
       # install compares the newest published tag against the version compiled into its own binary
       # (github-updater.ts:123-124, against VERSION from config.ts). Tag v0.21.0 on a tree still at
@@ -56,9 +69,11 @@ jobs:
           fi
           echo "tag ${GITHUB_REF_NAME} matches package.json ${packaged}"
       - run: bun run typecheck # tsc: the daemon
-      - run: bun run --cwd web typecheck # vue-tsc: templates + store surface, what `build:fast` skips
+      - if: runner.os == 'Linux'
+        run: bun run --cwd web typecheck # vue-tsc: templates + store surface, what `build:fast` skips
       - run: bun run check
-      - run: bun run --cwd web i18n:check
+      - if: runner.os == 'Linux'
+        run: bun run --cwd web i18n:check
       # Hosted runners ship without a global git identity; the suite makes commits and annotated
       # tags, which need a committer/tagger.
       - name: Configure a git identity
@@ -70,7 +85,8 @@ jobs:
       # the gate, not a second pass. CI applies the floor on every push; without it here a tag could
       # publish under a floor that push-time CI would have refused.
       - run: bun run check:coverage
-      - run: bun run --cwd web test
+      - if: runner.os == 'Linux'
+        run: bun run --cwd web test
 
   build:
     name: build (${{ matrix.os }})

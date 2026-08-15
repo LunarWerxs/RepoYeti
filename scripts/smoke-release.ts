@@ -85,18 +85,42 @@ try {
     throw new Error("release smoke: root did not return the dashboard HTML");
   }
 
-  const assetPath = html.match(/(?:src|href)=["'](\/assets\/[^"'?#]+)["']/i)?.[1];
-  if (!assetPath) throw new Error("release smoke: dashboard HTML did not reference a built asset");
-  const asset = await waitFor(`${origin}${assetPath}`, child);
-  const contentType = asset.headers.get("content-type") ?? "";
-  if (contentType.includes("text/html")) {
-    throw new Error(`release smoke: ${assetPath} incorrectly returned HTML`);
-  }
-  if ((await asset.arrayBuffer()).byteLength === 0) {
-    throw new Error(`release smoke: ${assetPath} was empty`);
+  // EVERY referenced asset, not just the first one. This used to be a single non-global `.match()`,
+  // so it checked whichever /assets/ URL happened to come first in the emitted HTML — an ordering
+  // accident of Vite plugins and the PWA head injection, not a guarantee. The entry bundle could
+  // 404 while a stylesheet or a modulepreload passed in its place, which is a green release that
+  // serves a blank dashboard. web/package.json's "//build" note records exactly that shape
+  // happening for real once (the Monaco chunk-404).
+  const assetPaths = [...new Set([...html.matchAll(/(?:src|href)=["'](\/assets\/[^"'?#]+)["']/gi)].map((m) => m[1]!))];
+  if (assetPaths.length === 0) {
+    throw new Error("release smoke: dashboard HTML did not reference a built asset");
   }
 
-  console.log(`✓ release bundle served health, dashboard, and ${assetPath}`);
+  // The entry module specifically: everything else can be present and correct while the one script
+  // that actually boots the app is missing, and the page still returns 200 with a valid shell.
+  // Matched over the whole tag rather than a fixed attribute order, because that order is Vite's to
+  // change.
+  const hasEntryModule = [...html.matchAll(/<script\b[^>]*>/gi)].some(
+    (m) => /type=["']module["']/i.test(m[0]) && /src=["']\/assets\//i.test(m[0]),
+  );
+  if (!hasEntryModule) {
+    throw new Error("release smoke: dashboard HTML has no <script type=module src=/assets/…> entry");
+  }
+
+  for (const assetPath of assetPaths) {
+    const asset = await waitFor(`${origin}${assetPath}`, child);
+    const contentType = asset.headers.get("content-type") ?? "";
+    if (contentType.includes("text/html")) {
+      throw new Error(`release smoke: ${assetPath} incorrectly returned HTML`);
+    }
+    if ((await asset.arrayBuffer()).byteLength === 0) {
+      throw new Error(`release smoke: ${assetPath} was empty`);
+    }
+  }
+
+  console.log(
+    `✓ release bundle served health, dashboard, and all ${assetPaths.length} referenced asset(s)`,
+  );
 } finally {
   child.kill();
   await Promise.race([child.exited, Bun.sleep(5_000)]);
