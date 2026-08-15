@@ -116,6 +116,24 @@ describe("ViewOptions rows", () => {
     w.unmount();
   });
 
+  it("shows a disabled row's reason as READ-ABLE text, not just a hover title", async () => {
+    // The reason used to live only in the `title` attribute. Every row in the changed-files menu
+    // is disabled until "Diff statistics" is switched on — which ships OFF — so the whole popover
+    // could be inert while looking like a menu that just ignored clicks. textContent, not
+    // innerHTML: an attribute would satisfy innerHTML and leave the bug exactly where it was.
+    const w = await open();
+    expect(document.body.textContent).toContain("needs stats");
+    w.unmount();
+  });
+
+  it("does not print a reason under an ENABLED row", async () => {
+    const w = await open();
+    // "why it exists" is the enabled row's `hint`, which stays a hover title — otherwise every
+    // menu turns into a wall of explanatory paragraphs.
+    expect(document.body.textContent).not.toContain("why it exists");
+    w.unmount();
+  });
+
   it("carries each row's explanatory hint, so moving it out of Settings loses no words", async () => {
     const w = await open();
     expect(document.body.innerHTML).toContain("why it exists");

@@ -104,9 +104,12 @@ const emit = defineEmits<{
       <div
         v-for="row in rows"
         :key="row.key"
-        class="flex min-h-7 items-center justify-between gap-3 rounded-sm px-2 py-1"
-        :class="row.disabled && 'opacity-45'"
+        class="rounded-sm px-2 py-1"
         :title="row.disabled ? row.disabledHint : row.hint"
+      >
+      <div
+        class="flex min-h-7 items-center justify-between gap-3"
+        :class="row.disabled && 'opacity-45'"
       >
         <span class="min-w-0 text-[12.5px] text-foreground">{{ row.label }}</span>
         <Switch
@@ -140,6 +143,18 @@ const emit = defineEmits<{
             {{ choice.label }}
           </button>
         </div>
+      </div>
+        <!-- A disabled row's REASON, rendered inline rather than left in the `title` above.
+             It used to be hover-only, so the whole menu could be inert (every row here needs
+             "Diff statistics" on, and that ships OFF) while looking like an ordinary menu that
+             simply ignored you — the switch is greyed 45%, which is easy to miss, and a native
+             tooltip needs a second of hover on a control nobody suspects. Saying it in the menu
+             is the difference between "this is broken" and "here is the switch to turn on".
+             NOT shown at full opacity's sibling: the dim belongs to the control, the reason must
+             stay readable. -->
+        <p v-if="row.disabled && row.disabledHint" class="pt-0.5 text-[11px] text-muted-foreground">
+          {{ row.disabledHint }}
+        </p>
       </div>
     </PopoverContent>
   </Popover>
