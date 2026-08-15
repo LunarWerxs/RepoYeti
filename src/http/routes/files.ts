@@ -18,6 +18,8 @@ import {
   stageFile,
   addToGitignore,
   getChanges,
+  listRepoTree,
+  searchRepoTree,
   searchChangedContent,
   listConflicts,
   readConflictFile,
@@ -131,6 +133,33 @@ export function register(app: Hono, { cfg }: Deps): void {
     if (result.ok)
       return c.json({ files: result.files ?? [], total: result.total, truncated: result.truncated });
     return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not read changes");
+  });
+
+  // One directory level of the working tree, for the file panel's "All files" browse mode.
+  // ?path=… selects the directory (absent/empty = repo root). Deliberately one level per call —
+  // see src/service/tree.ts for why a recursive listing is not on the table.
+  app.get("/api/repos/:id/tree", async (c) => {
+    const id = requireId(c);
+    if (id instanceof Response) return id;
+    const result = await listRepoTree(id, c.req.query("path") ?? "");
+    if (result.ok)
+      return c.json({
+        path: result.path ?? "",
+        entries: result.entries ?? [],
+        total: result.total,
+        truncated: result.truncated,
+      });
+    return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not list directory");
+  });
+
+  // Path search across the WHOLE working tree, for the "All files" mode's search box. Bounded
+  // by a result cap and a wall-clock budget — see src/service/tree.ts.
+  app.get("/api/repos/:id/tree-search", async (c) => {
+    const id = requireId(c);
+    if (id instanceof Response) return id;
+    const result = await searchRepoTree(id, c.req.query("q") ?? "");
+    if (result.ok) return c.json({ entries: result.entries ?? [], truncated: result.truncated });
+    return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not search files");
   });
 
   // Read one changed file's contents for the read-only viewer drawer. Path is a query

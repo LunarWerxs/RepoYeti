@@ -384,6 +384,17 @@
       "optCharsHint": "Show the added/removed CHARACTER totals alongside the line totals in the Changes list. Off leaves the line counts alone; the exact character figures stay on each row’s hover tooltip either way.",
       "clearSelectionCount": "Clear selection (1 file) | Clear selection ({n} files)"
     },
+    "files": {
+      "showAll": "Browse all files",
+      "showChanges": "Back to changed files",
+      "reload": "Reload the file tree",
+      "loading": "Loading files…",
+      "empty": "This folder is empty",
+      "searchPlaceholder": "Find a file anywhere in this repo…",
+      "searchNoMatch": "No files match",
+      "searchTruncated": "Showing the first {shown} matches — narrow the search to see more",
+      "truncated": "Showing {shown} of {total} entries in this folder"
+    },
     "collapse": "Collapse",
     "diffStat": {
       "lines": "{added} added, {removed} removed lines",

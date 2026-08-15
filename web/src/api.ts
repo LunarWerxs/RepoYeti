@@ -41,6 +41,7 @@ import type {
   PendingApproval,
   Repo,
   RepoStatus,
+  RepoTreeEntry,
   ResolvedRepoAccount,
   Share,
   ShareCreated,
@@ -776,6 +777,25 @@ export const api = {
     req<{ files: ChangedFile[]; total?: number; truncated?: boolean }>(
       "GET",
       `/api/repos/${id}/changes${opts.all ? "?all=1" : ""}`,
+    ),
+  /** ONE directory level of the working tree, for the file panel's "All files" browse mode.
+   *  `path` is repo-relative; "" lists the root. Lazy by design — a whole-repo listing is
+   *  hundreds of thousands of entries once ignored paths are included (see src/service/tree.ts). */
+  tree: (id: string, path = "", signal?: AbortSignal) =>
+    req<{ path: string; entries: RepoTreeEntry[]; total?: number; truncated?: boolean }>(
+      "GET",
+      `/api/repos/${id}/tree${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+      undefined,
+      signal,
+    ),
+  /** Paths anywhere in the working tree matching `q`. Pass an AbortSignal so a superseded
+   *  keystroke's walk can be cancelled — this one really does walk the disk. */
+  treeSearch: (id: string, q: string, signal?: AbortSignal) =>
+    req<{ entries: RepoTreeEntry[]; truncated?: boolean }>(
+      "GET",
+      `/api/repos/${id}/tree-search?q=${encodeURIComponent(q)}`,
+      undefined,
+      signal,
     ),
   fileContent: (id: string, path: string, ref?: "work" | "head", signal?: AbortSignal) =>
     req<FileContent>(

@@ -207,6 +207,15 @@ export interface ChangedFile {
   resolved?: boolean;
 }
 
+/** One entry from `/api/repos/:id/tree` — the "All files" browse mode's lazy directory listing
+ *  (mirrors src/service/tree.ts). Carries no git status: these are files on disk, changed or not. */
+export interface RepoTreeEntry {
+  name: string;
+  /** Repo-relative, forward slashes — the same shape the file-viewer's `path` accepts. */
+  path: string;
+  type: "dir" | "file";
+}
+
 export interface TreeNode {
   name: string;
   path: string;

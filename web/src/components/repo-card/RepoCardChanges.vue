@@ -5,7 +5,7 @@
 // and the store, and runs its own git ops (discard) keyed by repo.id.
 import { computed, ref, useTemplateRef, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import { AlertTriangle, Check, ChevronsDownUp, ChevronsUpDown, Cloud, CloudOff, FileSearch, GripHorizontal, List, ListTree, ListX, Loader2, RefreshCw, Search, X } from "@lucide/vue";
+import { AlertTriangle, Check, ChevronsDownUp, ChevronsUpDown, Cloud, CloudOff, FileSearch, FolderTree, GitCompareArrows, GripHorizontal, List, ListTree, ListX, Loader2, RefreshCw, Search, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
@@ -24,13 +24,17 @@ import {
   hasChangesOverride,
   changesDisplayMode,
   setChangesDisplayMode,
+  changesPanelMode,
+  setChangesPanelMode,
   MIN_CHANGES_PX,
 } from "@/lib/changes-view";
+import { provideFileBrowser } from "@/lib/file-browser";
 import { shortcutsActive } from "@/lib/hotkeys";
 import { releasedHeight, useGripDrag, useGripGlide } from "@/lib/grip-drag";
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import ViewOptions, { type ViewOptionRow } from "@/components/ui/ViewOptions.vue";
 import ChangesTree from "../ChangesTree.vue";
+import RepoFileTree from "../RepoFileTree.vue";
 import BranchPanel from "../BranchPanel.vue";
 import RepoCardMenu from "./RepoCardMenu.vue";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
@@ -44,7 +48,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import type { Repo, TreeNode } from "../../types";
+import type { Repo, RepoTreeEntry, TreeNode } from "../../types";
 
 const props = defineProps<{ repo: Repo }>();
 const store = useStore();
@@ -179,6 +183,100 @@ function flattenLeaves(nodes: TreeNode[], acc: TreeNode[] = []): TreeNode[] {
   }
   return acc;
 }
+
+// ── changes ⇄ all-files panel (per-repo, persisted; see @/lib/changes-view) ───
+// "All files" swaps the changed-file list for a lazy browser over the whole working tree. It is
+// deliberately NOT gated on the repo being dirty: a clean repo is exactly when you want to read
+// the code, so its toggle sits in the always-visible header row rather than inside the
+// dirty-gated changes section.
+const panelMode = computed(() => changesPanelMode(props.repo.id));
+const isBrowsing = computed(() => panelMode.value === "all");
+const browser = provideFileBrowser(props.repo.id);
+function togglePanelMode(): void {
+  setChangesPanelMode(props.repo.id, isBrowsing.value ? "changes" : "all");
+}
+// The root listing is fetched on first switch, not on mount — a card that never browses never
+// costs a request. Re-entering reuses whatever is already cached (reload is the toolbar's job).
+watch(
+  isBrowsing,
+  (browsing) => {
+    if (browsing && !browser.dirs.has("")) void browser.load("");
+  },
+  { immediate: true },
+);
+// Status letters for files that are ALSO changed, so browsing never loses that signal.
+const changedByPath = computed(
+  () => new Map((store.changesByRepo[props.repo.id] ?? []).map((f) => [f.path, f])),
+);
+
+// ── all-files search ─────────────────────────────────────────────────────────
+// Server-side on purpose. Filtering only the folders already expanded would look like it
+// searched the repository and quietly not have — and the whole tree is 200k+ paths, so it is
+// never all in the client. Same debounce/abort/kill-timer shape as the changed-files content
+// search above, because this one really does walk the disk.
+const fileQuery = ref("");
+const fileResults = ref<RepoTreeEntry[] | null>(null);
+const fileSearchLoading = ref(false);
+const fileSearchTruncated = ref(false);
+const MIN_FILE_SEARCH = 2;
+let fileSearchAbort: AbortController | null = null;
+let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function runFileSearch(): void {
+  const ctrl = new AbortController();
+  fileSearchAbort = ctrl;
+  const killTimer = setTimeout(() => ctrl.abort(), 10_000);
+  api
+    .treeSearch(props.repo.id, fileQuery.value.trim(), ctrl.signal)
+    .then((res) => {
+      if (ctrl.signal.aborted) return;
+      fileResults.value = res.entries ?? [];
+      fileSearchTruncated.value = res.truncated === true;
+    })
+    .catch(() => {
+      if (!ctrl.signal.aborted) {
+        fileResults.value = [];
+        fileSearchTruncated.value = false;
+      }
+    })
+    .finally(() => {
+      clearTimeout(killTimer);
+      if (fileSearchAbort === ctrl) {
+        fileSearchLoading.value = false;
+        fileSearchAbort = null;
+      }
+    });
+}
+
+watch(fileQuery, () => {
+  if (fileSearchTimer) clearTimeout(fileSearchTimer);
+  fileSearchAbort?.abort();
+  fileSearchAbort = null;
+  if (fileQuery.value.trim().length < MIN_FILE_SEARCH) {
+    // Back to the tree — null (not []) is what tells RepoFileTree it is not in results mode.
+    fileResults.value = null;
+    fileSearchTruncated.value = false;
+    fileSearchLoading.value = false;
+    return;
+  }
+  fileSearchLoading.value = true;
+  fileSearchTimer = setTimeout(runFileSearch, 220);
+});
+
+function clearFileSearch(): void {
+  fileQuery.value = "";
+}
+
+/** A folder result: drop the query and open the tree down to it. */
+async function goToFolder(entry: RepoTreeEntry): Promise<void> {
+  clearFileSearch();
+  await browser.revealPath(entry.path, entry.type);
+}
+
+onBeforeUnmount(() => {
+  if (fileSearchTimer) clearTimeout(fileSearchTimer);
+  fileSearchAbort?.abort();
+});
 
 // ── changed-files search ──────────────────────────────────────────────────────
 // Filename filtering is instant + local. The "Search content" toggle additionally greps
@@ -522,6 +620,34 @@ async function onCopyPath(path: string): Promise<void> {
     >
       {{ repo.absPath }}
     </div>
+    <!-- changes ⇄ all-files. Lives HERE, in the always-rendered header row, rather than in the
+         changed-files toolbar below: that toolbar only exists while the repo is dirty, and a
+         clean repo is precisely when you want to browse the code. Shows the icon of the mode
+         you'd switch TO, matching the tree ⇄ list button's convention.
+
+         Owner-only, matching the route: GET /api/repos/:id/tree is in policy.ts's OWNER_ONLY
+         list because enumerating a working tree (ignored paths included) is a bigger capability
+         than reading one named file. Rendering the button for a guest would only offer them a
+         403. -->
+    <Tooltip v-if="!store.isGuest">
+      <TooltipTrigger as-child>
+        <button
+          type="button"
+          role="switch"
+          :aria-checked="isBrowsing"
+          class="flex size-6 shrink-0 items-center justify-center rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40"
+          :class="isBrowsing ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'"
+          :aria-label="isBrowsing ? $t('repo.files.showChanges') : $t('repo.files.showAll')"
+          :title="tooltipsEnabled ? undefined : (isBrowsing ? $t('repo.files.showChanges') : $t('repo.files.showAll'))"
+          @click="togglePanelMode"
+        >
+          <component :is="isBrowsing ? GitCompareArrows : FolderTree" :size="14" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {{ isBrowsing ? $t("repo.files.showChanges") : $t("repo.files.showAll") }}
+      </TooltipContent>
+    </Tooltip>
     <!-- manual refresh (re-stat this repo) — immediately left of the remote-presence cloud icon -->
     <Tooltip>
       <TooltipTrigger as-child>
@@ -572,8 +698,92 @@ async function onCopyPath(path: string): Promise<void> {
     <span class="min-w-0 break-words">{{ st.error }}</span>
   </div>
 
+  <!-- ALL FILES: the whole working tree, ignored paths included, one folder fetched per open.
+       Reuses the changed-file panel's chrome (same border, same scroll viewport, same height
+       preset) so switching modes doesn't move the card around under the pointer. -->
+  <ExpandTransition :open="isBrowsing">
+    <div class="overflow-hidden rounded-md border border-border bg-background/40">
+      <div class="flex items-center gap-1.5 border-b border-border/40 px-1.5 py-1">
+        <div class="relative min-w-0 flex-1">
+          <Search
+            class="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <input
+            v-model="fileQuery"
+            type="text"
+            :placeholder="$t('repo.files.searchPlaceholder')"
+            :aria-label="$t('repo.files.searchPlaceholder')"
+            class="h-6 w-full rounded bg-transparent pr-8 pl-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
+          />
+          <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
+            <Loader2 v-if="fileSearchLoading" :size="13" class="animate-spin text-muted-foreground" />
+            <Tooltip v-else-if="fileQuery">
+              <TooltipTrigger as-child>
+                <button
+                  type="button"
+                  :aria-label="$t('repo.changes.searchClear')"
+                  :title="tooltipsEnabled ? undefined : $t('repo.changes.searchClear')"
+                  class="flex size-6 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                  @click="clearFileSearch"
+                >
+                  <X :size="12" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{{ $t("repo.changes.searchClear") }}</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              :aria-label="$t('repo.files.reload')"
+              :title="tooltipsEnabled ? undefined : $t('repo.files.reload')"
+              @click="browser.reset()"
+            >
+              <RefreshCw :size="13" :class="browser.busy() && 'animate-spin'" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("repo.files.reload") }}</TooltipContent>
+        </Tooltip>
+      </div>
+      <div class="changes-tree-viewport scroll-slim overflow-y-auto" :style="changesTreeStyle(repo.id)">
+        <div class="px-1 pt-0.5 pb-2.5">
+          <!-- A search that found nothing is its own state: the tree below would otherwise render
+               an empty list that reads like a broken panel. -->
+          <div
+            v-if="fileResults && !fileResults.length && !fileSearchLoading"
+            class="px-2.5 py-2 text-[12px] text-muted-foreground"
+          >
+            {{ $t("repo.files.searchNoMatch") }}
+          </div>
+          <RepoFileTree
+            v-else
+            :repo-id="repo.id"
+            :is-guest="store.isGuest"
+            :changed="changedByPath"
+            :results="fileResults"
+            @reveal="onReveal"
+            @editor="onEditor"
+            @copy-path="onCopyPath"
+            @go-to-folder="goToFolder"
+          />
+          <!-- The walk is capped and time-budgeted (see src/service/tree.ts), so say when the
+               answer is a head rather than letting it look complete. -->
+          <div
+            v-if="fileSearchTruncated"
+            class="px-2.5 py-1.5 text-[11.5px] text-warning/80"
+          >
+            {{ $t("repo.files.searchTruncated", { shown: fileResults?.length ?? 0 }) }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </ExpandTransition>
+
   <!-- changed-files tree (height from Settings preset; drag the grip to resize) -->
-  <ExpandTransition :open="!!(st && st.dirty > 0)">
+  <ExpandTransition :open="!!(st && st.dirty > 0 && !isBrowsing)">
   <div
     class="overflow-hidden rounded-md border border-border bg-background/40"
   >
@@ -817,7 +1027,7 @@ async function onCopyPath(path: string): Promise<void> {
   <!-- empty state: a clean working tree used to just collapse to nothing (felt broken/empty). Show
        a small "No changes" line instead. Complementary condition to the tree above, so exactly one
        shows; hidden while status is unknown or in an error state. -->
-  <ExpandTransition :open="!!(st && !st.error && st.dirty === 0)">
+  <ExpandTransition :open="!!(st && !st.error && st.dirty === 0 && !isBrowsing)">
     <div
       class="flex items-center gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-2 text-[12.5px] text-muted-foreground"
     >

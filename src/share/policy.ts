@@ -240,6 +240,15 @@ export const OWNER_ONLY: readonly string[] = [
   // tests/share-policy.test.ts) — a control guest can already pull, they just don't get the
   // preview. Move it to GUEST_ROUTES at `control` if that's ever wanted.
   "GET /api/repos/:id/incoming",
+  // Working-tree BROWSING ("All files" mode). Deliberately not a guest route, even though
+  // `GET /api/repos/:id/file` is: reading a path you were given is a different capability from
+  // enumerating the repository. This lists ignored paths too — which is the whole point of the
+  // mode, and also exactly where `.env` files, local credentials and build output live. A view
+  // share is "look at what I changed", not "walk my disk", so discovery stays with the owner.
+  "GET /api/repos/:id/tree",
+  // Same capability by a different door — a path search enumerates the tree just as surely as
+  // walking it, and a two-character query returns a slice of everything.
+  "GET /api/repos/:id/tree-search",
   "POST /api/repos/:id/discard",
   // Strictly more destructive than discard: it removes the file itself, and for an untracked
   // one there is no committed copy anywhere to get it back from. Same route also backs the

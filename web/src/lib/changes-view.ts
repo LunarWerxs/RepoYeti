@@ -73,6 +73,35 @@ export function setChangesDisplayMode(repoId: string, mode: ChangesDisplayMode):
   else delete displayModes.value[repoId];
 }
 
+// ── changes ⇄ all-files panel mode ────────────────────────────────────────────
+// The panel shows the CHANGED files by default. "All files" swaps in a lazy browser over the
+// whole working tree (RepoFileTree) — same card, same viewer, same icons, just no filter on
+// "did this change". Per-repo and browser-local, like the height and tree/list prefs above:
+// which repo you happen to be browsing is per-screen ergonomics, not a stated preference.
+//
+// Unlike those, this one is NOT gated on the repo being dirty — a clean repo is exactly when
+// you want to read the code, so the toggle lives outside the changed-files section entirely
+// (see RepoCardChanges.vue's header row).
+export type ChangesPanelMode = "changes" | "all";
+
+/** repoId → chosen panel. Absent = "changes" (the default). */
+const panelModes = useLocalStorage<Record<string, ChangesPanelMode>>(
+  "repoyeti:changesPanelMode",
+  {},
+);
+
+/** The card's current panel ("changes" unless the owner switched to browsing all files). */
+export function changesPanelMode(repoId: string): ChangesPanelMode {
+  return panelModes.value[repoId] === "all" ? "all" : "changes";
+}
+
+/** Set (or reset to the default) a card's panel. Storing "changes" drops the key, so the record
+ *  only ever holds the non-default choices — same tidiness rule as setChangesDisplayMode. */
+export function setChangesPanelMode(repoId: string, mode: ChangesPanelMode): void {
+  if (mode === "all") panelModes.value[repoId] = "all";
+  else delete panelModes.value[repoId];
+}
+
 // ── per-file change totals: how they render ───────────────────────────────────
 // Deliberately NOT here. `changesStatDisplay` (numbers vs bars) and `changesChars` (show the
 // character half) are DAEMON settings — see src/config.ts and store/settings.ts — not the
