@@ -4,6 +4,41 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.9] - 2026-08-14
+
+### Fixed
+
+- **A whitespace-only change is shown as a change.** Monaco's diff editor ignores leading and
+  trailing whitespace by default, which is a reasonable default for a code editor and the wrong one
+  for a git client: two lines differing only in trailing space were declared identical. The pane
+  then drew no highlights and collapsed nothing, so a file the changed-file row beside it called
+  `+1 -1` sat there side by side looking untouched. The list and the viewer disagreed about whether
+  the file had changed at all, and the viewer was the one lying. Trailing whitespace is a real edit
+  in this tool's world: it is exactly what a codemod leaves behind and what a formatter then
+  strips, so it gets shown.
+- **The diff pane waits for the diff instead of revealing the file un-diffed.** The viewer hides
+  itself until Monaco's diff worker returns its first result, because until then Monaco paints
+  precisely that: the whole file, nothing folded, nothing highlighted. But the safety net that
+  guarantees an eventual reveal was a flat 600ms, and on a large file or a loaded machine the worker
+  takes longer, so the net won the race and revealed the very state it existed to hide. The reveal
+  deadline and the diff deadline were sharing one number; they are not the same thing. The diff
+  event is the real signal and now gets 5s, with the timer back to being the failure path it was
+  meant to be. Where no listener could be attached no event is ever coming, so that case reveals
+  immediately rather than holding a blank pane.
+- **"Showing 2000 of 13350 changed files" is no longer a dead end.** The cap is right as a default:
+  it keeps the ordinary card render cheap and stops a mis-cloned repo producing a multi-megabyte
+  payload. It is wrong as a ceiling, because a repo-wide codemod genuinely does dirty that many
+  files. A "View all" now sits beside the notice and re-reads against a second, much higher bound
+  that still refuses a pathological tree. The choice is sticky per repo, so the automatic refresh
+  after a commit or a stage does not silently snap an expanded list back to the first 2000.
+
+### Internal
+
+- **The shared UI kit's MCP engine is re-synced.** A mechanical sync of the optional `initialize`
+  `instructions` field from lunarwerx-ui, which owns that code. Behaviour here is unchanged: this
+  server supplies no instructions, and the engine omits the field entirely rather than emitting it
+  empty, so the initialize result is byte-for-byte what it was.
+
 ## [0.20.8] - 2026-08-13
 
 ### Added
