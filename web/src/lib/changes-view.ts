@@ -102,6 +102,18 @@ export function setChangesPanelMode(repoId: string, mode: ChangesPanelMode): voi
   else delete panelModes.value[repoId];
 }
 
+/**
+ * Whether the "All files" search also looks inside gitignored paths. Off by default, and that
+ * default is the whole point: the TREE can afford to show `node_modules/` because a folder costs
+ * nothing until you open it, but a search has no such protection — one query flattens every
+ * vendored copy of a common filename into the results and buries the four you wanted. Browsing
+ * and searching want opposite defaults here, so they get them.
+ *
+ * Global rather than per-repo (unlike the panel mode above): this is a stated preference about
+ * how you search, not which repo you happen to be looking at.
+ */
+export const searchIgnoredFiles = useLocalStorage<boolean>("repoyeti:searchIgnoredFiles", false);
+
 // ── per-file change totals: how they render ───────────────────────────────────
 // Deliberately NOT here. `changesStatDisplay` (numbers vs bars) and `changesChars` (show the
 // character half) are DAEMON settings — see src/config.ts and store/settings.ts — not the

@@ -5,7 +5,7 @@
 // and the store, and runs its own git ops (discard) keyed by repo.id.
 import { computed, ref, useTemplateRef, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import { AlertTriangle, Check, ChevronsDownUp, ChevronsUpDown, Cloud, CloudOff, FileSearch, FolderTree, GitCompareArrows, GripHorizontal, List, ListTree, ListX, Loader2, RefreshCw, Search, X } from "@lucide/vue";
+import { AlertTriangle, Check, ChevronsDownUp, ChevronsUpDown, Cloud, CloudOff, EyeOff, FileSearch, FolderTree, GitCompareArrows, GripHorizontal, List, ListTree, ListX, Loader2, RefreshCw, Search, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
@@ -26,6 +26,7 @@ import {
   setChangesDisplayMode,
   changesPanelMode,
   setChangesPanelMode,
+  searchIgnoredFiles,
   MIN_CHANGES_PX,
 } from "@/lib/changes-view";
 import { provideFileBrowser } from "@/lib/file-browser";
@@ -218,6 +219,9 @@ const fileQuery = ref("");
 const fileResults = ref<RepoTreeEntry[] | null>(null);
 const fileSearchLoading = ref(false);
 const fileSearchTruncated = ref(false);
+// What the LAST result actually covered, which is not always what was asked (a repo with no git
+// to ask can only be walked). Drives the notice under the results.
+const fileSearchSawIgnored = ref(false);
 const MIN_FILE_SEARCH = 2;
 let fileSearchAbort: AbortController | null = null;
 let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -227,11 +231,17 @@ function runFileSearch(): void {
   fileSearchAbort = ctrl;
   const killTimer = setTimeout(() => ctrl.abort(), 10_000);
   api
-    .treeSearch(props.repo.id, fileQuery.value.trim(), ctrl.signal)
+    .treeSearch(
+      props.repo.id,
+      fileQuery.value.trim(),
+      { includeIgnored: searchIgnoredFiles.value },
+      ctrl.signal,
+    )
     .then((res) => {
       if (ctrl.signal.aborted) return;
       fileResults.value = res.entries ?? [];
       fileSearchTruncated.value = res.truncated === true;
+      fileSearchSawIgnored.value = res.ignoredIncluded === true;
     })
     .catch(() => {
       if (!ctrl.signal.aborted) {
@@ -248,7 +258,8 @@ function runFileSearch(): void {
     });
 }
 
-watch(fileQuery, () => {
+// Flipping the ignored switch re-runs the current query rather than making you retype it.
+watch([fileQuery, searchIgnoredFiles], () => {
   if (fileSearchTimer) clearTimeout(fileSearchTimer);
   fileSearchAbort?.abort();
   fileSearchAbort = null;
@@ -715,8 +726,8 @@ async function onCopyPath(path: string): Promise<void> {
             :aria-label="$t('repo.files.searchPlaceholder')"
             class="h-6 w-full rounded bg-transparent pr-8 pl-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
           />
-          <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center">
-            <Loader2 v-if="fileSearchLoading" :size="13" class="animate-spin text-muted-foreground" />
+          <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">
+            <Loader2 v-if="fileSearchLoading" :size="13" class="mr-1 animate-spin text-muted-foreground" />
             <Tooltip v-else-if="fileQuery">
               <TooltipTrigger as-child>
                 <button
@@ -730,6 +741,27 @@ async function onCopyPath(path: string): Promise<void> {
                 </button>
               </TooltipTrigger>
               <TooltipContent>{{ $t("repo.changes.searchClear") }}</TooltipContent>
+            </Tooltip>
+            <!-- Include gitignored paths. Off by default: the TREE can afford to show
+                 node_modules because a folder costs nothing until you open it, but a search has
+                 no such protection. Same right-cluster toggle shape as the changed-files
+                 "search inside files" button above. -->
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  type="button"
+                  role="checkbox"
+                  :aria-checked="searchIgnoredFiles"
+                  :aria-label="$t('repo.files.searchIgnored')"
+                  :title="tooltipsEnabled ? undefined : $t('repo.files.searchIgnored')"
+                  class="flex size-6 items-center justify-center rounded outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40"
+                  :class="searchIgnoredFiles ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'"
+                  @click="searchIgnoredFiles = !searchIgnoredFiles"
+                >
+                  <EyeOff :size="13" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{{ $t("repo.files.searchIgnoredHint") }}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -757,6 +789,10 @@ async function onCopyPath(path: string): Promise<void> {
             class="px-2.5 py-2 text-[12px] text-muted-foreground"
           >
             {{ $t("repo.files.searchNoMatch") }}
+            <!-- The likeliest reason a search came back empty here: the thing you wanted is
+                 gitignored, and the default does not look there. Say so instead of leaving the
+                 switch to be discovered. -->
+            <span v-if="!fileSearchSawIgnored">{{ $t("repo.files.searchNoMatchIgnoredHint") }}</span>
           </div>
           <RepoFileTree
             v-else

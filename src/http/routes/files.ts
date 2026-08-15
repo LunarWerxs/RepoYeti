@@ -157,8 +157,16 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/repos/:id/tree-search", async (c) => {
     const id = requireId(c);
     if (id instanceof Response) return id;
-    const result = await searchRepoTree(id, c.req.query("q") ?? "");
-    if (result.ok) return c.json({ entries: result.entries ?? [], truncated: result.truncated });
+    // ?ignored=1 opts back into gitignored paths. Absent = the cheap, exact, git-answered set.
+    const result = await searchRepoTree(id, c.req.query("q") ?? "", {
+      includeIgnored: c.req.query("ignored") === "1",
+    });
+    if (result.ok)
+      return c.json({
+        entries: result.entries ?? [],
+        truncated: result.truncated,
+        ignoredIncluded: result.ignoredIncluded,
+      });
     return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not search files");
   });
 

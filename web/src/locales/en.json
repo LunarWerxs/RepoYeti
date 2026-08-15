@@ -392,6 +392,9 @@
       "empty": "This folder is empty",
       "searchPlaceholder": "Find a file anywhere in this repo…",
       "searchNoMatch": "No files match",
+      "searchNoMatchIgnoredHint": "Ignored files aren’t searched — turn them on to look there too.",
+      "searchIgnored": "Include ignored files",
+      "searchIgnoredHint": "Search inside gitignored paths too (node_modules, dist, build output). Off by default: one query would otherwise return every vendored copy of a common filename.",
       "searchTruncated": "Showing the first {shown} matches — narrow the search to see more",
       "truncated": "Showing {shown} of {total} entries in this folder"
     },

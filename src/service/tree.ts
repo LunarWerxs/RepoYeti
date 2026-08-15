@@ -22,6 +22,8 @@ import { readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getRepo } from "../db.ts";
 import { backendFor } from "../vcs/index.ts";
+import { gitFor } from "../git.ts";
+import { readGate } from "../gitgate.ts";
 import { normalizeRelPath, pathTouchesVcsMarker, pathWithin } from "../paths.ts";
 
 /** One entry in a listed directory. */
@@ -129,20 +131,29 @@ export async function listRepoTree(repoId: string, relPath = ""): Promise<RepoTr
 
 // ── search ───────────────────────────────────────────────────────────────────
 // A filter over only the folders you already expanded would be worse than no search at all: it
-// looks like it searched the repository and quietly didn't. So this walks the real tree.
+// looks like it searched the repository and quietly didn't. So this searches the real tree.
 //
-// Which means it must be bounded on BOTH axes, because the tree is not: 200,000+ files here.
-// Breadth-first, so shallow matches (nearly always the wanted ones) are found before the walk
-// reaches a vendored dependency tree, and both a result cap and a wall-clock budget can stop it
-// early without the top results changing.
+// TWO PATHS, because the two questions have different right answers:
+//   • ignored EXCLUDED (the default) — ask git. `ls-files --cached --others --exclude-standard`
+//     is that question, and it is both exact and far cheaper than walking.
+//   • ignored INCLUDED (opt-in) — walk the filesystem, because no index knows about the files
+//     git was told to forget. The tree itself is unbounded (200,000+ files in this checkout), so
+//     that walk is breadth-first and stopped by BOTH a result cap and a wall-clock budget, which
+//     lets it end early without the top results changing.
 
 export interface RepoTreeSearchResult {
   ok: boolean;
   code: "OK" | "NOT_FOUND" | "ERROR";
   message?: string;
   entries?: RepoTreeEntry[];
-  /** True when the walk stopped early (cap or time budget) — there may be more matches. */
+  /** True when the search stopped early (cap or time budget) — there may be more matches. */
   truncated?: boolean;
+  /**
+   * Whether ignored paths were actually searched. Usually just echoes the request, but a repo
+   * with no git to ask (a Lore working copy) can only be walked, and a walk sees everything. The
+   * client shows what really happened rather than what was asked for.
+   */
+  ignoredIncluded?: boolean;
 }
 
 /** Enough to choose from; far past the point where a longer query is the better move. */
@@ -154,20 +165,95 @@ export const TREE_SEARCH_BUDGET_MS = 3_000;
 export const MIN_TREE_SEARCH = 2;
 
 /**
- * Repo-relative paths matching `query` (literal, case-insensitive, matched against the whole
- * path so "src/api" works as well as "api"). Breadth-first and bounded; `truncated` says the
- * answer is a head rather than the whole set.
+ * The non-ignored path set, straight from git, or null when this repo has no git to ask.
  *
- * Like listRepoTree, deliberately outside the op queue and the git read gate: no git child is
- * spawned and no index is touched.
+ * `git ls-files --cached --others --exclude-standard` IS the question "what would I see if
+ * .gitignore were respected", answered by the tool that owns the answer. One subprocess, and on
+ * a large repo it is not close: 18,583 paths in 0.55s where walking the same checkout yields
+ * 200,000+ in 4.5s. So the default search is both the cheaper one and the exact one — no
+ * hand-rolled ignore matching to drift from git's real semantics (negations, nested .gitignore
+ * files, core.excludesFile, .git/info/exclude).
  */
-export async function searchRepoTree(repoId: string, query: string): Promise<RepoTreeSearchResult> {
+async function gitVisiblePaths(absPath: string): Promise<string[] | null> {
+  try {
+    // A git child, so it takes a read-gate slot like every other one. Called from an HTTP
+    // request, so it rides the foreground lane (see src/gitgate.ts).
+    const raw = await readGate.run(() =>
+      gitFor(absPath).raw(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]),
+    );
+    return raw.split("\0").filter((p) => p !== "");
+  } catch {
+    return null; // not a git working copy (Lore), or git refused — caller falls back to walking
+  }
+}
+
+/** Shallow paths first, then alphabetical: a capped answer should be the useful half. */
+function compareByDepth(a: string, b: string): number {
+  const da = a.split("/").length;
+  const db = b.split("/").length;
+  return da !== db ? da - db : a.localeCompare(b);
+}
+
+/**
+ * Repo-relative paths matching `query` (literal, case-insensitive, matched against the whole
+ * path so "src/api" works as well as "api"). Shallow matches first, and bounded; `truncated`
+ * says the answer is a head rather than the whole set.
+ *
+ * By default this searches only what git would show you — `dist/` and `node_modules/` are
+ * genuinely browsable in the tree, but a two-word query that returns four hundred vendored
+ * `tsconfig.json`s is not a search result, it is a haystack. `includeIgnored` opts back in.
+ *
+ * The ignored-excluded path asks git and takes a read-gate slot; the include-ignored path walks
+ * the filesystem itself and, like listRepoTree, stays outside the op queue and the gate.
+ */
+export async function searchRepoTree(
+  repoId: string,
+  query: string,
+  opts: { includeIgnored?: boolean } = {},
+): Promise<RepoTreeSearchResult> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
   const needle = query.trim().toLowerCase();
   if (needle.length < MIN_TREE_SEARCH) return { ok: true, code: "OK", entries: [] };
 
   const marker = backendFor(repo.vcs).marker;
+
+  if (!opts.includeIgnored) {
+    const visible = await gitVisiblePaths(repo.absPath);
+    if (visible) {
+      // ls-files reports FILES. Their ancestors are the directories, so derive those too —
+      // otherwise searching "components" finds every file inside it but never the folder.
+      const dirs = new Set<string>();
+      for (const p of visible) {
+        const parts = p.split("/");
+        for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
+      }
+      const files = visible
+        .filter((p) => p.toLowerCase().includes(needle) && !pathTouchesVcsMarker(p, marker))
+        .sort(compareByDepth);
+      const matchedDirs = [...dirs]
+        .filter((p) => p.toLowerCase().includes(needle) && !pathTouchesVcsMarker(p, marker))
+        .sort(compareByDepth);
+
+      const all: RepoTreeEntry[] = [
+        ...matchedDirs.map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), path: p, type: "dir" as const })),
+        ...files.map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), path: p, type: "file" as const })),
+      ];
+      if (all.length > MAX_TREE_SEARCH_RESULTS) {
+        return {
+          ok: true,
+          code: "OK",
+          entries: all.slice(0, MAX_TREE_SEARCH_RESULTS),
+          truncated: true,
+          ignoredIncluded: false,
+        };
+      }
+      return { ok: true, code: "OK", entries: all, truncated: false, ignoredIncluded: false };
+    }
+    // No git to ask (a Lore working copy): fall through and walk. The result then includes
+    // ignored paths, which is why the client is told what actually happened — see `ignoredIncluded`.
+  }
+
   const deadline = Date.now() + TREE_SEARCH_BUDGET_MS;
   const entries: RepoTreeEntry[] = [];
   let truncated = false;
@@ -202,5 +288,7 @@ export async function searchRepoTree(repoId: string, query: string): Promise<Rep
     }
   }
 
-  return { ok: true, code: "OK", entries, truncated };
+  // A walk sees everything on disk, so this branch always searched ignored paths — whether it
+  // was asked to or only fell here because there was no git to ask.
+  return { ok: true, code: "OK", entries, truncated, ignoredIncluded: true };
 }

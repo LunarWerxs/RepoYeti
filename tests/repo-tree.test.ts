@@ -193,7 +193,7 @@ test("finds a path anywhere in the tree, not just in loaded folders", async () =
   writeFileSync(join(dir, "other.ts"), "x");
   const id = mustUpsertRepo(dir, "repo", "auto", false);
 
-  const res = await searchRepoTree(id, "needle");
+  const res = await searchRepoTree(id, "needle", { includeIgnored: true });
 
   expect(res.ok).toBe(true);
   expect(res.entries?.map((e) => e.path)).toEqual(["a/b/c/needle.ts"]);
@@ -213,16 +213,66 @@ test("matches the whole path, case-insensitively, and returns folders too", asyn
   expect(byName.entries?.map((e) => e.path)).toContain("src/Api/routes.ts");
 });
 
-test("searches ignored paths too — same reason the listing does", async () => {
+// The default deliberately DIFFERS from the listing's: a folder in the tree costs nothing until
+// you open it, but a search has no such protection — one query would otherwise flatten every
+// vendored copy of a common filename into the results.
+test("skips gitignored paths by default, and finds them when asked", async () => {
   const dir = await gitRepo();
   writeFileSync(join(dir, ".gitignore"), "dist/\n");
   mkdirSync(join(dir, "dist"));
   writeFileSync(join(dir, "dist", "bundle.js"), "x");
+  writeFileSync(join(dir, "bundle.ts"), "x"); // NOT ignored
   const id = mustUpsertRepo(dir, "repo", "auto", false);
 
-  expect((await searchRepoTree(id, "bundle")).entries?.map((e) => e.path)).toEqual([
-    "dist/bundle.js",
-  ]);
+  const def = await searchRepoTree(id, "bundle");
+  expect(def.entries?.map((e) => e.path)).toEqual(["bundle.ts"]);
+  expect(def.ignoredIncluded).toBe(false);
+
+  const all = await searchRepoTree(id, "bundle", { includeIgnored: true });
+  expect(all.entries?.map((e) => e.path).sort()).toEqual(["bundle.ts", "dist/bundle.js"]);
+  expect(all.ignoredIncluded).toBe(true);
+});
+
+test("the default honours real gitignore semantics, negations included", async () => {
+  const dir = await gitRepo();
+  // `logs/*`, NOT `logs/` — git cannot re-include a file whose parent DIRECTORY is excluded, so
+  // the negation only bites when the contents are excluded rather than the folder. That rule is
+  // precisely the kind a hand-rolled matcher gets wrong, which is why git is asked instead.
+  writeFileSync(join(dir, ".gitignore"), "logs/*\n!logs/keep.log\n");
+  mkdirSync(join(dir, "logs"));
+  writeFileSync(join(dir, "logs", "drop.log"), "x");
+  writeFileSync(join(dir, "logs", "keep.log"), "x");
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+
+  const paths = (await searchRepoTree(id, ".log")).entries?.map((e) => e.path) ?? [];
+
+  expect(paths).toContain("logs/keep.log");
+  expect(paths).not.toContain("logs/drop.log");
+});
+
+test("the default still returns matching FOLDERS, derived from the file set", async () => {
+  const dir = await gitRepo();
+  mkdirSync(join(dir, "src", "components"), { recursive: true });
+  writeFileSync(join(dir, "src", "components", "Button.vue"), "x");
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+
+  const res = await searchRepoTree(id, "components");
+
+  // `git ls-files` reports files only; without deriving ancestors, searching a folder name would
+  // find everything inside it and never the folder itself.
+  const folder = res.entries?.find((e) => e.path === "src/components");
+  expect(folder?.type).toBe("dir");
+});
+
+test("the default never leaks the VCS metadata directory either", async () => {
+  const dir = await gitRepo();
+  writeFileSync(join(dir, "a.txt"), "x");
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+
+  for (const q of ["config", "HEAD", "git"]) {
+    const res = await searchRepoTree(id, q);
+    expect(res.entries?.some((e) => e.path.toLowerCase().split("/").includes(".git"))).toBe(false);
+  }
 });
 
 test("never returns anything inside the VCS metadata directory", async () => {

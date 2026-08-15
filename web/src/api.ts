@@ -788,12 +788,19 @@ export const api = {
       undefined,
       signal,
     ),
-  /** Paths anywhere in the working tree matching `q`. Pass an AbortSignal so a superseded
-   *  keystroke's walk can be cancelled — this one really does walk the disk. */
-  treeSearch: (id: string, q: string, signal?: AbortSignal) =>
-    req<{ entries: RepoTreeEntry[]; truncated?: boolean }>(
+  /** Paths anywhere in the working tree matching `q`. Gitignored paths are excluded unless
+   *  `includeIgnored` — that variant really does walk the disk, hence the AbortSignal so a
+   *  superseded keystroke can cancel it. `ignoredIncluded` reports what was ACTUALLY searched
+   *  (a repo with no git to ask can only be walked, and a walk sees everything). */
+  treeSearch: (
+    id: string,
+    q: string,
+    opts: { includeIgnored?: boolean } = {},
+    signal?: AbortSignal,
+  ) =>
+    req<{ entries: RepoTreeEntry[]; truncated?: boolean; ignoredIncluded?: boolean }>(
       "GET",
-      `/api/repos/${id}/tree-search?q=${encodeURIComponent(q)}`,
+      `/api/repos/${id}/tree-search?q=${encodeURIComponent(q)}${opts.includeIgnored ? "&ignored=1" : ""}`,
       undefined,
       signal,
     ),

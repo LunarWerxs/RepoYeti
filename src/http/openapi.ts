@@ -181,7 +181,8 @@ export const META: Record<string, RouteMeta> = {
     tags: ["files"],
   },
   "GET /api/repos/:id/tree-search": {
-    summary: "Find paths anywhere in a repo's working tree (?q=). Bounded by a cap + time budget.",
+    summary:
+      "Find paths anywhere in a repo's working tree (?q=; ?ignored=1 to include gitignored ones). Bounded by a cap + time budget.",
     tags: ["files"],
   },
   "GET /api/repos/:id/file": {

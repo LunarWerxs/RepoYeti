@@ -7,6 +7,7 @@ import {
   clearChangesOverride,
   hasChangesOverride,
   MIN_CHANGES_PX,
+  searchIgnoredFiles,
   setChangesOverride,
   setChangesPanelMode,
 } from "@/lib/changes-view";
@@ -72,6 +73,12 @@ describe("changes ⇄ all-files panel mode", () => {
 
     expect(changesPanelMode(a)).toBe("all");
     expect(changesPanelMode(b)).toBe("changes");
+  });
+
+  it("does not search ignored files by default", () => {
+    // Deliberately the OPPOSITE default from the tree, which happily lists node_modules: a
+    // folder costs nothing until opened, a search result costs you the whole haystack.
+    expect(searchIgnoredFiles.value).toBe(false);
   });
 
   it("persists only the non-default choice, so the store stays tidy", async () => {
