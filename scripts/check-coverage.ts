@@ -191,19 +191,33 @@ if (import.meta.main) {
     rmSync(coverageRoot, { recursive: true, force: true });
   }
 } else {
-  const { out, exitCode } = await runSuite(baseArgs);
-  if (exitCode !== 0) {
-    console.error("✗ tests failed — see above");
-    process.exit(exitCode || 1);
+  // Ask for lcov alongside the text table. The percentage still comes from the table (that is the
+  // single-pass number the floor was calibrated against); lcov is what gives the untested-file
+  // ratchet its per-file rows, which the table does not carry. Linux has emitted both all along.
+  const coverageDir = mkdtempSync(join(tmpdir(), "repoyeti-coverage-"));
+  try {
+    const { out, exitCode } = await runSuite([
+      ...baseArgs,
+      "--coverage-reporter=text",
+      "--coverage-reporter=lcov",
+      `--coverage-dir=${coverageDir}`,
+    ]);
+    if (exitCode !== 0) {
+      console.error("✗ tests failed — see above");
+      process.exit(exitCode || 1);
+    }
+    // Coverage table footer: " All files | <% funcs> | <% lines> | ..."
+    const match = out.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
+    if (!match) {
+      console.error("✗ could not parse the coverage summary (no 'All files' row)");
+      process.exit(1);
+    }
+    lineCoverage = parseFloat(match[2]!);
+    minimumCoverage = MIN_TEXT_LINE_COVERAGE;
+    untestedReport = ratchetUntested([readFileSync(join(coverageDir, "lcov.info"), "utf8")]);
+  } finally {
+    rmSync(coverageDir, { recursive: true, force: true });
   }
-  // Coverage table footer: " All files | <% funcs> | <% lines> | ..."
-  const match = out.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
-  if (!match) {
-    console.error("✗ could not parse the coverage summary (no 'All files' row)");
-    process.exit(1);
-  }
-  lineCoverage = parseFloat(match[2]!);
-  minimumCoverage = MIN_TEXT_LINE_COVERAGE;
 }
 
   if (lineCoverage < minimumCoverage) {
@@ -212,10 +226,13 @@ if (import.meta.main) {
   }
   console.log(`✓ overall line coverage ${lineCoverage.toFixed(2)}% ≥ ${minimumCoverage}% floor`);
 
-  // Runs on the Linux leg only, because that is the platform whose reporter already emits per-file
-  // LCOV. Windows/macOS gate on the text summary alone and are left untouched: re-plumbing the
-  // reporter on the path every CI job depends on, to catch a class the Linux leg already catches
-  // on every push, is not a trade worth making.
+  // Runs on ALL THREE platforms, against ONE shared allowlist. That is only safe because the
+  // untested set turns out to be platform-invariant here, which was measured rather than assumed:
+  // the Windows run and the Linux run name the same seven files, no false positives on either
+  // side. Had they diverged, one allowlist would have meant each platform allowlisting the other's
+  // covered files until the gate meant nothing. If a future file IS covered on one OS only, this
+  // will fail on the others and the divergence is the finding, not the ratchet misbehaving: the
+  // fix is a test that runs everywhere, not an allowlist entry.
   if (untestedReport?.bootstrap) {
     console.log(
       [
