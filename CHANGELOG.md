@@ -4,6 +4,42 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-08-15
+
+### Added
+
+- **Gitignored files and folders are dimmed in the All-files tree.** Browsing a working tree
+  without knowing which parts git is ignoring means reading `node_modules`, `cdk.out` and
+  `coverage` as if they were yours. Editors dim those rows; so does this now, files as well as
+  folders. The mark comes from `git check-ignore` rather than from pattern-matching here, because
+  gitignore is negations, nested ignore files, `core.excludesFile` and `info/exclude` evaluated in
+  a defined order, and a hand-rolled matcher gets the interesting cases wrong.
+- **A switch to keep "All files" on this machine only.** Settings, Remote access, beside the
+  existing editing one: it stops the working-tree browser working over the tunnel while leaving
+  loopback untouched. Its own switch rather than riding on the editing one, because it is a
+  different risk. Editing writes; this enumerates, ignored paths included, which is where `.env`
+  files and local credentials live. Being happy to read your diffs from a phone and being happy
+  for the tunnel to list every file on the machine are separate decisions. Defaults to enabled.
+  Share-link guests were never able to browse and still cannot: both routes are owner-only.
+
+### Changed
+
+- **The file search no longer returns every vendored copy of a filename.** Browsing and searching
+  want opposite defaults, and shipping one for both was wrong: the tree can afford to list
+  `node_modules` because a folder costs nothing until you open it, but a search has no such
+  protection, and "tsconfig" came back as forty vendored hits burying the four that were the
+  answer. Ignored paths are now excluded by default, with a toggle in the search box to opt back
+  in. The default asks git rather than walking, which is both exact and far cheaper: 18,583 paths
+  in 0.55s where walking the same checkout yields 200,000+ in 4.5s.
+
+### Fixed
+
+- **Every changelog release links to its diff again.** The reference at the foot of the file is
+  what turns a `## [0.21.0]` heading into a link, and nothing enforced it, so it lapsed silently
+  for seventeen consecutive releases. Backfilled, along with a reference pointing at a version
+  this file has no entry for and an `[Unreleased]` link still comparing from v0.15.2. A check now
+  fails the build rather than letting it rot again.
+
 ## [0.21.0] - 2026-08-15
 
 ### Added
@@ -1368,6 +1404,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
+[0.21.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.9...v0.21.0
 [0.20.9]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.8...v0.20.9
 [0.20.8]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.7...v0.20.8
