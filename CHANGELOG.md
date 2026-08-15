@@ -4,6 +4,32 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.2] - 2026-08-15
+
+### Fixed
+
+- **Refresh now reconciles the branch list, not just the status** ([#22]). Check out a different
+  branch outside RepoYeti, from a terminal or another Git client, press Refresh, and the card kept
+  showing the old branch while still offering branches that had been deleted. Only a full page
+  reload cleared it. The status read was never wrong: Refresh really did return the new branch. What
+  was missing is that nothing invalidated the cached branch list, and the selector renders the
+  cache. Reconciled at the one funnel every status update passes through, so the Refresh button,
+  an action's own response and the live event stream all behave identically. The trigger includes
+  the ref-set hash, which is what catches the half of the report that leaves the current branch
+  untouched: a branch deleted or updated elsewhere. Lists for cards nobody has opened are left
+  alone rather than re-read for a view no one is looking at.
+- **An installed PWA recovers by itself after the tunnel address rotates** ([#21]). Running mostly
+  from a phone, an unattended update brings the daemon back on a fresh Quick Tunnel hostname, and
+  opening the installed app showed a dead URL; the only way back was opening the permanent link in
+  a browser and reinstalling. The self-heal for this already existed, but only for a page still
+  running, and it assumed the service worker was serving a cached shell on the dead origin. It was
+  not: no shell is precached, deliberately, because a precached one used to leave a rebuilt tab
+  reloading into a stale build. Two correct decisions that combined into a bug, since a cold start
+  then failed at the network before any code ran. A failed navigation now falls back to a tiny
+  standalone page that asks the permanent address where the daemon went and goes there. It
+  references no build assets, so it cannot go stale the way the app shell could, and it only ever
+  appears when a navigation genuinely failed.
+
 ## [0.21.1] - 2026-08-15
 
 ### Added
@@ -1404,6 +1430,9 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
+[#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
+[#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[0.21.2]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.9...v0.21.0
 [0.20.9]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.8...v0.20.9
