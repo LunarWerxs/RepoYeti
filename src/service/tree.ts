@@ -22,7 +22,7 @@ import { readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getRepo } from "../db.ts";
 import { backendFor } from "../vcs/index.ts";
-import { gitFor } from "../git.ts";
+import { gitFor, safeGitEnv } from "../git.ts";
 import { readGate } from "../gitgate.ts";
 import { normalizeRelPath, pathTouchesVcsMarker, pathWithin } from "../paths.ts";
 
@@ -32,6 +32,12 @@ export interface RepoTreeEntry {
   /** Repo-relative, forward slashes — the same path shape `/api/repos/:id/file` accepts. */
   path: string;
   type: "dir" | "file";
+  /**
+   * True when git is ignoring this path. Present only on directory listings (the panel dims
+   * them, the way an editor's explorer does); absent on search results, where the default
+   * already excludes ignored paths and the opt-in mode is explicitly asking for them.
+   */
+  ignored?: boolean;
 }
 
 export interface RepoTreeResult {
@@ -53,6 +59,40 @@ export interface RepoTreeResult {
  * Far above any hand-authored directory, so a real source folder is never clipped.
  */
 export const MAX_TREE_ENTRIES = 5_000;
+
+/**
+ * Which of `paths` git is ignoring, as a Set. Empty when there is no git to ask.
+ *
+ * `git check-ignore` is the only correct answer here: gitignore is not a glob list, it is
+ * negations, nested .gitignore files, core.excludesFile and .git/info/exclude, evaluated in a
+ * defined order. One process per directory listing, ~0.17s measured on a large repo, which is
+ * why this marks a listing rather than being consulted per entry.
+ *
+ * Paths go in over stdin, NUL-separated, so neither a directory of 5,000 entries nor a filename
+ * containing a space, a quote or a newline can break the call — as arguments, the first would
+ * exceed the Windows command-line limit and the second would be re-split.
+ */
+async function ignoredAmong(absPath: string, paths: string[]): Promise<Set<string>> {
+  if (paths.length === 0) return new Set();
+  try {
+    return await readGate.run(async () => {
+      const proc = Bun.spawn(["git", "check-ignore", "-z", "--stdin"], {
+        cwd: absPath,
+        env: safeGitEnv(),
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      proc.stdin.write(paths.join("\0"));
+      await proc.stdin.end();
+      const out = await new Response(proc.stdout).text();
+      await proc.exited; // exit 1 simply means "none of them are ignored"
+      return new Set(out.split("\0").filter((p) => p !== ""));
+    });
+  } catch {
+    return new Set(); // not a git working copy, or git refused — nothing gets dimmed
+  }
+}
 
 /** Directories first, then files; each case-insensitive alphabetical, with a case-sensitive
  *  tiebreak so the order is total (two names differing only in case must not compare equal). */
@@ -116,17 +156,24 @@ export async function listRepoTree(repoId: string, relPath = ""): Promise<RepoTr
   }
   entries.sort(compareEntries);
 
-  if (entries.length > MAX_TREE_ENTRIES) {
-    return {
-      ok: true,
-      code: "OK",
-      path: clean,
-      entries: entries.slice(0, MAX_TREE_ENTRIES),
-      total: entries.length,
-      truncated: true,
-    };
+  // Cap FIRST, then ask git about exactly the rows that ship. Marking the full set would pay for
+  // up to 5,000 paths nobody will see, and the two lists must not be able to disagree.
+  const truncated = entries.length > MAX_TREE_ENTRIES;
+  const shipped = truncated ? entries.slice(0, MAX_TREE_ENTRIES) : entries;
+
+  // What git is ignoring, so the panel can dim it the way an editor's explorer does.
+  const ignored = await ignoredAmong(
+    repo.absPath,
+    shipped.map((e) => e.path),
+  );
+  for (const e of shipped) {
+    if (ignored.has(e.path)) e.ignored = true;
   }
-  return { ok: true, code: "OK", path: clean, entries, total: entries.length };
+
+  if (truncated) {
+    return { ok: true, code: "OK", path: clean, entries: shipped, total: entries.length, truncated: true };
+  }
+  return { ok: true, code: "OK", path: clean, entries: shipped, total: entries.length };
 }
 
 // ── search ───────────────────────────────────────────────────────────────────

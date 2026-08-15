@@ -121,7 +121,7 @@ async function open(entry: RepoTreeEntry): Promise<void> {
         class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
         :style="{ paddingLeft: (searching ? 8 : depth * 14 + 8) + 'px' }"
         :aria-expanded="searching ? undefined : browser.isOpen(n.path)"
-        :title="n.path"
+        :title="n.ignored ? $t('repo.files.ignoredTitle', { path: n.path }) : n.path"
         @click="searching ? emit('goToFolder', n) : browser.toggle(n.path)"
       >
         <ChevronRight
@@ -130,8 +130,8 @@ async function open(entry: RepoTreeEntry): Promise<void> {
           class="shrink-0 text-muted-foreground transition-transform"
           :class="browser.isOpen(n.path) && 'rotate-90'"
         />
-        <component :is="iconFor(n)" class="shrink-0 text-[15px]" />
-        <span class="truncate text-[#cfcfd8]">
+        <component :is="iconFor(n)" class="shrink-0 text-[15px]" :class="n.ignored && 'opacity-40'" />
+        <span class="truncate" :class="n.ignored ? 'text-[#cfcfd8]/45' : 'text-[#cfcfd8]'">
           {{ n.name }}<span v-if="searching && rowDir(n.path)" class="ml-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
         </span>
         <Loader2
@@ -164,11 +164,11 @@ async function open(entry: RepoTreeEntry): Promise<void> {
             class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
             :class="isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30'"
             :style="{ paddingLeft: (searching ? 8 : depth * 14 + 8 + 22) + 'px' }"
-            :title="n.path"
+            :title="n.ignored ? $t('repo.files.ignoredTitle', { path: n.path }) : n.path"
             @click="open(n)"
           >
-            <component :is="iconFor(n)" class="shrink-0 text-[15px]" />
-            <span class="truncate text-[#cfcfd8]">
+            <component :is="iconFor(n)" class="shrink-0 text-[15px]" :class="n.ignored && 'opacity-40'" />
+            <span class="truncate" :class="n.ignored ? 'text-[#cfcfd8]/45' : 'text-[#cfcfd8]'">
               {{ n.name }}<span v-if="searching && rowDir(n.path)" class="ml-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
             </span>
             <!-- A file that is ALSO in the changed list keeps its status letter, so switching to

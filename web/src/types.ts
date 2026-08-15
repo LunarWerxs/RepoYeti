@@ -214,6 +214,9 @@ export interface RepoTreeEntry {
   /** Repo-relative, forward slashes — the same shape the file-viewer's `path` accepts. */
   path: string;
   type: "dir" | "file";
+  /** True when git is ignoring this path — the row is dimmed, as an editor's explorer does.
+   *  Set on directory listings only; search results don't carry it. */
+  ignored?: boolean;
 }
 
 export interface TreeNode {

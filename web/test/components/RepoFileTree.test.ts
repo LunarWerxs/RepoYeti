@@ -156,6 +156,25 @@ describe("RepoFileTree", () => {
     expect(wrapper.text()).toContain("empty");
   });
 
+  it("dims what git is ignoring, and leaves everything else at full strength", async () => {
+    tree.mockResolvedValue({
+      path: "",
+      entries: [
+        { name: "node_modules", path: "node_modules", type: "dir", ignored: true },
+        { name: "src", path: "src", type: "dir" },
+      ],
+    });
+    const { wrapper, browser } = mountTree();
+    await browser().load("");
+    await nextTick();
+
+    const rowClass = (label: string) =>
+      wrapper.findAll("button").find((b) => b.text().includes(label))!.html();
+
+    expect(rowClass("node_modules")).toContain("/45");
+    expect(rowClass("src")).not.toContain("/45");
+  });
+
   it("surfaces a listing failure instead of rendering an empty folder", async () => {
     tree.mockRejectedValue(new Error("EPERM: permission denied"));
     const { wrapper, browser } = mountTree();

@@ -83,6 +83,68 @@ test("includes gitignored paths — that is the point of the mode", async () => 
   expect((inner.entries ?? []).map((e) => e.name)).toEqual(["bundle.js"]);
 });
 
+// VS Code dims ignored entries in its explorer; the panel does the same, and the daemon is what
+// knows. Asking git (rather than matching patterns here) is what makes negations and nested
+// .gitignore files come out right.
+test("marks which listed entries git is ignoring", async () => {
+  const dir = await gitRepo();
+  writeFileSync(join(dir, ".gitignore"), "dist/\n*.log\n");
+  mkdirSync(join(dir, "dist"));
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "app.log"), "x");
+  writeFileSync(join(dir, "app.ts"), "x");
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+
+  const byName = new Map((await listRepoTree(id)).entries?.map((e) => [e.name, e]) ?? []);
+
+  expect(byName.get("dist")?.ignored).toBe(true);
+  expect(byName.get("app.log")?.ignored).toBe(true);
+  // Absent rather than false, so an un-ignored row ships nothing extra.
+  expect(byName.get("src")?.ignored).toBeUndefined();
+  expect(byName.get("app.ts")?.ignored).toBeUndefined();
+  expect(byName.get(".gitignore")?.ignored).toBeUndefined();
+});
+
+test("ignore marks honour negations, not a naive pattern match", async () => {
+  const dir = await gitRepo();
+  writeFileSync(join(dir, ".gitignore"), "logs/*\n!logs/keep.log\n");
+  mkdirSync(join(dir, "logs"));
+  writeFileSync(join(dir, "logs", "drop.log"), "x");
+  writeFileSync(join(dir, "logs", "keep.log"), "x");
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+
+  const byName = new Map((await listRepoTree(id, "logs")).entries?.map((e) => [e.name, e]) ?? []);
+
+  expect(byName.get("drop.log")?.ignored).toBe(true);
+  expect(byName.get("keep.log")?.ignored).toBeUndefined();
+});
+
+test("a repo with nothing ignored marks nothing", async () => {
+  const dir = await gitRepo();
+  writeFileSync(join(dir, "a.ts"), "x");
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+
+  // `git check-ignore` exits 1 when no path matches; that must read as "none", not as an error.
+  const res = await listRepoTree(id);
+
+  expect(res.ok).toBe(true);
+  expect(res.entries?.every((e) => e.ignored === undefined)).toBe(true);
+});
+
+test("marks entries whose names contain spaces and quotes", async () => {
+  const dir = await gitRepo();
+  writeFileSync(join(dir, ".gitignore"), "*.tmp\n");
+  writeFileSync(join(dir, "a file with spaces.tmp"), "x");
+  writeFileSync(join(dir, "plain.ts"), "x");
+  const id = mustUpsertRepo(dir, "repo", "auto", false);
+
+  // NUL-separated stdin is what keeps this honest — as arguments the name would be re-split.
+  const byName = new Map((await listRepoTree(id)).entries?.map((e) => [e.name, e]) ?? []);
+
+  expect(byName.get("a file with spaces.tmp")?.ignored).toBe(true);
+  expect(byName.get("plain.ts")?.ignored).toBeUndefined();
+});
+
 test("never lists the VCS metadata directory, at the root or nested", async () => {
   const dir = await gitRepo();
   mkdirSync(join(dir, "sub"), { recursive: true });
