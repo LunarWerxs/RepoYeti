@@ -1368,9 +1368,24 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
   fetch / pull (fast-forward only) / push (no force) / commit.
 - cloudflared tunnel (+ QR) and the Vue 3 PWA dashboard.
 
-[Unreleased]: https://github.com/LunarWerxs/RepoYeti/compare/v0.15.2...HEAD
+[0.21.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.9...v0.21.0
+[0.20.9]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.8...v0.20.9
+[0.20.8]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.7...v0.20.8
+[0.20.7]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.6...v0.20.7
+[0.20.6]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.5...v0.20.6
+[0.20.5]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.4...v0.20.5
+[0.20.4]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.3...v0.20.4
+[0.20.3]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.2...v0.20.3
+[0.20.2]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.1...v0.20.2
+[0.20.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.0...v0.20.1
+[0.20.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.19.1...v0.20.0
+[0.19.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.19.0...v0.19.1
+[0.19.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.18.0...v0.19.0
+[0.18.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.17.0...v0.18.0
+[0.17.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.15.3...v0.16.0
+[0.15.3]: https://github.com/LunarWerxs/RepoYeti/compare/v0.15.2...v0.15.3
 [0.15.2]: https://github.com/LunarWerxs/RepoYeti/compare/v0.14.0...v0.15.2
-[0.15.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.12.0...v0.13.0
