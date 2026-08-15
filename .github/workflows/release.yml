@@ -38,6 +38,23 @@ jobs:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
       - run: bun install --cwd web --frozen-lockfile
+      # Deleting a bad release un-publishes the binaries; it does NOT un-tell the fleet. Every
+      # install compares the newest published tag against the version compiled into its own binary
+      # (github-updater.ts:123-124, against VERSION from config.ts). Tag v0.21.0 on a tree still at
+      # 0.20.9 and the downloaded binary keeps reporting 0.20.9, so isNewer() stays true after the
+      # update applies and every copy re-updates forever. tests/version-consistency.test.ts already
+      # keeps the three in-tree version sites equal; nothing compared them to the tag until now.
+      - name: Tag must match the version in the tree
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          packaged="$(node -p "require('./package.json').version")"
+          if [ "$tagged" != "$packaged" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${packaged}"
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} matches package.json ${packaged}"
       - run: bun run typecheck # tsc: the daemon
       - run: bun run --cwd web typecheck # vue-tsc: templates + store surface, what `build:fast` skips
       - run: bun run check
@@ -49,7 +66,10 @@ jobs:
         run: |
           git config --global user.name "RepoYeti CI"
           git config --global user.email "ci@users.noreply.github.com"
-      - run: bun run test
+      # check:coverage runs the same suite WITH the overall-% floor, so this is `bun run test` plus
+      # the gate, not a second pass. CI applies the floor on every push; without it here a tag could
+      # publish under a floor that push-time CI would have refused.
+      - run: bun run check:coverage
       - run: bun run --cwd web test
 
   build:

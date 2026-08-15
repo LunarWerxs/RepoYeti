@@ -61,6 +61,14 @@ jobs:
           restore-keys: bun-web-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run i18n:check # fail on untranslated strings / missing keys / locale parity drift
+      # The root job audits root deps only, so web/ went unscanned entirely — and web/ is the half
+      # that takes untrusted input: dompurify and marked render README and commit-message markdown
+      # from arbitrary cloned repos. Found dompurify pinned at exactly the version an XSS advisory
+      # covers (GHSA-55q2-fjhq-7xh7) on 2026-08-14, sitting there unreported. Advisory-only, to
+      # match the root step: an upstream CVE landing overnight should not turn the branch red on
+      # its own, it should be visible.
+      - run: bun audit
+        continue-on-error: true
       - run: bun run test # Vitest: pure-lib units + component render + store smoke (no server needed)
       - run: bun run build # vue-tsc type-check + production bundle (re-runs i18n:check)
       # The Playwright SSE E2E (test:e2e) is intentionally NOT in CI — it needs a live daemon + a
