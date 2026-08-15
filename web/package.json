@@ -11,6 +11,8 @@
     "build": "node scripts/i18n-check.mjs && vue-tsc -b && vite build --outDir dist-next && node scripts/swap-dist.mjs",
     "build:fast": "vite build --outDir dist-next && node scripts/swap-dist.mjs",
     "preview": "vite preview",
+    "//typecheck": "The web half of the typecheck. The root `typecheck` is tsc over the daemon only, so a template referencing a store field that does not exist type-checks clean there — that is exactly how the changed-file 'View all' control shipped reading an undefined property. Incremental, so repeat runs are near-instant.",
+    "typecheck": "vue-tsc -b",
     "i18n:check": "node scripts/i18n-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest",

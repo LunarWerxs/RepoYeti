@@ -23,6 +23,16 @@ if command -v bun >/dev/null 2>&1; then
     echo "✗ tsc typecheck failed — fix the above, or 'git commit --no-verify' to bypass." >&2
     exit 1
   fi
+  # The root typecheck is tsc over the daemon and never looks at web/. A Vue template reading a
+  # store field that does not exist passed this gate cleanly and failed CI an hour later, so the
+  # web half runs here too. vue-tsc -b is incremental; the repeat cost is a second or two.
+  if [ -d web/node_modules ]; then
+    echo "› web typecheck…"
+    if ! (cd web && bun run typecheck); then
+      echo "✗ vue-tsc typecheck failed — fix the above, or 'git commit --no-verify' to bypass." >&2
+      exit 1
+    fi
+  fi
 fi
 
 # Kit-sync guard: a kit-synced file edited in this app instead of the kit forks it from every
