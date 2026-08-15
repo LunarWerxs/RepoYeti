@@ -164,6 +164,24 @@ export default defineConfig({
         runtimeCaching: [
           { urlPattern: /\/api\//, handler: "NetworkOnly" },
           { urlPattern: /\/oauth\//, handler: "NetworkOnly" },
+          // Cold-start recovery after a Quick Tunnel rotation (issue #21). An installed PWA is
+          // pinned to the origin it was installed from, and that origin is gone after the daemon
+          // restarts onto a fresh tunnel hostname; the navigation then fails at the network and
+          // no application JavaScript ever runs, so relay-home.ts's self-heal — which assumes it
+          // has "a place to run at all" — never gets one. The app opened onto a dead URL and the
+          // only way out was reinstalling it.
+          //
+          // NetworkOnly + precacheFallback, NOT navigateFallback, and that distinction is the
+          // whole point: navigateFallback answers EVERY navigation from the precache, which is
+          // what previously left a rebuilt tab reloading into a stale shell whose Monaco chunks
+          // no longer existed. This serves the fallback only when the network actually failed, so
+          // a healthy origin is untouched. The fallback is a standalone page referencing no
+          // hashed assets, so it cannot go stale the way index.html did.
+          {
+            urlPattern: ({ request }: { request: Request }) => request.mode === "navigate",
+            handler: "NetworkOnly",
+            options: { precacheFallback: { fallbackURL: "/offline-heal.html" } },
+          },
         ],
       },
       devOptions: { enabled: false },

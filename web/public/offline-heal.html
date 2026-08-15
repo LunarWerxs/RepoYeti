@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>RepoYeti — reconnecting</title>
+    <!--
+      The navigation fallback for a FAILED navigation only (see web/vite.config.ts: the navigate
+      route is NetworkOnly with precacheFallback, so a working origin never sees this page).
+
+      WHY IT EXISTS. An installed PWA is pinned to the origin it was installed from, and a Quick
+      Tunnel gets a new hostname every time the daemon restarts. relay-home.ts already knows how to
+      recover from that, and its header says so: "the service worker keeps serving the cached shell
+      on the dead origin, which is what gives this code a place to run at all." That precondition
+      was not actually true. The workbox config precaches no shell and sets navigateFallback:null —
+      correct on its own terms, to stop a rebuilt tab reloading into a stale shell — so a COLD start
+      on a rotated tunnel failed at the network before any application JavaScript ran, and the app
+      looked bricked until it was reinstalled. That is issue #21.
+
+      This page is the smallest thing that can close that gap. It is deliberately NOT the app shell:
+      it references no hashed assets, so it can never 404 on chunk names from an older build, which
+      is exactly the failure that made navigateFallback:null the right call for index.html. All it
+      does is ask the relay where the daemon went and go there.
+    -->
+    <style>
+      :root { color-scheme: dark light; }
+      body {
+        margin: 0; min-height: 100dvh; display: grid; place-items: center;
+        background: #0e0e12; color: #cfcfd8; padding: 24px;
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .box { max-width: 30rem; text-align: center; }
+      h1 { font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; color: #fff; }
+      p { margin: 0 0 .75rem; color: #9a9aa6; }
+      a { color: #8ab4ff; }
+      .spin {
+        width: 18px; height: 18px; margin: 0 auto 1rem; border-radius: 50%;
+        border: 2px solid #3a3a46; border-top-color: #8ab4ff; animation: s .8s linear infinite;
+      }
+      @keyframes s { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+      #manual { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <div class="spin" id="spin"></div>
+      <h1 id="title">Reconnecting to RepoYeti…</h1>
+      <p id="msg">This address has moved. Looking up where the daemon is now.</p>
+      <p id="manual">
+        Couldn't reach it automatically. Open your permanent RepoYeti link
+        (<span id="home"></span>) and it will redirect you.
+      </p>
+    </div>
+    <script>
+      // Kept in step with web/src/lib/relay-home.ts by web/test/lib/offline-heal.test.ts — this
+      // page cannot import that module (it must run with no bundle), so a test pins the contract
+      // rather than letting the two drift silently.
+      var STORAGE_KEY = "repoyeti:relay-home";
+
+      function storedResolveUrl() {
+        try {
+          var raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return null;
+          var resolve = JSON.parse(raw).resolve;
+          return typeof resolve === "string" && /^https?:\/\//i.test(resolve) ? resolve : null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function giveUp(resolveUrl) {
+        document.getElementById("spin").style.display = "none";
+        document.getElementById("title").textContent = "RepoYeti is unreachable";
+        document.getElementById("msg").textContent =
+          "The address this app was installed from is gone, and the permanent link did not answer.";
+        var manual = document.getElementById("manual");
+        if (resolveUrl) {
+          try {
+            document.getElementById("home").textContent = new URL(resolveUrl).origin;
+            manual.style.display = "block";
+          } catch (e) {
+            /* not a parseable URL — leave the manual hint hidden */
+          }
+        }
+      }
+
+      (function () {
+        var resolveUrl = storedResolveUrl();
+        if (!resolveUrl) return giveUp(null);
+        var done = false;
+        // A dead tunnel can hang rather than refuse, so bound the wait and show the manual route.
+        var timer = setTimeout(function () {
+          if (!done) { done = true; giveUp(resolveUrl); }
+        }, 8000);
+
+        fetch(resolveUrl, { cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (body) {
+            if (done) return;
+            var origin = body && typeof body.origin === "string" ? body.origin.replace(/\/+$/, "") : "";
+            // Same guard as resolveMovedOrigin: https only, and never bounce back to the origin
+            // that just failed — that would be a reload loop on a dead host.
+            if (!body || !body.ok || !/^https:\/\//i.test(origin) || origin === location.origin) {
+              done = true; clearTimeout(timer); return giveUp(resolveUrl);
+            }
+            done = true; clearTimeout(timer);
+            location.replace(origin + location.pathname + location.search + location.hash);
+          })
+          .catch(function () {
+            if (done) return;
+            done = true; clearTimeout(timer); giveUp(resolveUrl);
+          });
+      })();
+    </script>
+  </body>
+</html>
