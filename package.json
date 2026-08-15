@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@cnct/connect": "^1.2.0",
-    "hono": "^4.6.14",
+    "hono": "^4.13.2",
     "jose": "^6.2.3",
     "qrcode-terminal": "^0.12.0",
     "simple-git": "^3.27.0",
