@@ -55,13 +55,23 @@ const KEY: InjectionKey<FileBrowserApi> = Symbol("ry-file-browser");
 function makeApi(repoId?: string): FileBrowserApi {
   const dirs = reactive(new Map<string, DirState>());
   const open = reactive(new Set<string>());
+  /** Per-path request counter — only the newest in-flight read for a folder may write its state. */
+  const tickets = new Map<string, number>();
 
   async function load(path: string, force = false): Promise<void> {
     if (!repoId) return;
     const existing = dirs.get(path);
-    // Already loaded, or already loading — don't stack a second request for the same folder.
-    if (existing?.loading) return;
+    // Already loading — a plain load collapses onto the request in flight rather than stacking a
+    // second one. A FORCED load must not: `force` is the caller saying the cached answer is now
+    // wrong (a fresh .gitignore pattern just invalidated this listing's `ignored` flags), and the
+    // request already running is fetching exactly that stale answer. Collapsing onto it would
+    // resolve with the pre-change state and leave the row rendering as if nothing happened.
+    if (existing?.loading && !force) return;
     if (existing && !force && !existing.error) return;
+    // Which is why overlapping reads need an order: whichever started LAST holds the truth, so an
+    // earlier response that lands late is dropped instead of overwriting a newer one.
+    const ticket = (tickets.get(path) ?? 0) + 1;
+    tickets.set(path, ticket);
     dirs.set(path, {
       entries: existing?.entries ?? [],
       loading: true,
@@ -71,6 +81,7 @@ function makeApi(repoId?: string): FileBrowserApi {
     });
     try {
       const res = await api.tree(repoId, path);
+      if (tickets.get(path) !== ticket) return;
       dirs.set(path, {
         entries: res.entries ?? [],
         loading: false,
@@ -79,6 +90,7 @@ function makeApi(repoId?: string): FileBrowserApi {
         total: res.total,
       });
     } catch (e) {
+      if (tickets.get(path) !== ticket) return;
       dirs.set(path, {
         entries: [],
         loading: false,
@@ -116,6 +128,10 @@ function makeApi(repoId?: string): FileBrowserApi {
     reset: () => {
       dirs.clear();
       open.clear();
+      // Clearing the tickets too is what makes the refresh a real one: a read still in flight now
+      // matches no ticket, so it is dropped instead of landing afterwards and resurrecting a
+      // listing the refresh just threw away.
+      tickets.clear();
       void load("");
     },
     busy: () => {

@@ -356,6 +356,8 @@
       "ctxDiscardFolder": "Discard folder changes",
       "gitignored": "Added to .gitignore",
       "alreadyIgnored": "Already in .gitignore",
+      "gitignoredStillTracked": "Added to .gitignore — but git still tracks this, so it stays visible until you untrack it",
+      "alreadyIgnoredStillTracked": "Already in .gitignore — but git still tracks this, so the rule has no effect",
       "gitignoreFailed": "Couldn't update .gitignore",
       "copiedPath": "Path copied",
       "copyPathFailed": "Couldn't copy the path",

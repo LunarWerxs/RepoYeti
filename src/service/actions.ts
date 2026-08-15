@@ -23,6 +23,8 @@ import { runAction, refreshRepo, accountAuthFor, type ActionOutcome } from "./co
 import { guardRepo } from "./guards.ts";
 import { resolveRepoPath } from "./files.ts";
 import { normalizeRelPath, pathTouchesVcsMarker } from "../paths.ts";
+import { safeGitEnv } from "../git.ts";
+import { readGate } from "../gitgate.ts";
 import { collaborationFingerprint } from "../collaboration.ts";
 
 export const fetchRepo = (id: string): Promise<ActionOutcome> =>
@@ -366,20 +368,82 @@ export interface GitignoreResult {
   pattern?: string;
   /** True when the pattern was already ignored — a no-op, still reported as ok. */
   alreadyIgnored?: boolean;
+  /** True when git still TRACKS this path, which makes the pattern inert: git consults .gitignore
+   *  only for untracked paths. The write succeeded and the line is there; it simply changes
+   *  nothing until the path is also removed from the index. The client says so rather than
+   *  reporting a plain success for an action that visibly did nothing. */
+  stillTracked?: boolean;
   /** Post-action status for the initiating client — see ActionOutcome.status in service/core.ts. */
   status?: RepoStatus | null;
 }
 
 /**
- * Append a repo-relative path to the repo's root .gitignore — the changes-tree "Add to .gitignore"
- * action. Untrusted-path safe (confined to the repo like discard/stage) and behind the per-repo
- * op-queue. Idempotent: if the exact pattern is already present it's a no-op. The pattern is
+ * Ask git two questions about one path, since .gitignore's own semantics are the only correct
+ * authority on both and neither can be answered by reading lines out of the file:
+ *
+ *   ignored — is a pattern ALREADY covering this path? `--no-index` is what makes this the right
+ *     question: without it git refuses to call a tracked path ignored, and we would then append a
+ *     duplicate line every time someone right-clicked a tracked-but-already-listed folder.
+ *   tracked — is it in the index? If so the pattern we are about to write is inert, because git
+ *     consults .gitignore only for untracked paths.
+ *
+ * Both are best-effort: a repo git refuses to answer for degrades to "not ignored, not tracked",
+ * which writes the line — the same thing the old line-matching did, and never worse.
+ */
+async function gitIgnoreState(absPath: string, relPath: string): Promise<{ ignored: boolean; tracked: boolean }> {
+  const ask = async (argv: string[], stdinText?: string): Promise<string> => {
+    const proc = Bun.spawn(argv, {
+      cwd: absPath,
+      env: safeGitEnv(),
+      stdin: stdinText === undefined ? "ignore" : "pipe",
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    if (stdinText !== undefined && proc.stdin) {
+      proc.stdin.write(stdinText);
+      await proc.stdin.end();
+    }
+    const out = await new Response(proc.stdout).text();
+    await proc.exited; // exit 1 is a legitimate "no" from both commands, not a failure
+    return out;
+  };
+  try {
+    return await readGate.run(async () => {
+      const [ignored, tracked] = await Promise.all([
+        // The path goes in over stdin, not as an argument — `check-ignore` REFUSES `-z` on the
+        // argument form ("-z only makes sense with --stdin", exit 128), and a rejected call whose
+        // empty output reads as "not ignored" is a silent wrong answer rather than a loud one.
+        // Same NUL-separated idiom as tree.ts's listing check, for the same reason: a filename
+        // containing a space, a quote or a newline cannot re-split.
+        ask(["git", "check-ignore", "--no-index", "-z", "--stdin"], relPath),
+        // A literal pathspec, so a path containing `*`, `?` or `[` is a NAME here, never a glob.
+        // Matches the file itself, or every tracked file beneath it when it is a directory.
+        ask(["git", "ls-files", "-z", "--", `:(literal)${relPath}`]),
+      ]);
+      return { ignored: ignored.length > 0, tracked: tracked.length > 0 };
+    });
+  } catch {
+    return { ignored: false, tracked: false };
+  }
+}
+
+/**
+ * Append a repo-relative path to the repo's root .gitignore — the "Add to .gitignore" action shared
+ * by the changed-files tree, the all-files tree and the history panel. Untrusted-path safe
+ * (confined to the repo like discard/stage) and behind the per-repo op-queue. The pattern is
  * anchored to the repo root (leading slash) and written with forward slashes so it means exactly
  * this path on every platform. .gitignore only makes sense for git backends (Lore is refused).
  *
- * Note this only EDITS .gitignore — it does not `git rm --cached` an already-tracked file (git
- * ignores .gitignore for tracked paths). Untracked files vanish from the changes list on the
- * post-write refresh; a tracked file keeps showing until the owner also removes it from the index.
+ * Idempotent, and idempotent according to GIT rather than to string equality — see gitIgnoreState.
+ * Matching lines by hand got the common cases wrong in both directions: `.gitignore` conventionally
+ * writes a directory as `dist/`, which equals neither `/dist` nor `dist`, so re-ignoring a folder
+ * appended a near-duplicate; and a path already covered by `*.log`, by a bare parent, or by a
+ * nested .gitignore was never recognised at all.
+ *
+ * Note this only EDITS .gitignore — it does not `git rm --cached` an already-tracked path, because
+ * git consults .gitignore only for untracked ones. That case is REPORTED (`stillTracked`) instead
+ * of passing for a success that changes nothing: untracked paths vanish from the changes list on
+ * the post-write refresh, while a tracked one sits there looking like the action failed.
  */
 export async function addToGitignore(repoId: string, relPath: string): Promise<GitignoreResult> {
   const g = guardRepo<"SUBMODULE_NOT_ACTIONABLE">(repoId, "SUBMODULE_NOT_ACTIONABLE");
@@ -399,12 +463,12 @@ export async function addToGitignore(repoId: string, relPath: string): Promise<G
   const gitignorePath = join(repo.absPath, ".gitignore");
   const result = await enqueue(repoId, async () => {
     try {
+      // Inside the queue slot, so the answer can't be invalidated by another op writing .gitignore
+      // between the check and the append. readGate is a separate gate from the op queue (git READS
+      // vs per-repo writes), so waiting on it here cannot deadlock the slot we are holding.
+      const state = await gitIgnoreState(repo.absPath, r.clean);
       const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
-      const present = existing.split(/\r?\n/).some((l) => {
-        const t = l.trim();
-        return t === pattern || t === r.clean; // treat an anchored or bare prior entry as "already ignored"
-      });
-      if (present) return { ok: true as const, alreadyIgnored: true };
+      if (state.ignored) return { ok: true as const, alreadyIgnored: true, stillTracked: state.tracked };
       // Guarantee a newline before our line (so we never glue onto a no-trailing-newline last line).
       const sep = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
       const next = `${existing}${sep}${pattern}\n`;
@@ -413,7 +477,7 @@ export async function addToGitignore(repoId: string, relPath: string): Promise<G
       const tmp = `${gitignorePath}.${randomUUID()}.tmp`;
       writeFileSync(tmp, next, "utf8");
       renameSync(tmp, gitignorePath);
-      return { ok: true as const, alreadyIgnored: false };
+      return { ok: true as const, alreadyIgnored: false, stillTracked: state.tracked };
     } catch (e) {
       return { ok: false as const, message: e instanceof Error ? e.message : String(e) };
     }
@@ -421,7 +485,7 @@ export async function addToGitignore(repoId: string, relPath: string): Promise<G
   if (!result.ok) return { ok: false, code: "ERROR", message: result.message };
   // Refresh AFTER the queue slot releases (refreshRepo enqueues again → would deadlock if nested).
   const status = await refreshRepo(repo.id, repo.absPath);
-  return { ok: true, code: "OK", pattern, alreadyIgnored: result.alreadyIgnored, status };
+  return { ok: true, code: "OK", pattern, alreadyIgnored: result.alreadyIgnored, stillTracked: result.stillTracked, status };
 }
 
 // ── smart commit (AI multi-commit splitter) ─────────────────────────────────────────

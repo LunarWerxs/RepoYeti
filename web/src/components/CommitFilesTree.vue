@@ -120,7 +120,7 @@ function toggle(path: string): void {
             <span class="mono shrink-0 pl-1 text-[11px] font-bold" :style="{ color: statusColor(n.status ?? 'M') }">{{ n.status }}</span>
           </button>
         </ContextMenuTrigger>
-        <ContextMenuContent class="w-52">
+        <ContextMenuContent>
           <ContextMenuItem @select="emit('open', n)">
             <Eye :size="15" /><span>{{ $t("repo.history.ctxOpenAtCommit") }}</span>
           </ContextMenuItem>

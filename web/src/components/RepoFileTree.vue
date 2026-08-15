@@ -13,7 +13,7 @@
 // Folders start CLOSED — see @/lib/file-browser for why that is the opposite of the changed-files
 // tree's default.
 import { computed, type Component } from "vue";
-import { ChevronRight, Copy, Eye, FolderOpen, Loader2, SquarePen } from "@lucide/vue";
+import { Ban, ChevronRight, Copy, Eye, FolderOpen, Loader2, SquarePen } from "@lucide/vue";
 import { fileVisual } from "@/lib/file-icons";
 import { openFile, isViewing, viewerMode } from "@/lib/file-viewer";
 import { useFileBrowser } from "@/lib/file-browser";
@@ -52,6 +52,8 @@ const emit = defineEmits<{
   reveal: [path: string];
   editor: [path: string];
   copyPath: [path: string];
+  /** Append this path to the repo's root .gitignore — files and folders alike. */
+  gitignore: [path: string];
   /** A folder result was clicked — the panel clears the query and jumps to it in the tree. */
   goToFolder: [entry: RepoTreeEntry];
 }>();
@@ -116,30 +118,60 @@ async function open(entry: RepoTreeEntry): Promise<void> {
     <!-- folder row — the whole row toggles its subtree, fetching children on first open.
          In search mode there is no subtree to open, so the row jumps to the folder instead. -->
     <div v-if="n.type === 'dir'">
-      <button
-        type="button"
-        class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-        :style="{ paddingLeft: (searching ? 8 : depth * 14 + 8) + 'px' }"
-        :aria-expanded="searching ? undefined : browser.isOpen(n.path)"
-        :title="n.ignored ? $t('repo.files.ignoredTitle', { path: n.path }) : n.path"
-        @click="searching ? emit('goToFolder', n) : browser.toggle(n.path)"
-      >
-        <ChevronRight
-          v-if="!searching"
-          :size="12"
-          class="shrink-0 text-muted-foreground transition-transform"
-          :class="browser.isOpen(n.path) && 'rotate-90'"
-        />
-        <component :is="iconFor(n)" class="shrink-0 text-[15px]" :class="n.ignored && 'opacity-40'" />
-        <span class="truncate" :class="n.ignored ? 'text-[#cfcfd8]/45' : 'text-[#cfcfd8]'">
-          {{ n.name }}<span v-if="searching && rowDir(n.path)" class="ml-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
-        </span>
-        <Loader2
-          v-if="!searching && browser.dirs.get(n.path)?.loading"
-          :size="11"
-          class="shrink-0 animate-spin text-muted-foreground"
-        />
-      </button>
+      <!-- Folders get the same right-click menu as files, minus the two actions that need a file:
+           Open (nothing to show in the viewer) and Open in editor. Every action left is path-based
+           all the way down to the daemon — `explorer /select,<dir>` reveals a folder, and a
+           .gitignore pattern names a directory just as happily as a file — so offering these on
+           files only meant ignoring `node_modules` was one right-click per file inside it.
+           The ContextMenu wraps the ROW alone, with the subtree as a sibling below: wrapping both
+           would nest a menu per depth level and let a child's right-click reach its ancestors. -->
+      <ContextMenu>
+        <ContextMenuTrigger as-child>
+          <div class="group/dir relative">
+            <button
+              type="button"
+              class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+              :style="{ paddingLeft: (searching ? 8 : depth * 14 + 8) + 'px' }"
+              :aria-expanded="searching ? undefined : browser.isOpen(n.path)"
+              :title="n.ignored ? $t('repo.files.ignoredTitle', { path: n.path }) : n.path"
+              @click="searching ? emit('goToFolder', n) : browser.toggle(n.path)"
+            >
+              <ChevronRight
+                v-if="!searching"
+                :size="12"
+                class="shrink-0 text-muted-foreground transition-transform"
+                :class="browser.isOpen(n.path) && 'rotate-90'"
+              />
+              <component :is="iconFor(n)" class="shrink-0 text-[15px]" :class="n.ignored && 'opacity-40'" />
+              <span class="truncate" :class="n.ignored ? 'text-[#cfcfd8]/45' : 'text-[#cfcfd8]'">
+                {{ n.name }}<span v-if="searching && rowDir(n.path)" class="ml-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
+              </span>
+              <Loader2
+                v-if="!searching && browser.dirs.get(n.path)?.loading"
+                :size="11"
+                class="shrink-0 animate-spin text-muted-foreground"
+              />
+            </button>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem v-if="!isGuest" @select="emit('reveal', n.path)">
+            <FolderOpen :size="15" />
+            <span>{{ $t("repo.changes.revealAction") }}</span>
+          </ContextMenuItem>
+          <ContextMenuItem @select="emit('copyPath', n.path)">
+            <Copy :size="15" />
+            <span>{{ $t("repo.changes.ctxCopyPath") }}</span>
+          </ContextMenuItem>
+          <!-- Separator only when the group it introduces has something in it — a guest sees Copy
+               path alone, and a divider under a single item reads as a menu that failed to load. -->
+          <ContextMenuSeparator v-if="!isGuest" />
+          <ContextMenuItem v-if="!isGuest" @select="emit('gitignore', n.path)">
+            <Ban :size="15" />
+            <span>{{ $t("repo.changes.ctxGitignore") }}</span>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       <ExpandTransition v-if="!searching" :open="browser.isOpen(n.path)">
         <RepoFileTree
           :repo-id="repoId"
@@ -150,6 +182,7 @@ async function open(entry: RepoTreeEntry): Promise<void> {
           @reveal="emit('reveal', $event)"
           @editor="emit('editor', $event)"
           @copy-path="emit('copyPath', $event)"
+          @gitignore="emit('gitignore', $event)"
           @go-to-folder="emit('goToFolder', $event)"
         />
       </ExpandTransition>
@@ -199,6 +232,11 @@ async function open(entry: RepoTreeEntry): Promise<void> {
         <ContextMenuItem @select="emit('copyPath', n.path)">
           <Copy :size="15" />
           <span>{{ $t("repo.changes.ctxCopyPath") }}</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator v-if="!isGuest" />
+        <ContextMenuItem v-if="!isGuest" @select="emit('gitignore', n.path)">
+          <Ban :size="15" />
+          <span>{{ $t("repo.changes.ctxGitignore") }}</span>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

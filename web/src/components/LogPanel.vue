@@ -26,6 +26,7 @@ import {
   Mail,
   UserRound,
   GripHorizontal,
+  Ban,
   X,
 } from "@lucide/vue";
 import { toast } from "vue-sonner";
@@ -809,6 +810,28 @@ async function revealFile(path: string): Promise<void> {
     toast.error(e instanceof ApiError ? e.message : t("repo.openFailed"));
   }
 }
+// Same "Add to .gitignore" the changes tree and the all-files tree offer. These rows ARE the live
+// working tree (wtFiles reads store.changesByRepo), so a file you can right-click here is the same
+// file you can right-click there — offering the action on two of the three lists just meant
+// remembering which tab it lived in.
+async function gitignoreFile(path: string): Promise<void> {
+  if (store.gitOpBusy[props.repoId]) return;
+  const r = await store.addToGitignore(props.repoId, path);
+  if (!r.ok) {
+    toast.error(t("repo.changes.gitignoreFailed"));
+    return;
+  }
+  // Every row in THIS list is a changed working-tree file, so the tracked case is the common one
+  // here rather than the edge case — a plain success toast for a rule git will not apply is the
+  // wrong answer most of the time.
+  if (r.stillTracked) {
+    toast.warning(
+      r.alreadyIgnored ? t("repo.changes.alreadyIgnoredStillTracked") : t("repo.changes.gitignoredStillTracked"),
+    );
+  } else {
+    toast.success(r.alreadyIgnored ? t("repo.changes.alreadyIgnored") : t("repo.changes.gitignored"));
+  }
+}
 const rowEls = new Map<string, HTMLElement>();
 const setRowEl = (hash: string) => (el: unknown): void => {
   if (el instanceof HTMLElement) rowEls.set(hash, el);
@@ -1128,7 +1151,7 @@ watch(historyActivityScale, () => {
                                 <span v-if="f.stat?.removedLines" class="mono shrink-0 text-[10.5px] text-destructive">−{{ f.stat.removedLines }}</span>
                               </button>
                             </ContextMenuTrigger>
-                            <ContextMenuContent class="w-52">
+                            <ContextMenuContent>
                               <ContextMenuItem @select="openWorktreeFile(f)">
                                 <Eye :size="15" /><span>{{ $t("repo.changes.ctxOpen") }}</span>
                               </ContextMenuItem>
@@ -1141,6 +1164,11 @@ watch(historyActivityScale, () => {
                               <ContextMenuSeparator />
                               <ContextMenuItem @select="copyFilePath(f.path)">
                                 <Copy :size="15" /><span>{{ $t("repo.changes.ctxCopyPath") }}</span>
+                              </ContextMenuItem>
+                              <!-- Gated on the owner, matching every other .gitignore entry point in
+                                   the app: the items above only READ, this one writes a file. -->
+                              <ContextMenuItem v-if="!store.isGuest" @select="gitignoreFile(f.path)">
+                                <Ban :size="15" /><span>{{ $t("repo.changes.ctxGitignore") }}</span>
                               </ContextMenuItem>
                             </ContextMenuContent>
                           </ContextMenu>
@@ -1364,7 +1392,7 @@ watch(historyActivityScale, () => {
                 </button>
               </div>
                 </ContextMenuTrigger>
-                <ContextMenuContent class="w-60">
+                <ContextMenuContent>
                   <ContextMenuItem @select="toggleCommit(item.commit!.hash)">
                     <Eye :size="15" />
                     <span>
@@ -1522,7 +1550,7 @@ watch(historyActivityScale, () => {
                           <span v-if="f.dels" class="mono shrink-0 text-[10.5px] text-destructive">−{{ f.dels }}</span>
                         </button>
                       </ContextMenuTrigger>
-                      <ContextMenuContent class="w-52">
+                      <ContextMenuContent>
                         <ContextMenuItem @select="openCommitFile(f)">
                           <Eye :size="15" /><span>{{ $t("repo.history.ctxOpenAtCommit") }}</span>
                         </ContextMenuItem>

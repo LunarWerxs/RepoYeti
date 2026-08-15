@@ -486,7 +486,7 @@ onBeforeUnmount(() => {
       </button>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent class="w-52">
+        <ContextMenuContent>
           <ContextMenuItem v-if="!isGuest" @select="emit('reveal', n.path)">
             <FolderOpen :size="15" />
             <span>{{ $t("repo.changes.revealAction") }}</span>
@@ -688,7 +688,7 @@ onBeforeUnmount(() => {
         </div>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent class="w-52">
+        <ContextMenuContent>
           <ContextMenuItem v-if="!readOnly" @select="open(n)">
             <Eye :size="15" />
             <span>{{ $t("repo.changes.ctxOpen") }}</span>

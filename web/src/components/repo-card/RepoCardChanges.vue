@@ -615,8 +615,33 @@ async function onEditor(path: string): Promise<void> {
 async function onGitignore(path: string): Promise<void> {
   if (store.gitOpBusy[props.repo.id]) return;
   const r = await store.addToGitignore(props.repo.id, path);
-  if (r.ok) toast.success(r.alreadyIgnored ? t("repo.changes.alreadyIgnored") : t("repo.changes.gitignored"));
-  else toast.error(t("repo.changes.gitignoreFailed"));
+  if (r.ok) {
+    // A tracked path is the one case where a plain "Added to .gitignore" would be a lie by
+    // omission: the line really is in the file, and git will still show the path anyway.
+    // Each key spelled out at its call site — behind a helper the i18n scanner reports it unused.
+    if (r.stillTracked) {
+      toast.warning(
+        r.alreadyIgnored ? t("repo.changes.alreadyIgnoredStillTracked") : t("repo.changes.gitignoredStillTracked"),
+      );
+    } else {
+      toast.success(r.alreadyIgnored ? t("repo.changes.alreadyIgnored") : t("repo.changes.gitignored"));
+    }
+    if (!r.alreadyIgnored) refreshIgnoredMarks(path);
+  } else toast.error(t("repo.changes.gitignoreFailed"));
+}
+
+// The all-files tree caches one listing per folder, and every entry in it carries the `ignored`
+// flag the daemon read from `git check-ignore`. Writing a new pattern invalidates those flags, so
+// without this the row you just ignored keeps rendering undimmed until a manual tree refresh —
+// the action would look like it did nothing. Re-reads only folders that were ACTUALLY fetched, so
+// in changed-files mode (where the browse tree was never opened) this is a no-op rather than a
+// speculative walk.
+function refreshIgnoredMarks(path: string): void {
+  const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  for (const dir of [...browser.dirs.keys()]) {
+    // The parent holds the row itself; anything at or under the path inherits the new pattern.
+    if (dir === parent || dir === path || dir.startsWith(`${path}/`)) void browser.load(dir, true);
+  }
 }
 
 // ── copy a changed file's repo-relative path to the clipboard (from the row context menu) ──
@@ -813,6 +838,7 @@ async function onCopyPath(path: string): Promise<void> {
             @reveal="onReveal"
             @editor="onEditor"
             @copy-path="onCopyPath"
+            @gitignore="onGitignore"
             @go-to-folder="goToFolder"
           />
           <!-- The walk is capped and time-budgeted (see src/service/tree.ts), so say when the

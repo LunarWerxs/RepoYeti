@@ -377,15 +377,25 @@ export function useGitOps(
     }
   }
 
-  /** Append a changed file's path to the repo's .gitignore (the changes-tree "Add to .gitignore"
-   *  action). Idempotent — an already-ignored path comes back ok with alreadyIgnored=true. */
-  async function addToGitignore(repoId: string, path: string): Promise<ActionResult & { alreadyIgnored?: boolean }> {
+  /** Append a path to the repo's .gitignore (the "Add to .gitignore" row action). Idempotent — an
+   *  already-ignored path comes back ok with alreadyIgnored=true. `stillTracked` means the line was
+   *  written but git keeps tracking the path, so it changes nothing until the path is untracked. */
+  async function addToGitignore(
+    repoId: string,
+    path: string,
+  ): Promise<ActionResult & { alreadyIgnored?: boolean; stillTracked?: boolean }> {
     gitOpBusy[repoId] = "gitignore";
     try {
       const r = await api.addToGitignore(repoId, path);
       applyActionStatus(repoId, r);
       await loadChanges(repoId);
-      return { ok: r.ok, code: r.code, message: r.message ?? "ignored", alreadyIgnored: r.alreadyIgnored };
+      return {
+        ok: r.ok,
+        code: r.code,
+        message: r.message ?? "ignored",
+        alreadyIgnored: r.alreadyIgnored,
+        stillTracked: r.stillTracked,
+      };
     } catch (e) {
       return asResult(e);
     } finally {

@@ -770,11 +770,15 @@ export const api = {
     ),
   /** Append a path to the repo's .gitignore (idempotent; anchored to the repo root). */
   addToGitignore: (id: string, path: string) =>
-    req<{ ok: boolean; code: string; message?: string; pattern?: string; alreadyIgnored?: boolean; status?: RepoStatus | null }>(
-      "POST",
-      `/api/repos/${id}/gitignore`,
-      { path },
-    ),
+    req<{
+      ok: boolean;
+      code: string;
+      message?: string;
+      pattern?: string;
+      alreadyIgnored?: boolean;
+      stillTracked?: boolean;
+      status?: RepoStatus | null;
+    }>("POST", `/api/repos/${id}/gitignore`, { path }),
   /** Changed-file list. `total`/`truncated` are set when the server capped an oversized
    *  list (MAX_CHANGED_FILES) so the UI can show a "showing N of M" notice. */
   changes: (id: string, opts: { all?: boolean } = {}) =>
