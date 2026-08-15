@@ -4,6 +4,62 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-08-15
+
+### Added
+
+- **Browse the whole repository, not just its changed files.** The file panel could only ever show
+  files git had noticed. The viewer was always capable of opening any path, but the panel simply had
+  no way to list one, so everything you had not edited was unreachable from inside the app. A
+  toggle in each card's header now swaps the changed-file list for the entire working tree, using
+  the same viewer, the same icons and the same panel. A file that IS changed keeps its status
+  letter, so switching modes loses no signal, and the toggle sits outside the changed-files
+  section on purpose: a clean repo is precisely when you want to read the code.
+- **Ignored paths are included, and the tree loads one folder at a time.** Showing `dist/` and
+  vendored bundles is the point: that is exactly what `git ls-files` hides and what you
+  occasionally need to open. It is also what makes a whole-tree listing impossible rather than
+  merely slow: a working checkout here runs past 200,000 files once `node_modules` is counted,
+  seconds of disk to enumerate and a payload the browser would then have to turn into 200,000
+  nodes. So a folder's contents are fetched the moment it is opened (about a millisecond, a few
+  dozen entries) and folders nobody opens are never walked. Folders therefore start collapsed,
+  the opposite of the changed-files tree.
+- **Find a file anywhere in the repo.** Searching only the folders already expanded would look
+  like it searched the repository and quietly not have, so the search walks the real tree,
+  breadth-first, so shallow matches, nearly always the wanted ones, are found before the walk
+  reaches a dependency tree. Bounded by both a result cap and a wall-clock budget, and it says
+  when the answer is a head rather than the whole set. Clicking a folder result clears the query
+  and opens the tree down to it.
+
+Both new endpoints are owner-only. Reading a path you were handed is a different capability from
+enumerating a repository, and the listing covers ignored files, which is exactly where `.env`
+files and local credentials live. A view share stays "look at what I changed", not "walk my disk".
+
+### Changed
+
+- **A click no longer waits behind the background work.** Local git reads share one daemon-wide
+  pool, and it was two slots deep with a plain first-come queue that had no idea who was waiting.
+  Boot hydration fans out over every known repo with sixteen workers and the filesystem watcher
+  runs sixteen concurrent refreshes, so expanding one card could put its `git status` behind two
+  dozen reads draining two at a time. Seconds of "Loading changes…" caused entirely by queue
+  position rather than by anything about the repo. It is also why some repos felt instant and
+  others did not: which ones was luck.
+
+  The queue now has a foreground lane, marked once at the HTTP boundary, because an inbound request is
+  the definition of "someone is waiting for this", and nothing else reaches it, so background work
+  cannot pick the marker up by accident. The pool also widens from two to half the machine's cores
+  (clamped to 4–8): a single card expand issues four reads, so at two it could not fill even its
+  own request in one pass. Background work is already coalesced and retried, so deferring it
+  briefly costs nothing you can see.
+
+### Fixed
+
+- **A greyed-out view option now says why, in the menu.** The reason lived only in a `title`
+  attribute, which is close to invisible, given the switch dims to 45% and a native tooltip wants a second
+  of hover on a control nobody suspects is disabled. Every row in the changed-files view options
+  needs "Diff statistics" turned on, and that ships off, so on a fresh install the whole popover
+  was inert while looking like an ordinary menu that simply ignored you. Nothing was broken; it
+  just never said so.
+
 ## [0.20.9] - 2026-08-14
 
 ### Fixed
