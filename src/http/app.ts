@@ -12,6 +12,7 @@ import { jsonError } from "../contract.ts";
 import { API_BODY_LIMIT } from "../schemas.ts";
 import { authMiddleware, isRemoteRequest } from "../auth.ts";
 import { loopbackGuard } from "../loopback-guard.mjs";
+import { asForeground } from "../gitgate.ts";
 import { mountWeb } from "./web.ts";
 import type { Deps } from "./deps.ts";
 import { setDiffStatsEnabled } from "../read/diffstat.ts";
@@ -168,6 +169,12 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
       onError: (c) => jsonError(c, "BAD_REQUEST", "request body is too large", 413),
     }),
   );
+
+  // Everything below this line is work someone is waiting on. Marking the whole /api/* surface
+  // foreground lets those reads jump the git read gate ahead of boot hydration, the watcher's
+  // coalesced refreshes and the remote-sync check — none of which reach Hono, so nothing that
+  // isn't user-initiated can pick up the marker by accident. See src/gitgate.ts for the lanes.
+  app.use("/api/*", (_c, next) => asForeground(next));
 
   const deps: Deps = { cfg, requestShutdown: hooks.requestShutdown };
 
