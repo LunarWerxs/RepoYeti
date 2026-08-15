@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -89,11 +89,78 @@ export function mergedLcovLineCoverage(reports: string[]): number {
   return (covered / total) * 100;
 }
 
+/**
+ * Source files under `src/` that NO test ever executed a line of.
+ *
+ * The percentage floor above cannot see these. Bun instruments a module only when some test loads
+ * it, so a brand-new file with no test at all lands in NEITHER the numerator nor the denominator:
+ * it is invisible to the ratio rather than harmful to it. An entire feature can ship with tsc and
+ * biome as its only gates, and the coverage number will not move a decimal.
+ *
+ * `.d.ts` and `.test.ts` are excluded; a declaration file has no executable lines to cover, and a
+ * test is not the thing under test.
+ */
+export function untestedSources(reports: string[], sourceFiles: string[], root: string): string[] {
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
+  const rel = (p: string) => {
+    const n = norm(p);
+    const r = norm(root);
+    return n.startsWith(`${r}/`) ? n.slice(r.length + 1) : n;
+  };
+  const executed = new Set<string>();
+  for (const shard of reports.map(parseLcov)) {
+    for (const [source, lines] of shard) {
+      if ([...lines.values()].some((hits) => hits > 0)) executed.add(rel(source));
+    }
+  }
+  return sourceFiles.map(rel).filter((f) => !executed.has(f)).sort();
+}
+
+/** Every `src/**` file that could carry executable lines. */
+function sourceFilesUnder(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...sourceFilesUnder(path));
+    else if (/\.(ts|mts|mjs)$/.test(entry.name) && !/\.(d\.ts|d\.mts|test\.ts)$/.test(entry.name)) {
+      out.push(path);
+    }
+  }
+  return out;
+}
+
+// One path per line, `#` comments allowed. Deliberately a ratchet and not a floor: it records the
+// files that were already untested when this gate was added, so the gate can fail on the NEXT one
+// without demanding the existing backlog be cleared first. A gate that goes red on day one is a
+// gate someone deletes on day one.
+const ALLOWLIST = "scripts/coverage-untested-allowlist.txt";
+
+type Ratchet = { untested: string[]; newly: string[]; stale: string[]; bootstrap: boolean };
+
+/** `bootstrap` when the allowlist file does not exist yet: report the list, do not fail on it. */
+function ratchetUntested(reports: string[]): Ratchet {
+  const untested = untestedSources(reports, sourceFilesUnder("src"), process.cwd());
+  if (!existsSync(ALLOWLIST)) return { untested, newly: [], stale: [], bootstrap: true };
+  const allowed = new Set(
+    readFileSync(ALLOWLIST, "utf8")
+      .split(/\r?\n/)
+      .map((l) => l.replace(/#.*$/, "").trim())
+      .filter(Boolean),
+  );
+  return {
+    untested,
+    newly: untested.filter((f) => !allowed.has(f)),
+    stale: [...allowed].filter((f) => !untested.includes(f)).sort(),
+    bootstrap: false,
+  };
+}
+
 // Guarded so tests/coverage-gate.test.ts can import the merge above and lock its behavior without
 // running the entire suite as a side effect of the import.
 if (import.meta.main) {
   let lineCoverage: number;
   let minimumCoverage: number;
+  let untestedReport: Ratchet | null = null;
   if (process.platform === "linux") {
   // Bun 1.3.14's Linux coverage process reproducibly terminates after enough fixture-heavy files,
   // with no failed assertion or coverage footer. Two native Bun shards stay below that limit.
@@ -119,6 +186,7 @@ if (import.meta.main) {
     }
     lineCoverage = mergedLcovLineCoverage(reports);
     minimumCoverage = MIN_LCOV_LINE_COVERAGE;
+    untestedReport = ratchetUntested(reports);
   } finally {
     rmSync(coverageRoot, { recursive: true, force: true });
   }
@@ -143,4 +211,50 @@ if (import.meta.main) {
     process.exit(1);
   }
   console.log(`✓ overall line coverage ${lineCoverage.toFixed(2)}% ≥ ${minimumCoverage}% floor`);
+
+  // Runs on the Linux leg only, because that is the platform whose reporter already emits per-file
+  // LCOV. Windows/macOS gate on the text summary alone and are left untouched: re-plumbing the
+  // reporter on the path every CI job depends on, to catch a class the Linux leg already catches
+  // on every push, is not a trade worth making.
+  if (untestedReport?.bootstrap) {
+    console.log(
+      [
+        "",
+        `  ${ALLOWLIST} does not exist yet, so the untested-file ratchet is reporting only.`,
+        `  ${untestedReport.untested.length} source file(s) currently have no test executing a line.`,
+        "  Commit exactly these lines as that file to arm it:",
+        "",
+        ...untestedReport.untested.map((f) => `${f}`),
+        "",
+      ].join("\n"),
+    );
+  } else if (untestedReport) {
+    if (untestedReport.stale.length > 0) {
+      console.log(
+        `  note: ${untestedReport.stale.length} allowlisted file(s) now have coverage and can be pruned from ${ALLOWLIST}:`,
+      );
+      for (const f of untestedReport.stale) console.log(`    ${f}`);
+    }
+    if (untestedReport.newly.length > 0) {
+      console.error(
+        `\n✗ ${untestedReport.newly.length} source file(s) have no test executing a single line:`,
+      );
+      for (const f of untestedReport.newly) console.error(`    ${f}`);
+      console.error(
+        [
+          "",
+          "  The percentage floor cannot see these: an entirely untested file is absent from the",
+          "  coverage denominator, so it can never move the number it would otherwise drag down.",
+          "",
+          `  Write a test that loads it, or, if it is genuinely untestable here, add its path to`,
+          `  ${ALLOWLIST} with a comment saying why, in this same commit.`,
+          "",
+        ].join("\n"),
+      );
+      process.exit(1);
+    }
+    console.log(
+      `✓ no newly-untested source files (${untestedReport.untested.length} known, allowlisted)`,
+    );
+  }
 }
