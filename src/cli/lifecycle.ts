@@ -122,6 +122,67 @@ function isRelaunch(): boolean {
   return process.env.REPOYETI_RELAUNCH === "1" || process.argv.includes(RELAUNCH_FLAG);
 }
 
+/**
+ * The argv that relaunches THIS build of RepoYeti, pinned to the port it is actually serving on.
+ * Returns `[command, ...args]` ready for buildDetachedSpawn(). Pure + exported so the contract is
+ * locked by tests/relaunch-argv.test.ts instead of being discovered in the field — all three things
+ * below were wrong at once, and every one of them fails SILENTLY (the spawn still succeeds; the
+ * successor is what dies), so the caller's catch never fires and this daemon shuts down 800ms later
+ * believing a replacement is on the way.
+ *
+ * 1. THE EXECUTABLE. `process.argv[0..1]` is only the runtime + script in a source checkout. Inside
+ *    a `bun build --compile` binary it is the placeholder pair ["bun", "B:/~BUN/root/repoyeti.exe"]:
+ *    argv[0] is the literal string "bun", not a path, and argv[1] is a virtual path that exists only
+ *    inside the running binary. Respawning it dies with `Module not found "B:/~BUN/root/repoyeti.exe"`
+ *    where Bun happens to be installed, and cannot resolve "bun" at all on the machines a compiled
+ *    release exists FOR ("no runtime to install" is the whole pitch). process.execPath is the real
+ *    exe in both modes; only the script argument differs.
+ *
+ * 2. THE COMMAND TOKEN. `start` is IMPLICIT when no args are given (`main()` defaults to it), which
+ *    is exactly how the documented "just run repoyeti-windows-x64.exe" path launches. Appending
+ *    flags to that empty arg list puts a FLAG in the command slot, so the successor dispatched on
+ *    "--relaunch", printed `Unknown command: --relaunch`, and exited 1. Name the command explicitly.
+ *
+ * 3. THE PORT. `--port` here is the port we BOUND, not the one we preferred; they diverge for every
+ *    daemon that has ever hopped. The successor uses it for both waitForPortFree() and the bind, so
+ *    the preferred port makes it wait out its full 8s on a socket nobody is releasing and then bind
+ *    a port the user's open tab isn't on. Any inherited `--port` is dropped rather than trusted to
+ *    last-wins parsing, and RELAUNCH_FLAG is re-appended rather than accumulated, so argv stays the
+ *    same length no matter how many updates a daemon lives through.
+ */
+export function buildRelaunchArgv(
+  argv: readonly string[],
+  execPath: string,
+  isCompiled: boolean,
+  boundPort: number,
+): string[] {
+  const cliArgs = argv.slice(2);
+  // A leading token that starts with "-" is a flag, not a command — `start` is implied.
+  const hasCommand = cliArgs.length > 0 && !cliArgs[0]!.startsWith("-");
+  const command = hasCommand ? cliArgs[0]! : "start";
+  const rest = hasCommand ? cliArgs.slice(1) : cliArgs;
+
+  const kept: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const token = rest[i]!;
+    // Mirror start()'s own flag loop, so a flag's VALUE can never be mistaken for a flag: --root
+    // takes a path, and a path is allowed to be the literal string "--port".
+    if (token === "--root" && rest[i + 1] !== undefined) {
+      kept.push(token, rest[++i]!);
+      continue;
+    }
+    if (token === "--port" && rest[i + 1] !== undefined) {
+      i++; // drop the stale pair; the bound port is appended below
+      continue;
+    }
+    if (token === RELAUNCH_FLAG) continue; // re-appended below, never accumulated
+    kept.push(token);
+  }
+
+  const relaunchCli = [command, ...kept, "--port", String(boundPort), RELAUNCH_FLAG];
+  return isCompiled ? [execPath, ...relaunchCli] : [execPath, argv[1]!, ...relaunchCli];
+}
+
 export async function start(rest: string[], options: { openUi?: boolean } = {}): Promise<void> {
   cleanupStaleUpdateArtifacts();
   const cfg = loadConfig();
@@ -249,13 +310,17 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   // seamlessly instead of the daemon hopping to a port the tab can't reach.
   if (isRelaunch()) await waitForPortFree(port, 8000);
   server = await listen(app, port);
-  const url = `http://127.0.0.1:${server.port}`;
+  // Where we ACTUALLY landed. `port` above is only the preference; these two diverge the moment
+  // anything else holds it, and everything downstream (the runtime pointer, the tunnel, the
+  // auto-update handoff) has to follow the bound one or it points at a port nobody is serving.
+  const boundPort = server.port ?? port;
+  const url = `http://127.0.0.1:${boundPort}`;
   // Advertise where we actually landed (the port may have hopped) so the launcher
   // opens the right URL and a second launch can detect us. Cleared on clean exit. The extra
   // portableMode field lets the tray launcher pick an app-window vs. a normal tab on cold start,
   // before the daemon (and therefore /api/status) is reachable. hideTrayIcon likewise lets the
   // tray gate its NotifyIcon's .Visible on cold start before the daemon is reachable.
-  writeInstanceInfo(server.port ?? port, {
+  writeInstanceInfo(boundPort, {
     portableMode: liveCfg.portableMode === true,
     hideTrayIcon: liveCfg.hideTrayIcon === true,
   });
@@ -299,7 +364,7 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   // 5) remote access — auto-managed by runtime.ts (also driven by the Settings toggle via
   //    PUT /api/mode). Open a tunnel now for an explicit --tunnel, or because the saved mode
   //    is "remote" with an owner already claimed (never expose before TOFU is settled).
-  setServerPort(server.port ?? port);
+  setServerPort(boundPort);
   const ownerClaimed = !!(liveCfg.oauth?.ownerSub || liveCfg.oauth?.ownerEmail);
   if (wantTunnel || (accessMode(liveCfg) === "remote" && ownerClaimed)) {
     console.log("\nStarting cloudflared tunnel…");
@@ -404,7 +469,17 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
         // successor then saw the predecessor still alive, concluded "already running", and exited:
         // an applied update leaving ZERO daemons. A flag is part of the command line WMI does
         // deliver. The env var is kept too, so the POSIX (env-inheriting) path is belt-and-braces.
-        const relaunchArgv = [process.argv[0]!, ...process.argv.slice(1), RELAUNCH_FLAG];
+        //
+        // That same env-block drop is why the bound port rides as `--port <n>` rather than as
+        // REPOYETI_PORT: on win32 an env-only handover reaches the transient powershell.exe and
+        // never the successor daemon. See buildRelaunchArgv for the other two things this argv has
+        // to get right (the compiled binary's placeholder argv, and the implicit `start` command).
+        const relaunchArgv = buildRelaunchArgv(
+          process.argv,
+          process.execPath,
+          (globalThis as { __REPOYETI_RELEASE_BUILD__?: boolean }).__REPOYETI_RELEASE_BUILD__ === true,
+          boundPort,
+        );
         const plan = buildDetachedSpawn(process.platform, relaunchArgv);
         const child = spawn(plan.argv[0]!, plan.argv.slice(1), {
           cwd: process.cwd(),
