@@ -4,6 +4,36 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.3] - 2026-08-15
+
+### Fixed
+
+- **An applied update no longer takes RepoYeti down.** On a downloaded release build, installing an
+  update stopped the daemon and started nothing in its place: the dashboard went dead and the only
+  way back was launching the app again by hand. The relaunch built its successor's command from
+  `process.argv[0..1]`, which is the runtime and the script in a source checkout but, inside a
+  compiled single-file executable, is a placeholder pair pointing at a virtual path that exists only
+  inside the running binary. Respawning it fails immediately, and on the machines a compiled release
+  exists for (no runtime installed, which is the entire pitch) the command cannot resolve at all.
+  Nothing caught it, because the failure is in the child: the spawn call itself succeeds, so the
+  guard that exists precisely to never shut down without a successor saw one and stepped aside.
+  Second cause, same outcome, on any launch that did not spell out `start`, which is the documented
+  "just run the .exe" path: the relaunch signal is appended as a flag, and with no other arguments
+  it landed in the command slot, so the successor exited with `Unknown command: --relaunch`. The
+  update itself was always written to disk correctly, so an install on an older build recovers the
+  moment you start it again, and this is the last time it will need to.
+- **An update no longer moves the daemon to a different port and kills the tab you had open.** The
+  successor was handed the port this daemon *preferred*, not the port it was actually serving on.
+  Those are the same number only until something else holds the preferred port once; after that
+  every update aimed the successor at the wrong one, and it uses that value for both of its jobs. So
+  it waited out its full 8-second handoff timeout on a socket its predecessor never held and nobody
+  was going to release, then bound that port rather than the one your browser was talking to,
+  and the open dashboard's live connection died against a daemon that was otherwise perfectly
+  healthy. It is now given the bound port, so the wait applies to the socket actually being freed
+  and the daemon keeps one address across updates. Measured on an isolated home: a daemon that had
+  hopped once used to relocate its successor away from the open tab, and took 8.4s to do it; it now
+  hands over in 1.2s on the same port.
+
 ## [0.21.2] - 2026-08-15
 
 ### Fixed
@@ -1432,6 +1462,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
 [#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
 [#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[0.21.3]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.20.9...v0.21.0
