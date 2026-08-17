@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
+import { mkScratchDir } from "./helpers/scratch.ts";
 import { redactAi, resolveApiKey, type RepoYetiConfig } from "../src/config.ts";
 import {
   parseModels,
@@ -341,7 +341,10 @@ test("compatible commit planning avoids optional JSON-mode extensions", async ()
 
 // ── diff collection (read-only; capped) ─────────────────────────────────────────
 async function seededRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-ai-"));
+  // mkScratchDir, not mkdtempSync(tmpdir()): the OS-temp form leaks (nothing here removed it) and
+  // `gm-*` under %TEMP% is the exact pattern behind the ~115 junk repo rows the isUnderTempDir
+  // guard was added for. See tests/helpers/scratch.ts.
+  const dir = mkScratchDir("gm-ai-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   writeFileSync(join(dir, "base.txt"), "original\n");
   await $`git -C ${dir} add -A`.quiet();

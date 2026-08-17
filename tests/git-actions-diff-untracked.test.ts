@@ -7,14 +7,15 @@
  * appended to the raw diff BEFORE per-file folding so it gets the same fairness as tracked files).
  */
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, mkdirSync } from "node:fs";
+
 import { join } from "node:path";
 import { $ } from "bun";
 import { collectCommitDiff, collectPathsDiff, collectCommitPlanInput } from "../src/git-actions/diff.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 async function repo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-diffu-"));
+  const dir = mkScratchDir("gm-diffu-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;

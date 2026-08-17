@@ -49,9 +49,10 @@
     "check:local": "bun run check:kit",
     "lint": "biome lint .",
     "format": "biome format --write .",
-    "check": "bun run check:codes && bun run check:changelog && bun run check:boundaries && bun run check:libtypes && bun run check:bytes && bun run check:gitenv && bun run check:spawntimeout && bun run lint",
+    "check": "bun run check:codes && bun run check:changelog && bun run check:boundaries && bun run check:libtypes && bun run check:bytes && bun run check:gitenv && bun run check:spawntimeout && bun run check:testscratch && bun run lint",
     "build": "bun run scripts/build.ts",
     "check:spawntimeout": "bun scripts/checks/spawn-test-without-timeout.mjs",
+    "check:testscratch": "bun scripts/checks/test-scratch-outside-helper.mjs",
     "check:changelog": "bun run scripts/check-changelog-links.ts"
   },
   "dependencies": {

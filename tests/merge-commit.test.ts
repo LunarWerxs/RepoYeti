@@ -1,16 +1,17 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { $ } from "bun";
 import { readLog, readCommit } from "../src/read/inspect.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 /** A repo whose history contains a real merge commit:
  *    init → (feature: c-feat) ┐
  *    init → (main:    c-main) ┴─ merge (--no-ff)
  *  Returns the dir. HEAD is the merge commit (2 parents). */
 async function repoWithMerge(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-merge-"));
+  const dir = mkScratchDir("gm-merge-");
   const git = (...a: string[]) => $`git -C ${dir} -c user.name=T -c user.email=t@t.io ${a}`.quiet();
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   writeFileSync(join(dir, "seed.txt"), "seed\n");

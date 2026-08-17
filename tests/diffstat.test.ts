@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { $ } from "bun";
 import {
@@ -173,7 +173,7 @@ test("streaming parser bounds a newline-free minified patch line", () => {
 // ── against a real repo ───────────────────────────────────────────────────────────
 
 async function seedRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-diffstat-"));
+  const dir = mkScratchDir("gm-diffstat-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   writeFileSync(join(dir, "a.txt"), "hello\nworld\n");
   await $`git -C ${dir} add -A`.quiet();

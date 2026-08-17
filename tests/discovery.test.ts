@@ -1,10 +1,11 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { discoverStream, machineScanRoots, type FoundRepo } from "../src/discovery.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
-const tmp = (): string => mkdtempSync(join(tmpdir(), "gm-disc-"));
+const tmp = (): string => mkScratchDir("gm-disc-");
 
 /** Collect discoverStream's `onFound` callback into an array (the walk is async). */
 async function discover(roots: string[], maxDepth: number, maxRepos: number): Promise<FoundRepo[]> {

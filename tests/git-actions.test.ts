@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { $ } from "bun";
 import { gitPullFfOnly, gitCommitAll } from "../src/git-actions.ts";
@@ -13,6 +13,7 @@ import {
   sshCommandFor,
 } from "../src/git.ts";
 import type { Identity } from "../src/db.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 const ID: Identity = {
   id: "x",
@@ -23,7 +24,7 @@ const ID: Identity = {
 };
 
 async function repo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-act-"));
+  const dir = mkScratchDir("gm-act-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;
@@ -35,7 +36,7 @@ async function repo(): Promise<string> {
  * fetch+fast-forward itself, exactly like the real flow.
  */
 async function behindByOne(): Promise<string> {
-  const base = mkdtempSync(join(tmpdir(), "gm-pull-"));
+  const base = mkScratchDir("gm-pull-");
   const origin = join(base, "origin.git");
   const seed = join(base, "seed");
   await $`git -c init.defaultBranch=main init -q --bare ${origin}`.quiet();
@@ -178,7 +179,7 @@ test("git environment survives the ambient credential/editor vars that editors e
 // path (a bare repo, a pointer whose target is gone) are the ones that can regress unnoticed.
 
 test("a bare repository is resolved through the rev-parse fallback, then served from cache", async () => {
-  const bare = mkdtempSync(join(tmpdir(), "gm-bare-"));
+  const bare = mkScratchDir("gm-bare-");
   await $`git -c init.defaultBranch=main init -q --bare ${bare}`.quiet();
 
   // No `.git` marker at all → the stat-based fast paths miss and git itself is asked.
@@ -192,14 +193,14 @@ test("a bare repository is resolved through the rev-parse fallback, then served 
 test("a .git pointer whose target is gone reports no operation instead of throwing", async () => {
   // What a deleted worktree leaves behind: the pointer file outlives the gitdir it names. A
   // status refresh must survive it — this runs on every repo in the list.
-  const dir = mkdtempSync(join(tmpdir(), "gm-ptr-"));
+  const dir = mkScratchDir("gm-ptr-");
   writeFileSync(join(dir, ".git"), `gitdir: ${join(dir, "gone").replace(/\\/g, "/")}\n`);
 
   expect(await currentGitOperation(dir)).toBeNull();
 });
 
 test("gitRawWithInput surfaces git's own stderr rather than an empty result", async () => {
-  const notARepo = mkdtempSync(join(tmpdir(), "gm-stdin-"));
+  const notARepo = mkScratchDir("gm-stdin-");
   await expect(gitRawWithInput(notARepo, ["diff-tree", "--stdin"], "\n")).rejects.toThrow(
     /not a git repository/i,
   );
@@ -207,7 +208,7 @@ test("gitRawWithInput surfaces git's own stderr rather than an empty result", as
 
 test("a commit git refuses is classified, not thrown", async () => {
   // Nothing to amend yet: the failure comes back from git, through classify(), as a result.
-  const dir = mkdtempSync(join(tmpdir(), "gm-amend-"));
+  const dir = mkScratchDir("gm-amend-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   writeFileSync(join(dir, "a.txt"), "a\n");
 
@@ -217,7 +218,7 @@ test("a commit git refuses is classified, not thrown", async () => {
 });
 
 test("sshCommandFor validates and quotes identity key paths", () => {
-  const dir = mkdtempSync(join(tmpdir(), "gm-key-"));
+  const dir = mkScratchDir("gm-key-");
   const key = join(dir, "id key");
   writeFileSync(key, "not-a-real-key");
 

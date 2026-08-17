@@ -4,6 +4,31 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Internal
+
+- **The test suite cleans up after itself.** Nothing shipped to users changes, since the daemon's
+  own scratch directories were always removed in `finally` blocks, but running the suite leaked
+  directories on developer machines, in two separate ways, and had done since the scratch helper
+  was introduced. Locally that came to **1,673,606 files across 46,854 directories** in `.testtmp/`
+  between 2026-07-27 and 2026-08-15, plus **1,408 directories and 31,774 files** in the real
+  `%TEMP%` from two days of runs. Only a few gigabytes; the damage is the file count, which slows
+  every tool that walks the working tree and takes an age to delete once grown. CI never noticed
+  because GitHub runners are destroyed after each job, so the entire cost landed on contributors.
+  First cause: `tests/helpers/scratch.ts` moved scratch out of the OS temp directory (it had to,
+  because `isUnderTempDir` refuses to import a repo from there) and, in doing so, silently gave up
+  the reaping the OS had been doing for free, without replacing it. `.testtmp/` is gitignored, so no
+  git-based check could see it either. Scratch now lives under a per-run subdirectory that is torn
+  down when the run ends, and a run killed before its teardown is swept by the next run rather than
+  left forever. Second cause: the migration to that helper was never finished. Sixteen test files
+  still built fixtures directly under `%TEMP%` with no cleanup, and `%TEMP%\gm-*` repositories are
+  the exact shape of the ~115 junk rows `isUnderTempDir` and `pruneTempRepos` exist to clean up. All
+  sixteen now use `mkScratchDir`. `tests/db-temp-guard.test.ts` still uses a real temp path, because
+  proving the guard fires there requires one, but it now records every directory it creates and
+  removes them. A new `check:testscratch` guardrail fails the build if a test reaches for the OS
+  temp directory again.
+
 ## [0.21.3] - 2026-08-15
 
 ### Fixed

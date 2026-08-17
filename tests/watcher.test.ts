@@ -1,10 +1,11 @@
 import { test, expect } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, unlinkSync, writeFileSync, type FSWatcher } from "node:fs";
-import { tmpdir } from "node:os";
+import { unlinkSync, writeFileSync, type FSWatcher } from "node:fs";
+
 import { join } from "node:path";
 import { $ } from "bun";
 import { watchRepo, type WatchFactory } from "../src/watcher.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // The bonus recursive worktree watch (see watcher.ts's header comment) is only installed on
 // platforms where a single native descriptor covers the whole tree; gate the tests that depend
@@ -12,7 +13,7 @@ import { watchRepo, type WatchFactory } from "../src/watcher.ts";
 const WORKTREE_WATCH_SUPPORTED = process.platform === "win32" || process.platform === "darwin";
 
 async function gitRepo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-watch-"));
+  const dir = mkScratchDir("gm-watch-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;
@@ -203,7 +204,7 @@ test("a required runtime watcher error tears down native coverage and reports un
 });
 
 test("watchRepo reports unhealthy when there is no .git to watch", () => {
-  const bare = mkdtempSync(join(tmpdir(), "gm-watch-bare-")); // plain dir, no .git
+  const bare = mkScratchDir("gm-watch-bare-"); // plain dir, no .git
   const h = watchRepo(bare, () => {});
   try {
     expect(h.watching).toBe(false);

@@ -1,8 +1,14 @@
 // Runs before any test module imports src/*: points all daemon state at a throwaway
 // dir so tests never read or write the real ~/.repoyeti.
+import { afterAll } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { scratchRoot } from "./helpers/scratch.ts";
+import {
+  cleanupScratchRun,
+  cleanupScratchRunAsync,
+  scratchRoot,
+  scratchSuiteRoot,
+} from "./helpers/scratch.ts";
 
 // REPOYETI_HOME lives under the repo-local scratch root (tests/helpers/scratch.ts), NOT under
 // the OS temp directory. upsertRepo (src/db.ts) hard-refuses any repo path under the OS temp dir
@@ -39,4 +45,30 @@ process.env.REPOYETI_KEYCHAIN_SERVICE = `repoyeti-test-${process.pid}`;
 //
 // Note this deliberately does NOT hide the mistake; it converts a silent catastrophe into a
 // visible test failure. Fixtures should still be created with a real `git init`.
-process.env.GIT_CEILING_DIRECTORIES = scratchRoot().replaceAll("\\", "/");
+// Anchored at the `.testtmp` root, not this run's subdirectory, so the door covers every path in
+// the scratch tree — including a stray fixture created outside the per-run directory.
+process.env.GIT_CEILING_DIRECTORIES = scratchSuiteRoot().replaceAll("\\", "/");
+
+// ── teardown ──────────────────────────────────────────────────────────────────────
+// Nothing else reaps `.testtmp`. It is gitignored (invisible to the git-based checks), and CI
+// never notices because GitHub runners are destroyed after every job — so the cost lands entirely
+// on developer machines, where it reached 1,673,606 files across 46,854 leaked scratch directories
+// in under three weeks. Only ~4.6 GB, but the file COUNT is what hurts: it slows every tool that
+// walks the tree and takes an age to delete once grown.
+//
+// Two mechanisms, because neither alone is sufficient:
+//   · afterAll — the clean-exit path. This file is the sole `preload` (bunfig.toml), and a bun
+//     preload is evaluated once per test process, so a top-level afterAll registered here fires
+//     once after the whole suite. It uses the async rmrf() for its Windows EBUSY/EPERM retries:
+//     a watcher or SSE stream closed moments earlier can still be holding a directory handle.
+//   · process exit — the interrupted path (Ctrl-C, a crash, a killed run). Exit handlers must be
+//     synchronous, so this is a plain rmSync with no retry. That a preload's afterAll fires once
+//     is bun behaviour rather than a documented contract, which is the other reason to keep it.
+//
+// Anything either path misses is caught by sweepOrphanedRuns() on a later run. Teardown is
+// best-effort throughout: it must never turn a run whose assertions already passed red.
+afterAll(async () => {
+  await cleanupScratchRunAsync();
+});
+
+process.on("exit", cleanupScratchRun);

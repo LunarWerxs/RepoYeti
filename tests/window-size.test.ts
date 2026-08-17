@@ -5,10 +5,11 @@
 // WINDOW_SIZE_HINT_PARAM to the URL (http/routes/health.ts) and the page resizes itself
 // (web/src/lib/window-size-hint.ts). These tests pin the daemon's halves: the hint format,
 // the profile reader, and windowSizeHintFor's remembered/first-run/maximized decision.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { expect, test } from "bun:test";
+import { mkScratchDir } from "./helpers/scratch.ts";
 import {
   formatWindowSizeHint,
   rememberedPlacement,
@@ -21,7 +22,7 @@ const INITIAL = { width: 840, height: 760 };
 
 /** A scratch profile whose Preferences hold the given app_window_placement dict. */
 function profileWith(placements: unknown): string {
-  const dir = mkdtempSync(join(tmpdir(), "ry-winsize-"));
+  const dir = mkScratchDir("ry-winsize-");
   mkdirSync(join(dir, "Default"), { recursive: true });
   writeFileSync(
     join(dir, "Default", "Preferences"),
@@ -78,7 +79,7 @@ test("rememberedPlacement carries Chromium's maximized flag (restore bounds)", (
 });
 
 test("windowSizeHintFor: remembered beats first-run, junk falls back, maximized sends NO hint", () => {
-  const fresh = mkdtempSync(join(tmpdir(), "ry-winsize-"));
+  const fresh = mkScratchDir("ry-winsize-");
   try {
     expect(windowSizeHintFor(fresh, DASH, INITIAL)).toBe("840x760");
   } finally {

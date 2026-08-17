@@ -15,7 +15,7 @@
  * guard never fires on them. This file is the one place that deliberately points at (or
  * overrides) a real temp root, to prove the guard actually fires there.
  */
-import { test, expect } from "bun:test";
+import { test, expect, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,6 +24,32 @@ import { isUnderTempDir } from "../src/paths.ts";
 import { upsertRepo, getRepo, getRepos, pruneTempRepos } from "../src/db.ts";
 import { registerRepo } from "../src/service/index.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+
+// This file is the ONE place allowed to create directories under the real OS temp dir: proving
+// isUnderTempDir rejects a genuine temp path requires a genuine temp path, and a substitute would
+// prove nothing. mkScratchDir is therefore unavailable here — but the reason it exists still
+// applies, so every such directory is recorded and removed at the end of the file.
+//
+// Left untracked, these were the suite's last surviving OS-temp leak: six `%TEMP%\gm-*` directories
+// per run, which is exactly the shape of the ~115 junk repo rows this guard was written to stop.
+// A test that demonstrates the temp-dir hazard has no business contributing to it.
+const OS_TEMP_SCRATCH: string[] = [];
+
+function osTempScratch(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  OS_TEMP_SCRATCH.push(dir);
+  return dir;
+}
+
+afterAll(() => {
+  for (const dir of OS_TEMP_SCRATCH) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best effort: teardown must never fail a run whose assertions passed.
+    }
+  }
+});
 
 // ── isUnderTempDir ────────────────────────────────────────────────────────────────────────
 
@@ -49,7 +75,7 @@ test("isUnderTempDir honors a custom TEMP/TMP override, restored after the test"
   const prevTemp = process.env.TEMP;
   const prevTmp = process.env.TMP;
   try {
-    const customRoot = mkdtempSync(join(tmpdir(), "gm-customtemp-"));
+    const customRoot = osTempScratch("gm-customtemp-");
     // Point TEMP/TMP somewhere that ISN'T the current os.tmpdir() result at all (a fresh sibling
     // dir under it), so this only passes if isUnderTempDir actually reads the env var, not just
     // falling back to a cached os.tmpdir() value from before the override.
@@ -73,7 +99,7 @@ test("isUnderTempDir is case-insensitive on win32", () => {
 // ── upsertRepo refuses a temp path ────────────────────────────────────────────────────────
 
 test("upsertRepo refuses a path under os.tmpdir(): returns null and inserts nothing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "gm-guard-refuse-"));
+  const dir = osTempScratch("gm-guard-refuse-");
   const id = upsertRepo(dir, "guard-refuse", "auto", false);
   expect(id).toBeNull();
   // Not just a null id: genuinely never wrote a row. No repo in the live DB has this abs path.
@@ -91,14 +117,14 @@ test("upsertRepo still inserts a normal (non-temp) path", () => {
 });
 
 test("upsertRepo's temp-path refusal does not throw (non-throwing by design)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "gm-guard-nothrow-"));
+  const dir = osTempScratch("gm-guard-nothrow-");
   expect(() => upsertRepo(dir, "guard-nothrow", "auto", false)).not.toThrow();
 });
 
 // ── registerRepo (manual "Point to Folder" pin) surfaces the refusal ────────────────────────
 
 test("registerRepo refuses to pin a folder under the OS temp dir", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "gm-guard-register-"));
+  const dir = osTempScratch("gm-guard-register-");
   mkdirSync(join(dir, ".git"), { recursive: true }); // looks like a real git repo on disk
 
   const result = await registerRepo(dir);
@@ -124,7 +150,7 @@ test("registerRepo still pins a normal (non-temp) folder", async () => {
 /** A scratch DB with the same `repos` shape initDb() creates, for exercising pruneTempRepos in
  *  isolation (mirrors tests/identity-hygiene.test.ts's scratchPreMigrationDb pattern). */
 function scratchReposDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "repoyeti-prune-scratch-"));
+  const dir = osTempScratch("repoyeti-prune-scratch-");
   const handle = new Database(join(dir, "scratch.db"), { create: true });
   handle.exec(`
     CREATE TABLE repos (
@@ -147,7 +173,7 @@ test("pruneTempRepos removes seeded temp-path rows, including one whose folder s
 
   // A temp-path row whose folder DOES still exist: pruneTempRepos must remove this too (distinct
   // from cleanupMissingRepos, which is existence-based; this guard is path-based).
-  const stillThere = mkdtempSync(join(tmpdir(), "gm-junk-exists-"));
+  const stillThere = osTempScratch("gm-junk-exists-");
   insert.run("junk-2", stillThere, "gm-junk-2", Date.now());
 
   // A normal (non-temp) row that must survive untouched.

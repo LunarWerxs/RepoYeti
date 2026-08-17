@@ -4,12 +4,13 @@
  * is gated behind REPOYETI_LORE so the default git path is unchanged.
  */
 import { describe, it, expect, afterEach } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync } from "node:fs";
+
 import { join } from "node:path";
 import { gitBackend } from "../src/vcs/git.ts";
 import { loreBackend } from "../src/vcs/lore.ts";
 import { detectVcs, backendFor, isLoreEnabled } from "../src/vcs/index.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 describe("vcs backend abstraction", () => {
   const created: string[] = [];
@@ -42,10 +43,10 @@ describe("vcs backend abstraction", () => {
   });
 
   it("detects git always, but Lore only when REPOYETI_LORE is set", () => {
-    const gitRepo = mkdtempSync(join(tmpdir(), "ry-git-"));
+    const gitRepo = mkScratchDir("ry-git-");
     created.push(gitRepo);
     mkdirSync(join(gitRepo, ".git"));
-    const loreRepo = mkdtempSync(join(tmpdir(), "ry-lore-"));
+    const loreRepo = mkScratchDir("ry-lore-");
     created.push(loreRepo);
     mkdirSync(join(loreRepo, ".lore"));
 

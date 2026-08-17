@@ -1,12 +1,13 @@
 import { test, expect } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+
 import { join } from "node:path";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { setServerPort, startManagedTunnel, stopManagedTunnel } from "../src/runtime.ts";
 import { resolveCloudflaredExecutable, startTunnel } from "../src/tunnel.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
-const tmp = (): string => mkdtempSync(join(tmpdir(), "gm-tunnel-"));
+const tmp = (): string => mkScratchDir("gm-tunnel-");
 
 test("cloudflared resolver prefers bundled dist/vendor executable", () => {
   const root = tmp();

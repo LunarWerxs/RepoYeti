@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { $ } from "bun";
 import {
@@ -11,6 +11,7 @@ import {
   gitDeleteBranch,
 } from "../src/git-actions.ts";
 import type { Identity } from "../src/db.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 // Closes the audit's P0 test gaps: the DETACHED_HEAD guards (5 actions guard it, none were
 // tested) and the push error contract (NON_FAST_FORWARD / NO_REMOTE).
@@ -19,7 +20,7 @@ const ID: Identity = { id: "x", displayName: "T", gitUsername: "Tester", gitEmai
 
 /** A repo with two commits on `main` (so HEAD~1 exists to detach onto). */
 async function repo(): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "gm-err-"));
+  const dir = mkScratchDir("gm-err-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} config user.name Seed`.quiet();
   await $`git -C ${dir} config user.email s@s.io`.quiet();
@@ -58,7 +59,7 @@ test("gitPush returns NO_REMOTE when there is no configured remote", async () =>
 });
 
 test("gitPush returns NON_FAST_FORWARD when the remote has diverged", async () => {
-  const base = mkdtempSync(join(tmpdir(), "gm-err-base-"));
+  const base = mkScratchDir("gm-err-base-");
   const bare = join(base, "remote.git");
   await $`git init -q --bare ${bare}`.quiet();
 

@@ -1,13 +1,14 @@
 import { test, expect } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
+
 import { isAbsolute, join, resolve } from "node:path";
 import { $ } from "bun";
 import { parsePorcelainV2, readStatus, resolveHistoryRefsHash } from "../src/read/status.ts";
 import { currentGitOperation, gitFor } from "../src/git.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 
 async function gitRepo(prefix = "gm-status-"): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const dir = mkScratchDir(prefix);
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q --allow-empty -m init`.quiet();
   return dir;
@@ -97,7 +98,7 @@ test("readStatus changes worktree identity when the dirty count stays unchanged"
 });
 
 test("readStatus hashes staged blob identity on an unborn branch", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "gm-status-unborn-"));
+  const dir = mkScratchDir("gm-status-unborn-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();
   const path = join(dir, "new.txt");
 
@@ -277,7 +278,7 @@ test("readStatus reports operation markers from an ordinary .git directory", asy
 
 test("currentGitOperation follows a linked worktree's .git pointer without a Git lookup", async () => {
   const main = await gitRepo("gm-status-main-");
-  const worktree = mkdtempSync(join(tmpdir(), "gm-status-worktree-parent-"));
+  const worktree = mkScratchDir("gm-status-worktree-parent-");
   const checkout = join(worktree, "checkout");
   await $`git -C ${main} worktree add -q -b operation-test ${checkout}`.quiet();
   const rawGitDir = (
