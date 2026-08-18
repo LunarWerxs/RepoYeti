@@ -25,7 +25,7 @@ import { publicKeyFor } from "./relay.ts";
 import { normalizeBuzzCommunities } from "./buzz-url.ts";
 import { restrictToCurrentUser } from "./fs-perms.ts";
 
-export const VERSION = "0.21.3";
+export const VERSION = "0.21.4";
 
 /** Local state dir. Override with REPOYETI_HOME (used by tests; also handy for relocating state). */
 export const CONFIG_DIR = process.env.REPOYETI_HOME ?? join(homedir(), ".repoyeti");
