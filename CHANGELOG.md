@@ -26,9 +26,11 @@ All notable changes to RepoYeti are documented here. The format is based on
   positioned anything. The earlier attempt added an inert `<span>` between the two `as-child`
   triggers. That is a real and separate bug, but it could not touch this one: this half is
   `provide`/`inject` nesting, not DOM attribute merging. Each menu now lives **inside** its
-  tooltip's trigger, so its own root is the nearest for both halves. A new `check:popper` guardrail
-  fails the build on the old shape, because no component test can catch it: jsdom has no layout, so
-  an off-screen menu passes every assertion an on-screen one does.
+  tooltip's trigger, so its own root is the nearest for both halves. Two guards now cover it: a
+  `check:popper` build rule on the nesting itself, which costs nothing per component and so scales
+  to the next one written, and a regression test that opens the shared popover and asserts it is
+  positioned rather than merely present. Both were verified red against the last commit before the
+  fix, which is the step the previous attempt skipped.
 
 ### Internal
 

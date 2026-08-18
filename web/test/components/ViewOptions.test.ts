@@ -2,7 +2,7 @@
 // because the whole point of the move is discoverability: if the trigger stops rendering in a
 // panel toolbar, or a row stops reporting its change, the option becomes unreachable ENTIRELY —
 // there is no Settings row left to fall back on.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { i18n } from "@/i18n";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -63,6 +63,36 @@ describe("ViewOptions trigger", () => {
     await w.get("button").trigger("click");
     await w.vm.$nextTick();
     expect(document.body.textContent).toContain("Activity graph");
+    w.unmount();
+  });
+
+  // Issue #15, and the assertion the three tests around it could not make. "The popover opened" is
+  // not the same claim as "the user can see it", and for four releases this file asserted the first
+  // while users got neither: the menu really did open on click, with every row in the DOM, at
+  // `translate(0, -200%)` — two menu-heights above the top of the window. On a 1600x900 desktop its
+  // top edge measured -594px. The Popover was wrapped AROUND its Tooltip, so its trigger registered
+  // its anchor with the TOOLTIP's PopperRoot and the popover's own root was left empty.
+  //
+  // A jsdom test CAN see that, which is why this one is here. reka keeps `translate(0, -200%)`
+  // until `isPositioned` flips (Popper/PopperContent.js), and `isPositioned` turns on whether
+  // Floating UI was ever handed a reference ELEMENT, not on what measuring it returned. jsdom has
+  // no layout and reports 0x0 for every rect, so the coordinates here are meaningless — but the
+  // presence of the anchor is real, and the pre-position transform is the exact tell.
+  //
+  // The wait is not optional: Floating UI resolves asynchronously, so immediately after the click
+  // the transform still reads `-200%` on a HEALTHY component too. Asserting without waiting fails
+  // both ways and proves nothing. Verified against 61a22d0 (the last commit before the fix): this
+  // test goes red there and the eight around it stay green.
+  it("is positioned when it opens, not parked off-screen above the viewport", async () => {
+    const w = mountOptions();
+    await w.get("button").trigger("click");
+    await w.vm.$nextTick();
+    const wrapper = document.querySelector<HTMLElement>("[data-reka-popper-content-wrapper]");
+    expect(wrapper).not.toBeNull();
+    await vi.waitFor(() => expect(wrapper!.style.transform).not.toContain("-200%"), {
+      timeout: 2000,
+      interval: 25,
+    });
     w.unmount();
   });
 

@@ -148,6 +148,7 @@ Cloud sign-in and settings sync are entirely optional and off by default; core g
   daemon-safe preflight diagnostics. [Setup and security boundaries](docs/BUZZ.md).
 - **Architecture, remote access, config:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **Contributing & tests:** [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+- **Working here with an AI agent:** [AGENTS.md](AGENTS.md) (repo map, the enforced guardrails, and the traps that have cost a release)
 
 ## License
 

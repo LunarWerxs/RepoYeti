@@ -39,12 +39,14 @@
 //       <TooltipContent/>
 //     </Tooltip>
 //
-// WHY A CHECK AND NOT A TEST. jsdom has no layout, so a mounted-component test cannot see an
-// element parked off-screen — the menu opens, the items render, and the test passes on the broken
-// nesting exactly as it does on the fixed one. The defect is only visible to a real browser or to
-// this static rule. It also spread by copy-paste: four independent components carried it, three of
-// them with a comment confidently explaining a DIFFERENT cause, so the next one to be written would
-// have copied that too.
+// WHY A CHECK AS WELL AS A TEST. A jsdom test CAN catch this, once you know to wait for Floating UI
+// and to assert the transform rather than the rect: web/test/components/ViewOptions.test.ts does
+// exactly that, and it is the better guard for the one component it covers. What it cannot do is
+// scale. The defect spread by COPY-PASTE — four independent components carried it, three of them
+// with a comment confidently explaining a DIFFERENT cause — and writing a mount-and-wait test for
+// every future toolbar button is not a thing anyone will keep doing. This rule costs nothing per
+// component and catches the fifth one on the day it is written, including in components whose
+// dependencies (Monaco, async chunks) make a full mount test more trouble than it is worth.
 //
 // The rule is stated as "the NEAREST enclosing popper root must be the trigger's own", which is the
 // actual invariant rather than a proxy for it. A trigger textually inside a <Tooltip> is perfectly

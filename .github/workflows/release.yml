@@ -20,6 +20,17 @@ on:
 permissions:
   contents: write
 
+# One release run per ref. GitHub fired TWO identical runs for the v0.21.4 tag push, two seconds
+# apart, same SHA. Nothing here is idempotent past the build: both would have reached `gh release
+# create` for the same tag and the loser would have gone red on a release that actually published
+# fine, which is the worst kind of red — a public failure badge on a good release. `cancel-in-
+# progress` is safe precisely because the group is the TAG ref: two runs in one group can only ever
+# be duplicates of the same release, never two different ones racing, so the newer is always the one
+# to keep. A branch dispatch groups by its own ref and is unaffected.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # A release must not be publishable from code the test suite rejects. Until this gate existed the
   # Release workflow shared NOTHING with CI: its only build step is `bun run build`, which calls
