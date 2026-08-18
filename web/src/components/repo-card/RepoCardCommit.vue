@@ -279,12 +279,29 @@ defineExpose({ loadRecentMsgs, recentMsgs });
       />
       <div class="absolute top-1 right-1 flex items-center gap-0.5">
         <!-- recent commit messages, tucked behind a small history dropdown -->
-        <DropdownMenu v-if="recentMsgs.length">
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <!-- inert wrapper: two reka `as-child` triggers (Tooltip + DropdownMenu) must never
-                   merge onto one element, or the menu stops opening — see ViewOptions.vue. -->
-              <span class="inline-flex">
+        <Tooltip v-if="recentMsgs.length">
+          <TooltipTrigger as-child>
+            <!--
+              WHY THE DROPDOWNMENU IS NESTED INSIDE THE TOOLTIP TRIGGER, and not the other way round.
+
+              reka's MenuRoot, PopoverRoot and TooltipRoot each render a PopperRoot, and a PopperRoot
+              `provide`s the anchor its popper positions against. A trigger registers itself through
+              PopperAnchor, which `inject`s the NEAREST PopperRoot. So with the DropdownMenu on the OUTSIDE,
+              its own trigger sat inside the Tooltip and handed its anchor to the TOOLTIP's PopperRoot,
+              while DropdownMenuContent, outside the Tooltip, injected an anchor-less one. Floating UI then
+              never had a reference element, `isPositioned` stayed false, and PopperContent kept its
+              pre-position style `translate(0, -200%)`: the menu really did open — aria-expanded went
+              true and the items were in the DOM — two menu-heights above the top of the window, where
+              nobody could see it. It read as a dead button.
+
+              Nesting the DropdownMenu inside the span makes its own PopperRoot the nearest one for BOTH its
+              trigger and its content, and leaves the span as the tooltip's anchor. Keep the span: two
+              `as-child` triggers merging onto one element is a separate real bug, and reka measures the
+              tooltip off the trigger's bounding rect, so it must be a real box (`inline-flex`), never
+              `display: contents`.
+            -->
+            <span class="inline-flex">
+              <DropdownMenu>
                 <DropdownMenuTrigger
                   class="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
                   :aria-label="$t('repo.commit.recent')"
@@ -292,22 +309,22 @@ defineExpose({ loadRecentMsgs, recentMsgs });
                 >
                   <History :size="16" />
                 </DropdownMenuTrigger>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{{ $t("repo.commit.recent") }}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" class="max-w-[min(22rem,80vw)]">
-            <DropdownMenuLabel>{{ $t("repo.commit.recent") }}</DropdownMenuLabel>
-            <DropdownMenuItem
-              v-for="(m, i) in recentMsgs"
-              :key="i"
-              :title="$t('repo.commit.useRecentTitle')"
-              @select="commitMsg = m"
-            >
-              <span class="truncate text-[12.5px]">{{ m }}</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                <DropdownMenuContent align="end" class="max-w-[min(22rem,80vw)]">
+                  <DropdownMenuLabel>{{ $t("repo.commit.recent") }}</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    v-for="(m, i) in recentMsgs"
+                    :key="i"
+                    :title="$t('repo.commit.useRecentTitle')"
+                    @select="commitMsg = m"
+                  >
+                    <span class="truncate text-[12.5px]">{{ m }}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("repo.commit.recent") }}</TooltipContent>
+        </Tooltip>
         <Tooltip v-if="aiHere">
           <TooltipTrigger as-child>
             <button

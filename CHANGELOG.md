@@ -6,6 +6,30 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **The overflow menus open where you can see them.** Four controls did nothing at all when clicked
+  ([#15](https://github.com/LunarWerxs/RepoYeti/issues/15)): the file viewer's **View options** `⋮`,
+  which is the only home word wrap has ever had, the **Changed-files** and **History** view-options
+  sliders, the **branch switcher**, and the **recent commit messages** history button. Every one of
+  them really did open. `aria-expanded` went `true`, every item was in the DOM, nothing was logged,
+  and the menu was drawn at `translate(0, -200%)`, two menu-heights above the top of the window. On
+  a 1600x900 desktop the file viewer's menu measured its top edge at **-594px**. Neither the markup
+  nor the console said anything was wrong, which is how it survived four releases and one previous
+  fix attempt.
+  The cause is one line of nesting. reka's `MenuRoot`, `PopoverRoot` and `TooltipRoot` each render a
+  `PopperRoot`, which `provide`s the anchor its popper positions against, and every trigger
+  registers itself through `PopperAnchor`, which `inject`s the **nearest** one. With the menu
+  wrapped **around** its tooltip, the menu's own trigger sat inside the tooltip and handed its
+  anchor to the *tooltip's* root, while the menu's content, which sits outside the tooltip, injected
+  a root that no longer had one. Floating UI never received a reference element, so it never
+  positioned anything. The earlier attempt added an inert `<span>` between the two `as-child`
+  triggers. That is a real and separate bug, but it could not touch this one: this half is
+  `provide`/`inject` nesting, not DOM attribute merging. Each menu now lives **inside** its
+  tooltip's trigger, so its own root is the nearest for both halves. A new `check:popper` guardrail
+  fails the build on the old shape, because no component test can catch it: jsdom has no layout, so
+  an off-screen menu passes every assertion an on-screen one does.
+
 ### Internal
 
 - **The test suite cleans up after itself.** Nothing shipped to users changes, since the daemon's

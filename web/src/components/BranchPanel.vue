@@ -79,12 +79,29 @@ async function confirmDelete(): Promise<void> {
 <template>
   <!-- branch switcher: current branch + dropdown to switch / delete, ＋ to create -->
   <div class="flex items-center gap-2">
-    <DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger as-child>
-          <!-- inert wrapper: two reka `as-child` triggers (Tooltip + DropdownMenu) must never merge
-               onto one element, or the menu stops opening — see ViewOptions.vue for the full story. -->
-          <span class="inline-flex min-w-0 max-w-full">
+    <Tooltip>
+      <TooltipTrigger as-child>
+        <!--
+          WHY THE DROPDOWNMENU IS NESTED INSIDE THE TOOLTIP TRIGGER, and not the other way round.
+
+          reka's MenuRoot, PopoverRoot and TooltipRoot each render a PopperRoot, and a PopperRoot
+          `provide`s the anchor its popper positions against. A trigger registers itself through
+          PopperAnchor, which `inject`s the NEAREST PopperRoot. So with the DropdownMenu on the OUTSIDE,
+          its own trigger sat inside the Tooltip and handed its anchor to the TOOLTIP's PopperRoot,
+          while DropdownMenuContent, outside the Tooltip, injected an anchor-less one. Floating UI then
+          never had a reference element, `isPositioned` stayed false, and PopperContent kept its
+          pre-position style `translate(0, -200%)`: the menu really did open — aria-expanded went
+          true and the items were in the DOM — two menu-heights above the top of the window, where
+          nobody could see it. It read as a dead button.
+
+          Nesting the DropdownMenu inside the span makes its own PopperRoot the nearest one for BOTH its
+          trigger and its content, and leaves the span as the tooltip's anchor. Keep the span: two
+          `as-child` triggers merging onto one element is a separate real bug, and reka measures the
+          tooltip off the trigger's bounding rect, so it must be a real box (`inline-flex`), never
+          `display: contents`.
+        -->
+        <span class="inline-flex min-w-0 max-w-full">
+          <DropdownMenu>
             <DropdownMenuTrigger
               class="mono flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-[12px] text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
               :aria-label="$t('repo.branches.manageTooltip')"
@@ -99,50 +116,50 @@ async function confirmDelete(): Promise<void> {
               <span class="truncate">{{ detached ? "detached" : (currentBranch ?? "—") }}</span>
               <ChevronDown :size="13" class="shrink-0 opacity-60" />
             </DropdownMenuTrigger>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{{ $t("repo.branches.manageTooltip") }}</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="start" class="max-w-64">
-        <DropdownMenuLabel>{{ $t("repo.branches.switchLabel") }}</DropdownMenuLabel>
-        <div v-if="!branchList" class="flex items-center gap-2 px-2 py-1.5 text-[12px] text-muted-foreground">
-          <Loader2 :size="13" class="animate-spin" />{{ $t("repo.branches.loading") }}
-        </div>
-        <div v-else-if="!otherBranches.length" class="px-2 py-1.5 text-[12px] text-muted-foreground">
-          {{ $t("repo.branches.none") }}
-        </div>
-        <div
-          v-for="b in otherBranches"
-          :key="b.name"
-          class="group/br flex items-center gap-1.5 rounded-sm px-1.5 py-1 hover:bg-accent/60"
-        >
-          <button
-            type="button"
-            class="mono flex min-w-0 flex-1 items-center gap-1.5 text-left text-[12.5px] outline-none"
-            @click="switchTo(b.name)"
-          >
-            <GitBranch :size="13" class="shrink-0 opacity-70" />
-            <span class="truncate">{{ b.name }}</span>
-            <span v-if="b.ahead || b.behind" class="mono shrink-0 text-[10.5px] text-muted-foreground">
-              <span v-if="b.ahead">↑{{ b.ahead }}</span><span v-if="b.behind"> ↓{{ b.behind }}</span>
-            </span>
-          </button>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <button
-                type="button"
-                class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 pointer-coarse:opacity-100 outline-none transition group-hover/br:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
-                :aria-label="$t('repo.branches.deleteTooltip')"
-                @click="askDelete(b.name)"
+            <DropdownMenuContent align="start" class="max-w-64">
+              <DropdownMenuLabel>{{ $t("repo.branches.switchLabel") }}</DropdownMenuLabel>
+              <div v-if="!branchList" class="flex items-center gap-2 px-2 py-1.5 text-[12px] text-muted-foreground">
+                <Loader2 :size="13" class="animate-spin" />{{ $t("repo.branches.loading") }}
+              </div>
+              <div v-else-if="!otherBranches.length" class="px-2 py-1.5 text-[12px] text-muted-foreground">
+                {{ $t("repo.branches.none") }}
+              </div>
+              <div
+                v-for="b in otherBranches"
+                :key="b.name"
+                class="group/br flex items-center gap-1.5 rounded-sm px-1.5 py-1 hover:bg-accent/60"
               >
-                <Trash2 :size="13" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{{ $t("repo.branches.deleteTooltip") }}</TooltipContent>
-          </Tooltip>
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+                <button
+                  type="button"
+                  class="mono flex min-w-0 flex-1 items-center gap-1.5 text-left text-[12.5px] outline-none"
+                  @click="switchTo(b.name)"
+                >
+                  <GitBranch :size="13" class="shrink-0 opacity-70" />
+                  <span class="truncate">{{ b.name }}</span>
+                  <span v-if="b.ahead || b.behind" class="mono shrink-0 text-[10.5px] text-muted-foreground">
+                    <span v-if="b.ahead">↑{{ b.ahead }}</span><span v-if="b.behind"> ↓{{ b.behind }}</span>
+                  </span>
+                </button>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 pointer-coarse:opacity-100 outline-none transition group-hover/br:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
+                      :aria-label="$t('repo.branches.deleteTooltip')"
+                      @click="askDelete(b.name)"
+                    >
+                      <Trash2 :size="13" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{{ $t("repo.branches.deleteTooltip") }}</TooltipContent>
+                </Tooltip>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{{ $t("repo.branches.manageTooltip") }}</TooltipContent>
+    </Tooltip>
     <Tooltip>
       <TooltipTrigger as-child>
         <button

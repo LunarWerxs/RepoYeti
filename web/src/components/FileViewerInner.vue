@@ -556,69 +556,86 @@ onBeforeUnmount(() => {
 
       <!-- overflow menu: Edit · word wrap · word-level diff · split/unified · Open with.
            Stays visible in BOTH Content and Diff views whenever not mid-edit (word wrap has no gate). -->
-      <DropdownMenu v-if="!editing">
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <!-- inert wrapper: two reka `as-child` triggers (Tooltip + DropdownMenu) must never
-                 merge onto one element, or the menu stops opening — see ViewOptions.vue. -->
-            <span class="inline-flex">
+      <Tooltip v-if="!editing">
+        <TooltipTrigger as-child>
+          <!--
+            WHY THE DROPDOWNMENU IS NESTED INSIDE THE TOOLTIP TRIGGER, and not the other way round.
+
+            reka's MenuRoot, PopoverRoot and TooltipRoot each render a PopperRoot, and a PopperRoot
+            `provide`s the anchor its popper positions against. A trigger registers itself through
+            PopperAnchor, which `inject`s the NEAREST PopperRoot. So with the DropdownMenu on the OUTSIDE,
+            its own trigger sat inside the Tooltip and handed its anchor to the TOOLTIP's PopperRoot,
+            while DropdownMenuContent, outside the Tooltip, injected an anchor-less one. Floating UI then
+            never had a reference element, `isPositioned` stayed false, and PopperContent kept its
+            pre-position style `translate(0, -200%)`: the menu really did open — aria-expanded went
+            true and the items were in the DOM — two menu-heights above the top of the window, where
+            nobody could see it. It read as a dead button.
+
+            Nesting the DropdownMenu inside the span makes its own PopperRoot the nearest one for BOTH its
+            trigger and its content, and leaves the span as the tooltip's anchor. Keep the span: two
+            `as-child` triggers merging onto one element is a separate real bug, and reka measures the
+            tooltip off the trigger's bounding rect, so it must be a real box (`inline-flex`), never
+            `display: contents`.
+          -->
+          <span class="inline-flex">
+            <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <Button variant="ghost" size="icon-sm" :aria-label="$t('fileViewer.viewOptions')">
                   <MoreVertical />
                 </Button>
               </DropdownMenuTrigger>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{{ $t("fileViewer.viewOptions") }}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" class="max-w-52">
-          <DropdownMenuItem v-if="showEditControls && !store.isGuest" @select="startEdit">
-            <Pencil :size="14" />
-            {{ $t("fileViewer.edit") }}
-          </DropdownMenuItem>
-          <DropdownMenuItem v-if="!binaryPreview" @select.prevent="wordWrap = !wordWrap">
-            <WrapText :size="14" />
-            {{ $t("fileViewer.wordWrap") }}
-            <Check v-if="wordWrap" :size="14" class="ml-auto text-primary" />
-          </DropdownMenuItem>
-          <DropdownMenuItem v-if="viewerMode === 'content'" @select.prevent="dirtyDiffGutter = !dirtyDiffGutter">
-            <Highlighter :size="14" />
-            {{ $t("fileViewer.dirtyGutter") }}
-            <Check v-if="dirtyDiffGutter" :size="14" class="ml-auto text-primary" />
-          </DropdownMenuItem>
-          <DropdownMenuItem v-if="diffEditable" @select.prevent="wordLevelDiff = !wordLevelDiff">
-            <WholeWord :size="14" />
-            {{ $t("fileViewer.wordDiff") }}
-            <Check v-if="wordLevelDiff" :size="14" class="ml-auto text-primary" />
-          </DropdownMenuItem>
-          <DropdownMenuItem v-if="diffEditable" @select="diffSplitView = !diffSplitView">
-            <component :is="diffSplitView ? AlignJustify : Columns2" :size="14" />
-            {{ diffSplitView ? $t("fileViewer.unifiedView") : $t("fileViewer.splitView") }}
-          </DropdownMenuItem>
-          <!-- Deliberately NOT gated on diffEditable, unlike the three above: in patch mode
-               diffEditable is false, and patch mode is exactly when someone wants this. -->
-          <DropdownMenuItem
-            v-if="viewerMode === 'diff' && !store.isGuest"
-            :title="$t('settings.diffPatchAlwaysHint')"
-            @select.prevent="setAlwaysSideBySide(!alwaysSideBySide)"
-          >
-            <Columns2 :size="14" />
-            {{ $t("settings.diffPatchAlways") }}
-            <Check v-if="alwaysSideBySide" :size="14" class="ml-auto text-primary" />
-          </DropdownMenuItem>
-          <template v-if="store.canContinueLocal && !store.isGuest">
-            <DropdownMenuSeparator v-if="!binaryPreview" />
-            <DropdownMenuItem @select="openWith()">
-              <ExternalLink :size="14" />
-              {{ $t("fileViewer.openWith") }}
-            </DropdownMenuItem>
-            <DropdownMenuItem v-for="e in openableEditors" :key="e.id" class="pl-7" @select="openWith(e.id)">
-              <span class="truncate">{{ e.label }}</span>
-              <Check v-if="e.id === store.effectiveEditor" :size="14" class="ml-auto text-primary" />
-            </DropdownMenuItem>
-          </template>
-        </DropdownMenuContent>
-      </DropdownMenu>
+              <DropdownMenuContent align="end" class="max-w-52">
+                <DropdownMenuItem v-if="showEditControls && !store.isGuest" @select="startEdit">
+                  <Pencil :size="14" />
+                  {{ $t("fileViewer.edit") }}
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="!binaryPreview" @select.prevent="wordWrap = !wordWrap">
+                  <WrapText :size="14" />
+                  {{ $t("fileViewer.wordWrap") }}
+                  <Check v-if="wordWrap" :size="14" class="ml-auto text-primary" />
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="viewerMode === 'content'" @select.prevent="dirtyDiffGutter = !dirtyDiffGutter">
+                  <Highlighter :size="14" />
+                  {{ $t("fileViewer.dirtyGutter") }}
+                  <Check v-if="dirtyDiffGutter" :size="14" class="ml-auto text-primary" />
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="diffEditable" @select.prevent="wordLevelDiff = !wordLevelDiff">
+                  <WholeWord :size="14" />
+                  {{ $t("fileViewer.wordDiff") }}
+                  <Check v-if="wordLevelDiff" :size="14" class="ml-auto text-primary" />
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="diffEditable" @select="diffSplitView = !diffSplitView">
+                  <component :is="diffSplitView ? AlignJustify : Columns2" :size="14" />
+                  {{ diffSplitView ? $t("fileViewer.unifiedView") : $t("fileViewer.splitView") }}
+                </DropdownMenuItem>
+                <!-- Deliberately NOT gated on diffEditable, unlike the three above: in patch mode
+                     diffEditable is false, and patch mode is exactly when someone wants this. -->
+                <DropdownMenuItem
+                  v-if="viewerMode === 'diff' && !store.isGuest"
+                  :title="$t('settings.diffPatchAlwaysHint')"
+                  @select.prevent="setAlwaysSideBySide(!alwaysSideBySide)"
+                >
+                  <Columns2 :size="14" />
+                  {{ $t("settings.diffPatchAlways") }}
+                  <Check v-if="alwaysSideBySide" :size="14" class="ml-auto text-primary" />
+                </DropdownMenuItem>
+                <template v-if="store.canContinueLocal && !store.isGuest">
+                  <DropdownMenuSeparator v-if="!binaryPreview" />
+                  <DropdownMenuItem @select="openWith()">
+                    <ExternalLink :size="14" />
+                    {{ $t("fileViewer.openWith") }}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem v-for="e in openableEditors" :key="e.id" class="pl-7" @select="openWith(e.id)">
+                    <span class="truncate">{{ e.label }}</span>
+                    <Check v-if="e.id === store.effectiveEditor" :size="14" class="ml-auto text-primary" />
+                  </DropdownMenuItem>
+                </template>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{{ $t("fileViewer.viewOptions") }}</TooltipContent>
+      </Tooltip>
 
       <Tooltip v-if="props.showClose">
         <TooltipTrigger as-child>

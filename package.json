@@ -49,10 +49,12 @@
     "check:local": "bun run check:kit",
     "lint": "biome lint .",
     "format": "biome format --write .",
-    "check": "bun run check:codes && bun run check:changelog && bun run check:boundaries && bun run check:libtypes && bun run check:bytes && bun run check:gitenv && bun run check:spawntimeout && bun run check:testscratch && bun run lint",
+    "check": "bun run check:codes && bun run check:changelog && bun run check:boundaries && bun run check:libtypes && bun run check:bytes && bun run check:gitenv && bun run check:spawntimeout && bun run check:testscratch && bun run check:popper && bun run lint",
     "build": "bun run scripts/build.ts",
     "check:spawntimeout": "bun scripts/checks/spawn-test-without-timeout.mjs",
     "check:testscratch": "bun scripts/checks/test-scratch-outside-helper.mjs",
+    "//check:popper": "Guardrail for issue #15: a reka menu/popover whose trigger resolves to a Tooltip's PopperRoot instead of its own opens at translate(0,-200%), i.e. off-screen, with correct aria and no error. jsdom has no layout so no component test can see it.",
+    "check:popper": "bun run scripts/checks/popper-trigger-inside-tooltip.mjs",
     "check:changelog": "bun run scripts/check-changelog-links.ts"
   },
   "dependencies": {
