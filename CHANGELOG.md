@@ -4,7 +4,7 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.21.5] - 2026-08-19
 
 ### Added
 
@@ -1551,6 +1551,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
 [#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
 [#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[0.21.5]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.4...v0.21.5
 [0.21.4]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.1...v0.21.2
