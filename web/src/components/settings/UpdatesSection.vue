@@ -2,7 +2,7 @@
 // General-tab section: app auto-update consents. (Keyboard shortcuts lived here briefly as one
 // merged group; they're their own HotkeysSection under Advanced now — updates and accelerators
 // never belonged under one header.)
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { FileText } from "@lucide/vue";
 import { toast } from "vue-sonner";
@@ -34,6 +34,43 @@ const restartPending = computed(() => {
   const installed = store.updateStatus?.currentVersion;
   return !!installed && !!version.value && installed !== version.value;
 });
+
+/**
+ * "Restart to finish", as an action (issue #23).
+ *
+ * The badge above states the one thing left to do after a manual update, and until now that was all
+ * it did. On an installed PWA — the setup this whole row exists for — there is no tray and no
+ * terminal to go and do it in, so the new build just sat there until something else restarted the
+ * daemon. This asks the daemon to relaunch ITSELF through the auto-updater's existing handoff (a
+ * detached successor takes the same port, so this page reconnects to it), not through Shut Down,
+ * which stops the whole app and tells the tray to stand down.
+ *
+ * The daemon refuses while work is in flight — a running git operation, an agent waiting on an
+ * approval — and its message says which. That message is surfaced verbatim: it is the only
+ * explanation this screen can offer, and inventing a vaguer local one would say less.
+ */
+// Tracks the in-flight request ONLY, and is cleared in `finally` even on success. Latching it true
+// after a successful restart looks harmless — the daemon is going down and `autoUpdateRestarting`
+// has already swapped this badge for "Restarting…" — but this component is not unmounted by that,
+// so if the pending state ever comes back (the reconnect refetches, and a restart that did not
+// actually close the version gap leaves the badge showing again) it would come back permanently
+// disabled: a control that is visible, says what to do, and cannot be clicked. Caught in a real
+// browser, which is the only place the sequence "restart, reconnect, still pending" exists.
+const restarting = ref(false);
+async function restartNow(): Promise<void> {
+  if (restarting.value) return;
+  restarting.value = true;
+  try {
+    await store.restartDaemon();
+    toast.success(t("settings.versionRestartStarted"));
+  } catch (e) {
+    toast.error(t("settings.versionRestartFailed"), {
+      description: e instanceof Error ? e.message : undefined,
+    });
+  } finally {
+    restarting.value = false;
+  }
+}
 
 // Two separate consents, deliberately two switches (see src/auto-update.ts):
 //   · "Tell me about updates" (on by default) — announce one, install nothing.
@@ -70,7 +107,20 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
         <Badge v-else-if="store.autoUpdateApplying" variant="info">
           {{ $t("settings.versionUpdating") }}
         </Badge>
-        <Badge v-else-if="restartPending" variant="warning">
+        <!-- A statement of what has to happen next is not much use on the one screen that cannot
+             make it happen, so this badge is a button too (issue #23). It restarts the daemon
+             through the auto-updater's own relaunch — see restartNow above. -->
+        <Badge
+          v-else-if="restartPending"
+          as="button"
+          type="button"
+          variant="warning"
+          data-testid="restart-pending"
+          :disabled="restarting"
+          :title="$t('settings.versionRestartPendingAction')"
+          class="cursor-pointer hover:bg-warning/20 disabled:cursor-default disabled:opacity-70 dark:hover:bg-warning/30"
+          @click="restartNow"
+        >
           {{ $t("settings.versionRestartPending") }}
         </Badge>
         <!-- The one state with something to DO about it, so this badge is a button (issue #20).

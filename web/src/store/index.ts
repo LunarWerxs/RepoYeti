@@ -608,6 +608,22 @@ export const useStore = defineStore("repoyeti", () => {
   }
 
   /**
+   * "Restart to finish" — relaunch the daemon so a manually-installed update takes over (issue #23).
+   *
+   * The flag is set from the HTTP answer rather than left to the daemon's `auto_update_restarting`
+   * broadcast, because the daemon starts going down the moment it answers: that event and the SSE
+   * drop race each other, and the one client that must not be left staring at an unchanged badge is
+   * the one that just tapped it. The broadcast still does the job for every OTHER connected
+   * dashboard. Only a 2xx gets here — a refusal (a git op running, an agent awaiting approval)
+   * throws, so a daemon that is staying put never renders as "Restarting…". The reconnect clears
+   * the flag (see the `status` watch below).
+   */
+  async function restartDaemon(): Promise<void> {
+    await api.restartDaemon();
+    autoUpdateRestarting.value = true;
+  }
+
+  /**
    * This browser is holding a share link rather than owning this daemon.
    *
    * Everything a guest can't do is enforced by the daemon (src/share/policy.ts) — these two flags
@@ -1305,6 +1321,7 @@ export const useStore = defineStore("repoyeti", () => {
     updatePromptOpen,
     updateBlockedReason,
     openUpdatePrompt,
+    restartDaemon,
     notifyUpdateAvailable,
     clearUpdateNotification,
     pullBehind,

@@ -392,8 +392,10 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   //     the daemon ITSELF — the tray is a bare supervisor that never relaunches us. So hand it a
   //     relaunch that spawns a DETACHED copy of this exact launch command (REPOYETI_RELAUNCH=1 so the
   //     successor waits for our port), then gracefully shuts THIS daemon down to free the port.
+  // Also what the dashboard's "Restart to finish" reaches, through auto-update.ts requestRelaunch
+  // and POST /api/updates/restart (issue #23) — one relaunch, not two.
   setAutoUpdateHooks({
-    relaunch: () => {
+    relaunch: (): boolean => {
       try {
         // Through buildDetachedSpawn, like every other detached launch here (editors, the
         // portable window). `detached: true` is NOT a tree escape on Windows — detached-spawn's
@@ -434,10 +436,11 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
         child.unref();
       } catch (e) {
         console.error("repoyeti: auto-update relaunch failed to spawn — staying on the running version.", e);
-        return; // never shut down without a successor
+        return false; // never shut down without a successor
       }
-      console.log("repoyeti: auto-update applied — relaunching the daemon…");
+      console.log("repoyeti: relaunching the daemon…");
       setTimeout(shutdown, 800); // let the successor start, then free the port (same teardown as Ctrl-C)
+      return true;
     },
   });
   startAutoUpdate();

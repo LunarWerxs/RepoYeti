@@ -59,6 +59,9 @@ export type ApiErrorCode =
   | "NOT_CONFLICTED"
   /** The file changed after the resolution was generated — the proposal describes stale bytes. */
   | "CONFLICT_STALE"
+  // ── daemon lifecycle (mirror src/auto-update.ts requestRelaunch) ──
+  /** Work is in flight on the daemon right now, so it will not restart out from under it. */
+  | "BUSY"
   // ── request / validation ──
   | "BAD_REQUEST"
   | "VALIDATION"
@@ -191,6 +194,7 @@ export function statusForCode(code: ApiCode): ContentfulStatusCode {
     case "NOT_CONFLICTED":
     case "CONFLICT_STALE":
     case "IDENTITY_POLICY_VIOLATION":
+    case "BUSY":
       return 409;
     // 502 — an upstream (git remote / AI provider) failed.
     case "SSH_AUTH_FAILED":

@@ -1,5 +1,7 @@
 import { test, expect, afterEach } from "bun:test";
+import { addListener, removeListener, type BusListener } from "../src/bus.ts";
 import {
+  requestRelaunch,
   runAutoUpdateOnce,
   setAutoUpdateHooks,
   setAutoUpdateEnabled,
@@ -66,6 +68,7 @@ test("applies + relaunches when an update is available and applicable", async ()
     },
     relaunch: () => {
       relaunched++;
+      return true;
     },
   });
   const r = await runAutoUpdateOnce();
@@ -83,7 +86,7 @@ test("does nothing when already up to date", async () => {
       applied++;
       return applyResult({});
     },
-    relaunch: () => {},
+    relaunch: () => true,
   });
   const r = await runAutoUpdateOnce();
   expect(r.applied).toBe(false);
@@ -104,6 +107,7 @@ test("never applies on a dirty tree (canApply false)", async () => {
     },
     relaunch: () => {
       relaunched++;
+      return true;
     },
   });
   const r = await runAutoUpdateOnce();
@@ -120,6 +124,7 @@ test("does not relaunch when the apply fails", async () => {
     apply: async () => applyResult({ ok: false, message: "build failed" }),
     relaunch: () => {
       relaunched++;
+      return true;
     },
   });
   const r = await runAutoUpdateOnce();
@@ -132,7 +137,7 @@ test("reports the reason when the check itself fails", async () => {
   setAutoUpdateHooks({
     check: async () => status({ ok: false, reason: "no update remote configured" }),
     apply: async () => applyResult({}),
-    relaunch: () => {},
+    relaunch: () => true,
   });
   const r = await runAutoUpdateOnce();
   expect(r.applied).toBe(false);
@@ -160,6 +165,7 @@ test("with auto-apply OFF it announces instead of installing", async () => {
     },
     relaunch: () => {
       relaunched++;
+      return true;
     },
   });
   const r = await runAutoUpdateOnce();
@@ -177,7 +183,7 @@ test("announces even when the update cannot be applied (dirty tree)", async () =
   setAutoUpdateHooks({
     check: async () => status({ updateAvailable: true, canApply: false, dirty: true, reason: "local changes" }),
     apply: async () => applyResult({}),
-    relaunch: () => {},
+    relaunch: () => true,
   });
   const r = await runAutoUpdateOnce();
   expect(r.applied).toBe(false);
@@ -194,7 +200,7 @@ test("with both halves off it does nothing at all", async () => {
       applied++;
       return applyResult({});
     },
-    relaunch: () => {},
+    relaunch: () => true,
   });
   const r = await runAutoUpdateOnce();
   expect(r.reason).toBe("notify-off");
@@ -207,7 +213,7 @@ test("nothing is announced or applied when already up to date", async () => {
   setAutoUpdateHooks({
     check: async () => status({ updateAvailable: false }),
     apply: async () => applyResult({}),
-    relaunch: () => {},
+    relaunch: () => true,
   });
   const r = await runAutoUpdateOnce();
   expect(r.reason).toBe("up-to-date");
@@ -227,6 +233,7 @@ test("defers the apply when an MCP approval is pending", async () => {
     },
     relaunch: () => {
       relaunched++;
+      return true;
     },
     hasPendingApprovals: () => true,
   });
@@ -247,7 +254,7 @@ test("defers the apply when the op-queue has an active operation", async () => {
       applied++;
       return applyResult({});
     },
-    relaunch: () => {},
+    relaunch: () => true,
     hasActiveOperations: () => true,
   });
   const r = await runAutoUpdateOnce();
@@ -262,7 +269,7 @@ test("does not defer the notify path when work is in flight", async () => {
   setAutoUpdateHooks({
     check: async () => status({ updateAvailable: true, canApply: true }),
     apply: async () => applyResult({}),
-    relaunch: () => {},
+    relaunch: () => true,
     hasPendingApprovals: () => true,
     hasActiveOperations: () => true,
   });
@@ -282,6 +289,7 @@ test("applies once nothing is busy", async () => {
     },
     relaunch: () => {
       relaunched++;
+      return true;
     },
     hasPendingApprovals: () => false,
     hasActiveOperations: () => false,
@@ -304,7 +312,7 @@ test("op-queue busyness defers only AUTO_UPDATE_MAX_OPS_DEFERRALS times, then ap
       applied++;
       return applyResult({});
     },
-    relaunch: () => {},
+    relaunch: () => true,
     hasPendingApprovals: () => false,
     hasActiveOperations: () => true, // never goes idle
   });
@@ -326,7 +334,7 @@ test("a pending approval defers past the ops cap — its own auto-deny timeout b
       applied++;
       return applyResult({});
     },
-    relaunch: () => {},
+    relaunch: () => true,
     hasPendingApprovals: () => true,
     hasActiveOperations: () => false,
   });
@@ -348,7 +356,7 @@ test("going idle resets the ops-deferral budget", async () => {
       applied++;
       return applyResult({});
     },
-    relaunch: () => {},
+    relaunch: () => true,
     hasPendingApprovals: () => false,
     hasActiveOperations: () => busy,
   });
@@ -361,4 +369,138 @@ test("going idle resets the ops-deferral budget", async () => {
     expect((await runAutoUpdateOnce()).reason).toBe("deferred");
   }
   expect(applied).toBe(1);
+});
+
+// ── on-demand relaunch: the dashboard's "Restart to finish" (issue #23) ───────────────────────
+// It reuses the SAME injected handler the unattended apply uses — a second restart mechanism would
+// be a second place to get the win32 spawn traps right — so what is worth pinning here is the part
+// that differs: someone is WAITING on the answer, so every refusal has to be reported rather than
+// silently retried, and "on its way" must never be said about a daemon that isn't going anywhere.
+
+/** Collect bus events broadcast while `fn` runs. */
+function captureEvents(fn: () => void): string[] {
+  const seen: string[] = [];
+  const listener: BusListener = (event) => {
+    seen.push(event);
+  };
+  addListener(listener);
+  try {
+    fn();
+  } finally {
+    removeListener(listener);
+  }
+  return seen;
+}
+
+test("an on-demand restart goes through the same relaunch handler the unattended apply uses", () => {
+  let relaunched = 0;
+  setAutoUpdateHooks({
+    relaunch: () => {
+      relaunched++;
+      return true;
+    },
+    hasPendingApprovals: () => false,
+    hasActiveOperations: () => false,
+  });
+
+  const events = captureEvents(() => expect(requestRelaunch()).toEqual({ ok: true }));
+
+  expect(relaunched).toBe(1);
+  // Same event the unattended restart announces, so every OTHER connected dashboard shows
+  // "Restarting…" and reads the stream drop that follows as expected rather than as a fault.
+  expect(events).toContain("auto_update_restarting");
+});
+
+test("refuses when no relaunch handler is wired, instead of claiming a restart is on its way", () => {
+  // createApp() outside the daemon (a test, an embedded harness) leaves the warn-only default. The
+  // caller is a badge someone just tapped: answering ok would leave them watching for a daemon that
+  // was never coming back.
+  setAutoUpdateHooks({}); // real hooks → defaultRelaunch
+  let announced: string[] = [];
+  announced = captureEvents(() => {
+    expect(requestRelaunch()).toEqual({ ok: false, reason: "no-handler" });
+  });
+  expect(announced).not.toContain("auto_update_restarting");
+});
+
+test("refuses while an agent's approval is pending — that work is a human mid-decision", () => {
+  let relaunched = 0;
+  setAutoUpdateHooks({
+    relaunch: () => {
+      relaunched++;
+      return true;
+    },
+    hasPendingApprovals: () => true,
+    hasActiveOperations: () => false,
+  });
+
+  expect(requestRelaunch()).toEqual({ ok: false, reason: "pending-approval" });
+  expect(relaunched).toBe(0);
+});
+
+test("refuses while a git operation is running, with no starvation cap — the owner is the retry", () => {
+  // The unattended path tolerates only AUTO_UPDATE_MAX_OPS_DEFERRALS of these before applying
+  // anyway, because a loop nobody watches must not be starved into never updating. Here a person is
+  // holding the phone: refusing every time is safe, because they can see why and tap again.
+  let relaunched = 0;
+  setAutoUpdateHooks({
+    relaunch: () => {
+      relaunched++;
+      return true;
+    },
+    hasPendingApprovals: () => false,
+    hasActiveOperations: () => true,
+  });
+
+  for (let i = 0; i < AUTO_UPDATE_MAX_OPS_DEFERRALS + 2; i++) {
+    expect(requestRelaunch()).toEqual({ ok: false, reason: "active-operation" });
+  }
+  expect(relaunched).toBe(0);
+});
+
+test("refuses while an unattended apply is mid-flight", async () => {
+  // That apply is downloading/rebuilding right now and relaunches itself the moment it lands.
+  // Restarting through it is both the interruption the busy-deferral exists to prevent and pointless.
+  let release: (() => void) | null = null;
+  setAutoUpdateEnabled(true); // testing the apply path
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => {
+      await new Promise<void>((r) => {
+        release = r;
+      });
+      return applyResult({ restartRequired: false });
+    },
+    relaunch: () => true,
+    hasPendingApprovals: () => false,
+    hasActiveOperations: () => false,
+  });
+
+  const inFlight = runAutoUpdateOnce();
+  // Let the apply actually start (it must be awaiting the promise above before we ask).
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(requestRelaunch()).toEqual({ ok: false, reason: "update-in-flight" });
+
+  release!();
+  await inFlight;
+  // …and the moment it finishes, an on-demand restart is available again.
+  expect(requestRelaunch()).toEqual({ ok: true });
+});
+
+test("reports a failed spawn rather than announcing a restart that never happens", () => {
+  // lifecycle's handler catches a failed spawn and deliberately stays up: shutting down without a
+  // successor would leave the machine with ZERO daemons. So it is not a restart, and neither the
+  // caller nor the other dashboards may be told it was one.
+  setAutoUpdateHooks({
+    relaunch: () => false,
+    hasPendingApprovals: () => false,
+    hasActiveOperations: () => false,
+  });
+
+  const events = captureEvents(() => {
+    expect(requestRelaunch()).toEqual({ ok: false, reason: "spawn-failed" });
+  });
+
+  expect(events).not.toContain("auto_update_restarting");
 });

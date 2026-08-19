@@ -84,6 +84,7 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/portable-window": { summary: "Open this daemon's UI in a chromeless Chromium app window instead of a browser tab.", tags: ["system"] },
   "GET /api/updates": { summary: "Check the configured public Git remote for a source update.", tags: ["system"] },
   "POST /api/updates/apply": { summary: "Apply an available source update with git pull --ff-only, then rebuild the web UI.", tags: ["system"] },
+  "POST /api/updates/restart": { summary: "Relaunch the daemon so an installed update takes over. 409 BUSY while work is in flight.", tags: ["system"] },
   "GET /api/openapi.json": { summary: "This OpenAPI 3.1 document (public, unauthenticated).", tags: ["system"] },
 
   // ── auth ──────────────────────────────────────────────────────────────────────

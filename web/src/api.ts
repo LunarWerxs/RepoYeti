@@ -423,6 +423,10 @@ export const api = {
   checkUpdate: () => req<UpdateStatus>("GET", "/api/updates"),
   /** Apply an available source update. The daemon should be restarted afterward. */
   applyUpdate: () => req<UpdateApplyResult>("POST", "/api/updates/apply"),
+  /** Relaunch the daemon so an installed update takes over — the auto-updater's own handoff (a
+   *  detached successor inherits the bound port), NOT `shutdown()`, which stops the whole app.
+   *  Throws ApiError "BUSY" while work is in flight; the message names what is in the way. */
+  restartDaemon: () => req<{ ok: boolean }>("POST", "/api/updates/restart"),
   /** Flip local ↔ remote. Throws ApiError "NEEDS_OWNER" if remote needs a sign-in first. */
   setMode: (mode: AccessMode) => req<ModeResult>("PUT", "/api/mode", { mode }),
   /** Configure the stable named tunnel (hostname + connector token). Token is write-only — pass

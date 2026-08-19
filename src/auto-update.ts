@@ -61,8 +61,12 @@ export const AUTO_UPDATE_MAX_OPS_DEFERRALS = 6;
 export interface AutoUpdateHooks {
   check: typeof checkForUpdate;
   apply: typeof applyUpdate;
-  /** Restart the daemon so the freshly-pulled code takes over. Wired by src/cli/lifecycle.ts. */
-  relaunch: () => void;
+  /** Restart the daemon so the freshly-pulled code takes over. Wired by src/cli/lifecycle.ts.
+   *  Returns whether a successor was actually spawned. A failed spawn leaves THIS daemon running
+   *  and is not a restart, so it must be distinguishable: the unattended path reports it in its
+   *  result, and the on-demand path (requestRelaunch, below) has to answer a caller who is
+   *  watching a badge and would otherwise wait forever for a daemon that never went down. */
+  relaunch: () => boolean;
   /** Whether an agent has a mutating MCP call awaiting approval right now. Real impl reads
    *  src/approvals.ts; tests fake it so the busy-deferral case doesn't need a real pending approval. */
   hasPendingApprovals: () => boolean;
@@ -70,10 +74,11 @@ export interface AutoUpdateHooks {
    *  Real impl reads src/opqueue.ts; tests fake it the same way as hasPendingApprovals. */
   hasActiveOperations: () => boolean;
 }
-function defaultRelaunch(): void {
+function defaultRelaunch(): boolean {
   // No relaunch handler wired (e.g. createApp() in a test) — the update is applied on disk and takes
   // effect on the next manual restart. Never exit here; we don't own a successor.
   console.warn("repoyeti: auto-update applied, but no relaunch handler is wired — restart to apply the new code.");
+  return false;
 }
 const realHooks: AutoUpdateHooks = {
   check: checkForUpdate,
@@ -83,10 +88,16 @@ const realHooks: AutoUpdateHooks = {
   hasActiveOperations,
 };
 let hooks: AutoUpdateHooks = realHooks;
+/** Whether a REAL relaunch handler has been wired. The default is warn-only (defaultRelaunch), so
+ *  an ON-DEMAND restart must refuse rather than answer "on its way" and leave whoever asked
+ *  watching for a daemon that was never going to go down. The unattended path never needed this —
+ *  nobody is waiting on its answer — which is why the flag arrives with requestRelaunch. */
+let relaunchWired = false;
 /** Override the side-effect hooks (lifecycle sets `relaunch`; tests inject fakes for all three so
  *  nothing pulls/spawns/exits). Passing `{}` restores the real hooks. */
 export function setAutoUpdateHooks(h: Partial<AutoUpdateHooks>): void {
   hooks = { ...realHooks, ...h };
+  relaunchWired = typeof h.relaunch === "function";
   // A fresh hook set is a fresh world (boot, or a test's arrange step) — no deferral history.
   opsDeferrals = 0;
 }
@@ -199,8 +210,11 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
     if (!res.ok) return { checked: true, applied: false, relaunched: false, reason: "apply-failed" };
     if (res.restartRequired) {
       broadcast("auto_update_restarting", { message: res.message });
-      hooks.relaunch();
-      return { checked: true, applied: true, relaunched: true };
+      // The update IS applied on disk either way; only the restart can fail here (lifecycle's
+      // handler catches a failed spawn and deliberately stays up rather than exit with no
+      // successor). Reporting that as `relaunched: true` would make the one outcome worth
+      // knowing about — applied, still running the old code — indistinguishable from success.
+      return { checked: true, applied: true, relaunched: hooks.relaunch() };
     }
     return { checked: true, applied: true, relaunched: false };
   } catch {
@@ -208,6 +222,68 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
   } finally {
     applying = false;
   }
+}
+
+// ── on-demand relaunch — the dashboard's "Restart to finish" (issue #23) ──────────────────────
+/**
+ * Why an on-demand relaunch was refused. Deliberately a domain vocabulary, not API error codes:
+ * this module must not import the HTTP contract layer, so src/http/routes/updates.ts owns the
+ * mapping from these to `{code, message}` (and it is the layer that knows what a phone with no
+ * terminal beside it needs to be told).
+ */
+export type RelaunchRefusal =
+  /** No relaunch handler is wired — createApp() outside the daemon, e.g. a test. Nothing would
+   *  restart, so answering "on its way" would be a lie. */
+  | "no-handler"
+  /** An unattended apply is downloading/rebuilding RIGHT NOW. Restarting through it is exactly
+   *  the interruption the busy-deferral above exists to prevent, and it is also pointless: that
+   *  apply relaunches on its own the moment it lands. */
+  | "update-in-flight"
+  /** An agent has a mutating MCP call awaiting approval on this daemon this instant. */
+  | "pending-approval"
+  /** A git/file op is queued or running through the op-queue this instant. */
+  | "active-operation"
+  /** The successor could not be spawned. This daemon is still up and still serving. */
+  | "spawn-failed";
+
+export type RelaunchOutcome = { ok: true } | { ok: false; reason: RelaunchRefusal };
+
+/**
+ * Restart the daemon NOW, because someone asked — the "Restart to finish" badge, which is the only
+ * surface an installed PWA has after a MANUAL update installs a build the running process is not
+ * yet serving (issue #23).
+ *
+ * It goes through the SAME injected `relaunch` the unattended apply uses (wired in
+ * src/cli/lifecycle.ts: spawn a DETACHED successor carrying `--relaunch` and the bound port, then
+ * shut this daemon down gracefully so the successor takes that exact port and every connected
+ * dashboard reconnects to it). Reusing it is the point of doing this here at all — that handler's
+ * own comment catalogues three win32 traps (WMI drops the env block, so the signal and the port
+ * both ride as CLI flags; a non-detached child dies with the tray's `taskkill /T`), and a second
+ * restart mechanism would be a second place to get all three right.
+ *
+ * It is NOT POST /api/shutdown. That means "stop the whole application", and it writes the sentinel
+ * that tells the tray host to dispose its icon and exit — the precise opposite of "come back".
+ *
+ * The guards mirror the unattended busy-deferral, minus its starvation cap: that cap exists because
+ * a loop nobody is watching must not be starved into never updating at all, whereas here the owner
+ * IS the retry — the refusal names the work in the way and the badge stays tappable. Note that the
+ * op-queue signal counts routine background READS too (see src/opqueue.ts), so a refusal can be a
+ * status read that will be gone a second later. That is the conservative direction on purpose: one
+ * more tap costs nothing, and restarting out from under a push costs a great deal.
+ */
+export function requestRelaunch(): RelaunchOutcome {
+  if (!relaunchWired) return { ok: false, reason: "no-handler" };
+  if (applying) return { ok: false, reason: "update-in-flight" };
+  if (hooks.hasPendingApprovals()) return { ok: false, reason: "pending-approval" };
+  if (hooks.hasActiveOperations()) return { ok: false, reason: "active-operation" };
+  if (!hooks.relaunch()) return { ok: false, reason: "spawn-failed" };
+  // Announce only AFTER a successor exists, on the same event the unattended restart uses, so every
+  // OTHER connected dashboard shows "Restarting…" and reads the stream drop about to follow as
+  // expected rather than as a fault. (The client that asked flips its own flag off the HTTP answer;
+  // it cannot rely on this, because the broadcast and the disconnect race each other.) The handler
+  // delays its shutdown ~800ms to hand over the port, which is ample for this to reach the wire.
+  broadcast("auto_update_restarting", { message: "restart requested from the dashboard" });
+  return { ok: true };
 }
 
 // ── timer plumbing (mirrors auto-commit.ts) ───────────────────────────────────────────────────

@@ -889,7 +889,7 @@
     "updateLater": "Later",
     "updateReview": "Review update",
     "updateApplied": "Update installed",
-    "updateRestarting": "Restarting to finish.",
+    "updateRestarting": "Restart to finish — the badge on the Version row does it.",
     "updateFailed": "Couldn't install the update"
   },
   "scan": {
@@ -1155,6 +1155,9 @@
     "versionUpdateAvailableAction": "Review and install this update",
     "versionChangelog": "What's new in RepoYeti",
     "versionRestartPending": "Restart to finish",
+    "versionRestartPendingAction": "Restart RepoYeti now to finish the update",
+    "versionRestartStarted": "Restarting RepoYeti…",
+    "versionRestartFailed": "Couldn't restart RepoYeti",
     "versionUpdating": "Updating…",
     "versionRestarting": "Restarting…",
     "autoCommitFailed": "Could not change auto-commit settings",

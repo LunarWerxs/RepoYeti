@@ -580,6 +580,8 @@ export type ApiErrorCode =
   | "PLAN_STALE"
   | "NOT_CONFLICTED"
   | "CONFLICT_STALE"
+  // Work is in flight on the daemon, so it refused to restart itself (src/auto-update.ts).
+  | "BUSY"
   | "BAD_REQUEST"
   | "VALIDATION"
   | "NO_MESSAGE"

@@ -4,6 +4,44 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **"Restart to finish" is a button now** ([#23](https://github.com/LunarWerxs/RepoYeti/issues/23)).
+  Installing an update by hand from the dashboard leaves the daemon serving the OLD build until
+  something restarts it — only the opt-in unattended update restarts on its own — so the version row
+  correctly changed to **Restart to finish** and then stopped there. That is a statement of what has
+  to happen next, shown on the one screen that could not make it happen: an installed PWA on a phone
+  has no system tray and no terminal beside it, which is the setup this row exists for in the first
+  place. In practice the freshly-downloaded build just sat on disk, sometimes for hours, waiting for
+  the owner to reach a real computer.
+  Tapping the badge now relaunches the daemon through the auto-updater's **existing** handoff rather
+  than a second restart mechanism: a detached successor is spawned carrying the port this daemon is
+  bound to, this one shuts down gracefully to release it, and the successor binds the same port — so
+  the page you tapped from reconnects to the new version instead of hunting for a port that moved.
+  That handoff already had to get three win32 traps right (WMI drops the environment block, so both
+  the relaunch signal and the port ride as command-line flags; a non-detached child dies with the
+  tray's `taskkill /T`), and a parallel implementation would have been a second place to get all
+  three right. It is deliberately not `POST /api/shutdown`, which means *stop the whole application*
+  and drops the sentinel telling the tray host to dispose its icon and exit.
+  The restart is refused, with a reason, while work is in flight: an agent waiting on an MCP
+  approval, a git operation running, or an update still installing (that one restarts itself when it
+  lands). Those are the same guards the unattended updater uses, minus its starvation cap — that cap
+  exists because a loop nobody watches must not be starved into never updating at all, whereas here
+  the owner is the retry, so refusing every time is safe as long as the refusal says why. Every
+  connected dashboard, not just the one that asked, is told over SSE, so the disconnect that follows
+  reads as the restart it is rather than a fault.
+  New route: `POST /api/updates/restart`, owner-only (a share-link guest can never restart someone
+  else's machine), `409 BUSY` while work is in flight.
+
+### Fixed
+
+- **The "Update installed" toast no longer says the app is restarting when it isn't.** A manual
+  update reported *Restarting to finish.* while nothing was restarting — the daemon kept serving the
+  old build. It now says *Restart to finish*, which is both true and the name of the badge that does
+  it.
+
 ## [0.21.4] - 2026-08-18
 
 ### Fixed

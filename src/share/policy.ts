@@ -136,6 +136,9 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/portable-window",
   "GET /api/updates",
   "POST /api/updates/apply",
+  // Restarting the daemon is the owner's own machine going away for a few seconds, and every other
+  // share link with it. Same plane as /api/shutdown above.
+  "POST /api/updates/restart",
   // auth plane
   "GET /api/auth/status", // guests get a projection instead (routes/auth.ts)
   "GET /api/auth/me", // ditto
