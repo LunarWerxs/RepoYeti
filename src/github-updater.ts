@@ -16,6 +16,18 @@ import type { UpdateApplyResult, UpdateStatus } from "./updater.ts";
 const SERVICE = "repoyeti";
 const REPO = "LunarWerxs/RepoYeti";
 const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
+/**
+ * Resilience fallback for the update check, used only when the Studio proxy fails (see
+ * latestRelease). GitHub's own releases/latest is the right backstop precisely because it is
+ * the one URL here that cannot be orphaned by a rename: GitHub redirects both owner and repo
+ * renames, so this keeps resolving even if either changes.
+ *
+ * Why this exists (YTSort, 2026-08): a shipped artifact whose only update URL later stopped
+ * resolving left every install silently polling a dead link for six months. Neither the users
+ * nor the maintainer got any signal. A single hardcoded update endpoint with no second opinion
+ * is that same failure waiting to happen, so this file no longer has one.
+ */
+const GITHUB_LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 export interface ReleaseAsset {
   name: string;
@@ -93,24 +105,60 @@ function baseStatus(overrides: Partial<UpdateStatus>): UpdateStatus {
  * params on the request the app already made. Release *binaries* still download straight from
  * GitHub via the asset URLs the payload carries (trustedAssetUrl below still pins github.com).
  */
+/**
+ * Ask GitHub directly after the Studio proxy failed. Carries no install id and no version/os
+ * telemetry — this is a plain unauthenticated read, so it stays within GitHub's anonymous rate
+ * limit and reveals nothing the primary request would not have.
+ *
+ * If this fails too, the ORIGINAL failure is what gets reported: the primary endpoint is the
+ * one an operator needs to hear about, and surfacing "GitHub said 403" would send them chasing
+ * the backstop instead of the thing that actually broke.
+ */
+async function githubFallbackRelease(
+  common: Record<string, string>,
+  primaryError: unknown,
+  primaryStatus: number | undefined,
+): Promise<Release> {
+  let fallback: Response;
+  try {
+    fallback = await fetch(GITHUB_LATEST_API, {
+      headers: common,
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (error) {
+    throw primaryError ?? error;
+  }
+  if (!fallback.ok) {
+    if (primaryError) throw primaryError;
+    throw new Error(
+      `release check returned HTTP ${primaryStatus} (GitHub fallback: HTTP ${fallback.status})`,
+    );
+  }
+  return (await fallback.json()) as Release;
+}
+
 async function latestRelease(): Promise<Release> {
   const disabled = pingDisabled();
   const cfg = loadConfig();
   if (!disabled) ensureInstallId(cfg);
   const { url, headers } = buildPingRequest(cfg);
-  let response: Response;
+  const common = { accept: "application/vnd.github+json", "user-agent": `${SERVICE}/${VERSION}` };
+  let response: Response | null = null;
+  let primaryError: unknown = null;
   try {
     response = await fetch(url, {
-      headers: { accept: "application/vnd.github+json", "user-agent": `${SERVICE}/${VERSION}`, ...headers },
+      headers: { ...common, ...headers },
       signal: AbortSignal.timeout(5_000),
     });
   } catch (error) {
-    if (!disabled) recordPingResult(cfg, false);
-    throw error;
+    primaryError = error;
   }
-  if (!disabled) recordPingResult(cfg, response.ok);
-  if (!response.ok) throw new Error(`release check returned HTTP ${response.status}`);
-  return (await response.json()) as Release;
+  // Ping bookkeeping tracks the PRIMARY attempt only: a fallback that succeeds says nothing
+  // about whether Studio received the install-count row, and marking it reported would burn
+  // this install's one-time `new=1` on a request Studio never saw.
+  if (!disabled) recordPingResult(cfg, !!response?.ok);
+  if (response?.ok) return (await response.json()) as Release;
+  return await githubFallbackRelease(common, primaryError, response?.status);
 }
 
 let cached: { status: UpdateStatus; at: number } | null = null;
