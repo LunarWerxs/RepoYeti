@@ -41,8 +41,15 @@ const noAiConfig = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, 
  *
  * The three local-only tests keep the default: they never leave the working copy and run in
  * well under a second, so a slow one there would be a genuine signal.
+ *
+ * RAISED 30s -> 90s on 2026-08-21. Re-measured, the two rounds now take 17.9s and 9.6s, not the
+ * 3.0-3.9s and 4.2-6.3s recorded above - so the slower one was sitting at 60% of its own
+ * allowance and the "real headroom over the worst observed run" this comment claims had quietly
+ * stopped being true. (Measured on a machine running a dozen concurrent agent sessions, which is
+ * exactly the loaded condition a CI runner reproduces and the condition the flake appears under,
+ * so it is the honest number to budget against rather than an idle best case.)
  */
-const REMOTE_ROUND_TIMEOUT_MS = 30_000;
+const REMOTE_ROUND_TIMEOUT_MS = 90_000;
 
 function capture(): { events: Array<{ event: string; payload: unknown }>; stop: () => void } {
   const events: Array<{ event: string; payload: unknown }> = [];

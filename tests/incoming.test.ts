@@ -23,6 +23,20 @@ interface Fixture {
 
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
+/**
+ * Allowance for the three tests that build a real upstream and read it back.
+ *
+ * `fixture()` + `publishUpstream()` spawn a dozen git processes before the first assertion,
+ * and these three then diff a worktree and an index against that remote. Measured 2026-08-21
+ * on a BUSY machine (a dozen concurrent agent sessions, which is the condition the flake shows
+ * up under, not the condition to design away from): 8.2s, 5.9s and 4.3s. That is comfortably
+ * inside the gate's --timeout, and comfortably OUTSIDE bun's bare 5s default -- so `bun test`
+ * typed without the repo's flag failed them and looked like a runtime regression. It caused a
+ * real misdiagnosis once (a retracted "Bun 1.4 broke this repo" claim), so the budget is stated
+ * here and the test is correct under any invocation.
+ */
+const UPSTREAM_ROUND_TIMEOUT_MS = 60_000;
+
 /** A bare remote plus two clones, both on `main`, sharing one base commit. */
 async function fixture(): Promise<Fixture> {
   const root = mkScratchDir("gm-incoming-");
@@ -103,7 +117,7 @@ test("describes a clean fast-forward pull without touching the working tree", as
 
   // The preview's green verdict and the mutating ff-only contract agree.
   expect((await gitPullFfOnly(work, null)).code).toBe("OK");
-});
+}, UPSTREAM_ROUND_TIMEOUT_MS);
 
 test("predicts a conflict before the pull, still without touching the working tree", async () => {
   const { work, other } = await fixture();
@@ -255,7 +269,7 @@ test("snapshot token changes with worktree and index state even when commit coun
   expect(staged.behind).toBe(clean.behind);
   expect(staged.snapshot?.indexWorktreeHash).not.toBe(untracked.snapshot?.indexWorktreeHash);
   expect(staged.snapshot?.token).not.toBe(untracked.snapshot?.token);
-});
+}, UPSTREAM_ROUND_TIMEOUT_MS);
 
 test("a same-path staged blob replacement makes the cached preview stale", async () => {
   const { work, other } = await fixture();
@@ -288,7 +302,7 @@ test("a same-path staged blob replacement makes the cached preview stale", async
   expect(cached.snapshot?.worktreeStateHash).not.toBe(liveStatus.worktreeStateHash);
   expect(refreshed.snapshot?.worktreeStateHash).toBe(liveStatus.worktreeStateHash ?? undefined);
   expect(refreshed.snapshot?.token).not.toBe(cached.snapshot?.token);
-});
+}, UPSTREAM_ROUND_TIMEOUT_MS);
 
 test("snapshot identifies a replaced upstream tip even when ahead/behind counts match", async () => {
   const { work, other } = await fixture();

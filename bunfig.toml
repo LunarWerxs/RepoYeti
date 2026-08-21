@@ -1,4 +1,16 @@
 [test]
+# THE TEST TIMEOUT LIVES ON THE COMMAND LINE (`bun test tests --timeout 20000`, the `test`
+# script) AND NOWHERE ELSE, AND THAT IS NOT AN OVERSIGHT. Both tidier-looking places were tried
+# and MEASURED on bun 1.4.0, and both are false greens - they look configured and silently do
+# nothing, which is worse than the flag:
+#   · `timeout = 20000` under this [test] table is IGNORED outright. A 6s test still dies at the
+#     5s default with it set.
+#   · `setDefaultTimeout(20_000)` from the preload below applies only when ONE file runs. Add a
+#     second file to the same invocation and every test is back on 5s. Proven with a 6s probe:
+#     alone it passes, alongside roots-bulk.test.ts it times out at 5000ms.
+# So a bare `bun test` IS a different suite from the gate, permanently, and the answer is the
+# per-test third argument for anything genuinely slow (see tests/timer-rounds.test.ts and
+# tests/incoming.test.ts for the file-level constant idiom) rather than a global that lies.
 preload = ["./tests/setup.ts"]
 # web/ is Vitest's, not bun:test's. Bun's runner has no Vue SFC compiler, so a `.vue` import
 # resolves to a *string* path; @vue/test-utils then calls WeakMap.set(<string>) and throws

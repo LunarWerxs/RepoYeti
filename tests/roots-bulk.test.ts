@@ -34,6 +34,9 @@ async function gitRepoIn(parent: string, name: string): Promise<string> {
 
 // ── fetch-all ──────────────────────────────────────────────────────────────────
 
+// Measured 6.2s on 2026-08-21 under a loaded machine: this walks every root and does a real
+// fetch per repo with a remote, so it pays git spawn time N times over. Above bun's bare 5s
+// default, so it needs a stated budget rather than the gate's --timeout flag to be correct.
 test("fetchAllRepos attempts only repos with a remote, and reports per-repo failures", async () => {
   const withRemote = mkScratchDir("gm-fa-r-");
   await $`git -c init.defaultBranch=main init -q ${withRemote}`.quiet();
@@ -51,7 +54,7 @@ test("fetchAllRepos attempts only repos with a remote, and reports per-repo fail
   expect(r.failed.some((f) => f.id === idB)).toBe(false); // no-remote repo was skipped, not failed
   // idA has a remote → it was attempted (lands in ok or failed, never silently dropped)
   expect(r.failed.some((f) => f.id === idA) || r.ok >= 1).toBe(true);
-});
+}, 60_000);
 
 test("POST /api/repos/fetch-all returns a well-formed summary", async () => {
   const res = await createApp(localCfg()).request("/api/repos/fetch-all", { method: "POST" });

@@ -140,6 +140,10 @@ test("auto-deny OFF + auto-approve OFF: no timer is armed — the request waits 
   expect(await result).toBe("denied");
 });
 
+// 45s, raised from 15s on 2026-08-21. Both auto-resolution tests wait out a REAL timer pinned
+// to the clamp floor (APPROVAL_TIMEOUT_MIN_S = 10s), so ~10s of the budget is spent before any
+// assertion runs and only ~5s was left for everything else. Measured 10.0s and 10.3s on a loaded
+// machine; a cold runner has no room in 15s and would go red on a commit that changed nothing.
 test("auto-approve ON: a pending request auto-APPROVES after its timeout (both timers cleared on settle)", async () => {
   setAutoDenyEnabled(false); // isolate the approve timer
   setAutoApproveEnabled(true);
@@ -149,7 +153,7 @@ test("auto-approve ON: a pending request auto-APPROVES after its timeout (both t
   const outcome = await result;
   expect(outcome).toBe("approved");
   expect(listPending().some((e) => e.id === id)).toBe(false);
-}, 15_000);
+}, 45_000);
 
 test("both timers armed: the SHORTER duration wins (deny override shorter than approve)", async () => {
   setAutoDenyEnabled(true);
@@ -218,7 +222,7 @@ test(
     await expect(runPromise).rejects.toThrow(/approval timed out/);
     expect(listPending().length).toBe(0);
   },
-  15_000,
+  45_000,
 );
 
 test("gate-off passthrough: with mcpApprovalGate disabled, a mutating call runs immediately (no pending entry)", async () => {
