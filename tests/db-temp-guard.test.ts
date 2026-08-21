@@ -84,8 +84,17 @@ test("isUnderTempDir honors a custom TEMP/TMP override, restored after the test"
     process.env.TMP = overrideRoot;
     expect(isUnderTempDir(join(overrideRoot, "some-repo"))).toBe(true);
   } finally {
-    process.env.TEMP = prevTemp;
-    process.env.TMP = prevTmp;
+    // Restore by DELETING when the var was absent, never by assigning the old value back:
+    // on Linux TEMP/TMP don't exist, so `prev` is undefined, and `process.env.X = undefined`
+    // sets the literal STRING "undefined" (Node semantics, which Bun matches from 1.4.0;
+    // Bun <= 1.3.x silently deleted instead, which is what hid this). The assignment form
+    // planted TMP="undefined" for the REST OF THE SUITE, so os.tmpdir() returned "undefined"
+    // and every later mkdtemp under the OS temp dir failed -- 20 reds on the Linux CI leg
+    // that looked like a Bun 1.4 regression and were this cleanup all along.
+    if (prevTemp === undefined) delete process.env.TEMP;
+    else process.env.TEMP = prevTemp;
+    if (prevTmp === undefined) delete process.env.TMP;
+    else process.env.TMP = prevTmp;
   }
 });
 
