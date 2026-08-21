@@ -7,6 +7,10 @@ import { registerRepo, refreshRepo, stopWatching } from "../src/service/index.ts
 import type { RepoYetiConfig } from "../src/config.ts";
 import { rmrf } from "./rmrf.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // Closes E4: the PUT /api/mode start/stop toggle and the watcher→broadcast→SSE delivery path
 // (a repo refresh reaching a live subscriber) had no test. tunnel.test.ts only covers the

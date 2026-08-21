@@ -19,6 +19,10 @@ import {
   MAX_TREE_SEARCH_RESULTS,
   type RepoTreeEntry,
 } from "../src/service/index.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 

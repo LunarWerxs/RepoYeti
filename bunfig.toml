@@ -1,16 +1,17 @@
 [test]
-# THE TEST TIMEOUT LIVES ON THE COMMAND LINE (`bun test tests --timeout 20000`, the `test`
-# script) AND NOWHERE ELSE, AND THAT IS NOT AN OVERSIGHT. Both tidier-looking places were tried
-# and MEASURED on bun 1.4.0, and both are false greens - they look configured and silently do
-# nothing, which is worse than the flag:
-#   · `timeout = 20000` under this [test] table is IGNORED outright. A 6s test still dies at the
-#     5s default with it set.
-#   · `setDefaultTimeout(20_000)` from the preload below applies only when ONE file runs. Add a
-#     second file to the same invocation and every test is back on 5s. Proven with a 6s probe:
-#     alone it passes, alongside roots-bulk.test.ts it times out at 5000ms.
-# So a bare `bun test` IS a different suite from the gate, permanently, and the answer is the
-# per-test third argument for anything genuinely slow (see tests/timer-rounds.test.ts and
-# tests/incoming.test.ts for the file-level constant idiom) rather than a global that lies.
+# THE TEST TIMEOUT LIVES IN THE TEST FILES, and `timeout` does NOT belong under this table.
+# Every file whose tests spawn calls `useSuiteTimeout()` (tests/helpers/timeouts.ts) at its top,
+# which is scoped to that file and holds for the whole run however many files are in it. That is
+# what makes a bare `bun test` and `bun run test` the SAME suite - a timeout on the command line
+# only applies when someone remembers the command line, and forgetting it once already produced
+# a retracted "Bun 1.4 broke this repo" claim built entirely on the wrong invocation.
+#
+# The two tidier-looking places were tried and MEASURED on bun 1.4.0, and both are false greens:
+#   - `timeout = 20000` under this [test] table is IGNORED outright. A 6s test still dies at 5s.
+#   - `setDefaultTimeout()` from the preload below applies only when ONE file runs; add a second
+#     file to the invocation and every test is back on 5s.
+# scripts/checks/spawn-test-without-timeout.mjs enforces the per-file call and no longer stands
+# itself down for either of them.
 preload = ["./tests/setup.ts"]
 # web/ is Vitest's, not bun:test's. Bun's runner has no Vue SFC compiler, so a `.vue` import
 # resolves to a *string* path; @vue/test-utils then calls WeakMap.set(<string>) and throws

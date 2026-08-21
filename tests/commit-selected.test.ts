@@ -7,6 +7,10 @@ import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { stopWatching } from "../src/service/index.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // Per-file (selected) staging for a single ordinary commit: stage + commit ONLY the chosen paths,
 // leaving everything else pending. Reuses the same commitGroups primitive as Smart Commit, so this

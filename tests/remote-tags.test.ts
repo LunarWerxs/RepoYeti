@@ -8,6 +8,10 @@ import { gitRemoteSet, gitRemoteRemove, gitTagCreate } from "../src/git-actions.
 import { readTags } from "../src/read/inspect.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 const J = (method: string, body: unknown) => ({

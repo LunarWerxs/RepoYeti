@@ -36,6 +36,10 @@
 import { test, expect } from "bun:test";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const ROOT = join(import.meta.dir, "..");
 const MISC = join(ROOT, "misc");

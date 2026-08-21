@@ -32,6 +32,10 @@ import { mustUpsertRepo } from "./helpers/upsert.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import type { Identity } from "../src/db.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const ID: Identity = { id: "x", displayName: "T", gitUsername: "Tester", gitEmail: "t@test.io", sshKeyPath: null };
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });

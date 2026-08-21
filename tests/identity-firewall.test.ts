@@ -26,6 +26,10 @@ import { serviceBackend } from "../src/mcp/adapter-service.ts";
 import type { RepoYetiConfig, IdentityRule } from "../src/config.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 /** A real git repo with one seed commit + local author, registered with the daemon. */
 async function gitRepo(name: string): Promise<{ dir: string; id: string; view: RepoView }> {

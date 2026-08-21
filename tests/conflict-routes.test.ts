@@ -15,6 +15,10 @@ import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // Local mode (no OIDC) → /api/* isn't gated, so the routes are directly reachable.
 const localCfg = (extra?: Partial<RepoYetiConfig>): RepoYetiConfig => ({

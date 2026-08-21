@@ -13,6 +13,10 @@ import { readStatus, readChanges } from "../src/read/status.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // ── pure patch parser ───────────────────────────────────────────────────────────
 

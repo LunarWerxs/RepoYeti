@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { readLog, readCommit } from "../src/read/inspect.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 /** A repo whose history contains a real merge commit:
  *    init → (feature: c-feat) ┐

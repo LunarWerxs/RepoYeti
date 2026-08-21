@@ -21,6 +21,10 @@ import {
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { setDiffStatsEnabled } from "../src/read/diffstat.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const tmp = (): string => mkScratchDir("gm-svc-");
 

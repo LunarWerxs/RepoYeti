@@ -14,6 +14,10 @@ import {
 } from "../src/git.ts";
 import type { Identity } from "../src/db.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const ID: Identity = {
   id: "x",

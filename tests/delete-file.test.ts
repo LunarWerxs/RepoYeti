@@ -17,6 +17,10 @@ import { $ } from "bun";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { deleteFile } from "../src/service/index.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 /** A git repo with one seed commit (so HEAD exists), on branch `main`. */
 async function repo(): Promise<string> {

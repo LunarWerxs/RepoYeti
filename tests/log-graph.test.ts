@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { registerRepo, getLog, stopWatching } from "../src/service/index.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // Covers the "Git Graph" data path: the log's ref-scope (?refs=head|local|all → readLog's
 // scopeArgs) plus the parent-hash / ref-decoration fields the DAG renderer needs. A repo with an

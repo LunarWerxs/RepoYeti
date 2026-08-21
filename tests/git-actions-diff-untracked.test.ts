@@ -13,6 +13,10 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { collectCommitDiff, collectPathsDiff, collectCommitPlanInput } from "../src/git-actions/diff.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 async function repo(): Promise<string> {
   const dir = mkScratchDir("gm-diffu-");

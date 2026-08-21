@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { readChanges, readStatus } from "../src/read/status.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // Conflict Concierge: readChanges must surface WHICH kind of unmerged pair a "C" file is in
 // (ConflictKind), and must mark a since-resolved path with `resolved: true` rather than letting

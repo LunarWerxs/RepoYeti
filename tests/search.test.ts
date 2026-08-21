@@ -5,6 +5,10 @@ import { $ } from "bun";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { searchChangedContent } from "../src/service/index.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 async function gitRepo(): Promise<string> {
   const dir = mkScratchDir("gm-search-");

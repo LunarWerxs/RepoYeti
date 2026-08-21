@@ -6,6 +6,10 @@ import { $ } from "bun";
 import { parsePorcelainV2, readStatus, resolveHistoryRefsHash } from "../src/read/status.ts";
 import { currentGitOperation, gitFor } from "../src/git.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 async function gitRepo(prefix = "gm-status-"): Promise<string> {
   const dir = mkScratchDir(prefix);

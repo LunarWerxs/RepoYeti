@@ -36,7 +36,7 @@
     "dev": "bun run scripts/dev.ts",
     "status": "bun run src/index.ts status",
     "typecheck": "tsc --noEmit",
-    "test": "bun test tests --timeout 20000",
+    "test": "bun test tests",
     "test:coverage": "bun test tests --coverage",
     "check:coverage": "bun run scripts/check-coverage.ts",
     "check:codes": "bun run scripts/check-error-codes.ts",

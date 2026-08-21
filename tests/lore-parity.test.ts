@@ -11,6 +11,10 @@ import {
   smartCommitRepo,
   stopWatching,
 } from "../src/service/index.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // Verifies the Lore feature-parity port (AI commit-diff, content search, smart-commit plan input +
 // group staging) against a REAL `lore` CLI + a live local loreserver. Skipped when either is absent

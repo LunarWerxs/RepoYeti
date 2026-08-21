@@ -21,6 +21,10 @@ import { guestEventData } from "../src/share/events.ts";
 import { redactRemoteUrl, guestRepoView } from "../src/share/redact.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 let inScope = "";
 let outOfScope = "";

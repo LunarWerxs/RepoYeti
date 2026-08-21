@@ -32,6 +32,10 @@ import { hashToken, mintToken, GUEST_COOKIE } from "../src/share/index.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import type { OAuthConfig, RepoYetiConfig } from "../src/config.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const OWNER_OAUTH: OAuthConfig = {
   issuer: "https://accounts.connections.icu",

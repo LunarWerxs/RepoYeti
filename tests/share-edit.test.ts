@@ -24,6 +24,10 @@ import { hashToken, mintToken, isStaleOrigin } from "../src/share/index.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { $ } from "bun";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 let repoA = "";
 let repoB = "";

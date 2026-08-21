@@ -27,6 +27,10 @@ import { credentialConfigArgs, credentialEnv, gitHubAuth, GH_TOKEN_ENV } from ".
 import { isValidLogin, type GhAccount } from "../src/gh-cli.ts";
 import { classify } from "../src/git-actions/sync.ts";
 import type { RepoView } from "../src/db.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const acct = (login: string, active = false): GhAccount => ({
   host: "github.com",

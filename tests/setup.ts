@@ -67,8 +67,15 @@ process.env.GIT_CEILING_DIRECTORIES = scratchSuiteRoot().replaceAll("\\", "/");
 //
 // Anything either path misses is caught by sweepOrphanedRuns() on a later run. Teardown is
 // best-effort throughout: it must never turn a run whose assertions already passed red.
+// 60s, and the second argument is load-bearing rather than defensive. This hook deletes the
+// WHOLE run's scratch tree - dozens of real git repos, tens of thousands of small files - and it
+// runs once, at the very end, with Windows EBUSY retries layered on top. It sat on bun's 5s
+// default, which the gate's old `--timeout 20000` flag happened to cover; the moment that flag
+// went away it was the last thing standing between a bare `bun test` and a green run, and it
+// failed as `(fail) (unnamed)` attributed to whichever file happened to be last. Teardown must
+// never turn a run whose assertions already passed red, so it gets room to finish.
 afterAll(async () => {
   await cleanupScratchRunAsync();
-});
+}, 60_000);
 
 process.on("exit", cleanupScratchRun);

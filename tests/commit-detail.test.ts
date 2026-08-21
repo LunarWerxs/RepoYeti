@@ -5,6 +5,10 @@ import { $ } from "bun";
 import { registerRepo, getLog, getCommit, readCommitFile, stopWatching } from "../src/service/index.ts";
 import { COMMIT_FILES_CAP } from "../src/read/inspect.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // Covers the commit-detail read path (the History "tap a commit → see its changed files + per-file
 // line counts" feature): readCommit → VcsBackend → service.getCommit → GET /api/repos/:id/commit/:hash.

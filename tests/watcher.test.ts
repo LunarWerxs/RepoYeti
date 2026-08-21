@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { watchRepo, type WatchFactory } from "../src/watcher.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // The bonus recursive worktree watch (see watcher.ts's header comment) is only installed on
 // platforms where a single native descriptor covers the whole tree; gate the tests that depend

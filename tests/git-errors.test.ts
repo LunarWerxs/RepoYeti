@@ -12,6 +12,10 @@ import {
 } from "../src/git-actions.ts";
 import type { Identity } from "../src/db.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 // Closes the audit's P0 test gaps: the DETACHED_HEAD guards (5 actions guard it, none were
 // tested) and the push error contract (NON_FAST_FORWARD / NO_REMOTE).

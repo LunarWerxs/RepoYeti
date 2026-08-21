@@ -10,6 +10,10 @@ import { $ } from "bun";
 import { addToGitignore } from "../src/service/index.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 async function gitRepo(name: string): Promise<{ dir: string; id: string }> {
   const dir = mkScratchDir(`gm-gitignore-${name}-`);

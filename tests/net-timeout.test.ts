@@ -20,6 +20,10 @@ import { gitTagCreate } from "../src/git-actions/refs.ts";
 import { PROGRESS_ARG, safeGitEnv } from "../src/git.ts";
 import { mkScratchDir, fileUrl } from "./helpers/scratch.ts";
 import type { Identity } from "../src/db.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
+useSuiteTimeout();
 
 const BLOCK_TIMEOUT = new Error("block timeout reached");
 
