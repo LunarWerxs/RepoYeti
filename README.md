@@ -21,7 +21,7 @@
 
 ---
 
-RepoYeti runs a small daemon on your machine, finds every git repo you have, and serves a dashboard to your phone over a private tunnel. Fetch, commit, push, and read history and diffs from wherever you are. It runs on your machine, so your code stays there.
+RepoYeti is a self-hosted git dashboard that runs a small daemon on your computer, finds every git repository on it, and serves a live status grid, commit graph, and diff viewer to your phone or browser over a private Cloudflare tunnel, so you can fetch, commit, and push from wherever you are without installing anything in the cloud.
 
 <!-- A table, not three loose <img> tags: GitHub collapses whitespace between images, so the
      phones ended up shoulder to shoulder. GitHub also sizes table columns to their content and
@@ -150,6 +150,31 @@ Cloud sign-in and settings sync are entirely optional and off by default; core g
 - **Contributing & tests:** [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 - **Working here with an AI agent:** [AGENTS.md](AGENTS.md) (repo map, the enforced guardrails, and the traps that have cost a release)
 
+## FAQ
+
+**Is RepoYeti free?**
+Yes. RepoYeti is MIT licensed and free to download, self-host, and run. Optional cloud features, sign-in and settings sync, are off by default and not required; core git management works entirely self-hosted with no LunarWerx account. The only paid part of the workflow is whatever AI provider key you choose for Smart Commit.
+
+**Does it work offline?**
+Yes, for local repo work. Browsing your repos, viewing commit history, and diffing don't need an internet connection or any account. Fetching or pushing to a remote still needs whatever network access that remote requires, and reaching the dashboard from your phone needs a Cloudflare tunnel. No LunarWerx account is required for any of it.
+
+**What are the system requirements?**
+Prebuilt binaries cover Windows, Linux, and macOS on Apple Silicon; on Windows the release is a single .exe with no runtime to install, plus an optional system-tray build. Running from a clone instead needs Bun 1.1 or newer and git on PATH. Remote phone access additionally needs cloudflared installed separately; RepoYeti detects and reports if it's missing.
+
+**How is it different from GitHub Desktop or the GitHub mobile app?**
+GitHub Desktop is a Windows/Mac desktop app, not something you'd open on a phone. The GitHub mobile app browses and reviews repos hosted on GitHub.com, but it doesn't drive git in a local working tree. RepoYeti instead runs on your machine, shells out to your real local git via `simple-git`, and puts that same working tree on your phone.
+
+**Is my data sent anywhere?**
+Only a small, anonymous daily ping to Connections Studio for update checks: a random install id, the app version, and a coarse OS tag. The server derives a coarse location, ASN, locale, and a truncated user agent from that, but never an IP address, hostname, username, file path, or anything about your repos. Set `REPOYETI_NO_PING=1` to opt out.
+
+**Do I need to sign up for an AI provider to use Smart Commit?**
+Yes, some key is required since RepoYeti doesn't ship one (Groq revokes any key committed to a public repo). Groq is the suggested provider: free, and set up takes about three clicks from Settings → AI. OpenAI, Claude, Gemini, OpenRouter, and DeepSeek also work if you'd rather use those. Keys live in your OS keychain and never leave the daemon.
+
+**Why doesn't RepoYeti support force-push or rebase?**
+By design. RepoYeti leaves out force-push, `reset --hard`, and rebase entirely: a phone is a bad place to rewrite history. Pulls are fast-forward-only and stop rather than merge when a branch has diverged. None of this limits your normal desktop git client; RepoYeti just won't run those specific commands remotely.
+
 ## License
 
 [MIT](LICENSE) © LunarWerx Studios. Bundled file-type icons are [`vscode-icons`](https://github.com/vscode-icons/vscode-icons) (icon artwork under CC BY-SA).
+
+Made by [LunarWerx Studios](https://lunarwerx.com). Also building [AgentHydra](https://agenthydra.lunarwerx.com), [DevWebUI](https://devwebui.lunarwerx.com), and [ReDesign](https://redesign.lunarwerx.com).
