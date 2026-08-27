@@ -135,40 +135,78 @@ interface PorcelainStatus {
  * Only fields used by RepoYeti are retained; object ids for the staged-state hash
  * still come from the dedicated, conditional raw-diff call below.
  */
+type BranchHeaderPatch = Partial<
+  Pick<PorcelainStatus, "branch" | "detached" | "headOid" | "upstream" | "ahead" | "behind">
+>;
+
+/**
+ * Parse one `# branch.*` header record. Returns the fields it updates, or `null` when `record`
+ * isn't a recognized branch-header line (the caller then falls through to file-record parsing).
+ */
+function parseBranchHeaderRecord(record: string): BranchHeaderPatch | null {
+  if (record.startsWith("# branch.oid ")) {
+    const oid = record.slice(13).trim();
+    return { headOid: OID_RE.test(oid) ? oid.toLowerCase() : null };
+  }
+  if (record.startsWith("# branch.head ")) {
+    const head = record.slice(14);
+    const detached = head === "(detached)";
+    return { detached, branch: detached ? null : head };
+  }
+  if (record.startsWith("# branch.upstream ")) {
+    return { upstream: record.slice(18) };
+  }
+  if (record.startsWith("# branch.ab ")) {
+    const match = /^\+(\d+) -(\d+)$/.exec(record.slice(12));
+    return match ? { ahead: Number(match[1]), behind: Number(match[2]) } : {};
+  }
+  return null;
+}
+
+/**
+ * Parse one ordinary/rename/unmerged status record (type `1`/`2`/`u`). `null` when the record's
+ * fixed-field count doesn't match, exactly as the inline version used to `continue` on.
+ *
+ * Ordinary records have eight fixed fields before path, rename records nine, and unmerged
+ * records ten. Limit the split so spaces remain part of the path.
+ */
+function parseFileStatusRecord(record: string, type: string): WorktreeStatusPath | null {
+  const fixedFields = type === "1" ? 8 : type === "2" ? 9 : 10;
+  let cursor = 0;
+  const fields: string[] = [];
+  for (let field = 0; field < fixedFields; field++) {
+    const separator = record.indexOf(" ", cursor);
+    if (separator === -1) break;
+    fields.push(record.slice(cursor, separator));
+    cursor = separator + 1;
+  }
+  if (fields.length !== fixedFields) return null;
+  const xy = fields[1] ?? "..";
+  const index = xy[0] === "." ? " " : (xy[0] ?? " ");
+  const workingDir = xy[1] === "." ? " " : (xy[1] ?? " ");
+  const path = record.slice(cursor);
+  return { path, index, working_dir: workingDir };
+}
+
 export function parsePorcelainV2(raw: string): PorcelainStatus {
-  let branch: string | null = null;
-  let detached = false;
-  let headOid: string | null = null;
-  let upstream: string | null = null;
-  let ahead = 0;
-  let behind = 0;
+  const header: Omit<PorcelainStatus, "files"> = {
+    branch: null,
+    detached: false,
+    headOid: null,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+  };
   const files: WorktreeStatusPath[] = [];
   const records = raw.split("\0");
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i] ?? "";
     if (!record) continue;
-    if (record.startsWith("# branch.oid ")) {
-      const oid = record.slice(13).trim();
-      headOid = OID_RE.test(oid) ? oid.toLowerCase() : null;
-      continue;
-    }
-    if (record.startsWith("# branch.head ")) {
-      const head = record.slice(14);
-      detached = head === "(detached)";
-      branch = detached ? null : head;
-      continue;
-    }
-    if (record.startsWith("# branch.upstream ")) {
-      upstream = record.slice(18);
-      continue;
-    }
-    if (record.startsWith("# branch.ab ")) {
-      const match = /^\+(\d+) -(\d+)$/.exec(record.slice(12));
-      if (match) {
-        ahead = Number(match[1]);
-        behind = Number(match[2]);
-      }
+
+    const headerPatch = parseBranchHeaderRecord(record);
+    if (headerPatch) {
+      Object.assign(header, headerPatch);
       continue;
     }
 
@@ -179,32 +217,13 @@ export function parsePorcelainV2(raw: string): PorcelainStatus {
     }
     if (type !== "1" && type !== "2" && type !== "u") continue;
 
-    // Ordinary records have eight fixed fields before path, rename records nine,
-    // and unmerged records ten. Limit the split so spaces remain part of the path.
-    const fixedFields = type === "1" ? 8 : type === "2" ? 9 : 10;
-    let cursor = 0;
-    const fields: string[] = [];
-    for (let field = 0; field < fixedFields; field++) {
-      const separator = record.indexOf(" ", cursor);
-      if (separator === -1) break;
-      fields.push(record.slice(cursor, separator));
-      cursor = separator + 1;
-    }
-    if (fields.length !== fixedFields) continue;
-    const xy = fields[1] ?? "..";
-    const index = xy[0] === "." ? " " : (xy[0] ?? " ");
-    const workingDir = xy[1] === "." ? " " : (xy[1] ?? " ");
-    const path = record.slice(cursor);
-    const entry: WorktreeStatusPath = {
-      path,
-      index,
-      working_dir: workingDir,
-    };
+    const entry = parseFileStatusRecord(record, type);
+    if (!entry) continue;
     if (type === "2") entry.from = records[++i] ?? "";
     files.push(entry);
   }
 
-  return { branch, detached, headOid, upstream, ahead, behind, files };
+  return { ...header, files };
 }
 
 async function readPorcelainStatus(git: SimpleGit): Promise<PorcelainStatus> {
