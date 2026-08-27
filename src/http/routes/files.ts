@@ -1,6 +1,7 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import type { BlankEnv } from "hono/types";
 import type { Deps } from "../deps.ts";
 import { jsonError, statusForCode, type ApiErrorCode } from "../../contract.ts";
 import {
@@ -123,228 +124,314 @@ function documentMediaKind(value: string | undefined): DocumentMediaKind | null 
   return value === "pdf" || value === "audio" || value === "video" ? value : null;
 }
 
-export function register(app: Hono, { cfg }: Deps): void {
-  app.get("/api/repos/:id/changes", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    // ?all=1 lifts the default cap for a caller that clicked "view all" on the truncation
-    // notice. Opt-in, so an ordinary card render still pays the cheap bounded read.
-    const result = await getChanges(id, { all: c.req.query("all") === "1" });
-    if (result.ok)
-      return c.json({ files: result.files ?? [], total: result.total, truncated: result.truncated });
-    return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not read changes");
-  });
+async function getChangesRoute(c: Context) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  // ?all=1 lifts the default cap for a caller that clicked "view all" on the truncation
+  // notice. Opt-in, so an ordinary card render still pays the cheap bounded read.
+  const result = await getChanges(id, { all: c.req.query("all") === "1" });
+  if (result.ok)
+    return c.json({ files: result.files ?? [], total: result.total, truncated: result.truncated });
+  return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not read changes");
+}
 
-  // One directory level of the working tree, for the file panel's "All files" browse mode.
-  // ?path=… selects the directory (absent/empty = repo root). Deliberately one level per call —
-  // see src/service/tree.ts for why a recursive listing is not on the table.
-  app.get("/api/repos/:id/tree", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const blocked = remoteBrowseBlocked(c, cfg);
-    if (blocked) return blocked;
-    const result = await listRepoTree(id, c.req.query("path") ?? "");
-    if (result.ok)
-      return c.json({
-        path: result.path ?? "",
-        entries: result.entries ?? [],
-        total: result.total,
-        truncated: result.truncated,
-      });
-    return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not list directory");
-  });
-
-  // Path search across the WHOLE working tree, for the "All files" mode's search box. Bounded
-  // by a result cap and a wall-clock budget — see src/service/tree.ts.
-  app.get("/api/repos/:id/tree-search", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    // Same gate as the listing: a path search enumerates the tree just as surely as walking it.
-    const blocked = remoteBrowseBlocked(c, cfg);
-    if (blocked) return blocked;
-    // ?ignored=1 opts back into gitignored paths. Absent = the cheap, exact, git-answered set.
-    const result = await searchRepoTree(id, c.req.query("q") ?? "", {
-      includeIgnored: c.req.query("ignored") === "1",
+// One directory level of the working tree, for the file panel's "All files" browse mode.
+// ?path=… selects the directory (absent/empty = repo root). Deliberately one level per call —
+// see src/service/tree.ts for why a recursive listing is not on the table.
+async function getTreeRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const blocked = remoteBrowseBlocked(c, cfg);
+  if (blocked) return blocked;
+  const result = await listRepoTree(id, c.req.query("path") ?? "");
+  if (result.ok)
+    return c.json({
+      path: result.path ?? "",
+      entries: result.entries ?? [],
+      total: result.total,
+      truncated: result.truncated,
     });
-    if (result.ok)
-      return c.json({
-        entries: result.entries ?? [],
-        truncated: result.truncated,
-        ignoredIncluded: result.ignoredIncluded,
-      });
-    return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not search files");
-  });
+  return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not list directory");
+}
 
-  // Read one changed file's contents for the read-only viewer drawer. Path is a query
-  // param (?path=…); it's normalised + confined to the repo in readFileContent.
-  app.get("/api/repos/:id/file", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const path = c.req.query("path") ?? "";
-    const ref = c.req.query("ref") === "head" ? "head" : "work";
-    const preview = c.req.query("preview");
-    if (preview === "image") {
-      return previewResponse(await readImagePreview(id, path, ref), c.req.header("range"));
-    }
-    const mediaKind = documentMediaKind(preview);
-    if (mediaKind) {
-      return previewResponse(
-        await readBinaryPreview(id, path, mediaKind, ref),
-        c.req.header("range"),
-      );
-    }
-    const result = await readFileContent(id, path, ref);
-    if (result.ok) return c.json(result);
-    // A bad/escaping path is a client error (400), not a 500; a missing repo/file is 404.
-    return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
+// Path search across the WHOLE working tree, for the "All files" mode's search box. Bounded
+// by a result cap and a wall-clock budget — see src/service/tree.ts.
+async function getTreeSearchRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  // Same gate as the listing: a path search enumerates the tree just as surely as walking it.
+  const blocked = remoteBrowseBlocked(c, cfg);
+  if (blocked) return blocked;
+  // ?ignored=1 opts back into gitignored paths. Absent = the cheap, exact, git-answered set.
+  const result = await searchRepoTree(id, c.req.query("q") ?? "", {
+    includeIgnored: c.req.query("ignored") === "1",
   });
+  if (result.ok)
+    return c.json({
+      entries: result.entries ?? [],
+      truncated: result.truncated,
+      ignoredIncluded: result.ignoredIncluded,
+    });
+  return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not search files");
+}
 
-  // Content search across the repo's CHANGED files (the changes tree only shows those).
-  // Drives the "Search content" toggle; returns the matching repo-relative paths.
-  app.get("/api/repos/:id/search", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const result = await searchChangedContent(id, c.req.query("q") ?? "");
-    if (result.ok) return c.json({ paths: result.paths ?? [] });
-    return jsonError(c, result.code as ApiErrorCode, result.message ?? "search failed");
-  });
+// Read one changed file's contents for the read-only viewer drawer. Path is a query
+// param (?path=…); it's normalised + confined to the repo in readFileContent.
+async function getFileRoute(c: Context) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const path = c.req.query("path") ?? "";
+  const ref = c.req.query("ref") === "head" ? "head" : "work";
+  const preview = c.req.query("preview");
+  if (preview === "image") {
+    return previewResponse(await readImagePreview(id, path, ref), c.req.header("range"));
+  }
+  const mediaKind = documentMediaKind(preview);
+  if (mediaKind) {
+    return previewResponse(
+      await readBinaryPreview(id, path, mediaKind, ref),
+      c.req.header("range"),
+    );
+  }
+  const result = await readFileContent(id, path, ref);
+  if (result.ok) return c.json(result);
+  // A bad/escaping path is a client error (400), not a 500; a missing repo/file is 404.
+  return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
+}
 
-  // Both sides (HEAD + working tree) of a changed file, for the viewer's Diff tab.
-  app.get("/api/repos/:id/diff", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const path = c.req.query("path") ?? "";
-    const result = await readFileDiff(id, path);
-    if (result.ok) return c.json(result);
-    return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
-  });
+// Content search across the repo's CHANGED files (the changes tree only shows those).
+// Drives the "Search content" toggle; returns the matching repo-relative paths.
+async function getSearchRoute(c: Context) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const result = await searchChangedContent(id, c.req.query("q") ?? "");
+  if (result.ok) return c.json({ paths: result.paths ?? [] });
+  return jsonError(c, result.code as ApiErrorCode, result.message ?? "search failed");
+}
 
-  // A file's two sides AT ONE COMMIT (first-parent ↔ commit), for opening a history file in the
-  // Monaco viewer. `:hash` is a path param, the file path is ?path=… (confined in readCommitFile).
-  app.get("/api/repos/:id/commit/:hash/file", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const preview = c.req.query("preview");
-    if (preview === "image") {
-      return previewResponse(
-        await readCommitImagePreview(id, c.req.param("hash"), c.req.query("path") ?? ""),
-        c.req.header("range"),
-      );
-    }
-    const mediaKind = documentMediaKind(preview);
-    if (mediaKind) {
-      return previewResponse(
-        await readCommitBinaryPreview(
-          id,
-          c.req.param("hash"),
-          c.req.query("path") ?? "",
-          mediaKind,
-        ),
-        c.req.header("range"),
-      );
-    }
-    const result = await readCommitFile(id, c.req.param("hash"), c.req.query("path") ?? "");
-    if (result.ok) return c.json(result);
-    return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
-  });
+// Both sides (HEAD + working tree) of a changed file, for the viewer's Diff tab.
+async function getDiffRoute(c: Context) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const path = c.req.query("path") ?? "";
+  const result = await readFileDiff(id, path);
+  if (result.ok) return c.json(result);
+  return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
+}
 
-  // Save an edited file back to the working tree (the viewer's Edit mode). Same /api/* auth
-  // gate as every other mutation; the path is confined to the repo inside writeFileContent.
-  app.put("/api/repos/:id/file", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return c.json({ error: "missing repo id" }, 400);
-    const blocked = remoteEditingBlocked(c, cfg);
-    if (blocked) return blocked;
-    const path = c.req.query("path") ?? "";
-    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-    if (typeof b.content !== "string") {
-      return c.json({ ok: false, code: "NO_CONTENT", message: "content (string) is required" }, 400);
-    }
-    const result = await writeFileContent(id, path, b.content);
-    if (!result.ok) {
-      const status: ContentfulStatusCode =
-        result.code === "NOT_FOUND" ? 404 : result.code === "TOO_LARGE" ? 413 : 400;
-      return c.json(result, status);
-    }
-    await forceRefresh(id); // re-stat the repo so the change list + badges update right away
-    return c.json(result);
-  });
+// A file's two sides AT ONE COMMIT (first-parent ↔ commit), for opening a history file in the
+// Monaco viewer. `:hash` is a path param, the file path is ?path=… (confined in readCommitFile).
+async function getCommitFileRoute(c: Context<BlankEnv, "/api/repos/:id/commit/:hash/file">) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const preview = c.req.query("preview");
+  if (preview === "image") {
+    return previewResponse(
+      await readCommitImagePreview(id, c.req.param("hash"), c.req.query("path") ?? ""),
+      c.req.header("range"),
+    );
+  }
+  const mediaKind = documentMediaKind(preview);
+  if (mediaKind) {
+    return previewResponse(
+      await readCommitBinaryPreview(
+        id,
+        c.req.param("hash"),
+        c.req.query("path") ?? "",
+        mediaKind,
+      ),
+      c.req.header("range"),
+    );
+  }
+  const result = await readCommitFile(id, c.req.param("hash"), c.req.query("path") ?? "");
+  if (result.ok) return c.json(result);
+  return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
+}
 
-  // Discard one changed file's working-tree changes (the changes-tree "Discard" action).
-  // Destructive → gated behind the same remote-editing toggle as file writes (loopback always allowed).
-  app.post("/api/repos/:id/discard", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const blocked = remoteEditingBlocked(c, cfg);
-    if (blocked) return blocked;
-    const p = await parseBody(c, DiscardSchema);
-    if (!p.ok) return p.res;
-    const result = await discardFile(id, p.data.path);
-    if (result.ok) return c.json(withGuestStatus(c, cfg, result));
-    const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
+// Save an edited file back to the working tree (the viewer's Edit mode). Same /api/* auth
+// gate as every other mutation; the path is confined to the repo inside writeFileContent.
+async function putFileRoute(c: Context<BlankEnv, "/api/repos/:id/file">, cfg: Deps["cfg"]) {
+  const id = c.req.param("id");
+  if (!id) return c.json({ error: "missing repo id" }, 400);
+  const blocked = remoteEditingBlocked(c, cfg);
+  if (blocked) return blocked;
+  const path = c.req.query("path") ?? "";
+  const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  if (typeof b.content !== "string") {
+    return c.json({ ok: false, code: "NO_CONTENT", message: "content (string) is required" }, 400);
+  }
+  const result = await writeFileContent(id, path, b.content);
+  if (!result.ok) {
+    const status: ContentfulStatusCode =
+      result.code === "NOT_FOUND" ? 404 : result.code === "TOO_LARGE" ? 413 : 400;
     return c.json(result, status);
-  });
+  }
+  await forceRefresh(id); // re-stat the repo so the change list + badges update right away
+  return c.json(result);
+}
 
-  // Delete one file from disk outright (the changes-tree "Delete" action). Supersedes discard
-  // for the "I just wanna delete it" case — no restore semantics, and a tracked file's removal
-  // is staged too. Destructive → same remote-editing gate as discard.
-  // `recursive: true` extends this to a whole FOLDER (opt-in — see DeleteFileSchema); the
-  // response gains `deleted` (files actually removed) so the UI can toast a real count instead
-  // of a vague "deleted the folder".
-  app.post("/api/repos/:id/delete-file", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const blocked = remoteEditingBlocked(c, cfg);
-    if (blocked) return blocked;
-    const p = await parseBody(c, DeleteFileSchema);
-    if (!p.ok) return p.res;
-    const result = await deleteFile(id, p.data.path, p.data.recursive);
-    if (result.ok) return c.json(withGuestStatus(c, cfg, result));
-    const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
+// Discard one changed file's working-tree changes (the changes-tree "Discard" action).
+// Destructive → gated behind the same remote-editing toggle as file writes (loopback always allowed).
+async function postDiscardRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const blocked = remoteEditingBlocked(c, cfg);
+  if (blocked) return blocked;
+  const p = await parseBody(c, DiscardSchema);
+  if (!p.ok) return p.res;
+  const result = await discardFile(id, p.data.path);
+  if (result.ok) return c.json(withGuestStatus(c, cfg, result));
+  const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
+  return c.json(result, status);
+}
+
+// Delete one file from disk outright (the changes-tree "Delete" action). Supersedes discard
+// for the "I just wanna delete it" case — no restore semantics, and a tracked file's removal
+// is staged too. Destructive → same remote-editing gate as discard.
+// `recursive: true` extends this to a whole FOLDER (opt-in — see DeleteFileSchema); the
+// response gains `deleted` (files actually removed) so the UI can toast a real count instead
+// of a vague "deleted the folder".
+async function postDeleteFileRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const blocked = remoteEditingBlocked(c, cfg);
+  if (blocked) return blocked;
+  const p = await parseBody(c, DeleteFileSchema);
+  if (!p.ok) return p.res;
+  const result = await deleteFile(id, p.data.path, p.data.recursive);
+  if (result.ok) return c.json(withGuestStatus(c, cfg, result));
+  const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
+  return c.json(result, status);
+}
+
+// ── merge conflicts ─────────────────────────────────────────────────────────────────
+// Read side of the conflict resolver. Both routes are side-effect free; the AI proposal that
+// sits between them lives in routes/ai.ts, and the write is conflict-apply below.
+
+// Every unmerged path, each annotated with whether the resolver can act on it (and if not,
+// why). Unsupported paths are LISTED rather than filtered — a delete/modify conflict silently
+// missing from the list reads as a broken feature, not as an unsupported case.
+async function getConflictsRoute(c: Context) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const result = await listConflicts(id);
+  if (result.ok) return c.json(result);
+  return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
+}
+
+// One conflicted file, parsed into hunks, with common-ancestor text where git can supply it.
+// Also the source of the `hash` the apply call must echo back.
+async function getConflictRoute(c: Context) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const result = await readConflictFile(id, c.req.query("path") ?? "");
+  if (!result.ok) {
+    const status: ContentfulStatusCode =
+      result.code === "NOT_FOUND" ? 404 : result.code === "NOT_CONFLICTED" ? 409 : 400;
+    return c.json({ ok: false, code: result.code, message: result.message }, status);
+  }
+  // `parsed` is the internal representation (it carries the raw region text for splicing);
+  // the wire form is `hunks` + `text`, which is everything the review UI needs.
+  const { parsed: _parsed, ...wire } = result;
+  return c.json(wire);
+}
+
+// Write reviewed resolutions into a conflicted file.
+//
+// Destructive (it overwrites source) → same remote-editing gate as file writes and discard.
+// Three things this route deliberately does NOT do:
+//   - it does not stage. The path stays unmerged until the owner stages it, so `git commit`
+//     keeps refusing and the auto-commit gate keeps skipping the repo.
+//   - it does not trust the client's text. Every region is re-validated in the service layer
+//     (markers, index validity, file-level write guards) regardless of who authored it.
+//   - it does not accept a stale proposal. The `hash` must match the file as it is right now.
+async function postConflictApplyRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const blocked = remoteEditingBlocked(c, cfg);
+  if (blocked) return blocked;
+  const p = await parseBody(c, ConflictApplySchema);
+  if (!p.ok) return p.res;
+  const result = await applyConflictResolutions(id, p.data.path, p.data.hash, p.data.accepted);
+  if (result.ok) return c.json(result);
+  const status: ContentfulStatusCode =
+    result.code === "NOT_FOUND"
+      ? 404
+      : result.code === "TOO_LARGE"
+        ? 413
+        : result.code === "NOT_CONFLICTED" || result.code === "CONFLICT_STALE"
+          ? 409
+          : 400;
+  return c.json(result, status);
+}
+
+// Stage one changed file's working-tree change into the index (the changes-tree per-file
+// "Stage" action, GitHub-Desktop-style). Non-destructive — no remote-editing gate needed
+// (unlike discard/write/move, it can't lose data), but still local-mutation so it goes
+// through the same op-queue + refresh as every other mutating route.
+async function postStageRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const p = await parseBody(c, StageSchema);
+  if (!p.ok) return p.res;
+  const result = await stageFile(id, p.data.path);
+  if (result.ok) return c.json(withGuestStatus(c, cfg, result));
+  const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
+  return c.json(result, status);
+}
+
+// Append a path to the repo's .gitignore (the changes-tree "Add to .gitignore" action). Mutating
+// (writes .gitignore) → same remote-editing gate as file writes/discard/move. The path is
+// normalised + confined to the repo inside addToGitignore.
+async function postGitignoreRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const blocked = remoteEditingBlocked(c, cfg);
+  if (blocked) return blocked;
+  const p = await parseBody(c, GitignoreAddSchema);
+  if (!p.ok) return p.res;
+  const result = await addToGitignore(id, p.data.path);
+  if (result.ok) return c.json(withGuestStatus(c, cfg, result));
+  const status: ContentfulStatusCode =
+    result.code === "NOT_FOUND" ? 404 : result.code === "UNSUPPORTED" ? 400 : statusForCode(result.code as ApiErrorCode);
+  return c.json(result, status);
+}
+
+// Move a changed file into another folder (the changes-tree drag-and-drop). Mutating (renames
+// on disk / stages a git rename) → same remote-editing gate as file writes/discard. Both the
+// source and the computed destination are normalised + confined to the repo inside moveFile.
+async function postMoveRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const blocked = remoteEditingBlocked(c, cfg);
+  if (blocked) return blocked;
+  const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  if (typeof b.from !== "string" || typeof b.toDir !== "string") {
+    return c.json({ ok: false, code: "ERROR", message: "from and toDir (strings) are required" }, 400);
+  }
+  const result = await moveFile(id, b.from, b.toDir);
+  if (!result.ok) {
+    const status: ContentfulStatusCode =
+      result.code === "NOT_FOUND" ? 404 : result.code === "EXISTS" ? 409 : 400;
     return c.json(result, status);
-  });
+  }
+  await forceRefresh(id); // re-stat so the change list reflects the move right away
+  return c.json(result);
+}
 
-  // ── merge conflicts ─────────────────────────────────────────────────────────────────
-  // Read side of the conflict resolver. Both routes are side-effect free; the AI proposal that
-  // sits between them lives in routes/ai.ts, and the write is conflict-apply below.
-
-  // Every unmerged path, each annotated with whether the resolver can act on it (and if not,
-  // why). Unsupported paths are LISTED rather than filtered — a delete/modify conflict silently
-  // missing from the list reads as a broken feature, not as an unsupported case.
-  app.get("/api/repos/:id/conflicts", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const result = await listConflicts(id);
-    if (result.ok) return c.json(result);
-    return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
-  });
-
-  // One conflicted file, parsed into hunks, with common-ancestor text where git can supply it.
-  // Also the source of the `hash` the apply call must echo back.
-  app.get("/api/repos/:id/conflict", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const result = await readConflictFile(id, c.req.query("path") ?? "");
-    if (!result.ok) {
-      const status: ContentfulStatusCode =
-        result.code === "NOT_FOUND" ? 404 : result.code === "NOT_CONFLICTED" ? 409 : 400;
-      return c.json({ ok: false, code: result.code, message: result.message }, status);
-    }
-    // `parsed` is the internal representation (it carries the raw region text for splicing);
-    // the wire form is `hunks` + `text`, which is everything the review UI needs.
-    const { parsed: _parsed, ...wire } = result;
-    return c.json(wire);
-  });
-
-  // Write reviewed resolutions into a conflicted file.
-  //
-  // Destructive (it overwrites source) → same remote-editing gate as file writes and discard.
-  // Three things this route deliberately does NOT do:
-  //   - it does not stage. The path stays unmerged until the owner stages it, so `git commit`
-  //     keeps refusing and the auto-commit gate keeps skipping the repo.
-  //   - it does not trust the client's text. Every region is re-validated in the service layer
-  //     (markers, index validity, file-level write guards) regardless of who authored it.
-  //   - it does not accept a stale proposal. The `hash` must match the file as it is right now.
+export function register(app: Hono, { cfg }: Deps): void {
+  app.get("/api/repos/:id/changes", getChangesRoute);
+  app.get("/api/repos/:id/tree", (c) => getTreeRoute(c, cfg));
+  app.get("/api/repos/:id/tree-search", (c) => getTreeSearchRoute(c, cfg));
+  app.get("/api/repos/:id/file", getFileRoute);
+  app.get("/api/repos/:id/search", getSearchRoute);
+  app.get("/api/repos/:id/diff", getDiffRoute);
+  app.get("/api/repos/:id/commit/:hash/file", getCommitFileRoute);
+  app.put("/api/repos/:id/file", (c) => putFileRoute(c, cfg));
+  app.post("/api/repos/:id/discard", (c) => postDiscardRoute(c, cfg));
+  app.post("/api/repos/:id/delete-file", (c) => postDeleteFileRoute(c, cfg));
+  app.get("/api/repos/:id/conflicts", getConflictsRoute);
+  app.get("/api/repos/:id/conflict", getConflictRoute);
   app.post(
     "/api/repos/:id/conflict-apply",
     // Sized to the schema's own ceiling (40 regions × 512 KB is already impossible for a file
@@ -354,78 +441,9 @@ export function register(app: Hono, { cfg }: Deps): void {
       maxSize: CONFLICT_APPLY_BODY_LIMIT,
       onError: (c) => jsonError(c, "BAD_REQUEST", "resolution payload is too large", 413),
     }),
-    async (c) => {
-      const id = requireId(c);
-      if (id instanceof Response) return id;
-      const blocked = remoteEditingBlocked(c, cfg);
-      if (blocked) return blocked;
-      const p = await parseBody(c, ConflictApplySchema);
-      if (!p.ok) return p.res;
-      const result = await applyConflictResolutions(id, p.data.path, p.data.hash, p.data.accepted);
-      if (result.ok) return c.json(result);
-      const status: ContentfulStatusCode =
-        result.code === "NOT_FOUND"
-          ? 404
-          : result.code === "TOO_LARGE"
-            ? 413
-            : result.code === "NOT_CONFLICTED" || result.code === "CONFLICT_STALE"
-              ? 409
-              : 400;
-      return c.json(result, status);
-    },
+    (c) => postConflictApplyRoute(c, cfg),
   );
-
-  // Stage one changed file's working-tree change into the index (the changes-tree per-file
-  // "Stage" action, GitHub-Desktop-style). Non-destructive — no remote-editing gate needed
-  // (unlike discard/write/move, it can't lose data), but still local-mutation so it goes
-  // through the same op-queue + refresh as every other mutating route.
-  app.post("/api/repos/:id/stage", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const p = await parseBody(c, StageSchema);
-    if (!p.ok) return p.res;
-    const result = await stageFile(id, p.data.path);
-    if (result.ok) return c.json(withGuestStatus(c, cfg, result));
-    const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
-    return c.json(result, status);
-  });
-
-  // Append a path to the repo's .gitignore (the changes-tree "Add to .gitignore" action). Mutating
-  // (writes .gitignore) → same remote-editing gate as file writes/discard/move. The path is
-  // normalised + confined to the repo inside addToGitignore.
-  app.post("/api/repos/:id/gitignore", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const blocked = remoteEditingBlocked(c, cfg);
-    if (blocked) return blocked;
-    const p = await parseBody(c, GitignoreAddSchema);
-    if (!p.ok) return p.res;
-    const result = await addToGitignore(id, p.data.path);
-    if (result.ok) return c.json(withGuestStatus(c, cfg, result));
-    const status: ContentfulStatusCode =
-      result.code === "NOT_FOUND" ? 404 : result.code === "UNSUPPORTED" ? 400 : statusForCode(result.code as ApiErrorCode);
-    return c.json(result, status);
-  });
-
-  // Move a changed file into another folder (the changes-tree drag-and-drop). Mutating (renames
-  // on disk / stages a git rename) → same remote-editing gate as file writes/discard. Both the
-  // source and the computed destination are normalised + confined to the repo inside moveFile.
-  app.post("/api/repos/:id/move", async (c) => {
-    const id = requireId(c);
-    if (id instanceof Response) return id;
-    const blocked = remoteEditingBlocked(c, cfg);
-    if (blocked) return blocked;
-    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-    if (typeof b.from !== "string" || typeof b.toDir !== "string") {
-      return c.json({ ok: false, code: "ERROR", message: "from and toDir (strings) are required" }, 400);
-    }
-    const result = await moveFile(id, b.from, b.toDir);
-    if (!result.ok) {
-      const status: ContentfulStatusCode =
-        result.code === "NOT_FOUND" ? 404 : result.code === "EXISTS" ? 409 : 400;
-      return c.json(result, status);
-    }
-    await forceRefresh(id); // re-stat so the change list reflects the move right away
-    return c.json(result);
-  });
+  app.post("/api/repos/:id/stage", (c) => postStageRoute(c, cfg));
+  app.post("/api/repos/:id/gitignore", (c) => postGitignoreRoute(c, cfg));
+  app.post("/api/repos/:id/move", (c) => postMoveRoute(c, cfg));
 }
