@@ -14,10 +14,10 @@
  * A release that adds a heading and forgets the reference now fails here instead.
  */
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join } from "node:path";
 
-const ROOT = resolve(import.meta.dir, "..");
-const CHANGELOG = resolve(ROOT, "CHANGELOG.md");
+const ROOT = join(import.meta.dir, "..");
+const CHANGELOG = join(ROOT, "CHANGELOG.md");
 
 const text = readFileSync(CHANGELOG, "utf8");
 

@@ -21,7 +21,6 @@ async function continueLocal(): Promise<void> {
 <template>
   <div
     class="safe-top safe-bottom grid min-h-dvh place-items-center px-6"
-    style="background-image: var(--brand-glow); background-repeat: no-repeat"
   >
     <div class="w-full max-w-sm text-center">
       <!-- Full horizontal lockup, swapped by theme: black wordmark on light, white on dark. -->
