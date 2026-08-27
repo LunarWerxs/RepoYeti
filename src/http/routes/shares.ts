@@ -10,7 +10,8 @@
  * It is mounted OUTSIDE `/api/*` (so the gate never sees it) and BEFORE the static PWA catch-all
  * (so `/s/...` isn't swallowed by the SPA fallback).
  */
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
+import type { BlankEnv } from "hono/types";
 import type { Deps } from "../deps.ts";
 import type { RepoYetiConfig } from "../../config.ts";
 import { jsonError } from "../../contract.ts";
@@ -120,143 +121,152 @@ function deadLinkPage(): string {
 </div></body>`;
 }
 
+// ── owner: list / create / revoke ────────────────────────────────────────────
+
+function getShares(c: Context, cfg: RepoYetiConfig) {
+  // The panel gets each link back, ready to copy. Assembling it needs an origin to fall back
+  // on when no tunnel/relay address is published, and the request we are answering IS that
+  // address: this route is owner-only and in practice reached on loopback.
+  const origin = new URL(c.req.url).origin;
+  return c.json({ shares: listShares().map((s) => toDto(cfg, s, origin)) });
+}
+
+async function postShares(c: Context, cfg: RepoYetiConfig) {
+  const p = await parseBody(c, ShareCreateSchema);
+  if (!p.ok) return p.res;
+  const { label, perm, collaborative, duration, scopeAll, repoIds } = p.data;
+
+  // A scoped link naming no repos would grant nothing and read as broken; refuse it loudly
+  // rather than mint a dead link. (scopeAll is the way to say "everything".)
+  if (!scopeAll && repoIds.length === 0) {
+    return jsonError(c, "BAD_REQUEST", "pick at least one repository, or share all of them");
+  }
+  // Never mint a grant for a repo that doesn't exist — it would be silently inert, and the
+  // owner would think they'd shared something they hadn't.
+  const unknown = scopeAll ? [] : repoIds.filter((id) => !getRepo(id));
+  if (unknown.length > 0) return jsonError(c, "NOT_FOUND", "unknown repository in the share list");
+
+  const token = mintToken();
+  const share = createShare(hashToken(token), {
+    label,
+    perm,
+    collaborative,
+    scopeAll,
+    repoIds,
+    expiresAt: expiryFor(duration),
+    // Remember where this link will be handed out, so we can tell later that the address moved.
+    origin: publicShareOrigin(cfg),
+    // ...and the secret itself, so the panel can offer Copy link on this row later instead of
+    // only in the one-shot panel below. See Share.token in src/db.ts.
+    token,
+  });
+  // `url` is assembled server-side because the relay form puts the token in the URL fragment
+  // rather than the path (see shareLinkFor) — a distinction the browser should not have to
+  // re-derive, since getting it wrong would send the secret to the relay.
+  return c.json({
+    ok: true,
+    share: toDto(cfg, share, new URL(c.req.url).origin),
+    token,
+    url: shareLinkFor(cfg, token, new URL(c.req.url).origin),
+  });
+}
+
+// Edit a live grant WITHOUT touching its secret: the link already in someone's inbox keeps
+// working and just means something different. Narrowing repos or shortening an expiry should
+// never force the owner to revoke and re-send.
+async function patchShare(c: Context<BlankEnv, "/api/shares/:id">, cfg: RepoYetiConfig) {
+  const id = c.req.param("id");
+  if (!id) return jsonError(c, "NOT_FOUND", "no such share link");
+  const p = await parseBody(c, ShareUpdateSchema);
+  if (!p.ok) return p.res;
+  const { label, perm, collaborative, duration, scopeAll, repoIds } = p.data;
+
+  const current = getShare(id);
+  if (!current || current.revokedAt !== null) {
+    return jsonError(c, "NOT_FOUND", "no such share link");
+  }
+
+  // Same two guards the create path uses, against the state this edit would RESULT in — a
+  // patch that only flips scopeAll off must not leave a link granting nothing.
+  const nextScopeAll = scopeAll ?? current.scopeAll;
+  const nextRepoIds = repoIds ?? (nextScopeAll ? [] : shareRepoIds(id));
+  if (!nextScopeAll && nextRepoIds.length === 0) {
+    return jsonError(c, "BAD_REQUEST", "pick at least one repository, or share all of them");
+  }
+  const unknown = nextScopeAll ? [] : nextRepoIds.filter((rid) => !getRepo(rid));
+  if (unknown.length > 0) return jsonError(c, "NOT_FOUND", "unknown repository in the share list");
+
+  const updated = updateShare(id, {
+    ...(label === undefined ? {} : { label }),
+    ...(perm === undefined ? {} : { perm }),
+    ...(collaborative === undefined ? {} : { collaborative }),
+    scopeAll: nextScopeAll,
+    repoIds: nextRepoIds,
+    // Only re-base the expiry when the caller actually said something about duration.
+    ...(duration === undefined ? {} : { expiresAt: expiryFor(duration) }),
+  });
+  if (!updated) return jsonError(c, "NOT_FOUND", "no such share link");
+  return c.json({ ok: true, share: toDto(cfg, updated, new URL(c.req.url).origin) });
+}
+
+// Mint a NEW secret for an existing grant. This is a deliberate re-key, and for legacy rows
+// whose plaintext predates retention it is also the only way to gain a copyable URL. Either way
+// it kills the previous URL, which the UI states before it happens.
+function postShareRotate(c: Context<BlankEnv, "/api/shares/:id/rotate">, cfg: RepoYetiConfig) {
+  const id = c.req.param("id");
+  if (!id) return jsonError(c, "NOT_FOUND", "no such share link");
+  const token = mintToken();
+  const share = rotateShareToken(id, {
+    tokenHash: hashToken(token),
+    token,
+    origin: publicShareOrigin(cfg),
+  });
+  if (!share) return jsonError(c, "NOT_FOUND", "no such share link");
+  // Re-keying is also how a pre-existing link (minted before secrets were retained, so with no
+  // Copy button) gains one: the row comes back carrying the new secret.
+  return c.json({
+    ok: true,
+    share: toDto(cfg, share, new URL(c.req.url).origin),
+    token,
+    url: shareLinkFor(cfg, token, new URL(c.req.url).origin),
+  });
+}
+
+function deleteShare(c: Context<BlankEnv, "/api/shares/:id">) {
+  const id = c.req.param("id");
+  if (!id || !revokeShare(id)) return jsonError(c, "NOT_FOUND", "no such share link");
+  return c.json({ ok: true });
+}
+
+// The audit trail: what this link's holder actually did. The only place that can answer it —
+// a guest's commits are authored as the owner, so git history cannot.
+function getShareEvents(c: Context<BlankEnv, "/api/shares/:id/events">) {
+  const id = c.req.param("id");
+  if (!id || !getShare(id)) return jsonError(c, "NOT_FOUND", "no such share link");
+  return c.json({ events: listShareEvents(id) });
+}
+
+// ── guest: redeem ────────────────────────────────────────────────────────────
+// Mounted outside /api/* (the auth gate never sees it) — this IS the way in.
+function getShareRedeem(c: Context<BlankEnv, "/s/:token">) {
+  const share = redeemToken(c.req.param("token") ?? "");
+  // Unknown, revoked, and expired are one answer on purpose: distinguishing them would confirm
+  // to a stranger that a given link once existed.
+  if (!share) return c.html(deadLinkPage(), 404);
+  // Secure only over https — a loopback redemption (http://127.0.0.1) must still set a cookie.
+  const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() ?? new URL(c.req.url).protocol.replace(":", "");
+  setGuestCookie(c, share, proto === "https");
+  // Redirect so the secret leaves the address bar immediately: from here on the signed cookie
+  // is the credential, and the token never rides another request (Referer, logs, history).
+  return c.redirect("/");
+}
+
 export function register(app: Hono, { cfg }: Deps): void {
-  // ── owner: list / create / revoke ────────────────────────────────────────────
-  app.get("/api/shares", (c) => {
-    // The panel gets each link back, ready to copy. Assembling it needs an origin to fall back
-    // on when no tunnel/relay address is published, and the request we are answering IS that
-    // address: this route is owner-only and in practice reached on loopback.
-    const origin = new URL(c.req.url).origin;
-    return c.json({ shares: listShares().map((s) => toDto(cfg, s, origin)) });
-  });
-
-  app.post("/api/shares", async (c) => {
-    const p = await parseBody(c, ShareCreateSchema);
-    if (!p.ok) return p.res;
-    const { label, perm, collaborative, duration, scopeAll, repoIds } = p.data;
-
-    // A scoped link naming no repos would grant nothing and read as broken; refuse it loudly
-    // rather than mint a dead link. (scopeAll is the way to say "everything".)
-    if (!scopeAll && repoIds.length === 0) {
-      return jsonError(c, "BAD_REQUEST", "pick at least one repository, or share all of them");
-    }
-    // Never mint a grant for a repo that doesn't exist — it would be silently inert, and the
-    // owner would think they'd shared something they hadn't.
-    const unknown = scopeAll ? [] : repoIds.filter((id) => !getRepo(id));
-    if (unknown.length > 0) return jsonError(c, "NOT_FOUND", "unknown repository in the share list");
-
-    const token = mintToken();
-    const share = createShare(hashToken(token), {
-      label,
-      perm,
-      collaborative,
-      scopeAll,
-      repoIds,
-      expiresAt: expiryFor(duration),
-      // Remember where this link will be handed out, so we can tell later that the address moved.
-      origin: publicShareOrigin(cfg),
-      // ...and the secret itself, so the panel can offer Copy link on this row later instead of
-      // only in the one-shot panel below. See Share.token in src/db.ts.
-      token,
-    });
-    // `url` is assembled server-side because the relay form puts the token in the URL fragment
-    // rather than the path (see shareLinkFor) — a distinction the browser should not have to
-    // re-derive, since getting it wrong would send the secret to the relay.
-    return c.json({
-      ok: true,
-      share: toDto(cfg, share, new URL(c.req.url).origin),
-      token,
-      url: shareLinkFor(cfg, token, new URL(c.req.url).origin),
-    });
-  });
-
-  // Edit a live grant WITHOUT touching its secret: the link already in someone's inbox keeps
-  // working and just means something different. Narrowing repos or shortening an expiry should
-  // never force the owner to revoke and re-send.
-  app.patch("/api/shares/:id", async (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "NOT_FOUND", "no such share link");
-    const p = await parseBody(c, ShareUpdateSchema);
-    if (!p.ok) return p.res;
-    const { label, perm, collaborative, duration, scopeAll, repoIds } = p.data;
-
-    const current = getShare(id);
-    if (!current || current.revokedAt !== null) {
-      return jsonError(c, "NOT_FOUND", "no such share link");
-    }
-
-    // Same two guards the create path uses, against the state this edit would RESULT in — a
-    // patch that only flips scopeAll off must not leave a link granting nothing.
-    const nextScopeAll = scopeAll ?? current.scopeAll;
-    const nextRepoIds = repoIds ?? (nextScopeAll ? [] : shareRepoIds(id));
-    if (!nextScopeAll && nextRepoIds.length === 0) {
-      return jsonError(c, "BAD_REQUEST", "pick at least one repository, or share all of them");
-    }
-    const unknown = nextScopeAll ? [] : nextRepoIds.filter((rid) => !getRepo(rid));
-    if (unknown.length > 0) return jsonError(c, "NOT_FOUND", "unknown repository in the share list");
-
-    const updated = updateShare(id, {
-      ...(label === undefined ? {} : { label }),
-      ...(perm === undefined ? {} : { perm }),
-      ...(collaborative === undefined ? {} : { collaborative }),
-      scopeAll: nextScopeAll,
-      repoIds: nextRepoIds,
-      // Only re-base the expiry when the caller actually said something about duration.
-      ...(duration === undefined ? {} : { expiresAt: expiryFor(duration) }),
-    });
-    if (!updated) return jsonError(c, "NOT_FOUND", "no such share link");
-    return c.json({ ok: true, share: toDto(cfg, updated, new URL(c.req.url).origin) });
-  });
-
-  // Mint a NEW secret for an existing grant. This is a deliberate re-key, and for legacy rows
-  // whose plaintext predates retention it is also the only way to gain a copyable URL. Either way
-  // it kills the previous URL, which the UI states before it happens.
-  app.post("/api/shares/:id/rotate", (c) => {
-    const id = c.req.param("id");
-    if (!id) return jsonError(c, "NOT_FOUND", "no such share link");
-    const token = mintToken();
-    const share = rotateShareToken(id, {
-      tokenHash: hashToken(token),
-      token,
-      origin: publicShareOrigin(cfg),
-    });
-    if (!share) return jsonError(c, "NOT_FOUND", "no such share link");
-    // Re-keying is also how a pre-existing link (minted before secrets were retained, so with no
-    // Copy button) gains one: the row comes back carrying the new secret.
-    return c.json({
-      ok: true,
-      share: toDto(cfg, share, new URL(c.req.url).origin),
-      token,
-      url: shareLinkFor(cfg, token, new URL(c.req.url).origin),
-    });
-  });
-
-  app.delete("/api/shares/:id", (c) => {
-    const id = c.req.param("id");
-    if (!id || !revokeShare(id)) return jsonError(c, "NOT_FOUND", "no such share link");
-    return c.json({ ok: true });
-  });
-
-  // The audit trail: what this link's holder actually did. The only place that can answer it —
-  // a guest's commits are authored as the owner, so git history cannot.
-  app.get("/api/shares/:id/events", (c) => {
-    const id = c.req.param("id");
-    if (!id || !getShare(id)) return jsonError(c, "NOT_FOUND", "no such share link");
-    return c.json({ events: listShareEvents(id) });
-  });
-
-  // ── guest: redeem ────────────────────────────────────────────────────────────
-  // Mounted outside /api/* (the auth gate never sees it) — this IS the way in.
-  app.get("/s/:token", (c) => {
-    const share = redeemToken(c.req.param("token") ?? "");
-    // Unknown, revoked, and expired are one answer on purpose: distinguishing them would confirm
-    // to a stranger that a given link once existed.
-    if (!share) return c.html(deadLinkPage(), 404);
-    // Secure only over https — a loopback redemption (http://127.0.0.1) must still set a cookie.
-    const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() ?? new URL(c.req.url).protocol.replace(":", "");
-    setGuestCookie(c, share, proto === "https");
-    // Redirect so the secret leaves the address bar immediately: from here on the signed cookie
-    // is the credential, and the token never rides another request (Referer, logs, history).
-    return c.redirect("/");
-  });
+  app.get("/api/shares", (c) => getShares(c, cfg));
+  app.post("/api/shares", (c) => postShares(c, cfg));
+  app.patch("/api/shares/:id", (c) => patchShare(c, cfg));
+  app.post("/api/shares/:id/rotate", (c) => postShareRotate(c, cfg));
+  app.delete("/api/shares/:id", deleteShare);
+  app.get("/api/shares/:id/events", getShareEvents);
+  app.get("/s/:token", getShareRedeem);
 }

@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import {
   VERSION,
@@ -110,21 +110,20 @@ function resolveLoreServersEnabled(cfg: RepoYetiConfig): boolean {
   return enabled;
 }
 
-export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
-  // ── auth surface ───────────────────────────────────────────────────────────
-  app.get("/api/health", (c) =>
-    c.json({ ok: true, service: "repoyeti", version: VERSION, ts: Date.now() }),
-  );
-  // Runtime status for the UI — access mode + the public tunnel URL (null until a
-  // cloudflared tunnel yields one) so the web app can show the remote-access link/QR.
-  //
-  // Two audiences now. The owner gets everything below. A share-link guest gets only the handful
-  // of display knobs the dashboard needs in order to render correctly — the rest of this object is
-  // the owner's private configuration (tunnel, MCP rails, auto-commit/auto-update schedule, editor,
-  // dead-AI-key report), none of which is a guest's business. Rather than hand-pick fields to
-  // REMOVE (which silently leaks every field added later), the guest projection hand-picks the few
-  // to KEEP — same default-deny reflex as share/policy.ts.
-  app.get("/api/status", (c) => {
+function getHealth(c: Context) {
+  return c.json({ ok: true, service: "repoyeti", version: VERSION, ts: Date.now() });
+}
+
+// Runtime status for the UI — access mode + the public tunnel URL (null until a
+// cloudflared tunnel yields one) so the web app can show the remote-access link/QR.
+//
+// Two audiences now. The owner gets everything below. A share-link guest gets only the handful
+// of display knobs the dashboard needs in order to render correctly — the rest of this object is
+// the owner's private configuration (tunnel, MCP rails, auto-commit/auto-update schedule, editor,
+// dead-AI-key report), none of which is a guest's business. Rather than hand-pick fields to
+// REMOVE (which silently leaks every field added later), the guest projection hand-picks the few
+// to KEEP — same default-deny reflex as share/policy.ts.
+function getStatus(c: Context, cfg: RepoYetiConfig) {
     const share = effectiveGuest(c, cfg);
     if (share) {
       return c.json({
@@ -241,22 +240,23 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       // catalogue + per-machine availability come from GET /api/editors.
       defaultEditor: cfg.defaultEditor ?? null,
     });
-  });
+}
 
-  app.post("/api/shutdown", (c) => {
-    // The tray stops the daemon by port (Stop-RepoYeti) and never calls this route, so any request
-    // that reaches here is a user "Shut Down" from the web UI — a request to terminate the WHOLE
-    // app, tray included. Drop a sentinel the tray host polls so it disposes its notification-area
-    // icon and exits too (and its auto-restart watchdog stands down instead of resurrecting the
-    // daemon); harmless when no tray is running (cleared on the next daemon boot).
-    writeShutdownRequest();
-    setTimeout(() => requestShutdown?.(), 25);
-    return c.json({ ok: true });
-  });
-  // Owner UI settings. Currently just the diff-stats toggle: flipping it persists the
-  // config, updates the runtime flag, tells every client over SSE, and re-reads all repos
-  // so each card's aggregate stat appears/clears immediately.
-  app.put("/api/settings", async (c) => {
+function postShutdown(c: Context, requestShutdown: Deps["requestShutdown"]) {
+  // The tray stops the daemon by port (Stop-RepoYeti) and never calls this route, so any request
+  // that reaches here is a user "Shut Down" from the web UI — a request to terminate the WHOLE
+  // app, tray included. Drop a sentinel the tray host polls so it disposes its notification-area
+  // icon and exits too (and its auto-restart watchdog stands down instead of resurrecting the
+  // daemon); harmless when no tray is running (cleared on the next daemon boot).
+  writeShutdownRequest();
+  setTimeout(() => requestShutdown?.(), 25);
+  return c.json({ ok: true });
+}
+
+// Owner UI settings. Currently just the diff-stats toggle: flipping it persists the
+// config, updates the runtime flag, tells every client over SSE, and re-reads all repos
+// so each card's aggregate stat appears/clears immediately.
+async function putSettings(c: Context, cfg: RepoYetiConfig) {
     const p = await parseBody(c, SettingsUpdateSchema);
     if (!p.ok) return p.res;
     const b = p.data;
@@ -525,40 +525,48 @@ export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
       mcpAutoApproveTimeoutSecs: getApproveTimeoutSecs(),
       defaultEditor: cfg.defaultEditor ?? null,
     });
-  });
+}
 
-  // Open this daemon's own UI in a chromeless Chromium app window (msedge/chrome --app=URL)
-  // instead of a browser tab. Fired the moment the owner flips the "Portable window" toggle
-  // on, and available any time after (e.g. a manual re-open). Same auth/guard posture as every
-  // other mutating route here — gated by the single /api/* auth middleware, nothing extra.
-  app.post("/api/portable-window", async (c) => {
-    // Prefer the pointer's recorded URL (the port the daemon ACTUALLY bound, which can differ
-    // from the configured one — see writeInstanceInfo in cli/lifecycle.ts); fall back to the
-    // URL this very request arrived on, since the daemon is always loopback-only.
-    const url = readInstanceInfo()?.url ?? new URL(c.req.url).origin;
-    // Dedicated profile (sibling of runtime.json) so the window remembers its own
-    // size/position across launches instead of sharing the user's main browser profile.
-    // Derived from instanceFilePath()'s dirname — the exact dir runtime.json itself lives
-    // in — so this and the tray launcher (which reads the same runtime.json path) always
-    // agree, and REPOYETI_HOME is honoured automatically.
-    const profileDir = join(dirname(instanceFilePath()), "portable-profile");
-    // A forwarded --app launch (a window already open on this profile) ignores --window-size
-    // AND the saved placement, inheriting the running window's geometry — so also tag the URL
-    // with the size this window should have, and the page corrects itself with resizeTo
-    // (web/src/lib/window-size-hint.ts). The query string is not part of Chromium's placement
-    // key, so the hint can't re-key the window; a URL that won't parse just goes out un-hinted.
-    let target = url;
-    try {
-      const hint = windowSizeHintFor(profileDir, url, PORTABLE_WINDOW_SIZE);
-      if (hint) {
-        const u = new URL(url);
-        u.searchParams.set(WINDOW_SIZE_HINT_PARAM, hint);
-        target = u.toString();
-      }
-    } catch {
-      /* unparseable base URL: open it un-hinted rather than fail the route */
+// Open this daemon's own UI in a chromeless Chromium app window (msedge/chrome --app=URL)
+// instead of a browser tab. Fired the moment the owner flips the "Portable window" toggle
+// on, and available any time after (e.g. a manual re-open). Same auth/guard posture as every
+// other mutating route here — gated by the single /api/* auth middleware, nothing extra.
+async function postPortableWindow(c: Context) {
+  // Prefer the pointer's recorded URL (the port the daemon ACTUALLY bound, which can differ
+  // from the configured one — see writeInstanceInfo in cli/lifecycle.ts); fall back to the
+  // URL this very request arrived on, since the daemon is always loopback-only.
+  const url = readInstanceInfo()?.url ?? new URL(c.req.url).origin;
+  // Dedicated profile (sibling of runtime.json) so the window remembers its own
+  // size/position across launches instead of sharing the user's main browser profile.
+  // Derived from instanceFilePath()'s dirname — the exact dir runtime.json itself lives
+  // in — so this and the tray launcher (which reads the same runtime.json path) always
+  // agree, and REPOYETI_HOME is honoured automatically.
+  const profileDir = join(dirname(instanceFilePath()), "portable-profile");
+  // A forwarded --app launch (a window already open on this profile) ignores --window-size
+  // AND the saved placement, inheriting the running window's geometry — so also tag the URL
+  // with the size this window should have, and the page corrects itself with resizeTo
+  // (web/src/lib/window-size-hint.ts). The query string is not part of Chromium's placement
+  // key, so the hint can't re-key the window; a URL that won't parse just goes out un-hinted.
+  let target = url;
+  try {
+    const hint = windowSizeHintFor(profileDir, url, PORTABLE_WINDOW_SIZE);
+    if (hint) {
+      const u = new URL(url);
+      u.searchParams.set(WINDOW_SIZE_HINT_PARAM, hint);
+      target = u.toString();
     }
-    const result = await openPortableWindow(target, { profileDir, initialSize: PORTABLE_WINDOW_SIZE });
-    return c.json(result);
-  });
+  } catch {
+    /* unparseable base URL: open it un-hinted rather than fail the route */
+  }
+  const result = await openPortableWindow(target, { profileDir, initialSize: PORTABLE_WINDOW_SIZE });
+  return c.json(result);
+}
+
+export function register(app: Hono, { cfg, requestShutdown }: Deps): void {
+  // ── auth surface ───────────────────────────────────────────────────────────
+  app.get("/api/health", getHealth);
+  app.get("/api/status", (c) => getStatus(c, cfg));
+  app.post("/api/shutdown", (c) => postShutdown(c, requestShutdown));
+  app.put("/api/settings", (c) => putSettings(c, cfg));
+  app.post("/api/portable-window", postPortableWindow);
 }
