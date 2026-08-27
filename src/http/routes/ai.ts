@@ -238,6 +238,40 @@ async function putAiSettings(c: Context, cfg: RepoYetiConfig) {
   return c.json(aiPayload(cfg));
 }
 
+type CompatibleConnectionResult = { ok: true; baseUrl: string } | { ok: false; res: Response };
+
+/**
+ * Validate the extra requirements an OpenAI-compatible connection has on top of every other
+ * provider: a manual model id, a normalized base URL, and — unless the endpoint is loopback —
+ * an API key.
+ */
+function resolveCompatibleConnection(
+  c: Context,
+  manualModel: string,
+  rawBaseUrl: string | undefined,
+  apiKey: string,
+): CompatibleConnectionResult {
+  if (!manualModel) {
+    return { ok: false, res: jsonError(c, "AI_BAD_REQUEST", "Model ID required for an OpenAI-compatible provider") };
+  }
+  let baseUrl: string;
+  try {
+    baseUrl = normalizeCompatibleBaseUrl(rawBaseUrl ?? "");
+  } catch (e) {
+    return {
+      ok: false,
+      res: jsonError(c, "AI_BAD_REQUEST", e instanceof Error ? e.message : "Invalid OpenAI-compatible base URL"),
+    };
+  }
+  if (!apiKey && !isCompatibleLoopbackBaseUrl(baseUrl)) {
+    return {
+      ok: false,
+      res: jsonError(c, "NO_KEY", "API key required unless the OpenAI-compatible endpoint is on loopback"),
+    };
+  }
+  return { ok: true, baseUrl };
+}
+
 // Connect a provider: validate the key by listing models, then SAVE it. The generic compatible
 // provider treats discovery as optional because OpenAI-compatible generation does not imply
 // that GET /models exists; its manually entered model remains usable when discovery is absent.
@@ -253,25 +287,9 @@ async function postProviderConnect(c: Context, cfg: RepoYetiConfig) {
   const manualModel = (p.data.model ?? "").trim();
   let baseUrl: string | undefined;
   if (compatible) {
-    if (!manualModel) {
-      return jsonError(c, "AI_BAD_REQUEST", "Model ID required for an OpenAI-compatible provider");
-    }
-    try {
-      baseUrl = normalizeCompatibleBaseUrl(p.data.baseUrl ?? "");
-    } catch (e) {
-      return jsonError(
-        c,
-        "AI_BAD_REQUEST",
-        e instanceof Error ? e.message : "Invalid OpenAI-compatible base URL",
-      );
-    }
-    if (!apiKey && !isCompatibleLoopbackBaseUrl(baseUrl ?? "")) {
-      return jsonError(
-        c,
-        "NO_KEY",
-        "API key required unless the OpenAI-compatible endpoint is on loopback",
-      );
-    }
+    const resolved = resolveCompatibleConnection(c, manualModel, p.data.baseUrl, apiKey);
+    if (!resolved.ok) return resolved.res;
+    baseUrl = resolved.baseUrl;
   }
 
   try {

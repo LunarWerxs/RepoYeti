@@ -95,6 +95,49 @@ function isQuickTunnelOrigin(origin: string): boolean {
   }
 }
 
+/**
+ * Announce the OAuth callback route to the relay, retrying per `retryDelays`, and keep the
+ * module-level `oauthCallbackRoute` updated after every attempt so a status read mid-retry still
+ * sees the current state. Returns the final announce result, or null when a newer
+ * `publishRemoteRoutes` call superseded this one mid-retry — the caller must then do nothing
+ * further, since `oauthCallbackRoute` already belongs to that newer generation.
+ */
+async function announceOAuthCallbackWithRetry(
+  callbackBase: string,
+  identity: RelayIdentity,
+  origin: string,
+  redirectUri: string,
+  fetchImpl: typeof fetch,
+  retryDelays: readonly number[],
+  generation: number,
+): Promise<AnnounceResult | null> {
+  for (let attempt = 0; ; attempt++) {
+    const callbackResult = await announce(callbackBase, identity, origin, fetchImpl);
+    const callbackCompatible = callbackResult.capabilities?.includes(OAUTH_CALLBACK_CAPABILITY) ?? false;
+    if (generation !== remoteRouteGeneration) return null;
+    oauthCallbackRoute = {
+      origin,
+      redirectUri,
+      relayId: identity.id,
+      status: callbackResult.ok
+        ? callbackCompatible
+          ? "ready"
+          : "incompatible"
+        : attempt < retryDelays.length
+          ? "retrying"
+          : "failed",
+      ...(callbackResult.ok
+        ? callbackCompatible
+          ? {}
+          : { error: `relay does not support ${OAUTH_CALLBACK_CAPABILITY}` }
+        : { error: callbackResult.error ?? "announce failed" }),
+    };
+    if (callbackResult.ok || attempt >= retryDelays.length) return callbackResult;
+    if (!(await waitForRemoteRouteRetry(retryDelays[attempt]!))) return null;
+    if (generation !== remoteRouteGeneration) return null;
+  }
+}
+
 /** Publish every remote route needed by one freshly-created tunnel without per-login writes. */
 export async function publishRemoteRoutes(
   cfg: RepoYetiConfig,
@@ -133,34 +176,20 @@ export async function publishRemoteRoutes(
     );
   }
   const retryDelays = options.retryDelaysMs ?? OAUTH_CALLBACK_RETRY_DELAYS_MS;
-  let callbackResult: AnnounceResult;
-  for (let attempt = 0; ; attempt++) {
-    callbackResult = await announce(callbackBase, identity, origin, fetchImpl);
-    const callbackCompatible = callbackResult.capabilities?.includes(OAUTH_CALLBACK_CAPABILITY) ?? false;
-    // A stopped or replaced tunnel must not become login-ready just because its older announce
-    // finished last. Only the newest publication attempt may update process-wide route state.
-    if (generation !== remoteRouteGeneration) return;
-    oauthCallbackRoute = {
-      origin,
-      redirectUri,
-      relayId: identity.id,
-      status: callbackResult.ok
-        ? callbackCompatible
-          ? "ready"
-          : "incompatible"
-        : attempt < retryDelays.length
-          ? "retrying"
-          : "failed",
-      ...(callbackResult.ok
-        ? callbackCompatible
-          ? {}
-          : { error: `relay does not support ${OAUTH_CALLBACK_CAPABILITY}` }
-        : { error: callbackResult.error ?? "announce failed" }),
-    };
-    if (callbackResult.ok || attempt >= retryDelays.length) break;
-    if (!(await waitForRemoteRouteRetry(retryDelays[attempt]!))) return;
-    if (generation !== remoteRouteGeneration) return;
-  }
+  // A stopped or replaced tunnel must not become login-ready just because its older announce
+  // finished last. Only the newest publication attempt may update process-wide route state —
+  // announceOAuthCallbackWithRetry re-checks `generation` itself on every attempt and returns
+  // null the moment a newer call has taken over.
+  const callbackResult = await announceOAuthCallbackWithRetry(
+    callbackBase,
+    identity,
+    origin,
+    redirectUri,
+    fetchImpl,
+    retryDelays,
+    generation,
+  );
+  if (!callbackResult) return;
 
   if (sameRelay) {
     relayAnnounced = callbackResult.ok;

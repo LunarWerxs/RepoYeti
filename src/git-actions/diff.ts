@@ -564,6 +564,49 @@ const MIN_HUNK_EXCERPT = 160;
  */
 const EXCERPT_CAPTION_CHARS = 120;
 
+/**
+ * Rank hunks by how much they actually changed and spend `room` chars filling as many with real
+ * diff lines as it allows, largest first. An equal split is the obvious move and it
+ * self-destructs: a 20-hunk file divides an ~880-char budget into 44-char shares, which cannot
+ * hold even a `@@` header, so every hunk degrades to a header (or the whole excerpt overflows and
+ * the caller's fit check throws it away). Ranking concentrates the budget where the substance is
+ * and lets the map cover the rest, which is what the map is for.
+ *
+ * Returns the chosen excerpts keyed by original hunk index (so the caller can restore file
+ * order) plus how many additional changed lines were folded rather than shown.
+ */
+function selectHunkExcerpts(hunks: string[], room: number): { taken: Map<number, string>; elided: number } {
+  const weigh = (h: string): number =>
+    h.split("\n").filter((l) => l.startsWith("+") || l.startsWith("-")).length;
+  const ranked = hunks.map((h, at) => ({ h, at })).sort((a, b) => weigh(b.h) - weigh(a.h));
+
+  const taken = new Map<number, string>();
+  let budget = room;
+  let elided = 0;
+  for (const { h, at } of ranked) {
+    const lines = h.split("\n").filter((l, i, a) => l !== "" || i !== a.length - 1);
+    const header = lines[0] ?? ""; // "@@ -a,b +c,d @@ enclosing decl" — cheap, highly informative
+    // A hunk excerpt below its header plus a couple of lines says nothing worth the tokens; leave
+    // that hunk to the map rather than spend the budget proving we saw it.
+    if (budget < header.length + MIN_HUNK_EXCERPT) {
+      elided += Math.max(0, lines.length - 1);
+      continue;
+    }
+    const share = Math.min(budget, Math.max(MIN_HUNK_EXCERPT, Math.floor(room / hunks.length)));
+    let text = `${header}\n`;
+    let n = 1;
+    for (; n < lines.length; n++) {
+      const line = lines[n]!;
+      if (text.length + line.length + 1 > share) break;
+      text += `${line}\n`;
+    }
+    elided += Math.max(0, lines.length - n);
+    taken.set(at, text);
+    budget -= text.length;
+  }
+  return { taken, elided };
+}
+
 function condenseFileChunk(chunk: string, perFileCap: number): string {
   const lines = chunk.split("\n");
   const fileHeader = lines[0] ?? "";
@@ -641,39 +684,7 @@ function condenseFileChunk(chunk: string, perFileCap: number): string {
   const room = perFileCap - map.length - EXCERPT_CAPTION_CHARS;
   if (room < MIN_EXCERPT_CHARS) return map;
 
-  // Rank by how much each hunk actually changed and spend on the biggest first. An equal split is
-  // the obvious move and it self-destructs: a 20-hunk file divides an ~880-char budget into 44-char
-  // shares, which cannot hold even a `@@` header, so every hunk degrades to a header (or the whole
-  // excerpt overflows and the fit check below throws it away). Ranking concentrates the budget
-  // where the substance is and lets the map cover the rest, which is what the map is for.
-  const weigh = (h: string): number =>
-    h.split("\n").filter((l) => l.startsWith("+") || l.startsWith("-")).length;
-  const ranked = hunks.map((h, at) => ({ h, at })).sort((a, b) => weigh(b.h) - weigh(a.h));
-
-  const taken = new Map<number, string>();
-  let budget = room;
-  let elided = 0;
-  for (const { h, at } of ranked) {
-    const lines = h.split("\n").filter((l, i, a) => l !== "" || i !== a.length - 1);
-    const header = lines[0] ?? ""; // "@@ -a,b +c,d @@ enclosing decl" — cheap, highly informative
-    // A hunk excerpt below its header plus a couple of lines says nothing worth the tokens; leave
-    // that hunk to the map rather than spend the budget proving we saw it.
-    if (budget < header.length + MIN_HUNK_EXCERPT) {
-      elided += Math.max(0, lines.length - 1);
-      continue;
-    }
-    const share = Math.min(budget, Math.max(MIN_HUNK_EXCERPT, Math.floor(room / hunks.length)));
-    let text = `${header}\n`;
-    let n = 1;
-    for (; n < lines.length; n++) {
-      const line = lines[n]!;
-      if (text.length + line.length + 1 > share) break;
-      text += `${line}\n`;
-    }
-    elided += Math.max(0, lines.length - n);
-    taken.set(at, text);
-    budget -= text.length;
-  }
+  const { taken, elided } = selectHunkExcerpts(hunks, room);
   if (taken.size === 0) return map;
   // Emit in FILE order, not budget order: a diff read out of order is a diff misread.
   const excerpt = [...taken.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t).join("");

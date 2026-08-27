@@ -291,6 +291,57 @@ function failure(message: string): UpdateApplyResult {
   };
 }
 
+type AssetDownloadResult =
+  | { ok: true; archive: string; actualHash: string }
+  | { ok: false; message: string };
+
+/**
+ * Download one release asset into `staging` and verify it against the release's published
+ * SHA-256 BEFORE the caller unpacks it, failing closed if there is nothing to verify against.
+ *
+ * Until this existed, the only check on a downloaded binary was verifyVersion() — running it and
+ * seeing whether it printed the expected version string. Anything that prints that string
+ * passes, so the check told you the file was the right VERSION and nothing at all about whether
+ * it was the right FILE. The caller then renames it over the running executable, which makes
+ * "whatever was served at browser_download_url" arbitrary code execution on every installation
+ * with auto-update enabled.
+ *
+ * Fail-closed is deliberate. A missing manifest means we cannot tell a good archive from a bad
+ * one, and "install it anyway" is the exact behavior being removed. Every release the current
+ * workflow builds attaches SHA256SUMS.txt, so the only thing this refuses is an update we have no
+ * way to trust.
+ */
+async function downloadAssetVerified(
+  asset: ReleaseAsset,
+  assets: ReleaseAsset[],
+  staging: string,
+  remoteVersion: string,
+): Promise<AssetDownloadResult> {
+  const archive = join(staging, asset.name);
+  const response = await fetch(asset.browser_download_url, {
+    headers: { accept: "application/octet-stream", "user-agent": `${SERVICE}/${VERSION}` },
+    redirect: "follow",
+  });
+  if (!response.ok) return { ok: false, message: `download failed (HTTP ${response.status})` };
+  await Bun.write(archive, response);
+
+  const expectedHash = await publishedChecksum(assets, asset.name);
+  if (!expectedHash) {
+    return {
+      ok: false,
+      message: `v${remoteVersion} publishes no ${CHECKSUM_ASSET}, so the download cannot be verified`,
+    };
+  }
+  const actualHash = await sha256File(archive);
+  if (actualHash !== expectedHash) {
+    return {
+      ok: false,
+      message: `the downloaded ${asset.name} does not match the checksum published for v${remoteVersion}`,
+    };
+  }
+  return { ok: true, archive, actualHash };
+}
+
 export async function applyUpdate(): Promise<UpdateApplyResult> {
   const status = await checkForUpdate({ fresh: true });
   if (!status.ok) return failure(status.reason ?? "update check failed");
@@ -317,37 +368,10 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
   try {
     rmSync(staging, { recursive: true, force: true });
     mkdirSync(staging, { recursive: true });
-    const archive = join(staging, asset.name);
     output.push(`downloading ${asset.name} (${Math.round(asset.size / 1048576)} MB)`);
-    const response = await fetch(asset.browser_download_url, {
-      headers: { accept: "application/octet-stream", "user-agent": `${SERVICE}/${VERSION}` },
-      redirect: "follow",
-    });
-    if (!response.ok) return failure(`download failed (HTTP ${response.status})`);
-    await Bun.write(archive, response);
-
-    // Verify the archive against the release's published SHA-256 BEFORE unpacking it, and fail
-    // closed if there is nothing to verify against.
-    //
-    // Until now the only check on a downloaded binary was verifyVersion() below — running it and
-    // seeing whether it printed the expected version string. Anything that prints that string
-    // passes, so the check tells you the file is the right VERSION and nothing at all about
-    // whether it is the right FILE. This code then renames it over the running executable, which
-    // makes "whatever was served at browser_download_url" arbitrary code execution on every
-    // installation with auto-update enabled.
-    //
-    // Fail-closed is deliberate. A missing manifest means we cannot tell a good archive from a
-    // bad one, and "install it anyway" is the exact behavior being removed. Every release the
-    // current workflow builds attaches SHA256SUMS.txt, so the only thing this refuses is an
-    // update we have no way to trust.
-    const expectedHash = await publishedChecksum(assets, asset.name);
-    if (!expectedHash) {
-      return failure(`v${remoteVersion} publishes no ${CHECKSUM_ASSET}, so the download cannot be verified`);
-    }
-    const actualHash = await sha256File(archive);
-    if (actualHash !== expectedHash) {
-      return failure(`the downloaded ${asset.name} does not match the checksum published for v${remoteVersion}`);
-    }
+    const downloaded = await downloadAssetVerified(asset, assets, staging, remoteVersion);
+    if (!downloaded.ok) return failure(downloaded.message);
+    const { archive, actualHash } = downloaded;
     output.push(`verified sha256 ${actualHash.slice(0, 12)}…`);
 
     await extract(archive, staging);

@@ -123,12 +123,10 @@ function isRelaunch(): boolean {
   return process.env.REPOYETI_RELAUNCH === "1" || process.argv.includes(RELAUNCH_FLAG);
 }
 
-export async function start(rest: string[], options: { openUi?: boolean } = {}): Promise<void> {
-  cleanupStaleUpdateArtifacts();
-  const cfg = loadConfig();
-
-  // flags
-  let port = Number(process.env.REPOYETI_PORT) || cfg.port;
+/** Parsed `start` CLI flags. `--root` is applied as a side effect immediately (it doesn't affect
+ *  the daemon's own settings, only the DB), so it isn't part of the returned shape. */
+function parseStartFlags(rest: string[], defaultPort: number): { port: number; wantTunnel: boolean } {
+  let port = defaultPort;
   let wantTunnel = false;
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === "--root" && rest[i + 1]) {
@@ -139,44 +137,43 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
       wantTunnel = true;
     }
   }
+  return { port, wantTunnel };
+}
 
-  // Single instance: if a RepoYeti daemon is already serving, don't start a second
-  // one — it would just hop to another port (see `listen()`) and the launcher,
-  // tunnel, and MCP would disagree about which instance is "the" one. The dev
-  // watcher sets REPOYETI_DEV=1 (scripts/dev.ts) and must be free to rebind its port
-  // on every reload, so that flow is exempt from this guard.
-  // The auto-update successor (REPOYETI_RELAUNCH=1) is exempt too: its predecessor is
-  // still alive and answering /api/health during the ~800ms handoff, so probing here
-  // would see "already running" and make the successor exit, leaving ZERO daemons.
-  // It instead falls through to the REPOYETI_RELAUNCH port-wait below and takes over.
-  if (process.env.REPOYETI_DEV !== "1" && !isRelaunch()) {
-    // Three probes, not one. instance-pointer.mjs's own docstring calls a single probe "a COIN
-    // FLIP" here and says spawn-deciding callers must pass attempts >= 2: a live daemon that
-    // happens to be mid-scan can miss one 1s health probe, and the answer to "is one already
-    // running?" is then wrong in the expensive direction. writeInstanceInfo() overwrites the
-    // runtime pointer unconditionally, so the second daemon takes ownership of it while the
-    // first keeps serving and both write the same SQLite file — and the tray, launcher and MCP
-    // all follow whichever one wrote last.
-    const live = await findLiveInstance(1000, 3);
-    if (live) {
-      console.log(`\nRepoYeti is already running → ${live.url}\nNot starting a second instance.\n`);
-      if (options.openUi) openUi(live.url);
-      process.exit(0);
-    }
-  }
+/**
+ * Refuse to start a second daemon when one is already serving — it would just hop to another
+ * port (see `listen()`) and the launcher, tunnel, and MCP would disagree about which instance is
+ * "the" one. Exits the process directly (never returns) when a live instance is found; returns
+ * normally otherwise so `start` can continue booting.
+ *
+ * The dev watcher sets REPOYETI_DEV=1 (scripts/dev.ts) and must be free to rebind its port on
+ * every reload, so that flow is exempt from this guard. The auto-update successor
+ * (REPOYETI_RELAUNCH=1) is exempt too: its predecessor is still alive and answering /api/health
+ * during the ~800ms handoff, so probing here would see "already running" and make the successor
+ * exit, leaving ZERO daemons. It instead falls through to the REPOYETI_RELAUNCH port-wait below
+ * and takes over.
+ */
+async function exitIfAlreadyRunning(options: { openUi?: boolean }): Promise<void> {
+  if (process.env.REPOYETI_DEV === "1" || isRelaunch()) return;
+  // Three probes, not one. instance-pointer.mjs's own docstring calls a single probe "a COIN
+  // FLIP" here and says spawn-deciding callers must pass attempts >= 2: a live daemon that
+  // happens to be mid-scan can miss one 1s health probe, and the answer to "is one already
+  // running?" is then wrong in the expensive direction. writeInstanceInfo() overwrites the
+  // runtime pointer unconditionally, so the second daemon takes ownership of it while the
+  // first keeps serving and both write the same SQLite file — and the tray, launcher and MCP
+  // all follow whichever one wrote last.
+  const live = await findLiveInstance(1000, 3);
+  if (!live) return;
+  console.log(`\nRepoYeti is already running → ${live.url}\nNot starting a second instance.\n`);
+  if (options.openUi) openUi(live.url);
+  process.exit(0);
+}
 
-  const liveCfg = loadConfig();
-  initDb();
-  // initDb() just merged any duplicate identities it found (see db.ts mergeDuplicateIdentities).
-  // repos.identity_id and account_identities.identity_id are repointed automatically (they're
-  // SQLite rows), but identityRules[].requiredIdentityId lives in config.json instead, so it needs
-  // its own repoint pass here using the id to id remap the merge just produced.
-  applyIdentityMergeToConfig(liveCfg);
-  // Pull AI keys / OAuth client_secret from the OS keychain into the in-memory config (and
-  // migrate any legacy plaintext secrets out of config.json), before anything serves.
-  await hydrateSecrets(liveCfg);
-
-  // SECURITY: never expose a tunnel without app-layer auth.
+/**
+ * SECURITY: never expose a tunnel without app-layer auth or a configured owner. Exits the
+ * process directly (never returns) when either is missing; returns normally otherwise.
+ */
+function enforceTunnelSecurity(wantTunnel: boolean, liveCfg: RepoYetiConfig): void {
   const tunnelProblem = wantTunnel ? tunnelStartProblem(liveCfg) : null;
   if (tunnelProblem === "auth") {
     console.error(
@@ -194,6 +191,30 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
     );
     process.exit(1);
   }
+}
+
+export async function start(rest: string[], options: { openUi?: boolean } = {}): Promise<void> {
+  cleanupStaleUpdateArtifacts();
+  const cfg = loadConfig();
+
+  const { port, wantTunnel } = parseStartFlags(rest, Number(process.env.REPOYETI_PORT) || cfg.port);
+
+  // Single instance: see exitIfAlreadyRunning for why the dev watcher and an auto-update
+  // successor are exempt from this guard.
+  await exitIfAlreadyRunning(options);
+
+  const liveCfg = loadConfig();
+  initDb();
+  // initDb() just merged any duplicate identities it found (see db.ts mergeDuplicateIdentities).
+  // repos.identity_id and account_identities.identity_id are repointed automatically (they're
+  // SQLite rows), but identityRules[].requiredIdentityId lives in config.json instead, so it needs
+  // its own repoint pass here using the id to id remap the merge just produced.
+  applyIdentityMergeToConfig(liveCfg);
+  // Pull AI keys / OAuth client_secret from the OS keychain into the in-memory config (and
+  // migrate any legacy plaintext secrets out of config.json), before anything serves.
+  await hydrateSecrets(liveCfg);
+
+  enforceTunnelSecurity(wantTunnel, liveCfg);
 
   // No scan roots is a valid state now: the dashboard's "Scan for projects" can sweep the whole
   // computer (or a specific folder) on demand, and the daemon still serves whatever repos the DB

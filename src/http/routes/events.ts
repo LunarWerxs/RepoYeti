@@ -1,6 +1,7 @@
-import type { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
+import type { Context, Hono } from "hono";
+import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import type { Deps } from "../deps.ts";
+import type { RepoYetiConfig } from "../../config.ts";
 import { VERSION } from "../../config.ts";
 import { addListener, removeListener } from "../../bus.ts";
 import { effectiveGuest } from "../../auth.ts";
@@ -54,74 +55,84 @@ export class BoundedSseQueue {
   }
 }
 
+/**
+ * Serve one client's `/api/events` connection end to end: subscribe to the bus, project
+ * guest-scoped events through the share, drain the queue as `writeSSE` calls, and unwind
+ * cleanly on abort or overload.
+ *
+ * Named on purpose, not left as `register`'s inline callback: an anonymous callback's branches
+ * still count toward the enclosing function (one nesting level deeper, which cognitive
+ * complexity weighs worse, not better), so `register` stayed a complexity finding until this
+ * body moved into a function of its own.
+ */
+async function streamEventsToClient(c: Context, stream: SSEStreamingApi, cfg: RepoYetiConfig): Promise<void> {
+  const queue = new BoundedSseQueue();
+  let wake: (() => void) | null = null;
+  let aborted = false;
+  let overloaded = false;
+
+  // Resolved ONCE, at connect: this is a long-lived stream, so re-reading the cookie per event
+  // would be pointless (the cookie can't change mid-stream). Revocation still bites — every
+  // other request the guest makes re-checks the DB, and the dashboard is useless without them.
+  // The share object is only read for its id/scope here, never for permissions.
+  const share = effectiveGuest(c, cfg);
+
+  const listener = (event: string, data: string, payload: unknown): void => {
+    // A guest sees only events for repos their share covers, and only from an allowlist of
+    // event types — the raw bus carries the owner's settings, tunnel URL, and scan activity.
+    // The projection can rename the event as well as rewrite its body (hiding a repo reaches
+    // an all-repos guest as `repo_removed`), so take BOTH fields from it, never just the data.
+    if (share) {
+      const projected = guestEventData(share, event, payload);
+      if (projected === null) return;
+      if (!queue.push(projected)) overloaded = true;
+    } else {
+      if (!queue.push({ event, data })) overloaded = true;
+    }
+    wake?.();
+    wake = null;
+  };
+  addListener(listener);
+  stream.onAbort(() => {
+    aborted = true;
+    removeListener(listener);
+    wake?.();
+    wake = null;
+  });
+
+  try {
+    await stream.writeSSE({ event: "hello", data: JSON.stringify({ ok: true, version: VERSION }) });
+
+    while (!aborted && !overloaded) {
+      if (queue.items.length === 0) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        wake = resolve;
+        const timeout = setTimeout(resolve, 25_000);
+        await promise;
+        clearTimeout(timeout);
+        if (aborted || overloaded) break;
+        if (queue.items.length === 0) {
+          await stream.writeSSE({ event: "ping", data: String(Date.now()) });
+          continue;
+        }
+      }
+      while (queue.items.length > 0 && !aborted && !overloaded) {
+        const batch = queue.drain();
+        for (const m of batch) {
+          if (aborted || overloaded) break;
+          await stream.writeSSE({ event: m.event, data: m.data });
+        }
+      }
+    }
+  } finally {
+    // Also runs on write errors and byte-budget overload, not just a browser abort.
+    removeListener(listener);
+    wake?.();
+    wake = null;
+  }
+}
+
 export function register(app: Hono, { cfg }: Deps): void {
   // ── SSE stream ─────────────────────────────────────────────────────────────
-  app.get("/api/events", (c) =>
-    streamSSE(c, async (stream) => {
-      const queue = new BoundedSseQueue();
-      let wake: (() => void) | null = null;
-      let aborted = false;
-      let overloaded = false;
-
-      // Resolved ONCE, at connect: this is a long-lived stream, so re-reading the cookie per event
-      // would be pointless (the cookie can't change mid-stream). Revocation still bites — every
-      // other request the guest makes re-checks the DB, and the dashboard is useless without them.
-      // The share object is only read for its id/scope here, never for permissions.
-      const share = effectiveGuest(c, cfg);
-
-      const listener = (event: string, data: string, payload: unknown): void => {
-        // A guest sees only events for repos their share covers, and only from an allowlist of
-        // event types — the raw bus carries the owner's settings, tunnel URL, and scan activity.
-        // The projection can rename the event as well as rewrite its body (hiding a repo reaches
-        // an all-repos guest as `repo_removed`), so take BOTH fields from it, never just the data.
-        if (share) {
-          const projected = guestEventData(share, event, payload);
-          if (projected === null) return;
-          if (!queue.push(projected)) overloaded = true;
-        } else {
-          if (!queue.push({ event, data })) overloaded = true;
-        }
-        wake?.();
-        wake = null;
-      };
-      addListener(listener);
-      stream.onAbort(() => {
-        aborted = true;
-        removeListener(listener);
-        wake?.();
-        wake = null;
-      });
-
-      try {
-        await stream.writeSSE({ event: "hello", data: JSON.stringify({ ok: true, version: VERSION }) });
-
-        while (!aborted && !overloaded) {
-          if (queue.items.length === 0) {
-            const { promise, resolve } = Promise.withResolvers<void>();
-            wake = resolve;
-            const timeout = setTimeout(resolve, 25_000);
-            await promise;
-            clearTimeout(timeout);
-            if (aborted || overloaded) break;
-            if (queue.items.length === 0) {
-              await stream.writeSSE({ event: "ping", data: String(Date.now()) });
-              continue;
-            }
-          }
-          while (queue.items.length > 0 && !aborted && !overloaded) {
-            const batch = queue.drain();
-            for (const m of batch) {
-              if (aborted || overloaded) break;
-              await stream.writeSSE({ event: m.event, data: m.data });
-            }
-          }
-        }
-      } finally {
-        // Also runs on write errors and byte-budget overload, not just a browser abort.
-        removeListener(listener);
-        wake?.();
-        wake = null;
-      }
-    }),
-  );
+  app.get("/api/events", (c) => streamSSE(c, (stream) => streamEventsToClient(c, stream, cfg)));
 }
