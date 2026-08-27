@@ -53,8 +53,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
       - run: bun install --frozen-lockfile
@@ -114,8 +114,8 @@ jobs:
           - os: windows-latest
             asset: repoyeti-windows-x64.zip
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
       - run: bun install --frozen-lockfile
@@ -178,7 +178,7 @@ jobs:
             }
           }
           Compress-Archive -Path "tmp/$tray" -DestinationPath "out/$tray.zip"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.asset }}
           path: out/*
@@ -193,8 +193,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7 # needed for CHANGELOG.md — the notes are built from it
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
       - name: Build checksums
@@ -215,7 +215,7 @@ jobs:
           node scripts/release-notes.mjs "$version" --repo "$GITHUB_REPOSITORY" > RELEASE_NOTES.md
           echo "--- release notes ---"; cat RELEASE_NOTES.md
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: |
             artifacts/**/*
