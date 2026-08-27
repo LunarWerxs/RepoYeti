@@ -377,6 +377,52 @@ function fallbackSummary(method: string, openApiPath: string): string {
   return `${method} ${openApiPath}`;
 }
 
+/** Builds one operation object (summary/responses/tags/parameters/requestBody) for a single
+ *  (method, path) route entry. Pulled out of buildOpenApiDoc; same fields, same order. */
+function buildOpenApiOperation(
+  method: string,
+  openApiPath: string,
+  meta: RouteMeta | undefined,
+  errorRef: string,
+): Record<string, unknown> {
+  const operation: Record<string, unknown> = {
+    summary: meta?.summary ?? fallbackSummary(method, openApiPath),
+    responses: {
+      "200": { description: "Success" },
+      default: {
+        description: "Error",
+        content: { "application/json": { schema: { $ref: errorRef } } },
+      },
+    },
+  };
+  if (meta?.tags?.length) operation.tags = meta.tags;
+
+  const parameters: Array<Record<string, unknown>> = pathParamNames(openApiPath).map((name) => ({
+    name,
+    in: "path",
+    required: true,
+    schema: { type: "string" },
+  }));
+  for (const q of meta?.query ?? []) {
+    parameters.push({
+      name: q.name,
+      in: "query",
+      required: q.required ?? false,
+      ...(q.description ? { description: q.description } : {}),
+      schema: q.enum ? { type: "string", enum: q.enum } : { type: "string" },
+    });
+  }
+  if (parameters.length) operation.parameters = parameters;
+
+  if (meta?.body) {
+    operation.requestBody = {
+      required: true,
+      content: { "application/json": { schema: z.toJSONSchema(meta.body) } },
+    };
+  }
+  return operation;
+}
+
 /**
  * Build a valid OpenAPI 3.1 document from the live Hono routing table.
  *
@@ -402,41 +448,7 @@ export function buildOpenApiDoc(app: Hono): object {
     seen.add(dedupeKey);
 
     const meta = META[`${method} ${r.path}`];
-    const operation: Record<string, unknown> = {
-      summary: meta?.summary ?? fallbackSummary(method, openApiPath),
-      responses: {
-        "200": { description: "Success" },
-        default: {
-          description: "Error",
-          content: { "application/json": { schema: { $ref: ERROR_REF } } },
-        },
-      },
-    };
-    if (meta?.tags?.length) operation.tags = meta.tags;
-
-    const parameters: Array<Record<string, unknown>> = pathParamNames(openApiPath).map((name) => ({
-      name,
-      in: "path",
-      required: true,
-      schema: { type: "string" },
-    }));
-    for (const q of meta?.query ?? []) {
-      parameters.push({
-        name: q.name,
-        in: "query",
-        required: q.required ?? false,
-        ...(q.description ? { description: q.description } : {}),
-        schema: q.enum ? { type: "string", enum: q.enum } : { type: "string" },
-      });
-    }
-    if (parameters.length) operation.parameters = parameters;
-
-    if (meta?.body) {
-      operation.requestBody = {
-        required: true,
-        content: { "application/json": { schema: z.toJSONSchema(meta.body) } },
-      };
-    }
+    const operation = buildOpenApiOperation(method, openApiPath, meta, ERROR_REF);
 
     let entry = paths[openApiPath];
     if (!entry) {

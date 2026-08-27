@@ -34,7 +34,7 @@ import {
   type ConflictHunk,
   type ParsedConflictFile,
 } from "../ai/conflict-resolve.ts";
-import type { ConflictKind } from "../read/status.ts";
+import type { ChangedFile, ConflictKind } from "../read/status.ts";
 
 /** One conflicted path as the resolver UI lists it. */
 export interface ConflictListEntry {
@@ -147,6 +147,29 @@ async function enrichWithBase(absPath: string, relPath: string, parsed: ParsedCo
   }
 }
 
+/** Reads + classifies one conflicted path into its list entry (deleted / binary / too-large /
+ *  unparseable / too-many-hunks / resolvable). Read-only, mirrors listConflicts' prior inline logic. */
+async function buildConflictListEntry(repoId: string, f: ChangedFile): Promise<ConflictListEntry> {
+  const read = await readFileContent(repoId, f.path, "work");
+  const entry: ConflictListEntry = { path: f.path, ...(f.conflict ? { kind: f.conflict } : {}), hunks: 0 };
+  if (!read.ok || read.ref !== "work") {
+    // deleted-by-us / deleted-by-them: there is no working file to carry markers.
+    return { ...entry, unsupported: "missing" };
+  }
+  if (read.binary) return { ...entry, unsupported: "binary" };
+  if ((read.size ?? 0) > MAX_CONFLICT_FILE_BYTES || read.truncated) {
+    return { ...entry, unsupported: "too-large" };
+  }
+  const parsed = parseConflictFile(read.content ?? "");
+  if (!parsed) {
+    return { ...entry, unsupported: hasConflictMarkers(read.content ?? "") ? "unparseable" : "no-markers" };
+  }
+  if (parsed.hunks.length > MAX_CONFLICT_HUNKS) {
+    return { ...entry, hunks: parsed.hunks.length, unsupported: "too-many-hunks" };
+  }
+  return { ...entry, hunks: parsed.hunks.length };
+}
+
 /**
  * Every currently-unmerged path in the repo, each annotated with whether this feature can act
  * on it. Unsupported paths are listed WITH their reason rather than filtered out — an owner
@@ -161,29 +184,7 @@ export async function listConflicts(repoId: string): Promise<ConflictListResult>
     const conflicted = changes.filter((f) => f.status === "C");
     const files: ConflictListEntry[] = [];
     for (const f of conflicted) {
-      const read = await readFileContent(repoId, f.path, "work");
-      const entry: ConflictListEntry = { path: f.path, ...(f.conflict ? { kind: f.conflict } : {}), hunks: 0 };
-      if (!read.ok || read.ref !== "work") {
-        // deleted-by-us / deleted-by-them: there is no working file to carry markers.
-        files.push({ ...entry, unsupported: "missing" });
-        continue;
-      }
-      if (read.binary) files.push({ ...entry, unsupported: "binary" });
-      else if ((read.size ?? 0) > MAX_CONFLICT_FILE_BYTES || read.truncated) {
-        files.push({ ...entry, unsupported: "too-large" });
-      } else {
-        const parsed = parseConflictFile(read.content ?? "");
-        if (!parsed) {
-          files.push({
-            ...entry,
-            unsupported: hasConflictMarkers(read.content ?? "") ? "unparseable" : "no-markers",
-          });
-        } else if (parsed.hunks.length > MAX_CONFLICT_HUNKS) {
-          files.push({ ...entry, hunks: parsed.hunks.length, unsupported: "too-many-hunks" });
-        } else {
-          files.push({ ...entry, hunks: parsed.hunks.length });
-        }
-      }
+      files.push(await buildConflictListEntry(repoId, f));
     }
     return { ok: true, code: "OK", files };
   } catch (e) {

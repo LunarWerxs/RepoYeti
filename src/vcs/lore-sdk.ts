@@ -124,6 +124,15 @@ export interface SdkCommit {
   date: number;
 }
 
+/** Applies one `metadata` event's key/value onto the commit it belongs to. */
+function applySdkLogMetadata(cur: SdkCommit, d: Record<string, unknown>): void {
+  const key = String(d.key ?? "");
+  const val = (d.value as { data?: unknown } | undefined)?.data;
+  if (key === "message") cur.subject = String(val ?? "");
+  else if (key === "timestamp") cur.date = Number(val ?? 0);
+  else if ((key === "creator" || key === "committer") && !cur.authorName) cur.authorName = String(val ?? "");
+}
+
 /** Commit history via the SDK. Each `revisionHistoryEntry` is followed by `metadata` events
  *  (message / timestamp / creator) that belong to it. Returns null when unavailable/errored. */
 export async function sdkLog(repoPath: string, limit: number): Promise<SdkCommit[] | null> {
@@ -142,11 +151,7 @@ export async function sdkLog(repoPath: string, limit: number): Promise<SdkCommit
         cur = { hash: String(d.revision ?? ""), subject: "", authorName: "", date: 0 };
         commits.push(cur);
       } else if (e.tag === TAG_METADATA && cur) {
-        const key = String(d.key ?? "");
-        const val = (d.value as { data?: unknown } | undefined)?.data;
-        if (key === "message") cur.subject = String(val ?? "");
-        else if (key === "timestamp") cur.date = Number(val ?? 0);
-        else if ((key === "creator" || key === "committer") && !cur.authorName) cur.authorName = String(val ?? "");
+        applySdkLogMetadata(cur, d);
       } else if (e.tag === TAG_COMPLETE) {
         ok = Number(d.status ?? 1) === 0;
       }
