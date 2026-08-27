@@ -252,6 +252,38 @@ async function buildPlan(repoId: string): Promise<BuiltPlan> {
   return { ok: true, commits, degraded };
 }
 
+// Pull (ff-only) then push, mirroring smartCommitRepo's own sync order: a failed pull BLOCKS the
+// push, since pushing after a failed pull risks publishing over a diverged remote (the
+// NON_FAST_FORWARD the pull-first order exists to prevent). Split out of processRepo, which was
+// carrying this branching on top of its own commit + conflict-gate logic.
+async function syncRepo(
+  repo: RepoView,
+  wantsPull: boolean,
+  wantsPush: boolean,
+): Promise<{ pulled: boolean; pushed: boolean; note?: string }> {
+  let pulled = false;
+  let pushed = false;
+  let note: string | undefined;
+  let pushBlocked = false;
+  if (wantsPull) {
+    const pr = await pullRepo(repo.id);
+    pulled = pr.ok;
+    if (!pr.ok) {
+      note = pr.code;
+      pushBlocked = true;
+    }
+  }
+  if (wantsPush && !pushBlocked) {
+    const fresh = getRepo(repo.id)?.status; // smartCommitRepo/pullRepo already refreshed it
+    if (fresh && fresh.ahead > 0) {
+      const pu = await pushRepo(repo.id);
+      pushed = pu.ok;
+      if (!pu.ok) note = pu.code;
+    }
+  }
+  return { pulled, pushed, note };
+}
+
 // ── process one repo ────────────────────────────────────────────────────────────────────────
 async function processRepo(
   repo: RepoView,
@@ -282,29 +314,8 @@ async function processRepo(
     degraded = built.degraded;
   }
 
-  // Sync — pull first (ff-only, self-guarding), then push. A failed pull BLOCKS the push, exactly
-  // like smartCommitRepo's sync: pushing after a failed pull risks publishing over a diverged
-  // remote (the NON_FAST_FORWARD the pull-first order exists to prevent).
-  let pulled = false;
-  let pushed = false;
-  let note: string | undefined;
-  let pushBlocked = false;
-  if (wantsPull) {
-    const pr = await pullRepo(repo.id);
-    pulled = pr.ok;
-    if (!pr.ok) {
-      note = pr.code;
-      pushBlocked = true;
-    }
-  }
-  if (wantsPush && !pushBlocked) {
-    const fresh = getRepo(repo.id)?.status; // smartCommitRepo/pullRepo already refreshed it
-    if (fresh && fresh.ahead > 0) {
-      const pu = await pushRepo(repo.id);
-      pushed = pu.ok;
-      if (!pu.ok) note = pu.code;
-    }
-  }
+  // Sync — pull first (ff-only, self-guarding), then push.
+  const { pulled, pushed, note } = await syncRepo(repo, wantsPull, wantsPush);
 
   if (commits === 0 && !pulled && !pushed && !note) return {}; // nothing observable happened
   return {

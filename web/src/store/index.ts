@@ -727,54 +727,67 @@ export const useStore = defineStore("repoyeti", () => {
     return request;
   }
 
+  type StatusResponse = Awaited<ReturnType<typeof api.status>>;
+
+  // Connection/tunnel/display half of loadStatus's fields — split out purely to keep loadStatus
+  // itself under the complexity gate; same assignments, same fallbacks, same order.
+  function applyConnectionStatus(s: StatusResponse): void {
+    serverVersion.value = s.version ?? "";
+    mode.value = s.mode;
+    tunnelActive.value = s.tunnelActive;
+    tunnelUrl.value = s.tunnelUrl;
+    if (s.tunnel) tunnelConfig.value = s.tunnel;
+    if (s.relay) relayConfig.value = s.relay;
+    relayUrl.value = s.relayUrl ?? null;
+    relayAnnounced.value = s.relayAnnounced === true;
+    relayError.value = s.relayError ?? null;
+    rememberRelayHome(s.relayUrl, s.relayAnnounced === true);
+    diffStatsEnabled.value = s.diffStats;
+    changesStatDisplay.value = s.changesStatDisplay ?? "numbers";
+    changesCharsEnabled.value = s.changesChars ?? true;
+    remoteEditing.value = s.remoteEditing;
+    remoteBrowse.value = s.remoteBrowse !== false;
+    diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
+    diffPatchEnabled.value = s.diffPatchEnabled ?? true;
+  }
+
+  // Sync/auto-commit/MCP-approval half of loadStatus's fields (see applyConnectionStatus above).
+  function applyAutoCommitStatus(s: StatusResponse): void {
+    syncCheckEnabled.value = s.syncCheck ?? false;
+    syncIntervalSecs.value = s.syncIntervalSecs ?? 300;
+    keepInSync.value = s.keepInSync ?? false;
+    autoCommit.value = s.autoCommit ?? false;
+    autoCommitMode.value = s.autoCommitMode ?? "interval";
+    autoCommitIntervalSecs.value = s.autoCommitIntervalSecs ?? 900;
+    autoCommitAt.value = s.autoCommitAt ?? "18:00";
+    autoCommitPull.value = s.autoCommitPull ?? true;
+    autoCommitPush.value = s.autoCommitPush ?? true;
+    autoCommitAiFallback.value = s.autoCommitAiFallback ?? "skip";
+    autoUpdate.value = s.autoUpdate ?? false;
+    updateNotify.value = s.updateNotify ?? true;
+    autoScan.value = s.autoScan ?? false;
+    loreServersEnabled.value = s.loreServersEnabled ?? true;
+    portableMode.value = s.portableMode ?? false;
+    hideTrayIcon.value = s.hideTrayIcon ?? false;
+    mcpApprovalGate.value = s.mcpApprovalGate ?? true;
+    mcpApprovalTimeoutSecs.value = s.mcpApprovalTimeoutSecs ?? 120;
+    mcpAutoDeny.value = s.mcpAutoDeny ?? true;
+    mcpAutoApprove.value = s.mcpAutoApprove ?? false;
+    mcpAutoApproveTimeoutSecs.value = s.mcpAutoApproveTimeoutSecs ?? 120;
+    defaultEditor.value = s.defaultEditor ?? null;
+    contentSearchMin.value = s.minContentSearch ?? 3;
+    // Dead AI keys the daemon found at boot — surface them now (deduped per session in
+    // notifyAiKeyInvalid), so a dashboard opened AFTER boot still sees them, not only one that
+    // was connected for the one-shot SSE broadcast.
+    for (const k of s.aiKeyInvalid ?? []) notifyAiKeyInvalid(k.label);
+  }
+
   /** Fetch runtime status (access mode + the remote-access tunnel URL, if any). Best-effort. */
   async function loadStatus(): Promise<void> {
     try {
       const s = await api.status();
-      serverVersion.value = s.version ?? "";
-      mode.value = s.mode;
-      tunnelActive.value = s.tunnelActive;
-      tunnelUrl.value = s.tunnelUrl;
-      if (s.tunnel) tunnelConfig.value = s.tunnel;
-      if (s.relay) relayConfig.value = s.relay;
-      relayUrl.value = s.relayUrl ?? null;
-      relayAnnounced.value = s.relayAnnounced === true;
-      relayError.value = s.relayError ?? null;
-      rememberRelayHome(s.relayUrl, s.relayAnnounced === true);
-      diffStatsEnabled.value = s.diffStats;
-      changesStatDisplay.value = s.changesStatDisplay ?? "numbers";
-      changesCharsEnabled.value = s.changesChars ?? true;
-      remoteEditing.value = s.remoteEditing;
-      remoteBrowse.value = s.remoteBrowse !== false;
-      diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
-      diffPatchEnabled.value = s.diffPatchEnabled ?? true;
-      syncCheckEnabled.value = s.syncCheck ?? false;
-      syncIntervalSecs.value = s.syncIntervalSecs ?? 300;
-      keepInSync.value = s.keepInSync ?? false;
-      autoCommit.value = s.autoCommit ?? false;
-      autoCommitMode.value = s.autoCommitMode ?? "interval";
-      autoCommitIntervalSecs.value = s.autoCommitIntervalSecs ?? 900;
-      autoCommitAt.value = s.autoCommitAt ?? "18:00";
-      autoCommitPull.value = s.autoCommitPull ?? true;
-      autoCommitPush.value = s.autoCommitPush ?? true;
-      autoCommitAiFallback.value = s.autoCommitAiFallback ?? "skip";
-      autoUpdate.value = s.autoUpdate ?? false;
-      updateNotify.value = s.updateNotify ?? true;
-      autoScan.value = s.autoScan ?? false;
-      loreServersEnabled.value = s.loreServersEnabled ?? true;
-      portableMode.value = s.portableMode ?? false;
-      hideTrayIcon.value = s.hideTrayIcon ?? false;
-      mcpApprovalGate.value = s.mcpApprovalGate ?? true;
-      mcpApprovalTimeoutSecs.value = s.mcpApprovalTimeoutSecs ?? 120;
-      mcpAutoDeny.value = s.mcpAutoDeny ?? true;
-      mcpAutoApprove.value = s.mcpAutoApprove ?? false;
-      mcpAutoApproveTimeoutSecs.value = s.mcpAutoApproveTimeoutSecs ?? 120;
-      defaultEditor.value = s.defaultEditor ?? null;
-      contentSearchMin.value = s.minContentSearch ?? 3;
-      // Dead AI keys the daemon found at boot — surface them now (deduped per session in
-      // notifyAiKeyInvalid), so a dashboard opened AFTER boot still sees them, not only one that
-      // was connected for the one-shot SSE broadcast.
-      for (const k of s.aiKeyInvalid ?? []) notifyAiKeyInvalid(k.label);
+      applyConnectionStatus(s);
+      applyAutoCommitStatus(s);
     } catch {
       /* status is optional — leave whatever we have */
     }

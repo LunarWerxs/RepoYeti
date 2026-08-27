@@ -28,6 +28,7 @@ import {
   isCompatibleLoopbackBaseUrl,
   AiError,
   type AiModel,
+  type AiCode,
 } from "../../ai.ts";
 import { jsonError, type ApiErrorCode } from "../../contract.ts";
 import { setSecret, deleteSecret, aiKeyName } from "../../secrets.ts";
@@ -48,6 +49,7 @@ import {
 } from "../../service/index.ts";
 import { requireId } from "../respond.ts";
 import { effectiveGuest } from "../../auth.ts";
+import type { Share } from "../../db.ts";
 
 const GUEST_AI_WINDOW_MS = 60_000;
 const GUEST_AI_MAX_PER_WINDOW = 10;
@@ -407,6 +409,32 @@ async function deleteProvider(c: Context, cfg: RepoYetiConfig) {
   return c.json(aiPayload(cfg));
 }
 
+type ProviderResolution =
+  | { ok: true; provider: AiProviderId; apiKey: string; model: string }
+  | { ok: false; res: Response };
+
+// Given an already-selected (or undefined) provider id, resolve its API key + model, or the
+// error Response to return instead. This exact validation chain was duplicated across
+// postCommitMessage, postCommitPlan, and postConflictResolve before this extraction.
+function resolveProviderConfig(
+  c: Context,
+  cfg: RepoYetiConfig,
+  provider: AiProviderId | null | undefined,
+): ProviderResolution {
+  if (!provider) {
+    return { ok: false, res: jsonError(c, "NO_AI_PROVIDER", "no AI provider configured") };
+  }
+  const apiKey = resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
+  if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
+    return { ok: false, res: jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`) };
+  }
+  const model = resolveModel(cfg, provider);
+  if (!model) {
+    return { ok: false, res: jsonError(c, "NO_MODEL", `pick a model for ${provider} in Settings`) };
+  }
+  return { ok: true, provider, apiKey, model };
+}
+
 // Draft a commit message from the repo's diff using the default (or a chosen) provider.
 async function postCommitMessage(c: Context, cfg: RepoYetiConfig, guestAiUsage: Map<string, GuestAiUsage>) {
   const id = requireId(c);
@@ -420,15 +448,9 @@ async function postCommitMessage(c: Context, cfg: RepoYetiConfig, guestAiUsage: 
   // Share guests may spend only the provider/model the owner selected as default. Provider
   // overrides and provider identity remain owner-only.
   const requested = guest || p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
-  const provider = requested ?? effectiveDefaultProvider(cfg);
-  if (!provider) return jsonError(c, "NO_AI_PROVIDER", "no AI provider configured");
-  const apiKey =
-    resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
-  if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
-    return jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`);
-  }
-  const model = resolveModel(cfg, provider);
-  if (!model) return jsonError(c, "NO_MODEL", `pick a model for ${provider} in Settings`);
+  const resolved = resolveProviderConfig(c, cfg, requested ?? effectiveDefaultProvider(cfg));
+  if (!resolved.ok) return resolved.res;
+  const { provider, apiKey, model } = resolved;
 
   // With `paths`, draft from only those files (smart-commit per-group regenerate); else the
   // whole working tree (the normal "Generate" button). Both honor the owner's diff-detail dial.
@@ -463,6 +485,30 @@ async function postCommitMessage(c: Context, cfg: RepoYetiConfig, guestAiUsage: 
   }
 }
 
+// Build the { code, message } reason attached to a heuristic fallback plan when AI generation
+// failed for a reason other than a bad key (provider down, rate limit, garbage response). Pulled
+// out of postCommitPlan's catch block: it was itself the densest branch of that function, and its
+// job — pick the code, then pick the guest-safe or real message — is self-contained.
+function commitPlanFallbackReason(
+  e: unknown,
+  guest: Share | null,
+): { code: AiCode; message: string } {
+  if (e instanceof AiError) {
+    return {
+      code: e.code,
+      message: guest ? guestAiErrorMessage(e.code as ApiErrorCode) : e.message,
+    };
+  }
+  return {
+    code: "AI_ERROR",
+    message: guest
+      ? guestAiErrorMessage("AI_ERROR")
+      : e instanceof Error
+        ? e.message
+        : String(e),
+  };
+}
+
 // Propose a multi-commit plan from the repo's working tree (read-only — commits NOTHING).
 // On an AI failure other than a bad key we fall back to a deterministic grouping so Smart
 // Commit always yields an editable plan; a rejected key surfaces so the owner can fix it.
@@ -476,15 +522,9 @@ async function postCommitPlan(c: Context, cfg: RepoYetiConfig, guestAiUsage: Map
     return jsonError(c, "FORBIDDEN", "AI commit generation is disabled by the owner", 403);
   }
   const requested = guest || p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
-  const provider = requested ?? effectiveDefaultProvider(cfg);
-  if (!provider) return jsonError(c, "NO_AI_PROVIDER", "no AI provider configured");
-  const apiKey =
-    resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
-  if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
-    return jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`);
-  }
-  const model = resolveModel(cfg, provider);
-  if (!model) return jsonError(c, "NO_MODEL", `pick a model for ${provider} in Settings`);
+  const resolved = resolveProviderConfig(c, cfg, requested ?? effectiveDefaultProvider(cfg));
+  if (!resolved.ok) return resolved.res;
+  const { provider, apiKey, model } = resolved;
 
   // Empty selection means "nothing checked" → plan the whole tree, so an empty array is
   // treated the same as omitting `paths` entirely (never an accidental empty-scope plan).
@@ -520,22 +560,7 @@ async function postCommitPlan(c: Context, cfg: RepoYetiConfig, guestAiUsage: Map
     // render as "AI couldn't structure this" — a wrong answer to a question the owner can
     // actually act on ("your daily token cap is spent; retry at X / switch provider").
     if (e instanceof AiError && e.code === "AI_AUTH_FAILED") return aiErr(c, cfg, e, provider);
-    const reason =
-      e instanceof AiError
-        ? {
-            code: e.code,
-            message: guest
-              ? guestAiErrorMessage(e.code as ApiErrorCode)
-              : e.message,
-          }
-        : {
-            code: "AI_ERROR" as const,
-            message: guest
-              ? guestAiErrorMessage("AI_ERROR")
-              : e instanceof Error
-                ? e.message
-                : String(e),
-          };
+    const reason = commitPlanFallbackReason(e, guest);
     const plan = heuristicPlan(collected.input!, reason);
     return c.json(
       guest
@@ -569,15 +594,11 @@ async function postConflictResolve(c: Context, cfg: RepoYetiConfig) {
   const p = await parseBody(c, ConflictResolveSchema);
   if (!p.ok) return p.res;
 
-  const provider = (p.data.provider == null ? undefined : (p.data.provider as AiProviderId)) ??
-    effectiveDefaultProvider(cfg);
-  if (!provider) return jsonError(c, "NO_AI_PROVIDER", "no AI provider configured");
-  const apiKey = resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
-  if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
-    return jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`);
-  }
-  const model = resolveModel(cfg, provider);
-  if (!model) return jsonError(c, "NO_MODEL", `pick a model for ${provider} in Settings`);
+  const requestedProvider =
+    p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
+  const resolved = resolveProviderConfig(c, cfg, requestedProvider ?? effectiveDefaultProvider(cfg));
+  if (!resolved.ok) return resolved.res;
+  const { provider, apiKey, model } = resolved;
 
   const file = await readConflictFile(id, p.data.path);
   if (!file.ok || !file.parsed) {
