@@ -947,6 +947,38 @@ async function workLooksBinary(repoRoot: string, abs: string): Promise<boolean> 
   return looksBinary(head);
 }
 
+/** Size (in bytes) of a path's blob at HEAD, or `inHead: false` when it throws — i.e. the
+ *  path is newly added / untracked and has no HEAD blob yet. */
+async function probeHeadBlobSize(repoAbsPath: string, relCleanPath: string): Promise<{ headSize: number; inHead: boolean }> {
+  try {
+    const headSize = parseInt((await gitFor(repoAbsPath).raw(["cat-file", "-s", `HEAD:${relCleanPath}`])).trim(), 10) || 0;
+    return { headSize, inHead: true };
+  } catch {
+    return { headSize: 0, inHead: false };
+  }
+}
+
+/** When a file is large and modified on both sides, ship a compact unified patch instead of
+ *  full before/after models. Returns null to fall through to the model view — either the
+ *  file doesn't qualify, or the patch came back empty (e.g. a mode-only change). */
+async function tryCompactPatchDiff(args: {
+  backend: ReturnType<typeof backendFor>;
+  repoAbsPath: string;
+  relCleanPath: string;
+  relAbsPath: string;
+  inWork: boolean;
+  inHead: boolean;
+  maxSize: number;
+}): Promise<FileDiffResult | null> {
+  const { backend, repoAbsPath, relCleanPath, relAbsPath, inWork, inHead, maxSize } = args;
+  if (!getDiffPatchEnabled() || !inWork || !inHead || maxSize <= getDiffPatchBytes()) return null;
+  if (await workLooksBinary(repoAbsPath, relAbsPath)) return null;
+
+  const fp = await backend.filePatch(repoAbsPath, relCleanPath);
+  if (!fp.ok || !fp.patch.trim()) return null;
+  return { ok: true, code: "OK", path: relCleanPath, mode: "patch", patch: fp.patch, truncated: fp.truncated };
+}
+
 /**
  * Both versions of a changed file for the Diff view: the HEAD blob (original) and the
  * working-tree file (modified). Added/untracked files have an empty original; deleted
@@ -977,31 +1009,22 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
     const workFile = resolveReadableWorkFile(repo.absPath, r.abs);
     const inWork = workFile !== null;
     const workSize = workFile?.size ?? 0;
-    let headSize = 0;
-    let inHead = false;
-    try {
-      headSize = parseInt((await gitFor(repo.absPath).raw(["cat-file", "-s", `HEAD:${r.clean}`])).trim(), 10) || 0;
-      inHead = true;
-    } catch {
-      /* not in HEAD → newly added / untracked */
-    }
+    const { headSize, inHead } = await probeHeadBlobSize(repo.absPath, r.clean);
 
     // Large AND modified (present on BOTH sides) → compact diff: let git compute the patch
     // and ship only that. Added/deleted files stay on the model path — one side is empty
     // there, so the "diff" already IS the single file and there's nothing smaller to send.
     // Skipped entirely when the owner has turned patch mode off (always side-by-side).
-    if (
-      getDiffPatchEnabled() &&
-      inWork &&
-      inHead &&
-      Math.max(workSize, headSize) > getDiffPatchBytes() &&
-      !(await workLooksBinary(repo.absPath, r.abs))
-    ) {
-      const fp = await backend.filePatch(repo.absPath, r.clean);
-      if (fp.ok && fp.patch.trim())
-        return { ok: true, code: "OK", path: r.clean, mode: "patch", patch: fp.patch, truncated: fp.truncated };
-      // empty patch (e.g. a mode-only change) → fall through to the model view
-    }
+    const compactPatch = await tryCompactPatchDiff({
+      backend,
+      repoAbsPath: repo.absPath,
+      relCleanPath: r.clean,
+      relAbsPath: r.abs,
+      inWork,
+      inHead,
+      maxSize: Math.max(workSize, headSize),
+    });
+    if (compactPatch) return compactPatch;
 
     const [head, work] = await Promise.all([
       readFromHead(repo.absPath, r.clean),
