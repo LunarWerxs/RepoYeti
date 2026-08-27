@@ -303,6 +303,29 @@ function rowWalker(from: HTMLElement): { root: HTMLElement; walker: TreeWalker }
   walker.currentNode = from;
   return { root, walker };
 }
+function focusLastRow(root: HTMLElement, walker: TreeWalker): void {
+  walker.currentNode = root;
+  let last: HTMLElement | null = null;
+  for (let row = walker.nextNode(); row; row = walker.nextNode()) last = row as HTMLElement;
+  last?.focus();
+}
+function openOrStepIntoFolder(n: TreeNode, walker: TreeWalker): void {
+  if (!isOpen(n.path) && !props.forceExpand) collapse.toggle(n.path);
+  else (walker.nextNode() as HTMLElement | null)?.focus(); // open → first child
+}
+function collapseOrJumpToParent(n: TreeNode, walker: TreeWalker, depth: number): void {
+  if (n.type === "dir" && isOpen(n.path) && !props.forceExpand) {
+    collapse.toggle(n.path); // collapse this folder, keep focus on it
+    return;
+  }
+  // jump to the parent: nearest preceding row at a shallower indent
+  for (let row = walker.previousNode(); row; row = walker.previousNode()) {
+    if (row instanceof HTMLElement && Number(row.dataset.depth) < depth) {
+      row.focus();
+      break;
+    }
+  }
+}
 function onRowKey(e: KeyboardEvent, n: TreeNode, depth: number): void {
   const btn = e.currentTarget as HTMLElement;
   const traversal = rowWalker(btn);
@@ -321,34 +344,19 @@ function onRowKey(e: KeyboardEvent, n: TreeNode, depth: number): void {
       e.preventDefault();
       root.querySelector<HTMLElement>("button[data-tree-row]")?.focus();
       break;
-    case "End": {
+    case "End":
       e.preventDefault();
-      walker.currentNode = root;
-      let last: HTMLElement | null = null;
-      for (let row = walker.nextNode(); row; row = walker.nextNode()) last = row as HTMLElement;
-      last?.focus();
+      focusLastRow(root, walker);
       break;
-    }
     case "ArrowRight":
       if (n.type === "dir") {
         e.preventDefault();
-        if (!isOpen(n.path) && !props.forceExpand) collapse.toggle(n.path);
-        else (walker.nextNode() as HTMLElement | null)?.focus(); // open → first child
+        openOrStepIntoFolder(n, walker);
       }
       break;
     case "ArrowLeft":
       e.preventDefault();
-      if (n.type === "dir" && isOpen(n.path) && !props.forceExpand) {
-        collapse.toggle(n.path); // collapse this folder, keep focus on it
-      } else {
-        // jump to the parent: nearest preceding row at a shallower indent
-        for (let row = walker.previousNode(); row; row = walker.previousNode()) {
-          if (row instanceof HTMLElement && Number(row.dataset.depth) < depth) {
-            row.focus();
-            break;
-          }
-        }
-      }
+      collapseOrJumpToParent(n, walker, depth);
       break;
   }
 }

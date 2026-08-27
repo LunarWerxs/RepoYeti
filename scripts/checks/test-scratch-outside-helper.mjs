@@ -57,6 +57,31 @@ const ALLOWED_PREFIXES = ['tests/server-lib/']
 // violation; `tmpdir()` on its own (a bare path comparison, as db-temp-guard makes) is not.
 const CREATORS = /\b(mkdtempSync|mkdtemp|mkdirSync|mkdir)\s*\(/g
 
+/** End index of a `//` line comment starting at `i` (index of the first `/`). */
+function skipLineComment(src, i, n) {
+  let j = i
+  while (j < n && src[j] !== '\n') j++
+  return j
+}
+
+/** End index of the closing `*` of a `/* ... *\/` block comment starting at `i`. */
+function skipBlockComment(src, i, n) {
+  let j = i + 2
+  while (j < n && !(src[j] === '*' && src[j + 1] === '/')) j++
+  return j
+}
+
+/** End index (the closing quote, or `n` if unterminated) of a string/template literal body. */
+function skipStringLiteral(src, start, n, quote) {
+  let j = start
+  while (j < n) {
+    if (src[j] === '\\') { j += 2; continue }
+    if (src[j] === quote) break
+    j++
+  }
+  return j
+}
+
 /** Blank comments and string/template literals, preserving offsets so line numbers stay true. */
 function blankNonCode(src) {
   const out = src.split('')
@@ -69,27 +94,19 @@ function blankNonCode(src) {
     const c = src[i]
     const d = src[i + 1]
     if (c === '/' && d === '/') {
-      let j = i
-      while (j < n && src[j] !== '\n') j++
+      const j = skipLineComment(src, i, n)
       blank(i, j)
       i = j
       continue
     }
     if (c === '/' && d === '*') {
-      let j = i + 2
-      while (j < n && !(src[j] === '*' && src[j + 1] === '/')) j++
+      const j = skipBlockComment(src, i, n)
       blank(i, Math.min(j + 2, n))
       i = j + 2
       continue
     }
     if (c === '"' || c === "'" || c === '`') {
-      const quote = c
-      let j = i + 1
-      while (j < n) {
-        if (src[j] === '\\') { j += 2; continue }
-        if (src[j] === quote) break
-        j++
-      }
+      const j = skipStringLiteral(src, i + 1, n, c)
       blank(i + 1, j)
       i = j + 1
       continue
