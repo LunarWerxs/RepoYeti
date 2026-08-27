@@ -95,6 +95,49 @@ export function hasConflictMarkers(text: string): boolean {
  * risks splicing a resolution into the wrong nesting level — a way to corrupt a file that no
  * amount of downstream review would catch. The owner resolves those by hand.
  */
+/** Body of one open conflict region, from just after its `<<<<<<<` line up to (and including)
+ *  its `>>>>>>>` line — or null when a nested `<<<<<<<` is found before it closes. Pulled out of
+ *  parseConflictFile's inner loop verbatim; same phase machine, same accumulation, same null
+ *  meaning ("nested — refuse the whole file"). `closed` stays false when the region never closes. */
+function parseConflictRegionBody(
+  lines: readonly string[],
+  start: number,
+): { ours: string; base?: string; theirs: string; theirsLabel: string; block: string; closed: boolean; nextIndex: number } | null {
+  let ours = "";
+  let base: string | undefined;
+  let theirs = "";
+  let theirsLabel = "";
+  let phase: "ours" | "base" | "theirs" = "ours";
+  let closed = false;
+  let block = "";
+  let i = start;
+  for (; i < lines.length; i++) {
+    const l = lines[i]!;
+    const c = bare(l);
+    if (/^<{7}(?!<)/.test(c)) return null; // nested conflict — refuse the whole file
+    block += l;
+    if (/^\|{7}(?!\|)/.test(c)) {
+      phase = "base";
+      base = "";
+      continue;
+    }
+    if (/^={7}(?!=)/.test(c)) {
+      phase = "theirs";
+      continue;
+    }
+    if (/^>{7}(?!>)/.test(c)) {
+      theirsLabel = c.slice(7).trim();
+      closed = true;
+      i++;
+      break;
+    }
+    if (phase === "ours") ours += l;
+    else if (phase === "base") base += l;
+    else theirs += l;
+  }
+  return { ours, base, theirs, theirsLabel, block, closed, nextIndex: i };
+}
+
 export function parseConflictFile(text: string): ParsedConflictFile | null {
   if (!hasConflictMarkers(text)) return null;
   const lines = linesWithEol(text);
@@ -114,39 +157,12 @@ export function parseConflictFile(text: string): ParsedConflictFile | null {
     // ── an open conflict region ──
     const startLine = i;
     const oursLabel = content.slice(7).trim();
-    let ours = "";
-    let base: string | undefined;
-    let theirs = "";
-    let theirsLabel = "";
-    let phase: "ours" | "base" | "theirs" = "ours";
-    let closed = false;
-    let block = raw;
     i++;
-    for (; i < lines.length; i++) {
-      const l = lines[i]!;
-      const c = bare(l);
-      if (/^<{7}(?!<)/.test(c)) return null; // nested conflict — refuse the whole file
-      block += l;
-      if (/^\|{7}(?!\|)/.test(c)) {
-        phase = "base";
-        base = "";
-        continue;
-      }
-      if (/^={7}(?!=)/.test(c)) {
-        phase = "theirs";
-        continue;
-      }
-      if (/^>{7}(?!>)/.test(c)) {
-        theirsLabel = c.slice(7).trim();
-        closed = true;
-        i++;
-        break;
-      }
-      if (phase === "ours") ours += l;
-      else if (phase === "base") base += l;
-      else theirs += l;
-    }
-    if (!closed) return null; // unterminated region — not a file we understand
+    const region = parseConflictRegionBody(lines, i);
+    if (!region) return null; // nested conflict — refuse the whole file
+    const block = raw + region.block;
+    i = region.nextIndex;
+    if (!region.closed) return null; // unterminated region — not a file we understand
 
     if (pending) {
       segments.push({ kind: "text", text: pending });
@@ -156,10 +172,10 @@ export function parseConflictFile(text: string): ParsedConflictFile | null {
       index: hunks.length + 1,
       line: startLine,
       oursLabel: oursLabel || "ours",
-      theirsLabel: theirsLabel || "theirs",
-      oursText: ours,
-      ...(base !== undefined ? { baseText: base } : {}),
-      theirsText: theirs,
+      theirsLabel: region.theirsLabel || "theirs",
+      oursText: region.ours,
+      ...(region.base !== undefined ? { baseText: region.base } : {}),
+      theirsText: region.theirs,
       raw: block,
     };
     hunks.push(hunk);
