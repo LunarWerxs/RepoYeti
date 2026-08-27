@@ -4,6 +4,7 @@ import { autoAnimatePlugin } from "@formkit/auto-animate/vue";
 import App from "./App.vue";
 import { i18n } from "./i18n";
 import { applyWindowSizeHint } from "./lib/window-size-hint";
+import { startSignInNudgeSession } from "./lib/sign-in-nudge";
 import "./style.css";
 import "vue-sonner/style.css";
 
@@ -44,5 +45,11 @@ window.addEventListener("vite:preloadError", (event) => {
 // --window-size and the saved placement; the daemon/tray tag its URL with the size it should
 // be and we correct it here before first paint. No-op in a browser tab or on an un-hinted URL.
 applyWindowSizeHint();
+
+// Counts one session for the Connections sign-in nudge. Here, not in the settings store, because
+// that store is lazy: an owner who never opens the settings pane would never accrue a session and
+// so could never pass the nudge's gate. Counting only; nothing is shown from this call, and the
+// gate still wants a week of ownership and several sessions before the first ask.
+startSignInNudgeSession({ appId: "repoyeti", appName: "RepoYeti" });
 
 createApp(App).use(createPinia()).use(autoAnimatePlugin).use(i18n).mount("#app");

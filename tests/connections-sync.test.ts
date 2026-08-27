@@ -349,6 +349,30 @@ test("pushNow only ever sends PREF_KEYS-allowlisted keys — never secrets or ma
   expect(raw).not.toContain("autoCommit");
 });
 
+test("the preferences widened in 2026-08-25 actually travel, both directions", async () => {
+  // The exclusion test above proves the wrong things stay home. This proves the right things
+  // LEAVE — the failure the widening pass was fixing was silent in exactly that direction:
+  // eleven portable preferences sat unsynced for months and nothing was red.
+  await rememberTokens({ refresh_token: "initial-refresh-token" }, OAUTH);
+  const widened = {
+    loreServersEnabled: true,
+    updateNotify: false,
+    autoUpdateIntervalSecs: 43_200,
+    portableMode: true,
+    hideTrayIcon: true,
+    defaultEditor: "cursor",
+    mcpAutoDeny: true,
+    mcpApprovalTimeoutSecs: 90,
+    mcpAutoApproveTimeoutSecs: 45,
+  } as const;
+
+  await pushNow(baseCfg({ ...widened, diffStats: true }), OAUTH);
+  const sent = server.settings.prefs as Record<string, unknown>;
+  for (const [key, value] of Object.entries(widened)) {
+    expect(sent[key]).toEqual(value);
+  }
+});
+
 test("pullNow only applies PREF_KEYS-allowlisted keys from the remote doc — extras are ignored", async () => {
   await rememberTokens({ refresh_token: "initial-refresh-token" }, OAUTH);
   server.version = 1;

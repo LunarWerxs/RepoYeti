@@ -70,7 +70,93 @@ const PREF_KEYS = [
   "autoCommitPull",
   "autoCommitAiFallback",
   "autoScan",
+  // ── Widened 2026-08-25 ──────────────────────────────────────────────────────────
+  // Everything below is portable OWNER INTENT that was simply never added, not a
+  // deliberate exclusion. Each one passes all four tests the list is built on: it is not a
+  // secret, not a path or number that means something different on another machine, not a
+  // security posture, and not a switch that makes the daemon act on a repo unattended.
+  "loreServersEnabled", // whether the Lore-servers section is expanded: pure UI state
+  "updateNotify", // TELLING you an update exists installs nothing; the applying half stays out
+  "autoUpdateIntervalSecs", // a cadence, which only matters on a machine that opted in locally
+  "portableMode", // chromeless app window vs a browser tab: how you like the UI to open
+  "hideTrayIcon", // notification-area icon on or off
+  "defaultEditor", // an editor ID ("vscode", "cursor"), never a path — an absent one falls back
+  "mcpAutoDeny", // fail-SAFE: auto-denies an unanswered approval, so it can only ever ask less of you
+  "mcpApprovalTimeoutSecs", // cadence
+  "mcpAutoApproveTimeoutSecs", // cadence
 ] as const satisfies readonly (keyof RepoYetiConfig)[];
+
+/**
+ * Every config key that deliberately does NOT sync, with the reason it doesn't.
+ *
+ * This list exists to be checked, not read: together with [`PREF_KEYS`] it must cover every key
+ * of `RepoYetiConfig`, and the type below turns a missing one into a BUILD failure naming it.
+ * Before this, a new config field silently defaulted to "not synced" — which is how the master
+ * auto-commit toggles ended up on the wrong side of the line once already, and how eleven
+ * perfectly portable preferences sat unsynced without anyone deciding they should be.
+ *
+ * Adding a field to `RepoYetiConfig` now forces a decision here. That is the whole point.
+ */
+const NEVER_SYNCED = [
+  // Machine-specific: an absolute path, a port, or a list of both.
+  "roots",
+  "port",
+  "servers",
+  // Discovery bounds. These LOOK like portable preferences and are not: `maxRepos` is described
+  // as an inotify-budget guard, so a Windows box's comfortable cap can exhaust a Linux box's
+  // kernel watch limit, and `maxDepth` is meaningless without the tree it was chosen for. Both
+  // were widened during the 2026-08-25 pass and put back when the allowlist test — which names
+  // them as machine-specific alongside `roots` and `port` — refused them.
+  "maxDepth",
+  "maxRepos",
+  // Security posture of THIS machine (local-only vs remote-exposed). Not a preference that
+  // should follow you: a laptop on a café network is not the desktop you opened up at home.
+  "mode",
+  // Unattended-action master toggles — see the long note above `PREF_KEYS`. A fresh machine
+  // must never start committing, pushing, pulling, updating itself, or letting an AI agent act
+  // without approval, just because someone signed in on it.
+  "autoCommit",
+  "autoCommitPush",
+  "syncCheck",
+  "keepInSync",
+  "autoUpdate",
+  "mcpApprovalGate", // turning the gate OFF is fail-open; that must be a per-machine choice
+  "mcpAutoApprove", // likewise fail-open
+  // Secrets and per-install infrastructure identity.
+  "oauth",
+  "tunnel",
+  "relay",
+  "appPing",
+  "cloudSync",
+  "ai",
+  "apiToken",
+  "buzz",
+  // Keyed to THIS machine, and dangerous rather than merely useless if carried across.
+  // `identityRules` pins a required identity per filesystem-path glob and HARD-BLOCKS a
+  // mutating action that resolves any other one. On a second machine the globs match different
+  // folders and the `requiredIdentityId`s name identities that may not exist there at all, so
+  // syncing it would not be a preference travelling — it would be commits failing.
+  "identityRules",
+  // Hashes derived from this machine's own git config / SSH keys / gh state, so a dismissal
+  // recorded here names a suggestion the other machine will never make.
+  "dismissedIdentities",
+] as const satisfies readonly (keyof RepoYetiConfig)[];
+
+/**
+ * Compile-time proof that the two lists above partition `RepoYetiConfig`.
+ *
+ * If a new config key belongs to neither, this line fails to typecheck and the error names the
+ * key. A runtime test would work too, but this costs nothing and fires in the editor, before the
+ * commit rather than after it.
+ */
+type UnclassifiedConfigKey = Exclude<
+  keyof RepoYetiConfig,
+  (typeof PREF_KEYS)[number] | (typeof NEVER_SYNCED)[number]
+>;
+const _everyConfigKeyIsClassified: UnclassifiedConfigKey extends never
+  ? true
+  : ["these RepoYetiConfig keys sync neither way — add each to PREF_KEYS or NEVER_SYNCED", UnclassifiedConfigKey] = true;
+void _everyConfigKeyIsClassified;
 
 // ── SDK session plumbing ──────────────────────────────────────────────────────────
 // The SDK persists its session through a hybrid store: everything lives in MEMORY except the

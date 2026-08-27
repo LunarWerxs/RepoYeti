@@ -19,6 +19,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@cnct/connect": "^1.5.1",
     "@formkit/auto-animate": "^0.8.2",
     "@formkit/drag-and-drop": "^0.6.1",
     "@lucide/vue": "^1.22.0",

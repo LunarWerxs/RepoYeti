@@ -1,6 +1,7 @@
 import { type Ref, ref, watch } from "vue";
 import { api, ApiError, type SyncStatus } from "../api";
 import { t } from "../i18n";
+import { bindSignInNudgeStatus, nudgeOnSettingsChange } from "@/lib/sign-in-nudge";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import type { ChangesStatDisplay } from "../types";
 
@@ -216,6 +217,12 @@ export function useSettingsCloudSync(prefs: {
       autoScan,
     ],
     () => {
+      // NOT connected is the interesting case for the nudge, and it is the branch the push path
+      // above discards. Someone who just changed a preference is exactly who "these follow you to
+      // your other machines" is a real sentence for, and this is the same instant we WOULD have
+      // pushed it if they were signed in. The engine says no to almost all of these; see
+      // lib/sign-in-nudge.ts.
+      if (!syncStatus.value.connected) nudgeOnSettingsChange();
       if (!syncStatus.value.enabled || !syncStatus.value.connected || syncLoading.value) return;
       clearTimeout(pushPrefsTimer);
       pushPrefsTimer = setTimeout(() => {
@@ -223,6 +230,11 @@ export function useSettingsCloudSync(prefs: {
       }, 800);
     },
   );
+
+  // Point the nudge at the live connection state. Only the STATUS binds here - the session count
+  // is started at app boot (main.ts), because this store is lazy and an owner who never opens the
+  // settings pane would otherwise never accrue a session and never pass the gate.
+  bindSignInNudgeStatus(() => syncStatus.value.connected);
 
   return {
     syncStatus,
