@@ -342,6 +342,92 @@ async function downloadAssetVerified(
   return { ok: true, archive, actualHash };
 }
 
+// Download, verify, and extract the update archive into `staging`. Returns the candidate
+// executable's path once its checksum and version self-check both pass.
+async function stageUpdateCandidate(
+  asset: ReleaseAsset,
+  assets: ReleaseAsset[],
+  staging: string,
+  remoteVersion: string,
+  bundledName: string,
+): Promise<{ ok: true; candidate: string; output: string[] } | { ok: false; message: string }> {
+  const output: string[] = [];
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  output.push(`downloading ${asset.name} (${Math.round(asset.size / 1048576)} MB)`);
+  const downloaded = await downloadAssetVerified(asset, assets, staging, remoteVersion);
+  if (!downloaded.ok) return { ok: false, message: downloaded.message };
+  const { archive, actualHash } = downloaded;
+  output.push(`verified sha256 ${actualHash.slice(0, 12)}…`);
+
+  await extract(archive, staging);
+
+  const candidate = join(staging, bundledName);
+  if (!existsSync(candidate)) return { ok: false, message: `the update archive has no ${bundledName}` };
+  if (!(await verifyVersion(candidate, remoteVersion))) {
+    return { ok: false, message: "the downloaded executable failed its version self-check" };
+  }
+  return { ok: true, candidate, output };
+}
+
+// Progress markers for the binary swap below, visible to the catch block in `applyUpdate` so a
+// failure partway through the dance can be rolled back from wherever it actually got to.
+interface SwapProgress {
+  movedAside: boolean;
+  parkedPath: string | null;
+}
+
+// Park the new binary in the INSTALL directory first, then do the two renames back to back.
+//
+// The swap has to be move-aside-then-move-in (Windows will rename a running .exe but never
+// overwrite one), so there is unavoidably an instant with nothing at `executable`. What was
+// avoidable was its LENGTH: `moveInto` falls back to a full `cpSync` when source and
+// destination are on different volumes, and the staging dir is a subdirectory of the install
+// dir but the extracted candidate need not share its volume in every deployment. That put a
+// whole file copy inside the window. Parking first makes both steps same-directory metadata
+// operations with no I/O between them, which is as narrow as this can be made — and it
+// matters because the tray's Quit is a `taskkill /T /F` that can land at any moment.
+async function swapInUpdatedExecutable(
+  candidate: string,
+  installDir: string,
+  executable: string,
+  oldExecutable: string,
+  checkedAt: number,
+  progress: SwapProgress,
+): Promise<void> {
+  const parked = join(installDir, `.${basename(executable)}.new-${checkedAt}`);
+  rmSync(parked, { force: true });
+  moveInto(candidate, parked);
+  progress.parkedPath = parked;
+  renameSync(executable, oldExecutable);
+  progress.movedAside = true;
+  renameSync(parked, executable);
+  progress.parkedPath = null;
+  if (process.platform !== "win32") {
+    try {
+      await run("chmod", ["+x", executable]);
+    } catch {}
+  }
+}
+
+// Undo whatever the swap got through before it threw: restore the old binary if it was already
+// moved aside, and drop a parked binary that never made it into place.
+function rollbackFailedSwap(progress: SwapProgress, executable: string, oldExecutable: string): void {
+  if (progress.movedAside && existsSync(oldExecutable)) {
+    try {
+      rmSync(executable, { force: true });
+      renameSync(oldExecutable, executable);
+    } catch {}
+  }
+  // A parked binary that never got renamed into place is dead weight sitting in the install
+  // directory; drop it rather than leave a mystery file beside the executable.
+  if (progress.parkedPath) {
+    try {
+      rmSync(progress.parkedPath, { force: true });
+    } catch {}
+  }
+}
+
 export async function applyUpdate(): Promise<UpdateApplyResult> {
   const status = await checkForUpdate({ fresh: true });
   if (!status.ok) return failure(status.reason ?? "update check failed");
@@ -361,50 +447,15 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
   const staging = join(installDir, ".update-staging");
   const oldExecutable = join(installDir, `${basename(executable)}.old-${status.checkedAt}`);
   const bundledName = process.platform === "win32" ? "repoyeti.exe" : "repoyeti";
-  const output: string[] = [];
-  let movedAside = false;
-  let parkedPath: string | null = null;
+  const progress: SwapProgress = { movedAside: false, parkedPath: null };
 
   try {
-    rmSync(staging, { recursive: true, force: true });
-    mkdirSync(staging, { recursive: true });
-    output.push(`downloading ${asset.name} (${Math.round(asset.size / 1048576)} MB)`);
-    const downloaded = await downloadAssetVerified(asset, assets, staging, remoteVersion);
-    if (!downloaded.ok) return failure(downloaded.message);
-    const { archive, actualHash } = downloaded;
-    output.push(`verified sha256 ${actualHash.slice(0, 12)}…`);
+    const staged = await stageUpdateCandidate(asset, assets, staging, remoteVersion, bundledName);
+    if (!staged.ok) return failure(staged.message);
+    const { candidate, output } = staged;
 
-    await extract(archive, staging);
+    await swapInUpdatedExecutable(candidate, installDir, executable, oldExecutable, status.checkedAt, progress);
 
-    const candidate = join(staging, bundledName);
-    if (!existsSync(candidate)) return failure(`the update archive has no ${bundledName}`);
-    if (!(await verifyVersion(candidate, remoteVersion))) {
-      return failure("the downloaded executable failed its version self-check");
-    }
-
-    // Park the new binary in the INSTALL directory first, then do the two renames back to back.
-    //
-    // The swap has to be move-aside-then-move-in (Windows will rename a running .exe but never
-    // overwrite one), so there is unavoidably an instant with nothing at `executable`. What was
-    // avoidable was its LENGTH: `moveInto` falls back to a full `cpSync` when source and
-    // destination are on different volumes, and the staging dir is a subdirectory of the install
-    // dir but the extracted candidate need not share its volume in every deployment. That put a
-    // whole file copy inside the window. Parking first makes both steps same-directory metadata
-    // operations with no I/O between them, which is as narrow as this can be made — and it
-    // matters because the tray's Quit is a `taskkill /T /F` that can land at any moment.
-    const parked = join(installDir, `.${basename(executable)}.new-${status.checkedAt}`);
-    rmSync(parked, { force: true });
-    moveInto(candidate, parked);
-    parkedPath = parked;
-    renameSync(executable, oldExecutable);
-    movedAside = true;
-    renameSync(parked, executable);
-    parkedPath = null;
-    if (process.platform !== "win32") {
-      try {
-        await run("chmod", ["+x", executable]);
-      } catch {}
-    }
     rmSync(staging, { recursive: true, force: true });
     cached = null;
     output.push(`installed v${remoteVersion}`);
@@ -416,19 +467,7 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
       output,
     };
   } catch (error) {
-    if (movedAside && existsSync(oldExecutable)) {
-      try {
-        rmSync(executable, { force: true });
-        renameSync(oldExecutable, executable);
-      } catch {}
-    }
-    // A parked binary that never got renamed into place is dead weight sitting in the install
-    // directory; drop it rather than leave a mystery file beside the executable.
-    if (parkedPath) {
-      try {
-        rmSync(parkedPath, { force: true });
-      } catch {}
-    }
+    rollbackFailedSwap(progress, executable, oldExecutable);
     return failure(`update failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

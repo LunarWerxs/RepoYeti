@@ -272,6 +272,83 @@ function resolveCompatibleConnection(
   return { ok: true, baseUrl };
 }
 
+// Discover models for a provider connect. Only a confirmed rejection blocks connection;
+// everything else can mean only that this otherwise-compatible endpoint omits /models, so
+// discovery is marked unavailable and the explicit manual model is kept.
+async function discoverModelsForConnect(
+  provider: AiProviderId,
+  apiKey: string,
+  baseUrl: string | undefined,
+  compatible: boolean,
+  manualModel: string,
+): Promise<{ models: AiModel[]; discoveryAvailable: boolean }> {
+  let discoveryAvailable = true;
+  let models: AiModel[];
+  try {
+    models = await listModels(provider, apiKey, fetch, { baseUrl });
+  } catch (e) {
+    if (!compatible || (e instanceof AiError && e.code === "AI_AUTH_FAILED")) throw e;
+    discoveryAvailable = false;
+    models = [];
+  }
+  if (compatible && !models.some((m) => m.id === manualModel)) {
+    models.unshift({ id: manualModel, label: manualModel });
+  }
+  return { models, discoveryAvailable };
+}
+
+// Auto-pick a model so it works immediately: keep a still-valid prior choice, else the
+// provider's curated `recommended` model (config.ts AI_CATALOG) when the live list has it,
+// else the first CHAT model (non-chat models are already filtered out in adapters.ts, so
+// models[0] is a safe fallback — no more Groq → Whisper default).
+function pickModelForConnect(
+  compatible: boolean,
+  manualModel: string,
+  prev: string | null,
+  models: AiModel[],
+  recommended: string | undefined,
+): string | null {
+  if (compatible) return manualModel;
+  if (prev && models.some((m) => m.id === prev)) return prev;
+  if (recommended && models.some((m) => m.id === recommended)) return recommended;
+  return models[0]?.id ?? null;
+}
+
+// Save the connected provider: key to the OS keychain, model/baseUrl to config.json, and
+// promote it to default when nothing usable is already set.
+async function persistProviderConnection(
+  cfg: RepoYetiConfig,
+  ai: NonNullable<RepoYetiConfig["ai"]>,
+  provider: AiProviderId,
+  apiKey: string,
+  model: string | null,
+  baseUrl: string | undefined,
+  compatible: boolean,
+): Promise<void> {
+  // The key bytes go to the OS keychain; config.json (written by saveConfig) keeps only
+  // the model. apiKey stays in the in-memory cfg so this running daemon can use it.
+  if (apiKey) await setSecret(aiKeyName(provider), apiKey);
+  else await deleteSecret(aiKeyName(provider));
+  ai.providers[provider] = {
+    ...(apiKey ? { apiKey } : {}),
+    model,
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(!apiKey && compatible ? { noAuth: true as const } : {}),
+  };
+  if (
+    !ai.defaultProvider ||
+    !isAiProviderConfigured(cfg, ai.defaultProvider) ||
+    !resolveModel(cfg, ai.defaultProvider)
+  ) {
+    ai.defaultProvider = provider;
+  }
+  // A new key is exactly how an owner fixes a spent quota (upgraded tier / different account),
+  // so drop any rate-limit pause we're holding for this provider — otherwise the fix would
+  // look like it didn't work until the pause aged out.
+  clearRateGate(provider);
+  saveConfig(cfg);
+}
+
 // Connect a provider: validate the key by listing models, then SAVE it. The generic compatible
 // provider treats discovery as optional because OpenAI-compatible generation does not imply
 // that GET /models exists; its manually entered model remains usable when discovery is absent.
@@ -293,56 +370,18 @@ async function postProviderConnect(c: Context, cfg: RepoYetiConfig) {
   }
 
   try {
-    let discoveryAvailable = true;
-    let models: AiModel[];
-    try {
-      models = await listModels(provider, apiKey, fetch, { baseUrl });
-    } catch (e) {
-      // A confirmed rejection still blocks connection. Everything else can mean only that this
-      // otherwise-compatible endpoint omits /models, so retain the explicit manual model.
-      if (!compatible || (e instanceof AiError && e.code === "AI_AUTH_FAILED")) throw e;
-      discoveryAvailable = false;
-      models = [];
-    }
-    if (compatible && !models.some((m) => m.id === manualModel)) {
-      models.unshift({ id: manualModel, label: manualModel });
-    }
+    const { models, discoveryAvailable } = await discoverModelsForConnect(
+      provider,
+      apiKey,
+      baseUrl,
+      compatible,
+      manualModel,
+    );
     const ai = ensureAi(cfg);
     const prev = ai.providers[provider]?.model ?? null;
-    // Auto-pick a model so it works immediately: keep a still-valid prior choice, else the
-    // provider's curated `recommended` model (config.ts AI_CATALOG) when the live list has it,
-    // else the first CHAT model (non-chat models are already filtered out in adapters.ts, so
-    // models[0] is a safe fallback — no more Groq → Whisper default).
     const recommended = AI_CATALOG.find((e) => e.id === provider)?.recommended;
-    const model = compatible
-      ? manualModel
-      : prev && models.some((m) => m.id === prev)
-        ? prev
-        : recommended && models.some((m) => m.id === recommended)
-          ? recommended
-          : (models[0]?.id ?? null);
-    // The key bytes go to the OS keychain; config.json (written by saveConfig) keeps only
-    // the model. apiKey stays in the in-memory cfg so this running daemon can use it.
-    if (apiKey) await setSecret(aiKeyName(provider), apiKey);
-    else await deleteSecret(aiKeyName(provider));
-    ai.providers[provider] = {
-      ...(apiKey ? { apiKey } : {}),
-      model,
-      ...(baseUrl ? { baseUrl } : {}),
-      ...(!apiKey && compatible ? { noAuth: true as const } : {}),
-    };
-    if (
-      !ai.defaultProvider ||
-      !isAiProviderConfigured(cfg, ai.defaultProvider) ||
-      !resolveModel(cfg, ai.defaultProvider)
-    ) {
-      ai.defaultProvider = provider;
-    }
-    // A new key is exactly how an owner fixes a spent quota (upgraded tier / different account),
-    // so drop any rate-limit pause we're holding for this provider — otherwise the fix would
-    // look like it didn't work until the pause aged out.
-    clearRateGate(provider);
-    saveConfig(cfg);
+    const model = pickModelForConnect(compatible, manualModel, prev, models, recommended);
+    await persistProviderConnection(cfg, ai, provider, apiKey, model, baseUrl, compatible);
     return c.json({ ok: true, models, discoveryAvailable, settings: aiPayload(cfg) });
   } catch (e) {
     return aiErr(c, cfg, e, provider);
