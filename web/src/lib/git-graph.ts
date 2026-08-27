@@ -84,6 +84,105 @@ function firstFreeLane(lanes: (string | null)[]): number {
   return i === -1 ? lanes.length : i;
 }
 
+/** Lanes waiting for `hash` to appear (children of this commit already descending in). */
+function findIncomingLanes(lanes: (string | null)[], hash: string): number[] {
+  const incoming: number[] = [];
+  for (let k = 0; k < lanes.length; k++) if (lanes[k] === hash) incoming.push(k);
+  return incoming;
+}
+
+/** Incoming edges (top half): every child lane bends into the node at center. */
+function buildIncomingLinks(
+  incoming: number[],
+  nodeLane: number,
+  colorOf: (lane: number) => number,
+): GraphLink[] {
+  return incoming.map((k) => ({ x1: k, y1: 0, x2: nodeLane, y2: 0.5, color: colorOf(k) }));
+}
+
+/** Pass-through edges: any still-open lane not consumed by this node crosses straight down. */
+function buildPassThroughLinks(
+  lanes: (string | null)[],
+  nodeLane: number,
+  colorOf: (lane: number) => number,
+): GraphLink[] {
+  const links: GraphLink[] = [];
+  for (let k = 0; k < lanes.length; k++) {
+    if (k === nodeLane) continue;
+    if (lanes[k] != null) links.push({ x1: k, y1: 0, x2: k, y2: 1, color: colorOf(k) });
+  }
+  return links;
+}
+
+/** Outgoing edges (bottom half): first parent keeps the node's lane; extra (merge) parents
+ *  reuse a lane already heading to that parent, else fork into a fresh lane. Mutates `lanes`. */
+function buildOutgoingLinks(
+  c: GraphCommit,
+  nodeLane: number,
+  lanes: (string | null)[],
+  colorOf: (lane: number) => number,
+): GraphLink[] {
+  if (c.parents.length === 0) {
+    lanes[nodeLane] = null; // a root: the lane ends here
+    return [];
+  }
+  lanes[nodeLane] = c.parents[0]!;
+  const links: GraphLink[] = [
+    { x1: nodeLane, y1: 0.5, x2: nodeLane, y2: 1, color: colorOf(nodeLane) },
+  ];
+  for (let p = 1; p < c.parents.length; p++) {
+    const parent = c.parents[p]!;
+    let lane = lanes.indexOf(parent); // already descending toward this parent? merge into it
+    if (lane === -1) {
+      lane = firstFreeLane(lanes);
+      if (lane >= lanes.length) lanes.length = lane + 1;
+      lanes[lane] = parent;
+    }
+    links.push({ x1: nodeLane, y1: 0.5, x2: lane, y2: 1, color: colorOf(lane) });
+  }
+  return links;
+}
+
+/** Widest lane index touched by any of this row's links, or `nodeLane` if none reach further. */
+function maxLaneOf(nodeLane: number, links: GraphLink[]): number {
+  let maxLane = nodeLane;
+  for (const link of links) {
+    if (link.x1 > maxLane) maxLane = link.x1;
+    if (link.x2 > maxLane) maxLane = link.x2;
+  }
+  return maxLane;
+}
+
+/** Lay out one commit into its row: lane assignment + connectors. Mutates `lanes` in place, the
+ *  same "open lanes" state the next row's layout continues from. */
+function layoutCommitRow(
+  c: GraphCommit,
+  lanes: (string | null)[],
+  colorOf: (lane: number) => number,
+): GraphRow {
+  // Which existing lanes were waiting for this commit (its children descending in).
+  const incoming = findIncomingLanes(lanes, c.hash);
+
+  // The node's lane: the leftmost incoming lane, or a fresh lane for a tip nothing points at.
+  const nodeLane = incoming.length > 0 ? incoming[0]! : firstFreeLane(lanes);
+  if (nodeLane >= lanes.length) lanes.length = nodeLane + 1; // grow with holes if appending
+
+  const incomingLinks = buildIncomingLinks(incoming, nodeLane, colorOf);
+  // The incoming lanes terminate at the node; free them (nodeLane is re-used just below).
+  for (const k of incoming) lanes[k] = null;
+
+  const passThroughLinks = buildPassThroughLinks(lanes, nodeLane, colorOf);
+  const outgoingLinks = buildOutgoingLinks(c, nodeLane, lanes, colorOf);
+  const links = [...incomingLinks, ...passThroughLinks, ...outgoingLinks];
+
+  trimTrailing(lanes);
+  return {
+    node: { hash: c.hash, lane: nodeLane, color: colorOf(nodeLane), isMerge: c.parents.length > 1 },
+    links,
+    maxLane: maxLaneOf(nodeLane, links),
+  };
+}
+
 /**
  * Lay out a commit DAG into per-row lanes + connectors.
  * `commits` must be in display order (newest first); each `parents` entry is a full hash.
@@ -97,64 +196,9 @@ export function computeGraph(commits: GraphCommit[], paletteSize = DEFAULT_PALET
   let laneCount = 0;
 
   for (const c of commits) {
-    // Which existing lanes were waiting for this commit (its children descending in).
-    const incoming: number[] = [];
-    for (let k = 0; k < lanes.length; k++) if (lanes[k] === c.hash) incoming.push(k);
-
-    // The node's lane: the leftmost incoming lane, or a fresh lane for a tip nothing points at.
-    const nodeLane = incoming.length > 0 ? incoming[0]! : firstFreeLane(lanes);
-    if (nodeLane >= lanes.length) lanes.length = nodeLane + 1; // grow with holes if appending
-
-    const links: GraphLink[] = [];
-    let maxLane = nodeLane;
-    const touch = (lane: number): void => {
-      if (lane > maxLane) maxLane = lane;
-    };
-
-    // Incoming edges (top half): every child lane bends into the node at center.
-    for (const k of incoming) {
-      links.push({ x1: k, y1: 0, x2: nodeLane, y2: 0.5, color: colorOf(k) });
-      touch(k);
-    }
-    // The incoming lanes terminate at the node; free them (nodeLane is re-used just below).
-    for (const k of incoming) lanes[k] = null;
-
-    // Pass-through edges: any still-open lane not consumed by this node crosses straight down.
-    for (let k = 0; k < lanes.length; k++) {
-      if (k === nodeLane) continue;
-      if (lanes[k] != null) {
-        links.push({ x1: k, y1: 0, x2: k, y2: 1, color: colorOf(k) });
-        touch(k);
-      }
-    }
-
-    // Outgoing edges (bottom half): first parent keeps the node's lane; extra (merge) parents
-    // reuse a lane already heading to that parent, else fork into a fresh lane.
-    if (c.parents.length === 0) {
-      lanes[nodeLane] = null; // a root: the lane ends here
-    } else {
-      lanes[nodeLane] = c.parents[0]!;
-      links.push({ x1: nodeLane, y1: 0.5, x2: nodeLane, y2: 1, color: colorOf(nodeLane) });
-      for (let p = 1; p < c.parents.length; p++) {
-        const parent = c.parents[p]!;
-        let lane = lanes.indexOf(parent); // already descending toward this parent? merge into it
-        if (lane === -1) {
-          lane = firstFreeLane(lanes);
-          if (lane >= lanes.length) lanes.length = lane + 1;
-          lanes[lane] = parent;
-        }
-        links.push({ x1: nodeLane, y1: 0.5, x2: lane, y2: 1, color: colorOf(lane) });
-        touch(lane);
-      }
-    }
-
-    trimTrailing(lanes);
-    rows.push({
-      node: { hash: c.hash, lane: nodeLane, color: colorOf(nodeLane), isMerge: c.parents.length > 1 },
-      links,
-      maxLane,
-    });
-    if (maxLane + 1 > laneCount) laneCount = maxLane + 1;
+    const row = layoutCommitRow(c, lanes, colorOf);
+    rows.push(row);
+    if (row.maxLane + 1 > laneCount) laneCount = row.maxLane + 1;
   }
 
   return { rows, laneCount };

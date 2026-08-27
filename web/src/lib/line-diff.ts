@@ -40,20 +40,10 @@ const deleteMarker = (base: number, offset: number, modTotal: number): LineChang
   return { startLine: at, endLine: at, kind: "delete" };
 };
 
-/** LCS-backed edit script over two line arrays → grouped changes, offset into the full modified text. */
-function diffMiddle(a: string[], b: string[], base: number, modTotal: number): LineChange[] {
-  const n = a.length;
-  const m = b.length;
-  if (n === 0 && m === 0) return [];
-  if (n === 0) return [{ startLine: base + 1, endLine: base + m, kind: "add" }];
-  if (m === 0) return [deleteMarker(base, 0, modTotal)];
-  if (n > MAX_LCS || m > MAX_LCS || n * m > MAX_LCS_CELLS) {
-    return [{ startLine: base + 1, endLine: base + m, kind: "modify" }];
-  }
-
-  // Keep only two LCS-length rows while filling the table. Reconstruction needs only the chosen
-  // direction for each cell, so a one-byte map replaces the old Uint32 matrix (roughly 25 MB at
-  // the former worst case). 0 = equal, 1 = delete from a, 2 = insert from b.
+// Keep only two LCS-length rows while filling the table. Reconstruction needs only the chosen
+// direction for each cell, so a one-byte map replaces the old Uint32 matrix (roughly 25 MB at
+// the former worst case). 0 = equal, 1 = delete from a, 2 = insert from b.
+function buildLcsDirections(a: string[], b: string[], n: number, m: number): Uint8Array {
   const directions = new Uint8Array(n * m);
   let next = new Uint16Array(m + 1);
   let row = new Uint16Array(m + 1);
@@ -72,7 +62,19 @@ function diffMiddle(a: string[], b: string[], base: number, modTotal: number): L
     }
     [next, row] = [row, next];
   }
+  return directions;
+}
 
+/** Walk the LCS direction map into a grouped add/modify/delete edit script. */
+function reconstructLineChanges(
+  a: string[],
+  b: string[],
+  n: number,
+  m: number,
+  directions: Uint8Array,
+  base: number,
+  modTotal: number,
+): LineChange[] {
   const changes: LineChange[] = [];
   let i = 0;
   let j = 0;
@@ -124,6 +126,21 @@ function diffMiddle(a: string[], b: string[], base: number, modTotal: number): L
   }
   flush();
   return changes;
+}
+
+/** LCS-backed edit script over two line arrays → grouped changes, offset into the full modified text. */
+function diffMiddle(a: string[], b: string[], base: number, modTotal: number): LineChange[] {
+  const n = a.length;
+  const m = b.length;
+  if (n === 0 && m === 0) return [];
+  if (n === 0) return [{ startLine: base + 1, endLine: base + m, kind: "add" }];
+  if (m === 0) return [deleteMarker(base, 0, modTotal)];
+  if (n > MAX_LCS || m > MAX_LCS || n * m > MAX_LCS_CELLS) {
+    return [{ startLine: base + 1, endLine: base + m, kind: "modify" }];
+  }
+
+  const directions = buildLcsDirections(a, b, n, m);
+  return reconstructLineChanges(a, b, n, m, directions, base, modTotal);
 }
 
 /**
