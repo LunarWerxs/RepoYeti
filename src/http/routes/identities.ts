@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import type { BlankEnv } from "hono/types";
 import type { Deps } from "../deps.ts";
 import { jsonError } from "../../contract.ts";
 import { saveConfig } from "../../config.ts";
@@ -32,7 +33,7 @@ async function getDetectedIdentities(c: Context, cfg: Deps["cfg"]) {
 }
 
 // Dismiss a detected suggestion (by its stable id) so it stops re-appearing on every refresh.
-function postDismissDetected(c: Context<any, "/api/identities/detected/:id/dismiss">, cfg: Deps["cfg"]) {
+function postDismissDetected(c: Context<BlankEnv, "/api/identities/detected/:id/dismiss">, cfg: Deps["cfg"]) {
   const id = c.req.param("id");
   if (!id) return jsonError(c, "BAD_REQUEST", "missing detected-identity id");
   const list = new Set(cfg.dismissedIdentities ?? []);
@@ -43,7 +44,7 @@ function postDismissDetected(c: Context<any, "/api/identities/detected/:id/dismi
 }
 
 // Un-dismiss ONE suggestion (the temporary-undo path + per-item restore in the dismissed list).
-function postRestoreDetected(c: Context<any, "/api/identities/detected/:id/restore">, cfg: Deps["cfg"]) {
+function postRestoreDetected(c: Context<BlankEnv, "/api/identities/detected/:id/restore">, cfg: Deps["cfg"]) {
   const id = c.req.param("id");
   if (!id) return jsonError(c, "BAD_REQUEST", "missing detected-identity id");
   if (cfg.dismissedIdentities?.length) {
@@ -77,7 +78,7 @@ async function postIdentity(c: Context) {
   }
 }
 
-async function putIdentity(c: Context<any, "/api/identities/:id">) {
+async function putIdentity(c: Context<BlankEnv, "/api/identities/:id">) {
   const id = c.req.param("id");
   if (!getIdentity(id)) return jsonError(c, "NOT_FOUND", "identity not found");
   const p = await parseBody(c, IdentityUpdateSchema);
@@ -101,7 +102,7 @@ async function putIdentity(c: Context<any, "/api/identities/:id">) {
   }
 }
 
-function deleteIdentityRoute(c: Context<any, "/api/identities/:id">) {
+function deleteIdentityRoute(c: Context<BlankEnv, "/api/identities/:id">) {
   const id = c.req.param("id");
   return deleteIdentity(id) ? c.json({ ok: true }) : jsonError(c, "NOT_FOUND", "identity not found");
 }
