@@ -95,6 +95,32 @@ export interface TriageEntry {
   reason: string;
 }
 
+type TriageStatus = NonNullable<TriageRepoInput["status"]>;
+
+/** Why a repo belongs in the conflicted group, or null if it doesn't. */
+function conflictReason(s: TriageStatus): string | null {
+  if (!s.conflicted && !s.gitOperation) return null;
+  return s.conflicted ? "conflict" : (s.gitOperation ?? "mid-operation");
+}
+
+/** Why a repo belongs in the drifted group, or null if it's even with its upstream. */
+function driftReason(s: TriageStatus): string | null {
+  if (s.ahead <= 0 && s.behind <= 0) return null;
+  if (s.ahead > 0 && s.behind > 0) return "diverged";
+  return s.ahead > 0 ? "ahead" : "behind";
+}
+
+/** Why an auto-commit-enabled repo is currently blocked, or null if it's actionable. Mirrors
+ *  auto-commit.ts's gates: on a branch, not errored/detached, and not conflicted/mid-op. */
+function autoCommitBlockedReason(s: TriageStatus, isConflictedOrMidOp: boolean): string | null {
+  const actionable = !s.error && !s.detached && !!s.branch;
+  if (actionable && !isConflictedOrMidOp) return null;
+  if (isConflictedOrMidOp) return "conflict";
+  if (s.error) return "error";
+  if (s.detached) return "detached";
+  return "no-branch";
+}
+
 /** Compact "what needs attention" snapshot, grouped by concern (repo/branch/reason each). Pure
  *  and transport-agnostic — both adapters call this with their own repo list shape. Mirrors the
  *  Conflict Concierge triage card's web-side derivation (needsAttentionRepos in store/repo.ts)
@@ -117,22 +143,15 @@ export function buildTriageBriefing(repos: TriageRepoInput[]): {
     const branch = s.branch;
     const isConflictedOrMidOp = !!s.conflicted || !!s.gitOperation;
 
-    if (isConflictedOrMidOp) {
-      const reason = s.conflicted ? "conflict" : (s.gitOperation ?? "mid-operation");
-      conflicted.push({ id: r.id, name: r.name, branch, reason });
-    }
-    if (s.ahead > 0 || s.behind > 0) {
-      const reason = s.ahead > 0 && s.behind > 0 ? "diverged" : s.ahead > 0 ? "ahead" : "behind";
-      drifted.push({ id: r.id, name: r.name, branch, reason });
-    }
-    // Mirrors auto-commit.ts's gates: opted in, actionable (on a branch, not errored/detached),
-    // and currently blocked (conflicted/mid-op) or simply not actionable at all.
+    const conflict = conflictReason(s);
+    if (conflict) conflicted.push({ id: r.id, name: r.name, branch, reason: conflict });
+
+    const drift = driftReason(s);
+    if (drift) drifted.push({ id: r.id, name: r.name, branch, reason: drift });
+
     if (r.autoCommit) {
-      const actionable = !s.error && !s.detached && !!s.branch;
-      if (!actionable || isConflictedOrMidOp) {
-        const reason = isConflictedOrMidOp ? "conflict" : s.error ? "error" : s.detached ? "detached" : "no-branch";
-        autoCommitBlocked.push({ id: r.id, name: r.name, branch, reason });
-      }
+      const blocked = autoCommitBlockedReason(s, isConflictedOrMidOp);
+      if (blocked) autoCommitBlocked.push({ id: r.id, name: r.name, branch, reason: blocked });
     }
     if (s.dirty > 0) {
       dirty.push({ id: r.id, name: r.name, branch, reason: `${s.dirty} uncommitted` });

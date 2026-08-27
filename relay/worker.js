@@ -122,113 +122,129 @@ function forwardPage(origin) {
 </body>`;
 }
 
+// ── the daemon publishes where it currently lives ──────────────────────────
+async function handleAnnounce(request, env, url) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ ok: false, error: "bad json" }, 400);
+  }
+  const { id, origin, ts, publicKey } = body ?? {};
+  if (!ID_RE.test(String(id ?? ""))) return json({ ok: false, error: "bad id" }, 400);
+
+  const cleanOrigin = safeOrigin(String(origin ?? ""));
+  if (!cleanOrigin) return json({ ok: false, error: "origin must be an https URL" }, 400);
+
+  const when = Number(ts);
+  if (!Number.isFinite(when) || Math.abs(Date.now() - when) > MAX_SKEW_MS) {
+    return json({ ok: false, error: "stale timestamp" }, 400);
+  }
+
+  const signature = request.headers.get("x-signature") ?? "";
+  if (!signature) return json({ ok: false, error: "missing signature" }, 401);
+
+  const existingRaw = await env.RELAY.get(`d:${id}`);
+  const existing = existingRaw ? JSON.parse(existingRaw) : null;
+  // First announce registers the key; after that the stored one is authoritative, so a later
+  // caller cannot hand us a key of their own choosing and take over the id.
+  const key = existing?.publicKey ?? String(publicKey ?? "");
+  if (!key) return json({ ok: false, error: "first announce must include publicKey" }, 400);
+
+  if (!(await verify(key, signature, signedPayload({ id, origin: cleanOrigin, ts: when })))) {
+    return json({ ok: false, error: "bad signature" }, 401);
+  }
+
+  await env.RELAY.put(
+    `d:${id}`,
+    JSON.stringify({ publicKey: key, origin: cleanOrigin, updatedAt: Date.now() }),
+  );
+  return json({ ok: true, url: `${url.origin}/r/${id}`, capabilities: CAPABILITIES });
+}
+
+// ── resolve a daemon for another RepoYeti installation ─────────────────────
+// The normal /r/:id page necessarily reveals this origin to the visitor's browser. This JSON
+// form exposes nothing additional; it lets a peer daemon redeem the same invitation without
+// executing the fragment-forwarding page. CORS is open because the daemon's own PWA also
+// reads it cross-origin to find where its daemon moved after a quick-tunnel restart (the
+// installed app is pinned to the dead origin, so the fetch necessarily comes from there) —
+// and the response holds exactly what the /r/:id page already tells any visitor.
+async function handleResolve(env, url) {
+  const id = url.pathname.split("/")[2] ?? "";
+  if (!ID_RE.test(id)) return json({ ok: false, error: "not found" }, 404);
+  const raw = await env.RELAY.get(`d:${id}`);
+  if (!raw) return json({ ok: false, error: "not found" }, 404);
+  const target = safeOrigin(JSON.parse(raw).origin);
+  if (!target) return json({ ok: false, error: "not found" }, 404);
+  return json({ ok: true, origin: target }, 200, { "access-control-allow-origin": "*" });
+}
+
+// ── stable OAuth callback for rotating Quick Tunnels ───────────────────────
+async function handleOauthCallback(env, url) {
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  const id = relayIdFromState(state);
+  if (!code || !state || !id) return json({ ok: false, error: "bad oauth callback" }, 400);
+
+  const raw = await env.RELAY.get(`d:${id}`);
+  if (!raw) return json({ ok: false, error: "daemon not found" }, 404);
+  let target;
+  try {
+    target = safeOrigin(JSON.parse(raw).origin);
+  } catch {
+    target = null;
+  }
+  if (!target) return json({ ok: false, error: "daemon not found" }, 404);
+
+  const finish = new URL("/oauth/finish", target);
+  finish.searchParams.set("code", code);
+  finish.searchParams.set("state", state);
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: finish.toString(),
+      "cache-control": "no-store",
+    },
+  });
+}
+
+// ── someone opens a link ──────────────────────────────────────────────────
+async function handleShareLink(env, url) {
+  const [, , id, ...rest] = url.pathname.split("/");
+  if (!ID_RE.test(id ?? "")) return new Response("Not found", { status: 404 });
+
+  const raw = await env.RELAY.get(`d:${id}`);
+  if (!raw) return new Response(unknownPage(), { status: 404, headers: html() });
+  const { origin } = JSON.parse(raw);
+  const target = safeOrigin(origin);
+  if (!target) return new Response(unknownPage(), { status: 404, headers: html() });
+
+  // A path after the id (no fragment involved) is a plain redirect — used for "just open my
+  // dashboard" links, which carry no secret.
+  if (rest.length > 0 && rest.join("/") !== "") {
+    return Response.redirect(`${target}/${rest.join("/")}${url.search}`, 302);
+  }
+  return new Response(forwardPage(target), { headers: html() });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ── the daemon publishes where it currently lives ──────────────────────────
     if (url.pathname === "/announce" && request.method === "POST") {
-      let body;
-      try {
-        body = await request.json();
-      } catch {
-        return json({ ok: false, error: "bad json" }, 400);
-      }
-      const { id, origin, ts, publicKey } = body ?? {};
-      if (!ID_RE.test(String(id ?? ""))) return json({ ok: false, error: "bad id" }, 400);
-
-      const cleanOrigin = safeOrigin(String(origin ?? ""));
-      if (!cleanOrigin) return json({ ok: false, error: "origin must be an https URL" }, 400);
-
-      const when = Number(ts);
-      if (!Number.isFinite(when) || Math.abs(Date.now() - when) > MAX_SKEW_MS) {
-        return json({ ok: false, error: "stale timestamp" }, 400);
-      }
-
-      const signature = request.headers.get("x-signature") ?? "";
-      if (!signature) return json({ ok: false, error: "missing signature" }, 401);
-
-      const existingRaw = await env.RELAY.get(`d:${id}`);
-      const existing = existingRaw ? JSON.parse(existingRaw) : null;
-      // First announce registers the key; after that the stored one is authoritative, so a later
-      // caller cannot hand us a key of their own choosing and take over the id.
-      const key = existing?.publicKey ?? String(publicKey ?? "");
-      if (!key) return json({ ok: false, error: "first announce must include publicKey" }, 400);
-
-      if (!(await verify(key, signature, signedPayload({ id, origin: cleanOrigin, ts: when })))) {
-        return json({ ok: false, error: "bad signature" }, 401);
-      }
-
-      await env.RELAY.put(
-        `d:${id}`,
-        JSON.stringify({ publicKey: key, origin: cleanOrigin, updatedAt: Date.now() }),
-      );
-      return json({ ok: true, url: `${url.origin}/r/${id}`, capabilities: CAPABILITIES });
+      return handleAnnounce(request, env, url);
     }
 
-    // ── resolve a daemon for another RepoYeti installation ─────────────────────
-    // The normal /r/:id page necessarily reveals this origin to the visitor's browser. This JSON
-    // form exposes nothing additional; it lets a peer daemon redeem the same invitation without
-    // executing the fragment-forwarding page. CORS is open because the daemon's own PWA also
-    // reads it cross-origin to find where its daemon moved after a quick-tunnel restart (the
-    // installed app is pinned to the dead origin, so the fetch necessarily comes from there) —
-    // and the response holds exactly what the /r/:id page already tells any visitor.
     if (url.pathname.startsWith("/resolve/") && request.method === "GET") {
-      const id = url.pathname.split("/")[2] ?? "";
-      if (!ID_RE.test(id)) return json({ ok: false, error: "not found" }, 404);
-      const raw = await env.RELAY.get(`d:${id}`);
-      if (!raw) return json({ ok: false, error: "not found" }, 404);
-      const target = safeOrigin(JSON.parse(raw).origin);
-      if (!target) return json({ ok: false, error: "not found" }, 404);
-      return json({ ok: true, origin: target }, 200, { "access-control-allow-origin": "*" });
+      return handleResolve(env, url);
     }
 
-    // ── stable OAuth callback for rotating Quick Tunnels ───────────────────────
     if (url.pathname === "/oauth/callback" && request.method === "GET") {
-      const code = url.searchParams.get("code");
-      const state = url.searchParams.get("state");
-      const id = relayIdFromState(state);
-      if (!code || !state || !id) return json({ ok: false, error: "bad oauth callback" }, 400);
-
-      const raw = await env.RELAY.get(`d:${id}`);
-      if (!raw) return json({ ok: false, error: "daemon not found" }, 404);
-      let target;
-      try {
-        target = safeOrigin(JSON.parse(raw).origin);
-      } catch {
-        target = null;
-      }
-      if (!target) return json({ ok: false, error: "daemon not found" }, 404);
-
-      const finish = new URL("/oauth/finish", target);
-      finish.searchParams.set("code", code);
-      finish.searchParams.set("state", state);
-      return new Response(null, {
-        status: 302,
-        headers: {
-          location: finish.toString(),
-          "cache-control": "no-store",
-        },
-      });
+      return handleOauthCallback(env, url);
     }
 
-    // ── someone opens a link ──────────────────────────────────────────────────
     if (url.pathname.startsWith("/r/")) {
-      const [, , id, ...rest] = url.pathname.split("/");
-      if (!ID_RE.test(id ?? "")) return new Response("Not found", { status: 404 });
-
-      const raw = await env.RELAY.get(`d:${id}`);
-      if (!raw) return new Response(unknownPage(), { status: 404, headers: html() });
-      const { origin } = JSON.parse(raw);
-      const target = safeOrigin(origin);
-      if (!target) return new Response(unknownPage(), { status: 404, headers: html() });
-
-      // A path after the id (no fragment involved) is a plain redirect — used for "just open my
-      // dashboard" links, which carry no secret.
-      if (rest.length > 0 && rest.join("/") !== "") {
-        return Response.redirect(`${target}/${rest.join("/")}${url.search}`, 302);
-      }
-      return new Response(forwardPage(target), { headers: html() });
+      return handleShareLink(env, url);
     }
 
     if (url.pathname === "/health") return json({ ok: true, capabilities: CAPABILITIES });

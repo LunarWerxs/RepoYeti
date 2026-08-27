@@ -314,6 +314,38 @@ async function syncVerb(action: "push" | "pull" | "fetch", pos: string[]): Promi
 
 // ── dispatcher ─────────────────────────────────────────────────────────────────────────────────
 
+type VerbHandler = (pos: string[], flags: ParsedArgs["flags"]) => Promise<void>;
+
+/** Every git verb this CLI knows, keyed by name. push/pull/fetch share one implementation
+ *  (syncVerb) parameterised by their own name. */
+const VERB_HANDLERS: Record<string, VerbHandler> = {
+  repos: () => reposVerb(),
+  status: (pos) => statusVerb(pos),
+  log: (pos, flags) => logVerb(pos, flags),
+  branches: (pos) => branchesVerb(pos),
+  branch: (pos, flags) => branchVerb(pos, flags),
+  checkout: (pos) => checkoutVerb(pos),
+  commit: (pos, flags) => commitVerb(pos, flags),
+  diff: (pos) => diffVerb(pos),
+  drift: () => driftVerb(),
+  stash: (pos) => stashVerb(pos),
+  push: (pos) => syncVerb("push", pos),
+  pull: (pos) => syncVerb("pull", pos),
+  fetch: (pos) => syncVerb("fetch", pos),
+};
+
+/** Print one dispatch failure the way the caller expects: "✗ <code>: <message>" for an
+ *  ApiError, the bare usage line for a UsageError, else the error's own message. */
+function reportVerbError(e: unknown): void {
+  if (e instanceof UsageError) {
+    console.error(e.message);
+  } else if (e instanceof ApiError) {
+    console.error(red(`✗ ${e.code}: ${e.message}`));
+  } else {
+    console.error(red(`✗ ${e instanceof Error ? e.message : String(e)}`));
+  }
+}
+
 /**
  * Dispatch one git verb. On a thrown ApiError, print "✗ <code>: <message>" to stderr and set
  * process.exitCode = 1; on a usage error, print the usage line and exit 1; on any other error,
@@ -322,53 +354,11 @@ async function syncVerb(action: "push" | "pull" | "fetch", pos: string[]): Promi
 export async function runGitVerb(cmd: string, args: string[]): Promise<void> {
   const { pos, flags } = parseArgs(args);
   try {
-    switch (cmd) {
-      case "repos":
-        await reposVerb();
-        break;
-      case "status":
-        await statusVerb(pos);
-        break;
-      case "log":
-        await logVerb(pos, flags);
-        break;
-      case "branches":
-        await branchesVerb(pos);
-        break;
-      case "branch":
-        await branchVerb(pos, flags);
-        break;
-      case "checkout":
-        await checkoutVerb(pos);
-        break;
-      case "commit":
-        await commitVerb(pos, flags);
-        break;
-      case "diff":
-        await diffVerb(pos);
-        break;
-      case "drift":
-        await driftVerb();
-        break;
-      case "stash":
-        await stashVerb(pos);
-        break;
-      case "push":
-      case "pull":
-      case "fetch":
-        await syncVerb(cmd, pos);
-        break;
-      default:
-        throw new UsageError(`unknown git verb: ${cmd}`);
-    }
+    const handler = VERB_HANDLERS[cmd];
+    if (!handler) throw new UsageError(`unknown git verb: ${cmd}`);
+    await handler(pos, flags);
   } catch (e) {
-    if (e instanceof UsageError) {
-      console.error(e.message);
-    } else if (e instanceof ApiError) {
-      console.error(red(`✗ ${e.code}: ${e.message}`));
-    } else {
-      console.error(red(`✗ ${e instanceof Error ? e.message : String(e)}`));
-    }
+    reportVerbError(e);
     process.exitCode = 1;
   }
 }

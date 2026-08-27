@@ -127,6 +127,56 @@ const REGEX_OPENS_AFTER = new Set(
 const REGEX_OPENS_AFTER_KEYWORD =
   /\b(?:return|typeof|instanceof|case|in|of|new|delete|void|do|else|yield|await)$/
 
+/** One step while inside a string literal delimited by `quote`, starting at `i`. Blanks the
+ *  character (or an escaped pair) unless it's a newline, since line numbering depends on newlines
+ *  surviving. Returns the index to resume at, and whether this step closed the string. */
+function advanceInString(text, out, i, quote) {
+  const ch = text[i]
+  if (ch === '\\') {
+    if (text[i] !== '\n') out[i] = ' '
+    if (text[i + 1] !== '\n') out[i + 1] = ' '
+    return { next: i + 2, closed: false }
+  }
+  if (ch === quote) return { next: i + 1, closed: true }
+  if (ch !== '\n') out[i] = ' '
+  return { next: i + 1, closed: false }
+}
+
+/** Blank a `//` line comment starting at `start`, returning the index just past it. */
+function blankLineComment(text, out, start) {
+  let i = start
+  while (i < text.length && text[i] !== '\n') out[i++] = ' '
+  return i
+}
+
+/** Blank a slash-star block comment starting at `start` (unterminated runs to EOF), returning
+ *  the index just past it. */
+function blankBlockComment(text, out, start) {
+  const end = text.indexOf('*/', start + 2)
+  const stop = end === -1 ? text.length : end + 2
+  for (let i = start; i < stop; i++) if (text[i] !== '\n') out[i] = ' '
+  return stop
+}
+
+/** Whether a `/` at `i` opens a regex literal rather than dividing — an expression is expected
+ *  right there (start of input, after an opener/operator, or after a keyword that takes one). */
+function isRegexStart(text, i, prev) {
+  return (
+    prev === '' ||
+    REGEX_OPENS_AFTER.has(prev) ||
+    REGEX_OPENS_AFTER_KEYWORD.test(text.slice(0, i).trimEnd())
+  )
+}
+
+/** Blank a regex literal starting at `start` if it closes on this line, returning the index just
+ *  past it, or -1 if it doesn't close (not a regex after all — leave it for the caller). */
+function blankRegexLiteral(text, out, start) {
+  const end = endOfRegex(text, start)
+  if (end === -1) return -1
+  for (let i = start; i < end; i++) if (text[i] !== '\n') out[i] = ' '
+  return end
+}
+
 /** Blank comments and the INTERIOR of every string/template literal, replacing them with spaces so
  *  that every surviving character keeps its original index (line numbers are computed against the
  *  untouched text). Quotes and braces are preserved so call spans still balance. A spawn cannot
@@ -140,21 +190,12 @@ function blankNonCode(text) {
   while (i < text.length) {
     const ch = text[i]
     if (inString) {
-      if (ch === '\\') {
-        // Blank the escape pair, but never a newline: line numbering depends on them surviving.
-        if (text[i] !== '\n') out[i] = ' '
-        if (text[i + 1] !== '\n') out[i + 1] = ' '
-        i += 2
-        continue
-      }
-      if (ch === inString) {
+      const step = advanceInString(text, out, i, inString)
+      if (step.closed) {
         inString = null
         prev = ch
-        i++
-        continue
       }
-      if (ch !== '\n') out[i] = ' '
-      i++
+      i = step.next
       continue
     }
     if (ch === '"' || ch === "'" || ch === '`') {
@@ -163,24 +204,17 @@ function blankNonCode(text) {
       continue
     }
     if (ch === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') out[i++] = ' '
+      i = blankLineComment(text, out, i)
       continue
     }
     if (ch === '/' && text[i + 1] === '*') {
-      const end = text.indexOf('*/', i + 2)
-      const stop = end === -1 ? text.length : end + 2
-      for (; i < stop; i++) if (text[i] !== '\n') out[i] = ' '
+      i = blankBlockComment(text, out, i)
       continue
     }
-    if (
-      ch === '/' &&
-      (prev === '' ||
-        REGEX_OPENS_AFTER.has(prev) ||
-        REGEX_OPENS_AFTER_KEYWORD.test(text.slice(0, i).trimEnd()))
-    ) {
-      const end = endOfRegex(text, i)
+    if (ch === '/' && isRegexStart(text, i, prev)) {
+      const end = blankRegexLiteral(text, out, i)
       if (end !== -1) {
-        for (; i < end; i++) if (text[i] !== '\n') out[i] = ' '
+        i = end
         prev = '/'
         continue
       }

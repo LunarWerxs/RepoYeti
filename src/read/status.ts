@@ -432,6 +432,56 @@ export async function readWorktreeStateHash(
   return worktreeStateHash(files, `${staged}\0${unmerged}`);
 }
 
+/** Map from a renamed file's NEW path to its OLD path. simple-git surfaces renames in a separate
+ *  `renamed: [{from,to}]` list; this lets each file entry look up its own source path. */
+function buildRenameMap(renamed: { from: string; to: string }[] | undefined): Map<string, string> {
+  const renameFrom = new Map<string, string>();
+  for (const r of renamed ?? []) {
+    if (r?.to) renameFrom.set(r.to, r.from);
+  }
+  return renameFrom;
+}
+
+/** One raw `simple-git` status file entry → a ChangedFile. */
+function toChangedFile(
+  f: { path: string; index: string | null; working_dir: string | null },
+  renameFrom: Map<string, string>,
+  priorConflicts: Set<string> | null,
+): ChangedFile {
+  const x = f.index ?? " ";
+  const y = f.working_dir ?? " ";
+  const untracked = x === "?" || y === "?";
+  const conflicted = isConflictPair(x, y);
+  let letter: string;
+  // "N" for a file git has never seen, not VS Code's "U": next to "M" for modified, a "U"
+  // badge reads as "updated" (the owner's words) and says the opposite of what it means.
+  if (untracked) letter = "N";
+  else if (conflicted) letter = "C";
+  else if (renameFrom.has(f.path)) letter = "R";
+  else letter = (y !== " " ? y : x) || "M";
+  const from = renameFrom.get(f.path);
+  // A path is "resolved" only once it's left the unmerged pair AND MERGE_MSG shows it was
+  // part of THIS operation's conflict set — otherwise an ordinary staged M/A on an unrelated
+  // path during a merge would be mislabeled as a just-resolved conflict.
+  const resolved = !conflicted && priorConflicts?.has(f.path) ? true : undefined;
+  return {
+    path: f.path,
+    status: letter,
+    staged: !untracked && x !== " ",
+    ...(from ? { from } : {}),
+    ...(conflicted ? { conflict: conflictKind(x, y) } : {}),
+    ...(resolved ? { resolved } : {}),
+  };
+}
+
+/** Attach a line/char delta to each file that has one, mutating `files` in place. */
+function attachDiffStats(files: ChangedFile[], perFile: Map<string, DiffStat>): void {
+  for (const f of files) {
+    const s = perFile.get(f.path);
+    if (s) f.stat = s;
+  }
+}
+
 /**
  * The repo's changed-file list (names + status only — never file contents).
  * When `withStats` is on, each file also carries its line/char delta vs HEAD.
@@ -442,51 +492,18 @@ export async function readChanges(absPath: string, withStats = false): Promise<C
   // bound still holds and computeDiffStats never nests another gate.
   return readGate.run(async () => {
     const status = await gitFor(absPath).status();
-    // simple-git surfaces renames in a separate `renamed: [{from,to}]` list; map by the
-    // new path so we can attach the source path to the corresponding file entry.
-    const renameFrom = new Map<string, string>();
-    for (const r of status.renamed ?? []) {
-      if (r?.to) renameFrom.set(r.to, r.from);
-    }
+    const renameFrom = buildRenameMap(status.renamed);
     // The "resolved" marker needs "what was conflicted a moment ago", which only exists while a
     // merge/rebase/cherry-pick is actually in progress. currentGitOperation is one filesystem
     // stat/readdir and spawns no git subprocess (readStatus makes its own separate call — this
     // is not shared with it), so a clean repo pays exactly that and never opens MERGE_MSG.
     const gitOperation = await currentGitOperation(absPath);
     const priorConflicts = gitOperation ? await conflictedPathsFromMergeMsg(absPath) : null;
-    const files: ChangedFile[] = status.files.map((f) => {
-      const x = f.index ?? " ";
-      const y = f.working_dir ?? " ";
-      const untracked = x === "?" || y === "?";
-      const conflicted = isConflictPair(x, y);
-      let letter: string;
-      // "N" for a file git has never seen, not VS Code's "U": next to "M" for modified, a "U"
-      // badge reads as "updated" (the owner's words) and says the opposite of what it means.
-      if (untracked) letter = "N";
-      else if (conflicted) letter = "C";
-      else if (renameFrom.has(f.path)) letter = "R";
-      else letter = (y !== " " ? y : x) || "M";
-      const from = renameFrom.get(f.path);
-      // A path is "resolved" only once it's left the unmerged pair AND MERGE_MSG shows it was
-      // part of THIS operation's conflict set — otherwise an ordinary staged M/A on an unrelated
-      // path during a merge would be mislabeled as a just-resolved conflict.
-      const resolved = !conflicted && priorConflicts?.has(f.path) ? true : undefined;
-      return {
-        path: f.path,
-        status: letter,
-        staged: !untracked && x !== " ",
-        ...(from ? { from } : {}),
-        ...(conflicted ? { conflict: conflictKind(x, y) } : {}),
-        ...(resolved ? { resolved } : {}),
-      };
-    });
+    const files: ChangedFile[] = status.files.map((f) => toChangedFile(f, renameFrom, priorConflicts));
     if (withStats && files.length > 0) {
       const untracked = files.filter((f) => f.status === "N").map((f) => f.path);
       const { perFile } = await computeDiffStats(absPath, untracked);
-      for (const f of files) {
-        const s = perFile.get(f.path);
-        if (s) f.stat = s;
-      }
+      attachDiffStats(files, perFile);
     }
     return files;
   });

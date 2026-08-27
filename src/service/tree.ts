@@ -241,66 +241,45 @@ function compareByDepth(a: string, b: string): number {
   return da !== db ? da - db : a.localeCompare(b);
 }
 
-/**
- * Repo-relative paths matching `query` (literal, case-insensitive, matched against the whole
- * path so "src/api" works as well as "api"). Shallow matches first, and bounded; `truncated`
- * says the answer is a head rather than the whole set.
- *
- * By default this searches only what git would show you — `dist/` and `node_modules/` are
- * genuinely browsable in the tree, but a two-word query that returns four hundred vendored
- * `tsconfig.json`s is not a search result, it is a haystack. `includeIgnored` opts back in.
- *
- * The ignored-excluded path asks git and takes a read-gate slot; the include-ignored path walks
- * the filesystem itself and, like listRepoTree, stays outside the op queue and the gate.
- */
-export async function searchRepoTree(
-  repoId: string,
-  query: string,
-  opts: { includeIgnored?: boolean } = {},
-): Promise<RepoTreeSearchResult> {
-  const repo = getRepo(repoId);
-  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
-  const needle = query.trim().toLowerCase();
-  if (needle.length < MIN_TREE_SEARCH) return { ok: true, code: "OK", entries: [] };
-
-  const marker = backendFor(repo.vcs).marker;
-
-  if (!opts.includeIgnored) {
-    const visible = await gitVisiblePaths(repo.absPath);
-    if (visible) {
-      // ls-files reports FILES. Their ancestors are the directories, so derive those too —
-      // otherwise searching "components" finds every file inside it but never the folder.
-      const dirs = new Set<string>();
-      for (const p of visible) {
-        const parts = p.split("/");
-        for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
-      }
-      const files = visible
-        .filter((p) => p.toLowerCase().includes(needle) && !pathTouchesVcsMarker(p, marker))
-        .sort(compareByDepth);
-      const matchedDirs = [...dirs]
-        .filter((p) => p.toLowerCase().includes(needle) && !pathTouchesVcsMarker(p, marker))
-        .sort(compareByDepth);
-
-      const all: RepoTreeEntry[] = [
-        ...matchedDirs.map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), path: p, type: "dir" as const })),
-        ...files.map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), path: p, type: "file" as const })),
-      ];
-      if (all.length > MAX_TREE_SEARCH_RESULTS) {
-        return {
-          ok: true,
-          code: "OK",
-          entries: all.slice(0, MAX_TREE_SEARCH_RESULTS),
-          truncated: true,
-          ignoredIncluded: false,
-        };
-      }
-      return { ok: true, code: "OK", entries: all, truncated: false, ignoredIncluded: false };
-    }
-    // No git to ask (a Lore working copy): fall through and walk. The result then includes
-    // ignored paths, which is why the client is told what actually happened — see `ignoredIncluded`.
+/** Fast path: search git's own file list rather than walking the filesystem. ls-files reports
+ *  FILES; their ancestors are the directories, so those are derived too — otherwise searching
+ *  "components" would find every file inside it but never the folder itself. */
+function searchViaGitLsFiles(visible: string[], needle: string, marker: string): RepoTreeSearchResult {
+  const dirs = new Set<string>();
+  for (const p of visible) {
+    const parts = p.split("/");
+    for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
   }
+  const files = visible
+    .filter((p) => p.toLowerCase().includes(needle) && !pathTouchesVcsMarker(p, marker))
+    .sort(compareByDepth);
+  const matchedDirs = [...dirs]
+    .filter((p) => p.toLowerCase().includes(needle) && !pathTouchesVcsMarker(p, marker))
+    .sort(compareByDepth);
 
+  const all: RepoTreeEntry[] = [
+    ...matchedDirs.map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), path: p, type: "dir" as const })),
+    ...files.map((p) => ({ name: p.slice(p.lastIndexOf("/") + 1), path: p, type: "file" as const })),
+  ];
+  if (all.length > MAX_TREE_SEARCH_RESULTS) {
+    return {
+      ok: true,
+      code: "OK",
+      entries: all.slice(0, MAX_TREE_SEARCH_RESULTS),
+      truncated: true,
+      ignoredIncluded: false,
+    };
+  }
+  return { ok: true, code: "OK", entries: all, truncated: false, ignoredIncluded: false };
+}
+
+/** Fallback when there's no git to ask (a Lore working copy): a bounded BFS of the filesystem
+ *  itself. Always includes ignored paths — see `ignoredIncluded` on the result. */
+async function searchViaFilesystemWalk(
+  repo: { absPath: string },
+  needle: string,
+  marker: string,
+): Promise<RepoTreeSearchResult> {
   const deadline = Date.now() + TREE_SEARCH_BUDGET_MS;
   const entries: RepoTreeEntry[] = [];
   let truncated = false;
@@ -338,4 +317,38 @@ export async function searchRepoTree(
   // A walk sees everything on disk, so this branch always searched ignored paths — whether it
   // was asked to or only fell here because there was no git to ask.
   return { ok: true, code: "OK", entries, truncated, ignoredIncluded: true };
+}
+
+/**
+ * Repo-relative paths matching `query` (literal, case-insensitive, matched against the whole
+ * path so "src/api" works as well as "api"). Shallow matches first, and bounded; `truncated`
+ * says the answer is a head rather than the whole set.
+ *
+ * By default this searches only what git would show you — `dist/` and `node_modules/` are
+ * genuinely browsable in the tree, but a two-word query that returns four hundred vendored
+ * `tsconfig.json`s is not a search result, it is a haystack. `includeIgnored` opts back in.
+ *
+ * The ignored-excluded path asks git and takes a read-gate slot; the include-ignored path walks
+ * the filesystem itself and, like listRepoTree, stays outside the op queue and the gate.
+ */
+export async function searchRepoTree(
+  repoId: string,
+  query: string,
+  opts: { includeIgnored?: boolean } = {},
+): Promise<RepoTreeSearchResult> {
+  const repo = getRepo(repoId);
+  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  const needle = query.trim().toLowerCase();
+  if (needle.length < MIN_TREE_SEARCH) return { ok: true, code: "OK", entries: [] };
+
+  const marker = backendFor(repo.vcs).marker;
+
+  if (!opts.includeIgnored) {
+    const visible = await gitVisiblePaths(repo.absPath);
+    if (visible) return searchViaGitLsFiles(visible, needle, marker);
+    // No git to ask (a Lore working copy): fall through and walk. The result then includes
+    // ignored paths, which is why the client is told what actually happened — see `ignoredIncluded`.
+  }
+
+  return searchViaFilesystemWalk(repo, needle, marker);
 }

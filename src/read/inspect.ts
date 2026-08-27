@@ -210,6 +210,112 @@ export interface LogResult {
 }
 
 /**
+ * The author-filtered page of `readLog`, as a two-pass fetch: `%aN`/`%aE` apply .mailmap, so
+ * hashes are selected from that canonical metadata first — git's built-in --author predicate is
+ * documented to match the raw author header, and would make a clicked canonical activity chip
+ * silently omit that person's aliases. Returns "" (never non-numstat garbage) when the page is
+ * empty, which the caller's parser already reads as zero commits.
+ */
+async function fetchAuthorFilteredLog(
+  absPath: string,
+  scopeArgs: string[],
+  mergeFlag: string[],
+  normalizedAuthor: NonNullable<ReturnType<typeof normalizeLogAuthorFilter>>,
+  fmt: string,
+  off: number,
+  cap: number,
+): Promise<{ raw: string; hasMore: boolean }> {
+  const metadataFormat = ["%H", "%aN", "%aE"].join(US);
+  const metadataRaw = await gitFor(absPath).raw([
+    "log",
+    "--no-color",
+    ...scopeArgs,
+    ...mergeFlag,
+    "--use-mailmap",
+    `--pretty=tformat:${metadataFormat}`,
+  ]);
+  const matchingHashes = metadataRaw
+    .split("\n")
+    .filter((line) => line.includes(US))
+    .map((line) => {
+      const [hash = "", authorName = "", authorEmail = ""] = line.split(US);
+      return { hash, authorName, authorEmail };
+    })
+    .filter((commit) =>
+      normalizedAuthor.email
+        ? commit.authorEmail.trim().toLowerCase() === normalizedAuthor.email
+        : commit.authorName.trim().toLowerCase() === normalizedAuthor.name
+    )
+    .map((commit) => commit.hash);
+  const candidates = matchingHashes.slice(off, off + cap + 1);
+  const pageHashes = candidates.slice(0, cap);
+  const hasMore = candidates.length > cap;
+  if (pageHashes.length === 0) return { raw: "", hasMore: false };
+
+  // --no-walk=unsorted preserves the selected newest-first order and avoids traversing
+  // each hash's ancestry again. Chunking keeps even a 500-row page safe on Windows.
+  const chunks = Array.from(
+    { length: Math.ceil(pageHashes.length / LOG_HASH_CHUNK) },
+    (_, index) => pageHashes.slice(index * LOG_HASH_CHUNK, (index + 1) * LOG_HASH_CHUNK),
+  );
+  const details = await Promise.all(
+    chunks.map((hashes) =>
+      gitFor(absPath).raw([
+        "log",
+        "--no-color",
+        "--no-walk=unsorted",
+        "--use-mailmap",
+        "--numstat",
+        `--pretty=tformat:${fmt}`,
+        ...hashes,
+      ])
+    ),
+  );
+  return { raw: details.join("\n"), hasMore };
+}
+
+/**
+ * Parse `git log --numstat --pretty=...` output into commits. With --numstat the output is no
+ * longer one line per commit: each commit record is followed by "<added>\t<removed>\t<path>"
+ * lines (and blank separators). Commit records are the only lines carrying the unit separator, so
+ * that's the discriminator — a numstat path could otherwise contain anything, but never US. Stat
+ * lines fold into the commit above them.
+ */
+function parseNumstatLog(raw: string): LogEntry[] {
+  const commits: LogEntry[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.trim() === "") continue;
+    if (line.includes(US)) {
+      const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", subject = ""] =
+        line.split(US);
+      const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
+      commits.push({
+        hash,
+        shortHash,
+        subject,
+        authorName,
+        authorEmail,
+        date: Number(at) * 1000,
+        refs: refs.trim(),
+        parents,
+        isMerge: parents.length > 1,
+        stat: { filesChanged: 0, addedLines: 0, removedLines: 0 },
+      });
+      continue;
+    }
+    const current = commits.at(-1);
+    if (!current?.stat) continue;
+    // "12\t3\tsrc/foo.ts" — or "-\t-\tlogo.png" for a binary file (counted, but no lines).
+    const [addedRaw = "", removedRaw = "", ...pathParts] = line.split("\t");
+    if (pathParts.length === 0) continue; // not a numstat row
+    current.stat.filesChanged += 1;
+    if (addedRaw !== "-") current.stat.addedLines += Number(addedRaw) || 0;
+    if (removedRaw !== "-") current.stat.removedLines += Number(removedRaw) || 0;
+  }
+  return commits;
+}
+
+/**
  * Commit history of the current branch (HEAD), newest first, paginated by `skip`.
  * Read-only. On an unborn HEAD (brand-new repo with no commits) `git log` exits non-zero;
  * that surfaces as an empty list, not an error.
@@ -244,58 +350,9 @@ export async function readLog(
       let hasMore = false;
       try {
         if (normalizedAuthor) {
-          // `%aN` / `%aE` apply .mailmap. Select hashes from canonical metadata first, because
-          // git's built-in --author predicate is documented to match the raw author header and
-          // would make a clicked canonical activity chip silently omit that person's aliases.
-          const metadataFormat = ["%H", "%aN", "%aE"].join(US);
-          const metadataRaw = await gitFor(absPath).raw([
-            "log",
-            "--no-color",
-            ...scopeArgs,
-            ...mergeFlag,
-            "--use-mailmap",
-            `--pretty=tformat:${metadataFormat}`,
-          ]);
-          const matchingHashes = metadataRaw
-            .split("\n")
-            .filter((line) => line.includes(US))
-            .map((line) => {
-              const [hash = "", authorName = "", authorEmail = ""] = line.split(US);
-              return { hash, authorName, authorEmail };
-            })
-            .filter((commit) =>
-              normalizedAuthor.email
-                ? commit.authorEmail.trim().toLowerCase() === normalizedAuthor.email
-                : commit.authorName.trim().toLowerCase() === normalizedAuthor.name
-            )
-            .map((commit) => commit.hash);
-          const candidates = matchingHashes.slice(off, off + cap + 1);
-          const pageHashes = candidates.slice(0, cap);
-          hasMore = candidates.length > cap;
-          if (pageHashes.length === 0) {
-            return { ok: true, code: "OK" as const, commits: [], hasMore: false };
-          }
-          // --no-walk=unsorted preserves the selected newest-first order and avoids traversing
-          // each hash's ancestry again. Chunking keeps even a 500-row page safe on Windows.
-          const chunks = Array.from(
-            { length: Math.ceil(pageHashes.length / LOG_HASH_CHUNK) },
-            (_, index) =>
-              pageHashes.slice(index * LOG_HASH_CHUNK, (index + 1) * LOG_HASH_CHUNK),
-          );
-          const details = await Promise.all(
-            chunks.map((hashes) =>
-              gitFor(absPath).raw([
-                "log",
-                "--no-color",
-                "--no-walk=unsorted",
-                "--use-mailmap",
-                "--numstat",
-                `--pretty=tformat:${fmt}`,
-                ...hashes,
-              ])
-            ),
-          );
-          raw = details.join("\n");
+          const fetched = await fetchAuthorFilteredLog(absPath, scopeArgs, mergeFlag, normalizedAuthor, fmt, off, cap);
+          raw = fetched.raw;
+          hasMore = fetched.hasMore;
         } else {
           raw = await gitFor(absPath).raw([
             "log",
@@ -315,40 +372,7 @@ export async function readLog(
       } catch {
         return { ok: true, code: "OK" as const, commits: [], hasMore: false }; // unborn HEAD
       }
-      // With --numstat the output is no longer one line per commit: each commit record is followed
-      // by "<added>\t<removed>\t<path>" lines (and blank separators). Commit records are the only
-      // lines carrying the unit separator, so that's the discriminator — a numstat path could
-      // otherwise contain anything, but never US. Stat lines fold into the commit above them.
-      const commits: LogEntry[] = [];
-      for (const line of raw.split("\n")) {
-        if (line.trim() === "") continue;
-        if (line.includes(US)) {
-          const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", subject = ""] =
-            line.split(US);
-          const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
-          commits.push({
-            hash,
-            shortHash,
-            subject,
-            authorName,
-            authorEmail,
-            date: Number(at) * 1000,
-            refs: refs.trim(),
-            parents,
-            isMerge: parents.length > 1,
-            stat: { filesChanged: 0, addedLines: 0, removedLines: 0 },
-          });
-          continue;
-        }
-        const current = commits.at(-1);
-        if (!current?.stat) continue;
-        // "12\t3\tsrc/foo.ts" — or "-\t-\tlogo.png" for a binary file (counted, but no lines).
-        const [addedRaw = "", removedRaw = "", ...pathParts] = line.split("\t");
-        if (pathParts.length === 0) continue; // not a numstat row
-        current.stat.filesChanged += 1;
-        if (addedRaw !== "-") current.stat.addedLines += Number(addedRaw) || 0;
-        if (removedRaw !== "-") current.stat.removedLines += Number(removedRaw) || 0;
-      }
+      const commits = parseNumstatLog(raw);
       return {
         ok: true,
         code: "OK" as const,

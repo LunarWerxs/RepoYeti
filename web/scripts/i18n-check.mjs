@@ -98,6 +98,25 @@ const flagExprLiterals = (expr, file, line) => {
     }
   }
 };
+/** ELEMENT-node case: flag any prose-carrying attribute (e.g. `title="Saved"`) as hardcoded. */
+const checkElementProps = (node, file) => {
+  for (const prop of node.props || []) {
+    if (prop.type === 6 && PROSE_ATTRS.has(prop.name)) {
+      const v = prop.value?.content ?? "";
+      if (hasLetter(v) && !TEXT_ALLOWLIST.has(v.trim())) {
+        errors.push(`HARDCODED     ${rel(file)}:${prop.loc?.start?.line ?? 0} → ${prop.name}="${v}"`);
+      }
+    }
+  }
+};
+
+/** IF-node case: walk every branch's children (v-if/v-else-if/v-else are siblings here). */
+const walkIfBranches = (node, file, parentTag) => {
+  for (const b of node.branches || []) {
+    for (const c of b.children || []) walkNode(c, file, parentTag);
+  }
+};
+
 const walkNode = (node, file, parentTag) => {
   if (!node) return;
   switch (node.type) {
@@ -108,18 +127,11 @@ const walkNode = (node, file, parentTag) => {
       flagExprLiterals(node.content?.content ?? "", file, node.loc?.start?.line ?? 0);
       return;
     case 1: // ELEMENT
-      for (const prop of node.props || []) {
-        if (prop.type === 6 && PROSE_ATTRS.has(prop.name)) {
-          const v = prop.value?.content ?? "";
-          if (hasLetter(v) && !TEXT_ALLOWLIST.has(v.trim())) {
-            errors.push(`HARDCODED     ${rel(file)}:${prop.loc?.start?.line ?? 0} → ${prop.name}="${v}"`);
-          }
-        }
-      }
+      checkElementProps(node, file);
       for (const c of node.children || []) walkNode(c, file, node.tag);
       return;
     case 9: // IF
-      for (const b of node.branches || []) for (const c of b.children || []) walkNode(c, file, parentTag);
+      walkIfBranches(node, file, parentTag);
       return;
     default: // ROOT / FOR / IF_BRANCH / etc.
       for (const c of node.children || []) walkNode(c, file, parentTag);
