@@ -242,79 +242,90 @@ async function setAlwaysSideBySide(always: boolean): Promise<void> {
 }
 
 let contentController: AbortController | null = null;
-watch(
-  fetchKey,
-  async (key) => {
-    contentController?.abort();
-    contentController = null;
-    if (!key || !props.target) {
+
+function resetViewerState(): void {
+  errorMsg.value = null;
+  binary.value = false;
+  truncated.value = false;
+  fromHead.value = false;
+  patchMode.value = false;
+  editing.value = false; // a new file/mode drops any in-progress edit
+  dirty.value = false;
+}
+
+/** Fetch this file's content for whichever tab/commit combination `target` names, writing the
+ *  result into the shared refs. Each branch re-checks abort + supersession right after its
+ *  await, since a newer open/toggle can land while this one is still in flight. */
+async function fetchViewerContent(target: ViewerTarget, key: string, controller: AbortController): Promise<void> {
+  const { repoId, path, commit } = target;
+  if (commit) {
+    // History file: the first-parent↔commit models diff (read-only). Both tabs come from one
+    // fetch — the Content tab shows the file as it was AT the commit (its `modified` side).
+    const res = await api.commitFile(repoId, commit, path, controller.signal);
+    if (controller.signal.aborted) return;
+    if (fetchKey() !== key) return; // superseded mid-flight
+    original.value = res.original ?? "";
+    modified.value = res.modified ?? "";
+    content.value = res.modified ?? "";
+    patch.value = res.patch ?? "";
+    patchMode.value = res.mode === "patch";
+    binary.value = !!res.binary;
+    truncated.value = !!res.truncated;
+  } else if (viewerMode.value === "diff") {
+    const res = await api.fileDiff(repoId, path, controller.signal);
+    if (controller.signal.aborted) return;
+    if (fetchKey() !== key) return; // superseded mid-flight
+    original.value = res.original ?? "";
+    modified.value = res.modified ?? "";
+    patch.value = res.patch ?? "";
+    patchMode.value = res.mode === "patch";
+    binary.value = !!res.binary;
+    truncated.value = !!res.truncated;
+  } else {
+    const res = await api.fileContent(repoId, path, undefined, controller.signal);
+    if (controller.signal.aborted) return;
+    if (fetchKey() !== key) return;
+    content.value = res.content ?? "";
+    binary.value = !!res.binary;
+    truncated.value = !!res.truncated;
+    fromHead.value = res.ref === "head";
+  }
+}
+
+async function loadFileContent(key: string | null): Promise<void> {
+  contentController?.abort();
+  contentController = null;
+  const target = props.target;
+  if (!key || !target) {
+    loading.value = false;
+    return;
+  }
+  resetViewerState();
+  // Browser-native binary previews load from the authenticated raw representation directly.
+  // Avoid asking the text/diff endpoints to decode those bytes as UTF-8 first.
+  if (binaryPreview.value) {
+    loading.value = false;
+    return;
+  }
+  const controller = new AbortController();
+  contentController = controller;
+  loading.value = true;
+  try {
+    await fetchViewerContent(target, key, controller);
+  } catch (e) {
+    if (controller.signal.aborted) return;
+    if (fetchKey() === key) errorMsg.value = e instanceof ApiError ? e.message : t("fileViewer.error");
+  } finally {
+    // Controller identity closes the A→B→A race: the aborted first A must not clear the
+    // spinner for the newer A merely because their string keys happen to match again.
+    if (contentController === controller) {
+      contentController = null;
       loading.value = false;
-      return;
     }
-    errorMsg.value = null;
-    binary.value = false;
-    truncated.value = false;
-    fromHead.value = false;
-    patchMode.value = false;
-    editing.value = false; // a new file/mode drops any in-progress edit
-    dirty.value = false;
-    // Browser-native binary previews load from the authenticated raw representation directly.
-    // Avoid asking the text/diff endpoints to decode those bytes as UTF-8 first.
-    if (binaryPreview.value) {
-      loading.value = false;
-      return;
-    }
-    const controller = new AbortController();
-    contentController = controller;
-    const { repoId, path, commit } = props.target;
-    loading.value = true;
-    try {
-      if (commit) {
-        // History file: the first-parent↔commit models diff (read-only). Both tabs come from one
-        // fetch — the Content tab shows the file as it was AT the commit (its `modified` side).
-        const res = await api.commitFile(repoId, commit, path, controller.signal);
-        if (controller.signal.aborted) return;
-        if (fetchKey() !== key) return; // superseded mid-flight
-        original.value = res.original ?? "";
-        modified.value = res.modified ?? "";
-        content.value = res.modified ?? "";
-        patch.value = res.patch ?? "";
-        patchMode.value = res.mode === "patch";
-        binary.value = !!res.binary;
-        truncated.value = !!res.truncated;
-      } else if (viewerMode.value === "diff") {
-        const res = await api.fileDiff(repoId, path, controller.signal);
-        if (controller.signal.aborted) return;
-        if (fetchKey() !== key) return; // superseded mid-flight
-        original.value = res.original ?? "";
-        modified.value = res.modified ?? "";
-        patch.value = res.patch ?? "";
-        patchMode.value = res.mode === "patch";
-        binary.value = !!res.binary;
-        truncated.value = !!res.truncated;
-      } else {
-        const res = await api.fileContent(repoId, path, undefined, controller.signal);
-        if (controller.signal.aborted) return;
-        if (fetchKey() !== key) return;
-        content.value = res.content ?? "";
-        binary.value = !!res.binary;
-        truncated.value = !!res.truncated;
-        fromHead.value = res.ref === "head";
-      }
-    } catch (e) {
-      if (controller.signal.aborted) return;
-      if (fetchKey() === key) errorMsg.value = e instanceof ApiError ? e.message : t("fileViewer.error");
-    } finally {
-      // Controller identity closes the A→B→A race: the aborted first A must not clear the
-      // spinner for the newer A merely because their string keys happen to match again.
-      if (contentController === controller) {
-        contentController = null;
-        loading.value = false;
-      }
-    }
-  },
-  { immediate: true },
-);
+  }
+}
+
+watch(fetchKey, loadFileContent, { immediate: true });
 
 // ── dirty-diff gutter (Content mode) ────────────────────────────────────────────
 // VS Code-style: even with the Diff tab off, mark changed lines in the Content view's gutter. The

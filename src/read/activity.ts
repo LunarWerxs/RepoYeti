@@ -485,6 +485,151 @@ export interface ActivityReadOptions {
   statCache?: ActivityStatCache;
 }
 
+/** The `hourly` path: one exact `--shortstat` query, no caching, no sampling. */
+async function readHourlyActivity(
+  absPath: string,
+  commonArgs: string[],
+  commitCap: number,
+  format: string,
+  window: ActivityWindow,
+  scale: ActivityScale,
+): Promise<ActivityResult> {
+  const raw = await gitFor(absPath).raw([
+    ...commonArgs,
+    `--max-count=${commitCap + 1}`,
+    ...ACTIVITY_DIFF_POLICY_ARGS,
+    "--shortstat",
+    `--pretty=format:${format}`,
+  ]);
+  const commits = parseGitActivity(raw);
+  return aggregateActivity(commits, window.until, commits.length > commitCap, scale);
+}
+
+/** Cache hits for commits still live in this window. Cache availability must never decide
+ *  whether History itself is available: a corrupt/locked cache is only a performance miss. */
+function loadCachedStats(
+  statCache: ActivityStatCache | undefined,
+  window: ActivityWindow,
+  liveHashes: Set<string>,
+): Map<string, CommitStat> {
+  const statsByHash = new Map<string, CommitStat>();
+  if (!statCache) return statsByHash;
+  try {
+    const cached = statCache.read(window.since, window.until);
+    for (const [hash, stat] of cached) {
+      if (liveHashes.has(hash)) statsByHash.set(hash, stat);
+    }
+  } catch {
+    // Fall through to Git enrichment. A corrupt/locked cache is only a performance miss.
+  }
+  return statsByHash;
+}
+
+/** Diff-tree the sampled misses in bounded chunks, folding freshly measured stats into
+ *  `statsByHash` (mutated in place) and returning them for the cache write. */
+async function measureMissingStats(
+  absPath: string,
+  missingMetadata: ParsedActivityCommit[],
+  window: ActivityWindow,
+  changeStatCap: number,
+  format: string,
+  statsByHash: Map<string, CommitStat>,
+): Promise<ActivityStatCacheEntry[]> {
+  const sampledMetadata = selectChangeStatCommits(missingMetadata, window.starts, changeStatCap);
+  const statChunks = Array.from(
+    { length: Math.ceil(sampledMetadata.length / ACTIVITY_CHANGE_STAT_CHUNK) },
+    (_, index) =>
+      sampledMetadata.slice(index * ACTIVITY_CHANGE_STAT_CHUNK, (index + 1) * ACTIVITY_CHANGE_STAT_CHUNK),
+  );
+  const datesByHash = new Map(sampledMetadata.map((commit) => [commit.hash, commit.date] as const));
+  const measured: ActivityStatCacheEntry[] = [];
+  const statResults = await Promise.allSettled(
+    statChunks.map((chunk) =>
+      gitRawWithInput(
+        absPath,
+        [
+          "diff-tree",
+          "--stdin",
+          "--root",
+          "--always",
+          "--no-color",
+          ...ACTIVITY_DIFF_POLICY_ARGS,
+          "--shortstat",
+          `--pretty=format:${format}`,
+        ],
+        `${chunk.map((commit) => commit.hash).join("\n")}\n`,
+      ),
+    ),
+  );
+  for (const result of statResults) {
+    if (result.status !== "fulfilled") continue;
+    for (const commit of parseGitActivity(result.value)) {
+      const stat = commit.stat ?? { filesChanged: 0, addedLines: 0, removedLines: 0 };
+      const date = datesByHash.get(commit.hash);
+      statsByHash.set(commit.hash, stat);
+      if (date !== undefined) measured.push({ hash: commit.hash, date, stat });
+    }
+  }
+  return measured;
+}
+
+/** Best-effort cache write: fresh measurements still belong in this response even if
+ *  persistence is unavailable. */
+function persistMeasuredStats(statCache: ActivityStatCache | undefined, measured: ActivityStatCacheEntry[]): void {
+  if (!statCache || measured.length === 0) return;
+  try {
+    statCache.write(measured);
+  } catch {
+    // Fresh measurements still belong in this response even if persistence is unavailable.
+  }
+}
+
+/** The `daily`/`monthly` path: cheap metadata for exact commit/contributor/bucket counts, then a
+ *  bounded, time-stratified subset of cache misses is enriched with diff statistics. */
+async function readBoundedActivity(
+  absPath: string,
+  commonArgs: string[],
+  commitCap: number,
+  format: string,
+  window: ActivityWindow,
+  scale: ActivityScale,
+  changeStatCap: number,
+  statCache: ActivityStatCache | undefined,
+): Promise<ActivityResult> {
+  const metadataRaw = await gitFor(absPath).raw([
+    ...commonArgs,
+    `--max-count=${commitCap + 1}`,
+    `--pretty=format:${format}`,
+  ]);
+  const metadata = parseGitActivity(metadataRaw, false);
+  const commitsTruncated = metadata.length > commitCap;
+  const boundedMetadata = metadata.slice(0, commitCap);
+  if (boundedMetadata.length === 0) {
+    return aggregateActivity([], window.until, commitsTruncated, scale);
+  }
+
+  const liveHashes = new Set(boundedMetadata.map((commit) => commit.hash));
+  const statsByHash = loadCachedStats(statCache, window, liveHashes);
+
+  // Spend this request's bounded work only on misses. Repeated views therefore grow
+  // coverage monotonically until every commit in the selected window is exact.
+  const missingMetadata = boundedMetadata.filter((commit) => !statsByHash.has(commit.hash));
+  const measured = await measureMissingStats(absPath, missingMetadata, window, changeStatCap, format, statsByHash);
+  persistMeasuredStats(statCache, measured);
+
+  const commits = boundedMetadata.map((commit): ParsedActivityCommit => {
+    const stat = statsByHash.get(commit.hash);
+    return {
+      ...commit,
+      stat,
+      changeStatsKnown: stat !== undefined,
+    };
+  });
+  const changeStatsTruncated =
+    commitsTruncated || commits.some((commit) => commit.changeStatsKnown === false);
+  return aggregateActivity(commits, window.until, commitsTruncated, scale, changeStatsTruncated);
+}
+
 export async function readGitActivity(
   absPath: string,
   refScope: RefScope = "head",
@@ -512,119 +657,17 @@ export async function readGitActivity(
       ];
       try {
         if (scale === "hourly") {
-          const raw = await gitFor(absPath).raw([
-            ...commonArgs,
-            `--max-count=${commitCap + 1}`,
-            ...ACTIVITY_DIFF_POLICY_ARGS,
-            "--shortstat",
-            `--pretty=format:${format}`,
-          ]);
-          const commits = parseGitActivity(raw);
-          return aggregateActivity(
-            commits,
-            window.until,
-            commits.length > commitCap,
-            scale,
-          );
+          return await readHourlyActivity(absPath, commonArgs, commitCap, format, window, scale);
         }
-
-        const metadataRaw = await gitFor(absPath).raw([
-          ...commonArgs,
-          `--max-count=${commitCap + 1}`,
-          `--pretty=format:${format}`,
-        ]);
-        const metadata = parseGitActivity(metadataRaw, false);
-        const commitsTruncated = metadata.length > commitCap;
-        const boundedMetadata = metadata.slice(0, commitCap);
-        if (boundedMetadata.length === 0) {
-          return aggregateActivity([], window.until, commitsTruncated, scale);
-        }
-
-        const statsByHash = new Map<string, CommitStat>();
-        if (options.statCache) {
-          // Cache availability must never decide whether History itself is available.
-          try {
-            const cached = options.statCache.read(window.since, window.until);
-            const liveHashes = new Set(boundedMetadata.map((commit) => commit.hash));
-            for (const [hash, stat] of cached) {
-              if (liveHashes.has(hash)) statsByHash.set(hash, stat);
-            }
-          } catch {
-            // Fall through to Git enrichment. A corrupt/locked cache is only a performance miss.
-          }
-        }
-
-        // Spend this request's bounded work only on misses. Repeated views therefore grow
-        // coverage monotonically until every commit in the selected window is exact.
-        const missingMetadata = boundedMetadata.filter((commit) => !statsByHash.has(commit.hash));
-        const sampledMetadata = selectChangeStatCommits(
-          missingMetadata,
-          window.starts,
-          changeStatCap,
-        );
-        const statChunks = Array.from(
-          { length: Math.ceil(sampledMetadata.length / ACTIVITY_CHANGE_STAT_CHUNK) },
-          (_, index) =>
-            sampledMetadata.slice(
-              index * ACTIVITY_CHANGE_STAT_CHUNK,
-              (index + 1) * ACTIVITY_CHANGE_STAT_CHUNK,
-            ),
-        );
-        const datesByHash = new Map(
-          sampledMetadata.map((commit) => [commit.hash, commit.date] as const),
-        );
-        const measured: ActivityStatCacheEntry[] = [];
-        const statResults = await Promise.allSettled(
-          statChunks.map((chunk) =>
-            gitRawWithInput(
-              absPath,
-              [
-                "diff-tree",
-                "--stdin",
-                "--root",
-                "--always",
-                "--no-color",
-                ...ACTIVITY_DIFF_POLICY_ARGS,
-                "--shortstat",
-                `--pretty=format:${format}`,
-              ],
-              `${chunk.map((commit) => commit.hash).join("\n")}\n`,
-            ),
-          ),
-        );
-        for (const result of statResults) {
-          if (result.status !== "fulfilled") continue;
-          for (const commit of parseGitActivity(result.value)) {
-            const stat = commit.stat ?? { filesChanged: 0, addedLines: 0, removedLines: 0 };
-            const date = datesByHash.get(commit.hash);
-            statsByHash.set(commit.hash, stat);
-            if (date !== undefined) measured.push({ hash: commit.hash, date, stat });
-          }
-        }
-        if (options.statCache && measured.length > 0) {
-          try {
-            options.statCache.write(measured);
-          } catch {
-            // Fresh measurements still belong in this response even if persistence is unavailable.
-          }
-        }
-
-        const commits = boundedMetadata.map((commit): ParsedActivityCommit => {
-          const stat = statsByHash.get(commit.hash);
-          return {
-            ...commit,
-            stat,
-            changeStatsKnown: stat !== undefined,
-          };
-        });
-        const changeStatsTruncated =
-          commitsTruncated || commits.some((commit) => commit.changeStatsKnown === false);
-        return aggregateActivity(
-          commits,
-          window.until,
-          commitsTruncated,
+        return await readBoundedActivity(
+          absPath,
+          commonArgs,
+          commitCap,
+          format,
+          window,
           scale,
-          changeStatsTruncated,
+          changeStatCap,
+          options.statCache,
         );
       } catch (error) {
         if (unbornHead(error)) return aggregateActivity([], window.until, false, scale);

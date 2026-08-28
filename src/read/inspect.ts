@@ -449,6 +449,47 @@ const emptyCommitDetail = (hash: string, code: "OK" | "ERROR", message?: string)
   filesTotal: 0,
 });
 
+/** Parse the unit-separated header line from `git show --format=<fmt>` into its named fields. */
+function parseCommitHeaderLine(headerLine: string) {
+  const [full = "", short = "", an = "", ae = "", at = "0", cn = "", ce = "", ct = "0", parentsRaw = "", ...subjRest] =
+    headerLine.split(US);
+  const subject = subjRest.join(US);
+  const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
+  return { full, short, an, ae, at, cn, ce, ct, subject, parents };
+}
+
+/** Parse `--name-status` lines (everything after the header) into the changed-file list. */
+function parseNameStatusFiles(lines: string[]): CommitFile[] {
+  const files: CommitFile[] = [];
+  for (const l of lines) {
+    const t = l.trim();
+    if (!t) continue;
+    const parts = t.split("\t");
+    const status = (parts[0] ?? "M")[0] ?? "M";
+    if (status === "R" || status === "C") files.push({ status, path: parts[2] ?? "", from: parts[1], adds: 0, dels: 0 });
+    else files.push({ status, path: parts[1] ?? "", adds: 0, dels: 0 });
+  }
+  return files;
+}
+
+// Per-file line counts via --numstat instead of shipping the raw patch. The inline History
+// view only needs the file list + a "+adds −dels" stat; a single `git show -p` would
+// materialize the WHOLE patch in memory (arbitrarily large for a commit that regenerates a
+// lockfile or bundle) just to derive these numbers. --numstat emits the same rows in the
+// same order as --name-status (same flags, same diff), so zip it onto `files` BY INDEX — its
+// rename rows read `{old => new}`, which would not match the name-status target path. Binary
+// files report "-" for both counts, which Number() makes NaN → left at 0. Mutates `files`.
+function applyNumstat(files: CommitFile[], numstatOut: string): void {
+  const numstat = numstatOut.split("\n").map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < files.length; i++) {
+    const cols = numstat[i]?.split("\t");
+    const a = Number(cols?.[0]);
+    const d = Number(cols?.[1]);
+    if (Number.isFinite(a)) files[i]!.adds = a;
+    if (Number.isFinite(d)) files[i]!.dels = d;
+  }
+}
+
 /**
  * Full detail for ONE commit (the History "tap a commit → see its changes" view): the header
  * fields plus its changed-file list (`--name-status`) with a per-file line delta (`--numstat`).
@@ -475,35 +516,12 @@ export async function readCommit(absPath: string, hash: string): Promise<CommitD
       // Header (first line) + name-status lines (the rest).
       const metaOut = await git.raw(["show", ...showFlags, "--name-status", `--format=${fmt}`, hash]);
       const lines = metaOut.split("\n");
-      const [full = "", short = "", an = "", ae = "", at = "0", cn = "", ce = "", ct = "0", parentsRaw = "", ...subjRest] =
-        (lines[0] ?? "").split(US);
-      const subject = subjRest.join(US);
-      const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
-      const files: CommitFile[] = [];
-      for (const l of lines.slice(1)) {
-        const t = l.trim();
-        if (!t) continue;
-        const parts = t.split("\t");
-        const status = (parts[0] ?? "M")[0] ?? "M";
-        if (status === "R" || status === "C") files.push({ status, path: parts[2] ?? "", from: parts[1], adds: 0, dels: 0 });
-        else files.push({ status, path: parts[1] ?? "", adds: 0, dels: 0 });
-      }
-      // Per-file line counts via --numstat instead of shipping the raw patch. The inline History
-      // view only needs the file list + a "+adds −dels" stat; a single `git show -p` would
-      // materialize the WHOLE patch in memory (arbitrarily large for a commit that regenerates a
-      // lockfile or bundle) just to derive these numbers. --numstat emits the same rows in the
-      // same order as --name-status above (same flags, same diff), so zip it onto `files` BY
-      // INDEX — its rename rows read `{old => new}`, which would not match the name-status target
-      // path. Binary files report "-" for both counts, which Number() makes NaN → left at 0.
+      const header = parseCommitHeaderLine(lines[0] ?? "");
+      const files = parseNameStatusFiles(lines.slice(1));
+
       const numstatOut = await git.raw(["show", ...showFlags, "--numstat", "--format=", hash]);
-      const numstat = numstatOut.split("\n").map((l) => l.trim()).filter(Boolean);
-      for (let i = 0; i < files.length; i++) {
-        const cols = numstat[i]?.split("\t");
-        const a = Number(cols?.[0]);
-        const d = Number(cols?.[1]);
-        if (Number.isFinite(a)) files[i]!.adds = a;
-        if (Number.isFinite(d)) files[i]!.dels = d;
-      }
+      applyNumstat(files, numstatOut);
+
       // Cap the shipped list AFTER the zip (both lists are aligned full-length): the UI renders a
       // row per file, and a vendored-tree commit touching tens of thousands would bloat the payload
       // and the DOM for no scanning value. filesTotal carries the real count for the "+N more" note.
@@ -515,18 +533,18 @@ export async function readCommit(absPath: string, hash: string): Promise<CommitD
       return {
         ok: true,
         code: "OK" as const,
-        hash: full || hash,
-        shortHash: short || hash.slice(0, 12),
-        subject,
+        hash: header.full || hash,
+        shortHash: header.short || hash.slice(0, 12),
+        subject: header.subject,
         body,
-        authorName: an,
-        authorEmail: ae,
-        date: Number(at) * 1000,
-        parents,
-        isMerge: parents.length > 1,
-        committerName: cn,
-        committerEmail: ce,
-        committerDate: Number(ct) * 1000,
+        authorName: header.an,
+        authorEmail: header.ae,
+        date: Number(header.at) * 1000,
+        parents: header.parents,
+        isMerge: header.parents.length > 1,
+        committerName: header.cn,
+        committerEmail: header.ce,
+        committerDate: Number(header.ct) * 1000,
         files,
         filesTotal,
       };

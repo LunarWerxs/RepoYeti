@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref, reactive, computed, watch } from "vue";
+import { ref, reactive, computed, watch, type Ref, type ComputedRef } from "vue";
 import { useEventSource } from "@vueuse/core";
 import { api, ApiError, type AccessMode, type TunnelStatus, type RelayStatus } from "../api";
 import type {
@@ -844,6 +844,83 @@ export const useStore = defineStore("repoyeti", () => {
     // covered by the caller's own loadAll()) doesn't trigger a redundant resync — only a genuine
     // reconnect after a drop does.
     let hasConnectedOnce = false;
+    // The full per-event-type handling lives in the SSE_EVENT_HANDLERS table (module scope,
+    // below the store) — one named function per arm, dispatched by event name. `eventCtx`
+    // bundles every ref/action a handler might need; it's rebuilt per connect() (reconnects
+    // are rare, and every field is a stable ref/function reference either way).
+    const eventCtx: SseEventCtx = {
+      getRepoStatus,
+      hasRepo,
+      patchRepo,
+      queueRepoAdded,
+      flushPendingRepoInserts,
+      identityRules,
+      notifyUpdateAvailable,
+      reconcileBehindNotification,
+      notifyBehind,
+      notifySynced,
+      notifyAutoCommitted,
+      notifyAutoCommitBlocked,
+      notifyNewProjects,
+      notifyAiKeyInvalid,
+      addPendingApproval,
+      removePendingApproval,
+      loadEditors,
+      loadSyncStatus,
+      checkForUpdate,
+      repos,
+      collaborationSnapshots,
+      autoUpdateApplying,
+      autoUpdateRestarting,
+      tunnelUrl,
+      tunnelActive,
+      tunnelConfig,
+      relayUrl,
+      relayAnnounced,
+      relayError,
+      relayConfig,
+      diffStatsEnabled,
+      changesStatDisplay,
+      changesCharsEnabled,
+      remoteEditing,
+      remoteBrowse,
+      diffPatchBytes,
+      diffPatchEnabled,
+      syncCheckEnabled,
+      syncIntervalSecs,
+      keepInSync,
+      autoCommit,
+      autoUpdate,
+      updateNotify,
+      autoCommitMode,
+      autoCommitIntervalSecs,
+      autoCommitAt,
+      autoCommitPull,
+      autoCommitPush,
+      autoCommitAiFallback,
+      autoScan,
+      loreServersEnabled,
+      portableMode,
+      hideTrayIcon,
+      mcpApprovalGate,
+      mcpApprovalTimeoutSecs,
+      mcpAutoDeny,
+      mcpAutoApprove,
+      mcpAutoApproveTimeoutSecs,
+      defaultEditor,
+      editorsLoaded,
+      scanning,
+      scanFound,
+      scanNew,
+      scanDone,
+      lastScanCancelled,
+      scanNewRepos,
+      collectingScanRepos,
+      isGuest,
+      clearRepoCaches,
+      bumpHistoryRevision,
+      isHistoryRelevantStatusChange,
+    };
     stopEventWatches = [
       watch(
         status,
@@ -871,227 +948,12 @@ export const useStore = defineStore("repoyeti", () => {
         { immediate: true },
       ),
       watch(data, (raw) => {
-      if (!raw || !event.value) return;
-      try {
-        const payload = JSON.parse(raw);
-        if (event.value === "repo_state_changed") {
-          const previousStatus = getRepoStatus(payload.id);
-          const nextStatus = (payload.status as Repo["status"] | undefined) ?? null;
-          patchRepo(payload.id, { status: nextStatus });
-          if (isHistoryRelevantStatusChange(previousStatus, nextStatus)) {
-            bumpHistoryRevision(payload.id);
-          }
-          // Behind notifications are snapshots of a condition whose source of truth is the live
-          // repo status. Every pull/fetch/refresh reaches this event, even if it did not start
-          // from the notification, so keep its count current and retire it at zero. A failed
-          // status read reports zero as a fallback; do not treat that unknown state as resolved.
-          if (
-            payload.status &&
-            !payload.status.error &&
-            typeof payload.status.behind === "number"
-          ) {
-            reconcileBehindNotification(payload.id, payload.status.behind);
-          }
-        } else if (event.value === "repo_added") {
-          // Background discovery found a repo after boot — slot it in (or refresh in place). A
-          // scan fires this once per repo it finds, so new repos are buffered and merged in one
-          // batch per animation frame instead of splicing (and recomputing every dependent list)
-          // once per event — see queueRepoAdded/flushPendingRepoInserts in store/repo.ts.
-          const repo = payload.repo as Repo | undefined;
-          if (repo?.id) {
-            const isNew = !hasRepo(repo.id);
-            queueRepoAdded(repo);
-            // Only a running scan's finds go on the review list, and only ones we didn't have.
-            if (isNew && collectingScanRepos.value) {
-              scanNewRepos.value.push({ id: repo.id, name: repo.name, absPath: repo.absPath });
-            }
-          }
-        } else if (event.value === "repo_removed") {
-          // A scan root was removed, the owner removed this repo, or — on an all-repos share link —
-          // they hid it and it left this viewer's scope (src/share/events.ts translates the hide
-          // into exactly this event). Drop the card live, and take the file viewer with it if it
-          // was open on that repo: the drawer would otherwise sit there looking live while every
-          // call it makes 404s against a repo this session can no longer reach.
-          if (payload.id) {
-            repos.value = repos.value.filter((r) => r.id !== payload.id);
-            clearRepoCaches(payload.id);
-            reconcileBehindNotification(payload.id, 0);
-            dismissViewerForRepo(payload.id);
-          }
-        } else if (event.value === "repo_renamed") {
-          // Renamed on another device — adopt the new label live.
-          patchRepo(payload.id, { displayName: payload.displayName ?? null });
-        } else if (event.value === "repo_identity_changed")
-          patchRepo(payload.id, { identityId: payload.identityId });
-        else if (event.value === "identity_rules_changed") {
-          // Another tab/device edited the rules — adopt the fresh list live.
-          if (Array.isArray(payload.rules)) identityRules.value = payload.rules;
-        } else if (event.value === "repo_account_changed")
-          patchRepo(payload.id, {
-            syncAccountHost: payload.syncAccountHost ?? null,
-            syncAccountLogin: payload.syncAccountLogin ?? null,
-          });
-        else if (event.value === "repo_hidden_changed")
-          patchRepo(payload.id, { hidden: !!payload.hidden });
-        else if (event.value === "repo_pinned_changed")
-          patchRepo(payload.id, { pinned: !!payload.pinned });
-        else if (event.value === "repo_starred_changed")
-          patchRepo(payload.id, { starred: !!payload.starred });
-        else if (event.value === "repo_auto_commit_changed")
-          patchRepo(payload.id, { autoCommit: !!payload.autoCommit });
-        else if (event.value === "repo_behind") {
-          // The background sync check found repos with new remote commits → warn (toast +
-          // opt-in OS notification). The amber card state arrives separately via repo_state_changed.
-          notifyBehind((payload.repos as BehindRepo[] | undefined) ?? []);
-        } else if (event.value === "repo_synced") {
-          // "Keep in sync" auto-pulled these — quiet confirmation (the cards already updated).
-          const synced = (payload.repos as SyncedRepo[] | undefined) ?? [];
-          for (const repo of synced) {
-            if (repo.pulled > 0) bumpHistoryRevision(repo.id);
-          }
-          notifySynced(synced);
-        } else if (event.value === "repo_auto_committed") {
-          // The auto-commit timer committed (and maybe synced) these — quiet success toast.
-          const committed = (payload.repos as AutoCommittedRepo[] | undefined) ?? [];
-          for (const repo of committed) {
-            if (repo.commits > 0) bumpHistoryRevision(repo.id);
-          }
-          notifyAutoCommitted(committed);
-        } else if (event.value === "repo_auto_commit_blocked") {
-          // The auto-commit timer skipped these (conflict / mid-operation / failed sync) → warn.
-          notifyAutoCommitBlocked((payload.repos as AutoCommitBlockedRepo[] | undefined) ?? []);
-        } else if (event.value === "update_available") {
-          // The scheduled check found a newer build. This NEVER installs anything on its own
-          // (that's the separate, opt-in `autoUpdate`) — it surfaces the offer and lets the
-          // owner decide, which is the whole point of the notify/apply split.
-          notifyUpdateAvailable({
-            canApply: payload.canApply !== false,
-            reason: typeof payload.reason === "string" ? payload.reason : null,
-          });
-          // Re-read /api/updates so the Settings version badge learns about this too. It is drawn
-          // from `updateStatus`, which is filled once at boot (loadAllOnce) and never again — so
-          // an announcement that arrived while the dashboard was open used to leave the bell
-          // offering an update the Version row still said did not exist. Owner-only, same gate as
-          // the boot check; single-flight, and the daemon caches the answer for 5 minutes.
-          if (!isGuest.value) void checkForUpdate();
-        } else if (event.value === "auto_update_applying") {
-          autoUpdateApplying.value = true;
-        } else if (event.value === "auto_update_restarting") {
-          autoUpdateApplying.value = false;
-          autoUpdateRestarting.value = true;
-        } else if (event.value === "daemon_status") {
-          // daemon_status is a PATCH, not a snapshot. The relay announces after the tunnel comes
-          // up and emits only relay fields; treating an absent tunnelUrl as null erased the healthy
-          // quick-tunnel URL and left the UI spinning forever.
-          if (payload.tunnelUrl !== undefined) {
-            tunnelUrl.value = typeof payload.tunnelUrl === "string" ? payload.tunnelUrl : null;
-          }
-          if (typeof payload.tunnelActive === "boolean") tunnelActive.value = payload.tunnelActive;
-          // A tunnel that came up or went away re-announces (or invalidates) the permanent link,
-          // so the relay's registered state rides the same event rather than needing a poll.
-          if (payload.relayUrl !== undefined) relayUrl.value = (payload.relayUrl as string | null) ?? null;
-          if (typeof payload.relayAnnounced === "boolean") relayAnnounced.value = payload.relayAnnounced;
-          rememberRelayHome(relayUrl.value, relayAnnounced.value);
-          if (payload.relayError !== undefined) {
-            relayError.value =
-              typeof payload.relayError === "string" ? payload.relayError : null;
-          }
-          if (payload.relay) relayConfig.value = payload.relay as RelayStatus;
-        } else if (event.value === "settings_changed") {
-          if (typeof payload.diffStats === "boolean") diffStatsEnabled.value = payload.diffStats;
-          if (payload.changesStatDisplay === "numbers" || payload.changesStatDisplay === "bars") {
-            changesStatDisplay.value = payload.changesStatDisplay;
-          }
-          if (typeof payload.changesChars === "boolean") changesCharsEnabled.value = payload.changesChars;
-          if (typeof payload.remoteEditing === "boolean") remoteEditing.value = payload.remoteEditing;
-          if (typeof payload.remoteBrowse === "boolean") remoteBrowse.value = payload.remoteBrowse;
-          if (typeof payload.diffPatchBytes === "number") diffPatchBytes.value = payload.diffPatchBytes;
-          if (typeof payload.diffPatchEnabled === "boolean") diffPatchEnabled.value = payload.diffPatchEnabled;
-          if (typeof payload.syncCheck === "boolean") syncCheckEnabled.value = payload.syncCheck;
-          if (typeof payload.syncIntervalSecs === "number") syncIntervalSecs.value = payload.syncIntervalSecs;
-          if (typeof payload.keepInSync === "boolean") keepInSync.value = payload.keepInSync;
-          if (typeof payload.autoCommit === "boolean") autoCommit.value = payload.autoCommit;
-          if (typeof payload.autoUpdate === "boolean") autoUpdate.value = payload.autoUpdate;
-          if (typeof payload.updateNotify === "boolean") updateNotify.value = payload.updateNotify;
-          if (payload.autoCommitMode === "interval" || payload.autoCommitMode === "daily")
-            autoCommitMode.value = payload.autoCommitMode;
-          if (typeof payload.autoCommitIntervalSecs === "number")
-            autoCommitIntervalSecs.value = payload.autoCommitIntervalSecs;
-          if (typeof payload.autoCommitAt === "string") autoCommitAt.value = payload.autoCommitAt;
-          if (typeof payload.autoCommitPull === "boolean") autoCommitPull.value = payload.autoCommitPull;
-          if (typeof payload.autoCommitPush === "boolean") autoCommitPush.value = payload.autoCommitPush;
-          if (payload.autoCommitAiFallback === "skip" || payload.autoCommitAiFallback === "basic")
-            autoCommitAiFallback.value = payload.autoCommitAiFallback;
-          if (typeof payload.autoScan === "boolean") autoScan.value = payload.autoScan;
-          if (typeof payload.loreServersEnabled === "boolean") loreServersEnabled.value = payload.loreServersEnabled;
-          if (typeof payload.portableMode === "boolean") portableMode.value = payload.portableMode;
-          if (typeof payload.hideTrayIcon === "boolean") hideTrayIcon.value = payload.hideTrayIcon;
-          if (typeof payload.mcpApprovalGate === "boolean") mcpApprovalGate.value = payload.mcpApprovalGate;
-          if (typeof payload.mcpApprovalTimeoutSecs === "number")
-            mcpApprovalTimeoutSecs.value = payload.mcpApprovalTimeoutSecs;
-          if (typeof payload.mcpAutoDeny === "boolean") mcpAutoDeny.value = payload.mcpAutoDeny;
-          if (typeof payload.mcpAutoApprove === "boolean") mcpAutoApprove.value = payload.mcpAutoApprove;
-          if (typeof payload.mcpAutoApproveTimeoutSecs === "number")
-            mcpAutoApproveTimeoutSecs.value = payload.mcpAutoApproveTimeoutSecs;
-          // defaultEditor is broadcast as string|null (present only when it changed) — a null is
-          // a legitimate "cleared" value, so gate on the key existing, not on truthiness.
-          if (payload.defaultEditor !== undefined) {
-            defaultEditor.value = (payload.defaultEditor as string | null) ?? null;
-            // The stored pref just changed elsewhere (another tab/device) → the resolved
-            // effectiveEditor (drives the Open-with dropdown's "current default" check) is now
-            // stale. Re-fetch the catalogue, but only for a tab that already uses it.
-            if (editorsLoaded.value) void loadEditors(true);
-          }
-          if (payload.tunnel) tunnelConfig.value = payload.tunnel as TunnelStatus;
-          if (payload.relay) relayConfig.value = payload.relay as RelayStatus;
-          // The daemon applied a pulled cloud-sync doc (possibly from another device) — re-fetch
-          // status and re-apply the synced appearance (loadSyncStatus applies it internally).
-          if (payload.cloudSync) void loadSyncStatus();
-        } else if (event.value === "approval_pending") {
-          // A headless agent's mutating MCP call is now awaiting owner approve/deny.
-          addPendingApproval(payload as PendingApproval);
-        } else if (event.value === "approval_resolved") {
-          // Approved/denied/timed out — elsewhere (another tab) or by the auto-deny/approve timer.
-          removePendingApproval(payload.id);
-        } else if (event.value === "collaboration_snapshots_changed") {
-          // Snapshot arrival and expiry are daemon events. This replaces a 2.5s HTTP poll in
-          // every open tab while still removing a peer promptly when its heartbeat expires.
-          if (Array.isArray(payload.snapshots))
-            collaborationSnapshots.value = payload.snapshots as CollaborationSnapshot[];
-        } else if (event.value === "ai_key_invalid") {
-          // The startup key-liveness check found a configured AI provider's key was rejected.
-          notifyAiKeyInvalid(
-            typeof payload.label === "string" && payload.label ? payload.label : String(payload.provider ?? ""),
-          );
-        } else if (event.value === "scan_started") {
-          // A rescan began (from the modal, or another device) — reset the live counters.
-          scanning.value = true;
-          scanDone.value = false;
-          lastScanCancelled.value = false;
-          scanFound.value = 0;
-          scanNew.value = 0;
-          scanNewRepos.value = [];
-          collectingScanRepos.value = true;
-        } else if (event.value === "scan_progress") {
-          if (typeof payload.found === "number") scanFound.value = payload.found;
-          if (typeof payload.added === "number") scanNew.value = payload.added;
-        } else if (event.value === "scan_done" || event.value === "scan_cancelled") {
-          // Force in whatever `repo_added` events are still sitting in the insert buffer — the
-          // scan can finish between animation frames, and the summary/review list below reads
-          // straight off `repos.value`/`scanNewRepos`, which must already reflect every find.
-          flushPendingRepoInserts();
-          scanning.value = false;
-          scanDone.value = true;
-          collectingScanRepos.value = false;
-          lastScanCancelled.value = event.value === "scan_cancelled";
-          if (typeof payload.found === "number") scanFound.value = payload.found;
-          if (typeof payload.added === "number") scanNew.value = payload.added;
-          // Surface genuinely-new projects even if the scan was stopped early.
-          if (typeof payload.added === "number") notifyNewProjects(payload.added);
+        if (!raw || !event.value) return;
+        try {
+          dispatchSseEvent(event.value, JSON.parse(raw), eventCtx);
+        } catch {
+          /* ignore malformed frame */
         }
-      } catch {
-        /* ignore malformed frame */
-      }
       }),
     ];
   }
@@ -1407,3 +1269,416 @@ export const useStore = defineStore("repoyeti", () => {
     setAccountIdentity,
   };
 });
+
+// ─── SSE event dispatch ────────────────────────────────────────────────────────
+//
+// The daemon's /api/events stream (connect(), above) used to decide what each event type does
+// in one 250-line if/else-if chain, closing directly over every ref and action the store
+// exposes. That made the whole thing one function as far as any complexity check is concerned,
+// no matter how the branches inside it were named. Below is the same logic, unchanged, as one
+// module-level named function per event — genuinely dedented, not closures nested inside
+// connect() — plus the bundle of refs/actions they need (SseEventCtx) built once per connect()
+// call and threaded through explicitly instead of captured.
+
+/** Everything an SSE event handler might touch. Built once in connect() (see above) from that
+ *  closure's live refs/actions and passed to every handler below — a plain data bundle, not a
+ *  live subscription, so this typing exists purely to keep each handler's own footprint honest. */
+type SseEventCtx = Pick<
+  ReturnType<typeof useRepoActions>,
+  "getRepoStatus" | "hasRepo" | "patchRepo" | "queueRepoAdded" | "flushPendingRepoInserts"
+> &
+  Pick<ReturnType<typeof useIdentities>, "identityRules"> &
+  Pick<
+    ReturnType<typeof useSettings>,
+    | "notifyUpdateAvailable"
+    | "reconcileBehindNotification"
+    | "notifyBehind"
+    | "notifySynced"
+    | "notifyAutoCommitted"
+    | "notifyAutoCommitBlocked"
+    | "notifyNewProjects"
+    | "notifyAiKeyInvalid"
+    | "addPendingApproval"
+    | "removePendingApproval"
+    | "loadEditors"
+    | "loadSyncStatus"
+  > &
+  Pick<ReturnType<typeof useSelfUpdate>, "checkForUpdate"> & {
+    repos: Ref<Repo[]>;
+    collaborationSnapshots: Ref<CollaborationSnapshot[]>;
+    autoUpdateApplying: Ref<boolean>;
+    autoUpdateRestarting: Ref<boolean>;
+    tunnelUrl: Ref<string | null>;
+    tunnelActive: Ref<boolean>;
+    tunnelConfig: Ref<TunnelStatus>;
+    relayUrl: Ref<string | null>;
+    relayAnnounced: Ref<boolean>;
+    relayError: Ref<string | null>;
+    relayConfig: Ref<RelayStatus>;
+    diffStatsEnabled: Ref<boolean>;
+    changesStatDisplay: Ref<ChangesStatDisplay>;
+    changesCharsEnabled: Ref<boolean>;
+    remoteEditing: Ref<boolean>;
+    remoteBrowse: Ref<boolean>;
+    diffPatchBytes: Ref<number>;
+    diffPatchEnabled: Ref<boolean>;
+    syncCheckEnabled: Ref<boolean>;
+    syncIntervalSecs: Ref<number>;
+    keepInSync: Ref<boolean>;
+    autoCommit: Ref<boolean>;
+    autoUpdate: Ref<boolean>;
+    updateNotify: Ref<boolean>;
+    autoCommitMode: Ref<"interval" | "daily">;
+    autoCommitIntervalSecs: Ref<number>;
+    autoCommitAt: Ref<string>;
+    autoCommitPull: Ref<boolean>;
+    autoCommitPush: Ref<boolean>;
+    autoCommitAiFallback: Ref<"skip" | "basic">;
+    autoScan: Ref<boolean>;
+    loreServersEnabled: Ref<boolean>;
+    portableMode: Ref<boolean>;
+    hideTrayIcon: Ref<boolean>;
+    mcpApprovalGate: Ref<boolean>;
+    mcpApprovalTimeoutSecs: Ref<number>;
+    mcpAutoDeny: Ref<boolean>;
+    mcpAutoApprove: Ref<boolean>;
+    mcpAutoApproveTimeoutSecs: Ref<number>;
+    defaultEditor: Ref<string | null>;
+    editorsLoaded: Ref<boolean>;
+    scanning: Ref<boolean>;
+    scanFound: Ref<number>;
+    scanNew: Ref<number>;
+    scanDone: Ref<boolean>;
+    lastScanCancelled: Ref<boolean>;
+    scanNewRepos: Ref<Array<{ id: string; name: string; absPath: string }>>;
+    collectingScanRepos: Ref<boolean>;
+    isGuest: ComputedRef<boolean>;
+    clearRepoCaches: (repoId: string) => void;
+    bumpHistoryRevision: (repoId: string) => void;
+    isHistoryRelevantStatusChange: (previous: Repo["status"], next: Repo["status"]) => boolean;
+  };
+
+function handleRepoStateChanged(payload: any, ctx: SseEventCtx): void {
+  const previousStatus = ctx.getRepoStatus(payload.id);
+  const nextStatus = (payload.status as Repo["status"] | undefined) ?? null;
+  ctx.patchRepo(payload.id, { status: nextStatus });
+  if (ctx.isHistoryRelevantStatusChange(previousStatus, nextStatus)) {
+    ctx.bumpHistoryRevision(payload.id);
+  }
+  // Behind notifications are snapshots of a condition whose source of truth is the live
+  // repo status. Every pull/fetch/refresh reaches this event, even if it did not start
+  // from the notification, so keep its count current and retire it at zero. A failed
+  // status read reports zero as a fallback; do not treat that unknown state as resolved.
+  if (payload.status && !payload.status.error && typeof payload.status.behind === "number") {
+    ctx.reconcileBehindNotification(payload.id, payload.status.behind);
+  }
+}
+
+// Background discovery found a repo after boot — slot it in (or refresh in place). A
+// scan fires this once per repo it finds, so new repos are buffered and merged in one
+// batch per animation frame instead of splicing (and recomputing every dependent list)
+// once per event — see queueRepoAdded/flushPendingRepoInserts in store/repo.ts.
+function handleRepoAdded(payload: any, ctx: SseEventCtx): void {
+  const repo = payload.repo as Repo | undefined;
+  if (!repo?.id) return;
+  const isNew = !ctx.hasRepo(repo.id);
+  ctx.queueRepoAdded(repo);
+  // Only a running scan's finds go on the review list, and only ones we didn't have.
+  if (isNew && ctx.collectingScanRepos.value) {
+    ctx.scanNewRepos.value.push({ id: repo.id, name: repo.name, absPath: repo.absPath });
+  }
+}
+
+// A scan root was removed, the owner removed this repo, or — on an all-repos share link —
+// they hid it and it left this viewer's scope (src/share/events.ts translates the hide
+// into exactly this event). Drop the card live, and take the file viewer with it if it
+// was open on that repo: the drawer would otherwise sit there looking live while every
+// call it makes 404s against a repo this session can no longer reach.
+function handleRepoRemoved(payload: any, ctx: SseEventCtx): void {
+  if (!payload.id) return;
+  ctx.repos.value = ctx.repos.value.filter((r) => r.id !== payload.id);
+  ctx.clearRepoCaches(payload.id);
+  ctx.reconcileBehindNotification(payload.id, 0);
+  dismissViewerForRepo(payload.id);
+}
+
+function handleRepoRenamed(payload: any, ctx: SseEventCtx): void {
+  // Renamed on another device — adopt the new label live.
+  ctx.patchRepo(payload.id, { displayName: payload.displayName ?? null });
+}
+
+function handleRepoIdentityChanged(payload: any, ctx: SseEventCtx): void {
+  ctx.patchRepo(payload.id, { identityId: payload.identityId });
+}
+
+function handleIdentityRulesChanged(payload: any, ctx: SseEventCtx): void {
+  // Another tab/device edited the rules — adopt the fresh list live.
+  if (Array.isArray(payload.rules)) ctx.identityRules.value = payload.rules;
+}
+
+function handleRepoAccountChanged(payload: any, ctx: SseEventCtx): void {
+  ctx.patchRepo(payload.id, {
+    syncAccountHost: payload.syncAccountHost ?? null,
+    syncAccountLogin: payload.syncAccountLogin ?? null,
+  });
+}
+
+function handleRepoHiddenChanged(payload: any, ctx: SseEventCtx): void {
+  ctx.patchRepo(payload.id, { hidden: !!payload.hidden });
+}
+
+function handleRepoPinnedChanged(payload: any, ctx: SseEventCtx): void {
+  ctx.patchRepo(payload.id, { pinned: !!payload.pinned });
+}
+
+function handleRepoStarredChanged(payload: any, ctx: SseEventCtx): void {
+  ctx.patchRepo(payload.id, { starred: !!payload.starred });
+}
+
+function handleRepoAutoCommitChanged(payload: any, ctx: SseEventCtx): void {
+  ctx.patchRepo(payload.id, { autoCommit: !!payload.autoCommit });
+}
+
+function handleRepoBehind(payload: any, ctx: SseEventCtx): void {
+  // The background sync check found repos with new remote commits → warn (toast +
+  // opt-in OS notification). The amber card state arrives separately via repo_state_changed.
+  ctx.notifyBehind((payload.repos as BehindRepo[] | undefined) ?? []);
+}
+
+function handleRepoSynced(payload: any, ctx: SseEventCtx): void {
+  // "Keep in sync" auto-pulled these — quiet confirmation (the cards already updated).
+  const synced = (payload.repos as SyncedRepo[] | undefined) ?? [];
+  for (const repo of synced) {
+    if (repo.pulled > 0) ctx.bumpHistoryRevision(repo.id);
+  }
+  ctx.notifySynced(synced);
+}
+
+function handleRepoAutoCommitted(payload: any, ctx: SseEventCtx): void {
+  // The auto-commit timer committed (and maybe synced) these — quiet success toast.
+  const committed = (payload.repos as AutoCommittedRepo[] | undefined) ?? [];
+  for (const repo of committed) {
+    if (repo.commits > 0) ctx.bumpHistoryRevision(repo.id);
+  }
+  ctx.notifyAutoCommitted(committed);
+}
+
+function handleRepoAutoCommitBlocked(payload: any, ctx: SseEventCtx): void {
+  // The auto-commit timer skipped these (conflict / mid-operation / failed sync) → warn.
+  ctx.notifyAutoCommitBlocked((payload.repos as AutoCommitBlockedRepo[] | undefined) ?? []);
+}
+
+function handleUpdateAvailable(payload: any, ctx: SseEventCtx): void {
+  // The scheduled check found a newer build. This NEVER installs anything on its own
+  // (that's the separate, opt-in `autoUpdate`) — it surfaces the offer and lets the
+  // owner decide, which is the whole point of the notify/apply split.
+  ctx.notifyUpdateAvailable({
+    canApply: payload.canApply !== false,
+    reason: typeof payload.reason === "string" ? payload.reason : null,
+  });
+  // Re-read /api/updates so the Settings version badge learns about this too. It is drawn
+  // from `updateStatus`, which is filled once at boot (loadAllOnce) and never again — so
+  // an announcement that arrived while the dashboard was open used to leave the bell
+  // offering an update the Version row still said did not exist. Owner-only, same gate as
+  // the boot check; single-flight, and the daemon caches the answer for 5 minutes.
+  if (!ctx.isGuest.value) void ctx.checkForUpdate();
+}
+
+function handleAutoUpdateApplying(_payload: any, ctx: SseEventCtx): void {
+  ctx.autoUpdateApplying.value = true;
+}
+
+function handleAutoUpdateRestarting(_payload: any, ctx: SseEventCtx): void {
+  ctx.autoUpdateApplying.value = false;
+  ctx.autoUpdateRestarting.value = true;
+}
+
+function handleDaemonStatus(payload: any, ctx: SseEventCtx): void {
+  // daemon_status is a PATCH, not a snapshot. The relay announces after the tunnel comes
+  // up and emits only relay fields; treating an absent tunnelUrl as null erased the healthy
+  // quick-tunnel URL and left the UI spinning forever.
+  if (payload.tunnelUrl !== undefined) {
+    ctx.tunnelUrl.value = typeof payload.tunnelUrl === "string" ? payload.tunnelUrl : null;
+  }
+  if (typeof payload.tunnelActive === "boolean") ctx.tunnelActive.value = payload.tunnelActive;
+  // A tunnel that came up or went away re-announces (or invalidates) the permanent link,
+  // so the relay's registered state rides the same event rather than needing a poll.
+  if (payload.relayUrl !== undefined) ctx.relayUrl.value = (payload.relayUrl as string | null) ?? null;
+  if (typeof payload.relayAnnounced === "boolean") ctx.relayAnnounced.value = payload.relayAnnounced;
+  rememberRelayHome(ctx.relayUrl.value, ctx.relayAnnounced.value);
+  if (payload.relayError !== undefined) {
+    ctx.relayError.value = typeof payload.relayError === "string" ? payload.relayError : null;
+  }
+  if (payload.relay) ctx.relayConfig.value = payload.relay as RelayStatus;
+}
+
+function applyDiffSettings(payload: any, ctx: SseEventCtx): void {
+  if (typeof payload.diffStats === "boolean") ctx.diffStatsEnabled.value = payload.diffStats;
+  if (payload.changesStatDisplay === "numbers" || payload.changesStatDisplay === "bars") {
+    ctx.changesStatDisplay.value = payload.changesStatDisplay;
+  }
+  if (typeof payload.changesChars === "boolean") ctx.changesCharsEnabled.value = payload.changesChars;
+  if (typeof payload.remoteEditing === "boolean") ctx.remoteEditing.value = payload.remoteEditing;
+  if (typeof payload.remoteBrowse === "boolean") ctx.remoteBrowse.value = payload.remoteBrowse;
+  if (typeof payload.diffPatchBytes === "number") ctx.diffPatchBytes.value = payload.diffPatchBytes;
+  if (typeof payload.diffPatchEnabled === "boolean") ctx.diffPatchEnabled.value = payload.diffPatchEnabled;
+}
+
+function applySyncSettings(payload: any, ctx: SseEventCtx): void {
+  if (typeof payload.syncCheck === "boolean") ctx.syncCheckEnabled.value = payload.syncCheck;
+  if (typeof payload.syncIntervalSecs === "number") ctx.syncIntervalSecs.value = payload.syncIntervalSecs;
+  if (typeof payload.keepInSync === "boolean") ctx.keepInSync.value = payload.keepInSync;
+  // The daemon applied a pulled cloud-sync doc (possibly from another device) — re-fetch
+  // status and re-apply the synced appearance (loadSyncStatus applies it internally).
+  if (payload.cloudSync) void ctx.loadSyncStatus();
+}
+
+function applyAutoCommitSettings(payload: any, ctx: SseEventCtx): void {
+  if (typeof payload.autoCommit === "boolean") ctx.autoCommit.value = payload.autoCommit;
+  if (payload.autoCommitMode === "interval" || payload.autoCommitMode === "daily")
+    ctx.autoCommitMode.value = payload.autoCommitMode;
+  if (typeof payload.autoCommitIntervalSecs === "number")
+    ctx.autoCommitIntervalSecs.value = payload.autoCommitIntervalSecs;
+  if (typeof payload.autoCommitAt === "string") ctx.autoCommitAt.value = payload.autoCommitAt;
+  if (typeof payload.autoCommitPull === "boolean") ctx.autoCommitPull.value = payload.autoCommitPull;
+  if (typeof payload.autoCommitPush === "boolean") ctx.autoCommitPush.value = payload.autoCommitPush;
+  if (payload.autoCommitAiFallback === "skip" || payload.autoCommitAiFallback === "basic")
+    ctx.autoCommitAiFallback.value = payload.autoCommitAiFallback;
+}
+
+function applyUpdateSettings(payload: any, ctx: SseEventCtx): void {
+  if (typeof payload.autoUpdate === "boolean") ctx.autoUpdate.value = payload.autoUpdate;
+  if (typeof payload.updateNotify === "boolean") ctx.updateNotify.value = payload.updateNotify;
+}
+
+function applyMcpSettings(payload: any, ctx: SseEventCtx): void {
+  if (typeof payload.mcpApprovalGate === "boolean") ctx.mcpApprovalGate.value = payload.mcpApprovalGate;
+  if (typeof payload.mcpApprovalTimeoutSecs === "number")
+    ctx.mcpApprovalTimeoutSecs.value = payload.mcpApprovalTimeoutSecs;
+  if (typeof payload.mcpAutoDeny === "boolean") ctx.mcpAutoDeny.value = payload.mcpAutoDeny;
+  if (typeof payload.mcpAutoApprove === "boolean") ctx.mcpAutoApprove.value = payload.mcpAutoApprove;
+  if (typeof payload.mcpAutoApproveTimeoutSecs === "number")
+    ctx.mcpAutoApproveTimeoutSecs.value = payload.mcpAutoApproveTimeoutSecs;
+}
+
+function applyMiscSettings(payload: any, ctx: SseEventCtx): void {
+  if (typeof payload.autoScan === "boolean") ctx.autoScan.value = payload.autoScan;
+  if (typeof payload.loreServersEnabled === "boolean") ctx.loreServersEnabled.value = payload.loreServersEnabled;
+  if (typeof payload.portableMode === "boolean") ctx.portableMode.value = payload.portableMode;
+  if (typeof payload.hideTrayIcon === "boolean") ctx.hideTrayIcon.value = payload.hideTrayIcon;
+  // defaultEditor is broadcast as string|null (present only when it changed) — a null is
+  // a legitimate "cleared" value, so gate on the key existing, not on truthiness.
+  if (payload.defaultEditor !== undefined) {
+    ctx.defaultEditor.value = (payload.defaultEditor as string | null) ?? null;
+    // The stored pref just changed elsewhere (another tab/device) → the resolved
+    // effectiveEditor (drives the Open-with dropdown's "current default" check) is now
+    // stale. Re-fetch the catalogue, but only for a tab that already uses it.
+    if (ctx.editorsLoaded.value) void ctx.loadEditors(true);
+  }
+  if (payload.tunnel) ctx.tunnelConfig.value = payload.tunnel as TunnelStatus;
+  if (payload.relay) ctx.relayConfig.value = payload.relay as RelayStatus;
+}
+
+function handleSettingsChanged(payload: any, ctx: SseEventCtx): void {
+  applyDiffSettings(payload, ctx);
+  applySyncSettings(payload, ctx);
+  applyAutoCommitSettings(payload, ctx);
+  applyUpdateSettings(payload, ctx);
+  applyMcpSettings(payload, ctx);
+  applyMiscSettings(payload, ctx);
+}
+
+function handleApprovalPending(payload: any, ctx: SseEventCtx): void {
+  // A headless agent's mutating MCP call is now awaiting owner approve/deny.
+  ctx.addPendingApproval(payload as PendingApproval);
+}
+
+function handleApprovalResolved(payload: any, ctx: SseEventCtx): void {
+  // Approved/denied/timed out — elsewhere (another tab) or by the auto-deny/approve timer.
+  ctx.removePendingApproval(payload.id);
+}
+
+function handleCollaborationSnapshotsChanged(payload: any, ctx: SseEventCtx): void {
+  // Snapshot arrival and expiry are daemon events. This replaces a 2.5s HTTP poll in
+  // every open tab while still removing a peer promptly when its heartbeat expires.
+  if (Array.isArray(payload.snapshots))
+    ctx.collaborationSnapshots.value = payload.snapshots as CollaborationSnapshot[];
+}
+
+function handleAiKeyInvalid(payload: any, ctx: SseEventCtx): void {
+  // The startup key-liveness check found a configured AI provider's key was rejected.
+  ctx.notifyAiKeyInvalid(
+    typeof payload.label === "string" && payload.label ? payload.label : String(payload.provider ?? ""),
+  );
+}
+
+function handleScanStarted(_payload: any, ctx: SseEventCtx): void {
+  // A rescan began (from the modal, or another device) — reset the live counters.
+  ctx.scanning.value = true;
+  ctx.scanDone.value = false;
+  ctx.lastScanCancelled.value = false;
+  ctx.scanFound.value = 0;
+  ctx.scanNew.value = 0;
+  ctx.scanNewRepos.value = [];
+  ctx.collectingScanRepos.value = true;
+}
+
+function handleScanProgress(payload: any, ctx: SseEventCtx): void {
+  if (typeof payload.found === "number") ctx.scanFound.value = payload.found;
+  if (typeof payload.added === "number") ctx.scanNew.value = payload.added;
+}
+
+function handleScanFinished(payload: any, eventName: string, ctx: SseEventCtx): void {
+  // Force in whatever `repo_added` events are still sitting in the insert buffer — the
+  // scan can finish between animation frames, and the summary/review list below reads
+  // straight off `repos.value`/`scanNewRepos`, which must already reflect every find.
+  ctx.flushPendingRepoInserts();
+  ctx.scanning.value = false;
+  ctx.scanDone.value = true;
+  ctx.collectingScanRepos.value = false;
+  ctx.lastScanCancelled.value = eventName === "scan_cancelled";
+  if (typeof payload.found === "number") ctx.scanFound.value = payload.found;
+  if (typeof payload.added === "number") ctx.scanNew.value = payload.added;
+  // Surface genuinely-new projects even if the scan was stopped early.
+  if (typeof payload.added === "number") ctx.notifyNewProjects(payload.added);
+}
+
+const SSE_EVENT_HANDLERS: Record<string, (payload: any, ctx: SseEventCtx) => void> = {
+  repo_state_changed: handleRepoStateChanged,
+  repo_added: handleRepoAdded,
+  repo_removed: handleRepoRemoved,
+  repo_renamed: handleRepoRenamed,
+  repo_identity_changed: handleRepoIdentityChanged,
+  identity_rules_changed: handleIdentityRulesChanged,
+  repo_account_changed: handleRepoAccountChanged,
+  repo_hidden_changed: handleRepoHiddenChanged,
+  repo_pinned_changed: handleRepoPinnedChanged,
+  repo_starred_changed: handleRepoStarredChanged,
+  repo_auto_commit_changed: handleRepoAutoCommitChanged,
+  repo_behind: handleRepoBehind,
+  repo_synced: handleRepoSynced,
+  repo_auto_committed: handleRepoAutoCommitted,
+  repo_auto_commit_blocked: handleRepoAutoCommitBlocked,
+  update_available: handleUpdateAvailable,
+  auto_update_applying: handleAutoUpdateApplying,
+  auto_update_restarting: handleAutoUpdateRestarting,
+  daemon_status: handleDaemonStatus,
+  settings_changed: handleSettingsChanged,
+  approval_pending: handleApprovalPending,
+  approval_resolved: handleApprovalResolved,
+  collaboration_snapshots_changed: handleCollaborationSnapshotsChanged,
+  ai_key_invalid: handleAiKeyInvalid,
+  scan_started: handleScanStarted,
+  scan_progress: handleScanProgress,
+};
+
+/** Dispatch one parsed SSE frame to its handler by event name. `scan_done`/`scan_cancelled`
+ *  share one handler (it tells them apart from the name it's given), so it's not in the table. */
+function dispatchSseEvent(eventName: string, payload: any, ctx: SseEventCtx): void {
+  if (eventName === "scan_done" || eventName === "scan_cancelled") {
+    handleScanFinished(payload, eventName, ctx);
+    return;
+  }
+  const handler = SSE_EVENT_HANDLERS[eventName];
+  if (handler) handler(payload, ctx);
+}

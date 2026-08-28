@@ -341,6 +341,99 @@ export interface HandleCompleteOptions extends AuthOptions {
   jwksSet?: Parameters<typeof jwtVerify>[1];
 }
 
+/** Parse the JSON payload carried inside the signed `state` param (after `unsign` already
+ *  verified it). Split out purely so the try/catch it needs doesn't add nesting to the caller;
+ *  the caller still owns the (differently-worded) response for an `unsign` failure vs. this one. */
+function parseStatePayload(sp: string): { nonce: string; stateOrigin: string; stateRedirectUri: string } | null {
+  try {
+    const parsed = JSON.parse(sp);
+    const nonce = parsed.n as string;
+    const stateOrigin = String(parsed.o || "");
+    const stateRedirectUri = String(parsed.d || `${stateOrigin}/oauth/callback`);
+    return { nonce, stateOrigin, stateRedirectUri };
+  } catch {
+    return null;
+  }
+}
+
+/** The authorization-code → token exchange, plus its two failure responses. Returns the parsed
+ *  token set (with `id_token` guaranteed present) and the discovery doc on success, or the exact
+ *  `Response` handleComplete must return on failure — same status/body as before this was split out. */
+async function exchangeAuthCode(
+  c: Context,
+  o: OAuthConfig,
+  code: string,
+  stateRedirectUri: string,
+  verifier: string,
+  doFetch: FetchLike,
+): Promise<
+  | { ok: true; tok: { id_token: string } & OAuthTokens; doc: Awaited<ReturnType<typeof discover>> }
+  | { ok: false; response: Response }
+> {
+  const doc = await discover(o.issuer, doFetch);
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    // Must EXACTLY match the redirect_uri sent at /oauth/login. New states carry it explicitly;
+    // old local states fall back to their signed origin + /oauth/callback.
+    redirect_uri: stateRedirectUri,
+    client_id: o.clientId,
+    code_verifier: verifier,
+  });
+  if (o.clientSecret) body.set("client_secret", o.clientSecret);
+  const tr = await doFetch(doc.token_endpoint!, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!tr.ok) {
+    // Log what the IdP actually SAID. The status + OAuth error code are the entire diagnosis and
+    // they are not interchangeable: invalid_client = we presented a client_secret for a public
+    // client (or a bad one for a confidential client) — note the IdP rejects this BEFORE spending
+    // the code, so it silently repeats forever; invalid_grant = the code expired/was replayed, or
+    // PKCE failed; redirect_uri_mismatch = allowlist drift. Swallowing the body collapsed all of
+    // them into one opaque page, and telling them apart meant querying the IdP's own database.
+    // The body is an OAuth error code, never a credential, so it is safe to log.
+    const detail = (await tr.text().catch(() => "")).slice(0, 200);
+    console.error(`[repoyeti] token exchange failed: HTTP ${tr.status} ${detail}`);
+    return { ok: false, response: c.html(errPage("Token exchange with Connections failed."), 502) };
+  }
+  const tok = (await tr.json()) as { id_token?: string } & OAuthTokens;
+  if (!tok.id_token) return { ok: false, response: c.html(errPage("Connections returned no identity token."), 502) };
+  return { ok: true, tok: tok as { id_token: string } & OAuthTokens, doc };
+}
+
+/** The id_token carries only `sub` — AEGIS mints minimal-claim id_tokens (Google-style; profile
+ *  claims live at /oauth/userinfo). Fetch the display name (+ the privacy-relay email) there so
+ *  the UI shows a human name instead of the raw sub. Best-effort: a userinfo blip must never fail
+ *  an otherwise-valid owner login, so any failure just falls back to the id_token's own claims. */
+async function fetchDisplayProfile(
+  doc: { userinfo_endpoint?: string },
+  tok: OAuthTokens,
+  fallbackEmail: string,
+  doFetch: FetchLike,
+): Promise<{ name: string; displayEmail: string; picture: string }> {
+  let name = "";
+  let displayEmail = fallbackEmail;
+  let picture = "";
+  if (tok.access_token && doc.userinfo_endpoint) {
+    try {
+      const ui = await doFetch(doc.userinfo_endpoint, {
+        headers: { authorization: `Bearer ${tok.access_token}` },
+      });
+      if (ui.ok) {
+        const u = (await ui.json()) as { email?: string; name?: string; picture?: string };
+        if (u.name) name = u.name;
+        if (u.email) displayEmail = u.email;
+        if (u.picture) picture = u.picture;
+      }
+    } catch {
+      /* best-effort — the login proceeds with sub only */
+    }
+  }
+  return { name, displayEmail, picture };
+}
+
 /** Shared by /oauth/finish (stable relay return) and /oauth/callback (direct completion). */
 export async function handleComplete(
   c: Context,
@@ -354,17 +447,10 @@ export async function handleComplete(
 
   const sp = unsign(state, opts?.secret);
   if (!sp) return c.html(errPage("Invalid or tampered sign-in state."), 400);
-  let nonce: string;
-  let stateOrigin: string;
-  let stateRedirectUri: string;
-  try {
-    const parsed = JSON.parse(sp);
-    nonce = parsed.n as string;
-    stateOrigin = String(parsed.o || "");
-    stateRedirectUri = String(parsed.d || `${stateOrigin}/oauth/callback`);
-  } catch {
-    return c.html(errPage("Invalid sign-in state."), 400);
-  }
+  const statePayload = parseStatePayload(sp);
+  if (!statePayload) return c.html(errPage("Invalid sign-in state."), 400);
+  const { nonce, stateRedirectUri } = statePayload;
+
   const tx = txs.get(nonce);
   if (!tx) return c.html(errPage("This sign-in link expired. Start again."), 400);
   txs.delete(nonce);
@@ -373,36 +459,9 @@ export async function handleComplete(
   const doFetch: FetchLike = opts?.fetchImpl ?? authFetch;
 
   try {
-    const doc = await discover(o.issuer, doFetch);
-    const body = new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      // Must EXACTLY match the redirect_uri sent at /oauth/login. New states carry it explicitly;
-      // old local states fall back to their signed origin + /oauth/callback.
-      redirect_uri: stateRedirectUri,
-      client_id: o.clientId,
-      code_verifier: tx.verifier,
-    });
-    if (o.clientSecret) body.set("client_secret", o.clientSecret);
-    const tr = await doFetch(doc.token_endpoint!, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    if (!tr.ok) {
-      // Log what the IdP actually SAID. The status + OAuth error code are the entire diagnosis and
-      // they are not interchangeable: invalid_client = we presented a client_secret for a public
-      // client (or a bad one for a confidential client) — note the IdP rejects this BEFORE spending
-      // the code, so it silently repeats forever; invalid_grant = the code expired/was replayed, or
-      // PKCE failed; redirect_uri_mismatch = allowlist drift. Swallowing the body collapsed all of
-      // them into one opaque page, and telling them apart meant querying the IdP's own database.
-      // The body is an OAuth error code, never a credential, so it is safe to log.
-      const detail = (await tr.text().catch(() => "")).slice(0, 200);
-      console.error(`[repoyeti] token exchange failed: HTTP ${tr.status} ${detail}`);
-      return c.html(errPage("Token exchange with Connections failed."), 502);
-    }
-    const tok = (await tr.json()) as { id_token?: string } & OAuthTokens;
-    if (!tok.id_token) return c.html(errPage("Connections returned no identity token."), 502);
+    const exchanged = await exchangeAuthCode(c, o, code, stateRedirectUri, tx.verifier, doFetch);
+    if (!exchanged.ok) return exchanged.response;
+    const { tok, doc } = exchanged;
 
     const keySet = opts?.jwksSet ?? jwks(doc.jwks_uri!);
     const { payload } = await jwtVerify(tok.id_token, keySet, {
@@ -424,28 +483,9 @@ export async function handleComplete(
     if (!ownerMatches(o, sub, email)) {
       return c.html(errPage("This Connections account isn't the owner of this RepoYeti."), 403);
     }
-    // The id_token carries only `sub` — AEGIS mints minimal-claim id_tokens (Google-style; profile
-    // claims live at /oauth/userinfo). Fetch the display name (+ the privacy-relay email) there so the
-    // UI shows a human name instead of the raw sub. Best-effort: a userinfo blip must never fail an
-    // otherwise-valid owner login.
-    let name = "";
-    let displayEmail = email;
-    let picture = "";
-    if (tok.access_token && doc.userinfo_endpoint) {
-      try {
-        const ui = await doFetch(doc.userinfo_endpoint, {
-          headers: { authorization: `Bearer ${tok.access_token}` },
-        });
-        if (ui.ok) {
-          const u = (await ui.json()) as { email?: string; name?: string; picture?: string };
-          if (u.name) name = u.name;
-          if (u.email) displayEmail = u.email;
-          if (u.picture) picture = u.picture;
-        }
-      } catch {
-        /* best-effort — the login proceeds with sub only */
-      }
-    }
+
+    const { name, displayEmail, picture } = await fetchDisplayProfile(doc, tok, email, doFetch);
+
     // Hand the full token set to the host (if it wired the hook) AFTER the owner check, so only the
     // verified owner's tokens are ever retained. RepoYeti persists the refresh_token (keychain) so
     // the daemon can sync settings to the Connections store on the owner's behalf. Identity-only

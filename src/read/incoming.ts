@@ -210,6 +210,287 @@ function parseNumstat(line: string): { path: string; added: number; removed: num
   };
 }
 
+type IncomingEarlyOut = { ok: false; result: IncomingResult };
+
+/** Resolve the upstream. No upstream (or a detached HEAD) is a normal state, not an error. */
+async function resolveUpstream(
+  git: ReturnType<typeof gitFor>,
+): Promise<{ ok: true; upstream: string } | IncomingEarlyOut> {
+  let upstream = "";
+  try {
+    upstream = (await git.raw(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])).trim();
+  } catch {
+    return { ok: false, result: { ...empty("OK"), message: undefined } };
+  }
+  if (!upstream) return { ok: false, result: empty("OK") };
+  return { ok: true, upstream };
+}
+
+/** Capture a snapshot, or the error-shaped result to return early on failure. Shared by the
+ *  before/after capture around the multi-command preview below. */
+async function snapshotOrError(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+): Promise<{ ok: true; snapshot: IncomingSnapshot } | IncomingEarlyOut> {
+  try {
+    return { ok: true, snapshot: await captureSnapshot(git, upstream) };
+  } catch (error) {
+    return { ok: false, result: { ...incomingError(errorMessage(error)), upstream } };
+  }
+}
+
+// One command, one graph snapshot: the left count is commits reachable only from HEAD;
+// the right count is commits reachable only from the upstream. Computing these separately
+// lets a ref update between calls produce an impossible relationship and a green preview
+// that `pull --ff-only` immediately rejects.
+async function readAheadBehind(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+): Promise<{ ok: true; ahead: number; behind: number } | IncomingEarlyOut> {
+  try {
+    const counts = (await git.raw(["rev-list", "--left-right", "--count", `HEAD...${upstream}`]))
+      .trim()
+      .split(/\s+/);
+    const ahead = Number(counts[0]);
+    const behind = Number(counts[1]);
+    if (
+      counts.length < 2 ||
+      !Number.isSafeInteger(ahead) ||
+      !Number.isSafeInteger(behind) ||
+      ahead < 0 ||
+      behind < 0
+    ) {
+      throw new Error("git returned invalid ahead/behind counts");
+    }
+    return { ok: true, ahead, behind };
+  } catch (error) {
+    return {
+      ok: false,
+      result: {
+        ...empty("ERROR", errorMessage(error)),
+        upstream,
+        noUpstream: false,
+        relation: "unknown",
+        pullDisposition: "unknown",
+      },
+    };
+  }
+}
+
+/** Parse `log HEAD..@{u} --numstat` rows into ordered LogEntry rows, folding each commit's
+ *  numstat lines into its own stat totals. Same field layout as readLog (subject last so an
+ *  odd character can't shift a field). */
+function parseIncomingCommits(rawLog: string): LogEntry[] {
+  const commits: LogEntry[] = [];
+  for (const line of rawLog.split("\n")) {
+    if (line.trim() === "") continue;
+    if (line.includes(US)) {
+      const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", subject = ""] =
+        line.split(US);
+      const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
+      commits.push({
+        hash, shortHash, subject, authorName, authorEmail,
+        date: Number(at) * 1000,
+        refs: refs.trim(),
+        parents,
+        isMerge: parents.length > 1,
+        stat: { filesChanged: 0, addedLines: 0, removedLines: 0 },
+      });
+      continue;
+    }
+    const current = commits.at(-1);
+    if (!current?.stat) continue;
+    const row = parseNumstat(line);
+    if (!row) continue;
+    current.stat.filesChanged += 1;
+    current.stat.addedLines += row.added;
+    current.stat.removedLines += row.removed;
+  }
+  return commits;
+}
+
+/** ── the commits you don't have ──────────────────────────────────────────────── */
+async function readIncomingCommits(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+): Promise<{ commits: LogEntry[]; commitsTruncated: boolean }> {
+  const fmt = ["%H", "%h", "%an", "%ae", "%at", "%P", "%D", "%s"].join(US);
+  let rawLog = "";
+  try {
+    rawLog = await git.raw([
+      "log",
+      "--no-color",
+      `--max-count=${MAX_INCOMING_COMMITS + 1}`, // +1 so we can detect truncation
+      "--numstat",
+      `--pretty=format:${fmt}`,
+      `HEAD..${upstream}`,
+    ]);
+  } catch {
+    rawLog = ""; // unborn HEAD, or an upstream that points at nothing yet
+  }
+  const commits = parseIncomingCommits(rawLog);
+  const commitsTruncated = commits.length > MAX_INCOMING_COMMITS;
+  if (commitsTruncated) commits.length = MAX_INCOMING_COMMITS;
+  return { commits, commitsTruncated };
+}
+
+/** Status letters keyed by path, from a `--name-status` pass over the same range as the numstat
+ *  pass below. Best-effort: a nicety layered onto the numstat totals, which are the substance. */
+async function readIncomingFileStatuses(git: ReturnType<typeof gitFor>, upstream: string): Promise<Map<string, string>> {
+  const statusByPath = new Map<string, string>();
+  try {
+    const rawStatus = await git.raw(["diff", "--name-status", "--no-color", `HEAD...${upstream}`]);
+    for (const l of rawStatus.split("\n")) {
+      const t = l.trim();
+      if (!t) continue;
+      const parts = t.split("\t");
+      const letter = (parts[0] ?? "M")[0] ?? "M";
+      const path = letter === "R" || letter === "C" ? (parts[2] ?? "") : (parts[1] ?? "");
+      if (path) statusByPath.set(path, letter);
+    }
+  } catch {
+    /* status letters are a nicety; the numstat below is the substance */
+  }
+  return statusByPath;
+}
+
+/** The numstat pass itself. Mutates `stat` in place (even on a caught failure mid-loop, matching
+ *  the original inline behavior) so the caller's running total reflects whatever was parsed. */
+async function readIncomingFiles(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+  statusByPath: Map<string, string>,
+  stat: CommitStat,
+): Promise<IncomingFile[]> {
+  try {
+    const rawNum = await git.raw(["diff", "--numstat", "--no-color", `HEAD...${upstream}`]);
+    const all: IncomingFile[] = [];
+    for (const l of rawNum.split("\n")) {
+      if (l.trim() === "") continue;
+      const row = parseNumstat(l);
+      if (!row) continue;
+      stat.filesChanged += 1;
+      stat.addedLines += row.added;
+      stat.removedLines += row.removed;
+      all.push({
+        path: row.path,
+        status: statusByPath.get(row.path) ?? "M",
+        addedLines: row.added,
+        removedLines: row.removed,
+        binary: row.binary,
+      });
+    }
+    return all.slice(0, MAX_INCOMING_FILES);
+  } catch {
+    /* leave files empty; the commit list still tells the story */
+    return [];
+  }
+}
+
+/** ── the net file effect ─────────────────────────────────────────────────────── Three dots:
+ *  compare the upstream tip against the MERGE BASE, not against HEAD. Two dots would also
+ *  report your own local-only commits inverted, which is not what a pull brings. */
+async function readIncomingFileEffect(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+  hasIncoming: boolean,
+): Promise<{ files: IncomingFile[]; stat: CommitStat }> {
+  const stat: CommitStat = { filesChanged: 0, addedLines: 0, removedLines: 0 };
+  if (!hasIncoming) return { files: [], stat };
+  // status letters and line counts come from two passes over the same range, keyed by path
+  const statusByPath = await readIncomingFileStatuses(git, upstream);
+  const files = await readIncomingFiles(git, upstream, statusByPath, stat);
+  return { files, stat };
+}
+
+// Commit-graph safety is not enough: a fast-forward can still be refused when an
+// uncommitted or staged path overlaps an incoming change. `read-tree -n` runs git's
+// unpack/checkout safety checks without updating either the index or working tree,
+// so this mirrors the important part of `pull --ff-only` without performing the pull.
+async function checkFastForwardSafety(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+): Promise<{ pullDisposition: IncomingResult["pullDisposition"]; dispositionMessage?: string }> {
+  try {
+    await git.raw(["read-tree", "-n", "-m", "-u", "HEAD", upstream]);
+    return { pullDisposition: "ready_fast_forward" };
+  } catch (error) {
+    if (isWouldOverwrite(error)) return { pullDisposition: "blocked_would_overwrite" };
+    // Fail closed. A preflight Git/version/environment failure must never become a
+    // reassuring green state just because it was not one of the expected overlap forms.
+    return {
+      pullDisposition: "unknown",
+      dispositionMessage: "could not verify whether the fast-forward is safe for the working tree",
+    };
+  }
+}
+
+async function checkDivergedMerge(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+): Promise<{ conflicts: string[]; conflictCheck: boolean }> {
+  try {
+    // Output shape (git's documented `--write-tree` format):
+    //   <OID of the merged toplevel tree>
+    //   <one conflicted path per line, from --name-only>
+    //   <blank line>
+    //   <informational messages, e.g. "CONFLICT (content): ...">
+    // A clean merge emits the OID and nothing else. Parse the path block rather than the
+    // human-readable CONFLICT lines: the block is machine-oriented and stable, whereas
+    // those messages are prose that varies by conflict type. Note simple-git RESOLVES
+    // here even though git exits 1 on conflicts, so the exit code is not available to us
+    // and the output is the only signal.
+    const out = await git.raw(["merge-tree", "--write-tree", "--name-only", "HEAD", upstream]);
+    const lines = out.split("\n");
+    const paths: string[] = [];
+    for (const line of lines.slice(1)) {
+      if (line.trim() === "") break; // blank line closes the conflicted-path block
+      paths.push(line);
+    }
+    return { conflicts: paths, conflictCheck: true };
+  } catch {
+    // Old git without --write-tree (or the merge could not be simulated at all). Say so
+    // rather than reporting a clean merge we never actually checked.
+    return { conflicts: [], conflictCheck: false };
+  }
+}
+
+/** ── would it conflict? ──────────────────────────────────────────────────────── `merge-tree
+ *  --write-tree` performs the whole merge against the object store and writes the result as a
+ *  tree object. It never reads or writes the working tree or the index, so this is safe to run
+ *  on a dirty repo. Older git lacks --write-tree entirely, hence conflictCheck. */
+async function evaluateConflictRisk(
+  git: ReturnType<typeof gitFor>,
+  upstream: string,
+  relation: IncomingResult["relation"],
+  hasIncoming: boolean,
+): Promise<{
+  conflicts: string[];
+  conflictCheck: boolean;
+  pullDisposition: IncomingResult["pullDisposition"];
+  dispositionMessage?: string;
+}> {
+  const fastForward = relation === "behind_fast_forward";
+  let pullDisposition: IncomingResult["pullDisposition"] =
+    relation === "diverged" ? "blocked_non_fast_forward" : fastForward ? "unknown" : "noop";
+  let dispositionMessage: string | undefined;
+  let conflicts: string[] = [];
+  let conflictCheck = false;
+
+  if (hasIncoming && fastForward) {
+    conflictCheck = true; // no commit-level merge is required for a fast-forward
+    const probe = await checkFastForwardSafety(git, upstream);
+    pullDisposition = probe.pullDisposition;
+    dispositionMessage = probe.dispositionMessage;
+  } else if (hasIncoming && relation === "diverged") {
+    const probe = await checkDivergedMerge(git, upstream);
+    conflicts = probe.conflicts;
+    conflictCheck = probe.conflictCheck;
+  }
+
+  return { conflicts, conflictCheck, pullDisposition, dispositionMessage };
+}
+
 /**
  * Everything a pull would bring in. Reflects the last fetch: if nothing has fetched recently the
  * answer is simply "nothing incoming", which is why callers fetch first (see the service layer).
@@ -219,225 +500,37 @@ export async function readIncoming(absPath: string): Promise<IncomingResult> {
     return await readGate.run(async () => {
       const git = gitFor(absPath);
 
-      // Resolve the upstream. No upstream (or a detached HEAD) is a normal state, not an error.
-      let upstream = "";
-      try {
-        upstream = (await git.raw(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])).trim();
-      } catch {
-        return { ...empty("OK"), message: undefined };
-      }
-      if (!upstream) return empty("OK");
+      const upstreamResult = await resolveUpstream(git);
+      if (!upstreamResult.ok) return upstreamResult.result;
+      const { upstream } = upstreamResult;
 
       // Capture before and after the multi-command preview. `readGate` limits child-process
       // fan-out but does not serialize this read with every external Git/file-system mutation.
       // If anything relevant changes mid-read, fail closed instead of returning data assembled
       // from two different repository states.
-      let initialSnapshot: IncomingSnapshot;
-      try {
-        initialSnapshot = await captureSnapshot(git, upstream);
-      } catch (error) {
-        return {
-          ...incomingError(errorMessage(error)),
-          upstream,
-        };
-      }
+      const initial = await snapshotOrError(git, upstream);
+      if (!initial.ok) return initial.result;
+      const initialSnapshot = initial.snapshot;
 
-      // One command, one graph snapshot: the left count is commits reachable only from HEAD;
-      // the right count is commits reachable only from the upstream. Computing these separately
-      // lets a ref update between calls produce an impossible relationship and a green preview
-      // that `pull --ff-only` immediately rejects.
-      let ahead = 0;
-      let behind = 0;
-      try {
-        const counts = (await git.raw(["rev-list", "--left-right", "--count", `HEAD...${upstream}`]))
-          .trim()
-          .split(/\s+/);
-        ahead = Number(counts[0]);
-        behind = Number(counts[1]);
-        if (
-          counts.length < 2 ||
-          !Number.isSafeInteger(ahead) ||
-          !Number.isSafeInteger(behind) ||
-          ahead < 0 ||
-          behind < 0
-        ) {
-          throw new Error("git returned invalid ahead/behind counts");
-        }
-      } catch (error) {
-        return {
-          ...empty("ERROR", errorMessage(error)),
-          upstream,
-          noUpstream: false,
-          relation: "unknown",
-          pullDisposition: "unknown",
-        };
-      }
+      const counts = await readAheadBehind(git, upstream);
+      if (!counts.ok) return counts.result;
+      const { ahead, behind } = counts;
       const relation = relationship(ahead, behind);
       const hasIncoming = behind > 0;
 
-      // ── the commits you don't have ────────────────────────────────────────────────
-      // Same field layout as readLog (subject last so an odd character can't shift a field),
-      // with --numstat folded in for the per-commit totals the history table already shows.
-      const fmt = ["%H", "%h", "%an", "%ae", "%at", "%P", "%D", "%s"].join(US);
-      let rawLog = "";
-      try {
-        rawLog = await git.raw([
-          "log",
-          "--no-color",
-          `--max-count=${MAX_INCOMING_COMMITS + 1}`, // +1 so we can detect truncation
-          "--numstat",
-          `--pretty=format:${fmt}`,
-          `HEAD..${upstream}`,
-        ]);
-      } catch {
-        rawLog = ""; // unborn HEAD, or an upstream that points at nothing yet
-      }
-      const commits: LogEntry[] = [];
-      for (const line of rawLog.split("\n")) {
-        if (line.trim() === "") continue;
-        if (line.includes(US)) {
-          const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", subject = ""] =
-            line.split(US);
-          const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
-          commits.push({
-            hash, shortHash, subject, authorName, authorEmail,
-            date: Number(at) * 1000,
-            refs: refs.trim(),
-            parents,
-            isMerge: parents.length > 1,
-            stat: { filesChanged: 0, addedLines: 0, removedLines: 0 },
-          });
-          continue;
-        }
-        const current = commits.at(-1);
-        if (!current?.stat) continue;
-        const row = parseNumstat(line);
-        if (!row) continue;
-        current.stat.filesChanged += 1;
-        current.stat.addedLines += row.added;
-        current.stat.removedLines += row.removed;
-      }
-      const commitsTruncated = commits.length > MAX_INCOMING_COMMITS;
-      if (commitsTruncated) commits.length = MAX_INCOMING_COMMITS;
-
-      // ── the net file effect ───────────────────────────────────────────────────────
-      // Three dots: compare the upstream tip against the MERGE BASE, not against HEAD. Two dots
-      // would also report your own local-only commits inverted, which is not what a pull brings.
-      let files: IncomingFile[] = [];
-      const stat: CommitStat = { filesChanged: 0, addedLines: 0, removedLines: 0 };
-      if (hasIncoming) {
-        // status letters and line counts come from two passes over the same range, keyed by path
-        const statusByPath = new Map<string, string>();
-        try {
-          const rawStatus = await git.raw(["diff", "--name-status", "--no-color", `HEAD...${upstream}`]);
-          for (const l of rawStatus.split("\n")) {
-            const t = l.trim();
-            if (!t) continue;
-            const parts = t.split("\t");
-            const letter = (parts[0] ?? "M")[0] ?? "M";
-            const path = letter === "R" || letter === "C" ? (parts[2] ?? "") : (parts[1] ?? "");
-            if (path) statusByPath.set(path, letter);
-          }
-        } catch {
-          /* status letters are a nicety; the numstat below is the substance */
-        }
-        try {
-          const rawNum = await git.raw(["diff", "--numstat", "--no-color", `HEAD...${upstream}`]);
-          const all: IncomingFile[] = [];
-          for (const l of rawNum.split("\n")) {
-            if (l.trim() === "") continue;
-            const row = parseNumstat(l);
-            if (!row) continue;
-            stat.filesChanged += 1;
-            stat.addedLines += row.added;
-            stat.removedLines += row.removed;
-            all.push({
-              path: row.path,
-              status: statusByPath.get(row.path) ?? "M",
-              addedLines: row.added,
-              removedLines: row.removed,
-              binary: row.binary,
-            });
-          }
-          files = all.slice(0, MAX_INCOMING_FILES);
-        } catch {
-          /* leave files empty; the commit list still tells the story */
-        }
-      }
-
-      // ── would it conflict? ────────────────────────────────────────────────────────
-      // `merge-tree --write-tree` performs the whole merge against the object store and writes
-      // the result as a tree object. It never reads or writes the working tree or the index, so
-      // this is safe to run on a dirty repo. Non-zero exit means conflicts; the "CONFLICT (...)"
-      // lines name the paths. Older git lacks --write-tree entirely, hence conflictCheck.
-      let conflicts: string[] = [];
-      let conflictCheck = false;
+      const { commits, commitsTruncated } = await readIncomingCommits(git, upstream);
+      const { files, stat } = await readIncomingFileEffect(git, upstream, hasIncoming);
+      const { conflicts, conflictCheck, pullDisposition, dispositionMessage } = await evaluateConflictRisk(
+        git,
+        upstream,
+        relation,
+        hasIncoming,
+      );
       const fastForward = relation === "behind_fast_forward";
-      let pullDisposition: IncomingResult["pullDisposition"] =
-        relation === "diverged"
-          ? "blocked_non_fast_forward"
-          : relation === "behind_fast_forward"
-            ? "unknown"
-            : "noop";
-      let dispositionMessage: string | undefined;
-      if (hasIncoming) {
-        if (fastForward) {
-          // Commit-graph safety is not enough: a fast-forward can still be refused when an
-          // uncommitted or staged path overlaps an incoming change. `read-tree -n` runs git's
-          // unpack/checkout safety checks without updating either the index or working tree,
-          // so this mirrors the important part of `pull --ff-only` without performing the pull.
-          conflictCheck = true; // no commit-level merge is required for a fast-forward
-          try {
-            await git.raw(["read-tree", "-n", "-m", "-u", "HEAD", upstream]);
-            pullDisposition = "ready_fast_forward";
-          } catch (error) {
-            if (isWouldOverwrite(error)) {
-              pullDisposition = "blocked_would_overwrite";
-            } else {
-              // Fail closed. A preflight Git/version/environment failure must never become a
-              // reassuring green state just because it was not one of the expected overlap forms.
-              pullDisposition = "unknown";
-              dispositionMessage = "could not verify whether the fast-forward is safe for the working tree";
-            }
-          }
-        } else if (relation === "diverged") {
-          try {
-            // Output shape (git's documented `--write-tree` format):
-            //   <OID of the merged toplevel tree>
-            //   <one conflicted path per line, from --name-only>
-            //   <blank line>
-            //   <informational messages, e.g. "CONFLICT (content): ...">
-            // A clean merge emits the OID and nothing else. Parse the path block rather than the
-            // human-readable CONFLICT lines: the block is machine-oriented and stable, whereas
-            // those messages are prose that varies by conflict type. Note simple-git RESOLVES
-            // here even though git exits 1 on conflicts, so the exit code is not available to us
-            // and the output is the only signal.
-            const out = await git.raw(["merge-tree", "--write-tree", "--name-only", "HEAD", upstream]);
-            conflictCheck = true;
-            const lines = out.split("\n");
-            const paths: string[] = [];
-            for (const line of lines.slice(1)) {
-              if (line.trim() === "") break; // blank line closes the conflicted-path block
-              paths.push(line);
-            }
-            conflicts = paths;
-          } catch {
-            // Old git without --write-tree (or the merge could not be simulated at all). Say so
-            // rather than reporting a clean merge we never actually checked.
-            conflictCheck = false;
-          }
-        }
-      }
 
-      let snapshot: IncomingSnapshot;
-      try {
-        snapshot = await captureSnapshot(git, upstream);
-      } catch (error) {
-        return {
-          ...incomingError(errorMessage(error)),
-          upstream,
-        };
-      }
+      const final = await snapshotOrError(git, upstream);
+      if (!final.ok) return final.result;
+      const snapshot = final.snapshot;
       if (snapshot.token !== initialSnapshot.token) {
         return {
           ...incomingError("repository changed while the pull preview was being checked"),
