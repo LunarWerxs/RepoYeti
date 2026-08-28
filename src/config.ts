@@ -977,89 +977,98 @@ export function saveConfig(cfg: RepoYetiConfig): void {
   }
 }
 
-/**
- * Load secrets from the OS keychain into the in-memory config, and MIGRATE any secrets
- * still sitting in a legacy plaintext config.json into the keychain (then re-save to strip
- * them). Call once at daemon boot, before serving, so every sync call site (resolveApiKey,
- * redactAi, …) sees the hydrated key without becoming async. Idempotent + best-effort: on a
- * keychain-less host it leaves the plaintext config untouched.
- */
-export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
+/** Hydrate/migrate AI provider API keys. Returns whether anything was migrated. */
+async function hydrateAiProviderSecrets(cfg: RepoYetiConfig): Promise<boolean> {
   let migrated = false;
-
-  if (cfg.ai?.providers) {
-    for (const [id, p] of Object.entries(cfg.ai.providers)) {
-      if (!p) continue;
-      if (id === "compatible" && p.noAuth === true) {
-        // A loopback endpoint explicitly connected without auth must stay keyless across restarts.
-        // Clear a stale credential left by an older/keyed configuration instead of silently
-        // re-hydrating it and sending an Authorization header the owner no longer expects.
-        if (p.apiKey) {
-          delete p.apiKey;
-          migrated = true;
-        }
-        await deleteSecret(aiKeyName(id));
-        continue;
-      }
+  if (!cfg.ai?.providers) return migrated;
+  for (const [id, p] of Object.entries(cfg.ai.providers)) {
+    if (!p) continue;
+    if (id === "compatible" && p.noAuth === true) {
+      // A loopback endpoint explicitly connected without auth must stay keyless across restarts.
+      // Clear a stale credential left by an older/keyed configuration instead of silently
+      // re-hydrating it and sending an Authorization header the owner no longer expects.
       if (p.apiKey) {
-        // Legacy plaintext key on disk → move it into the keychain (then it gets stripped).
-        if (await setSecret(aiKeyName(id), p.apiKey)) migrated = true;
-      } else {
-        // No key in memory → hydrate from the keychain if one is stored.
-        const k = await getSecret(aiKeyName(id));
-        if (k) p.apiKey = k;
-      }
-    }
-  }
-
-  if (cfg.oauth) {
-    // The baked-in Connections client is PUBLIC (PKCE is its only proof): AEGIS registers it with
-    // token_endpoint_auth_method "none" and no secret hash, and its token endpoint refuses any
-    // exchange that PRESENTS a client_secret — with invalid_client, BEFORE it consumes the code, so
-    // every sign-in dies at /oauth/callback while the code sits unspent. The old GitMob callback
-    // registered this SAME client_id as confidential, so its secret can still be in the keychain —
-    // and getSecret() re-homes it out of the old "gitmob" service, which is how a dead credential
-    // reaches a client that must never send one. AEGIS kept no hash to verify it against: it is
-    // unusable by construction, so purge it rather than re-attach it. A user's OWN confidential
-    // client (their own issuer/clientId) is untouched and still hydrates below.
-    if (cfg.oauth.clientId === CONNECTIONS_OAUTH.clientId) {
-      delete cfg.oauth.clientSecret;
-      if (await getSecret(OAUTH_CLIENT_SECRET)) {
-        await deleteSecret(OAUTH_CLIENT_SECRET);
+        delete p.apiKey;
         migrated = true;
       }
-    } else if (cfg.oauth.clientSecret) {
-      if (await setSecret(OAUTH_CLIENT_SECRET, cfg.oauth.clientSecret)) migrated = true;
+      await deleteSecret(aiKeyName(id));
+      continue;
+    }
+    if (p.apiKey) {
+      // Legacy plaintext key on disk → move it into the keychain (then it gets stripped).
+      if (await setSecret(aiKeyName(id), p.apiKey)) migrated = true;
     } else {
-      const cs = await getSecret(OAUTH_CLIENT_SECRET);
-      if (cs) cfg.oauth.clientSecret = cs;
+      // No key in memory → hydrate from the keychain if one is stored.
+      const k = await getSecret(aiKeyName(id));
+      if (k) p.apiKey = k;
     }
   }
+  return migrated;
+}
 
-  if (cfg.tunnel) {
-    if (cfg.tunnel.token) {
-      if (await setSecret(TUNNEL_TOKEN, cfg.tunnel.token)) migrated = true;
-    } else {
-      const t = await getSecret(TUNNEL_TOKEN);
-      if (t) cfg.tunnel.token = t;
+/** Hydrate/migrate the OAuth client_secret, purging it entirely for the public Connections client. */
+async function hydrateOauthSecret(cfg: RepoYetiConfig): Promise<boolean> {
+  let migrated = false;
+  if (!cfg.oauth) return migrated;
+  // The baked-in Connections client is PUBLIC (PKCE is its only proof): AEGIS registers it with
+  // token_endpoint_auth_method "none" and no secret hash, and its token endpoint refuses any
+  // exchange that PRESENTS a client_secret — with invalid_client, BEFORE it consumes the code, so
+  // every sign-in dies at /oauth/callback while the code sits unspent. The old GitMob callback
+  // registered this SAME client_id as confidential, so its secret can still be in the keychain —
+  // and getSecret() re-homes it out of the old "gitmob" service, which is how a dead credential
+  // reaches a client that must never send one. AEGIS kept no hash to verify it against: it is
+  // unusable by construction, so purge it rather than re-attach it. A user's OWN confidential
+  // client (their own issuer/clientId) is untouched and still hydrates below.
+  if (cfg.oauth.clientId === CONNECTIONS_OAUTH.clientId) {
+    delete cfg.oauth.clientSecret;
+    if (await getSecret(OAUTH_CLIENT_SECRET)) {
+      await deleteSecret(OAUTH_CLIENT_SECRET);
+      migrated = true;
     }
-  }
-
-  // Optional API Bearer token (off by default). Mirror the tunnel-token hydration: a legacy
-  // plaintext token on disk gets moved into the keychain (then stripped), else hydrate from it.
-  if (cfg.apiToken) {
-    if (await setSecret(API_TOKEN, cfg.apiToken)) migrated = true;
+  } else if (cfg.oauth.clientSecret) {
+    if (await setSecret(OAUTH_CLIENT_SECRET, cfg.oauth.clientSecret)) migrated = true;
   } else {
-    const t = await getSecret(API_TOKEN);
-    if (t) cfg.apiToken = t;
+    const cs = await getSecret(OAUTH_CLIENT_SECRET);
+    if (cs) cfg.oauth.clientSecret = cs;
   }
+  return migrated;
+}
 
-  // One-time migration from the short-lived split relay-key design. The signing pair now stays
-  // together in config.json: unlike an API credential, this key is useful only with its matching
-  // public identity, and splitting the halves let tests (or a restored credential store) replace
-  // one independently and strand the stable address. Only attach a legacy key when it derives the
-  // stored public key; a mismatch is deliberately left incomplete so ensureRelayIdentity() rotates
-  // the whole identity instead of repeatedly sending bad signatures.
+/** Hydrate/migrate the Quick Tunnel token. */
+async function hydrateTunnelToken(cfg: RepoYetiConfig): Promise<boolean> {
+  if (!cfg.tunnel) return false;
+  if (cfg.tunnel.token) {
+    return await setSecret(TUNNEL_TOKEN, cfg.tunnel.token);
+  }
+  const t = await getSecret(TUNNEL_TOKEN);
+  if (t) cfg.tunnel.token = t;
+  return false;
+}
+
+/**
+ * Hydrate/migrate the optional API Bearer token (off by default). Mirrors the tunnel-token
+ * hydration: a legacy plaintext token on disk gets moved into the keychain (then stripped),
+ * else hydrate from it.
+ */
+async function hydrateApiToken(cfg: RepoYetiConfig): Promise<boolean> {
+  if (cfg.apiToken) {
+    return await setSecret(API_TOKEN, cfg.apiToken);
+  }
+  const t = await getSecret(API_TOKEN);
+  if (t) cfg.apiToken = t;
+  return false;
+}
+
+/**
+ * One-time migration from the short-lived split relay-key design. The signing pair now stays
+ * together in config.json: unlike an API credential, this key is useful only with its matching
+ * public identity, and splitting the halves let tests (or a restored credential store) replace
+ * one independently and strand the stable address. Only attach a legacy key when it derives the
+ * stored public key; a mismatch is deliberately left incomplete so ensureRelayIdentity() rotates
+ * the whole identity instead of repeatedly sending bad signatures.
+ */
+async function migrateLegacyRelayKey(cfg: RepoYetiConfig): Promise<boolean> {
+  let migrated = false;
   const legacyRelayPrivate = await getSecret(RELAY_PRIVATE_KEY);
   if (legacyRelayPrivate) {
     const identity = cfg.relay?.identity;
@@ -1092,6 +1101,23 @@ export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
     // Credential Manager. Delete it so future test runs/restores cannot split the pair again.
     await deleteSecret(RELAY_PRIVATE_KEY);
   }
+  return migrated;
+}
+
+/**
+ * Load secrets from the OS keychain into the in-memory config, and MIGRATE any secrets
+ * still sitting in a legacy plaintext config.json into the keychain (then re-save to strip
+ * them). Call once at daemon boot, before serving, so every sync call site (resolveApiKey,
+ * redactAi, …) sees the hydrated key without becoming async. Idempotent + best-effort: on a
+ * keychain-less host it leaves the plaintext config untouched.
+ */
+export async function hydrateSecrets(cfg: RepoYetiConfig): Promise<void> {
+  let migrated = false;
+  migrated = (await hydrateAiProviderSecrets(cfg)) || migrated;
+  migrated = (await hydrateOauthSecret(cfg)) || migrated;
+  migrated = (await hydrateTunnelToken(cfg)) || migrated;
+  migrated = (await hydrateApiToken(cfg)) || migrated;
+  migrated = (await migrateLegacyRelayKey(cfg)) || migrated;
 
   // Re-persist so the now-migrated plaintext secrets are stripped from config.json.
   if (migrated) saveConfig(cfg);
