@@ -6,7 +6,6 @@
  * can live beside these without one giant entry file.
  */
 import { spawn } from "node:child_process";
-import { buildDetachedSpawn } from "../detached-spawn.mjs";
 import { connect } from "node:net";
 import { resolve } from "node:path";
 import qrcode from "qrcode-terminal";
@@ -14,7 +13,7 @@ import { checkAiKeys } from "../ai-keycheck.ts";
 import { fireBootPing } from "../app-ping.ts";
 import { startAutoCommit, stopAutoCommit } from "../auto-commit.ts";
 import { setAutoUpdateHooks, startAutoUpdate, stopAutoUpdate } from "../auto-update.ts";
-import { addListener, broadcast, removeListener, type BusListener } from "../bus.ts";
+import { addListener, type BusListener, broadcast, removeListener } from "../bus.ts";
 import { startCollaborationSync, stopCollaborationSync } from "../collaboration.ts";
 import {
   accessMode,
@@ -22,8 +21,8 @@ import {
   authEnforced,
   hydrateSecrets,
   loadConfig,
-  relayEffective,
   type RepoYetiConfig,
+  relayEffective,
   saveConfig,
   tunnelStartProblem,
   VERSION,
@@ -37,9 +36,9 @@ import {
   initDb,
   upsertRepo,
 } from "../db.ts";
+import { buildDetachedSpawn } from "../detached-spawn.mjs";
 import { discoverStream } from "../discovery.ts";
 import { findFreePort } from "../find-free-port.mjs";
-import { buildRelaunchArgv } from "../relaunch-argv.mjs";
 import { checkForUpdate as checkGithubReleasePing } from "../github-updater.ts";
 import { createApp } from "../http/app.ts";
 import {
@@ -49,6 +48,7 @@ import {
   writeInstanceInfo,
 } from "../instance.ts";
 import { openUi } from "../open-ui.ts";
+import { buildRelaunchArgv } from "../relaunch-argv.mjs";
 import { startRemoteSync, stopRemoteSync } from "../remote-sync.ts";
 import { setServerPort, startManagedTunnel, stopManagedTunnel } from "../runtime.ts";
 import {
@@ -446,7 +446,8 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
           relaunchFlag: RELAUNCH_FLAG,
           valueFlags: ["--root"], // mirror start()'s own loop: a root path may read like a flag
         });
-        const plan = buildDetachedSpawn(process.platform, relaunchArgv);
+        // hideWindow: the successor is a CONSOLE program - without ShowWindow=0 every auto-update relaunch pops a visible console hosting the daemon (kit fix 2026-08-30).
+        const plan = buildDetachedSpawn(process.platform, relaunchArgv, { hideWindow: true });
         const child = spawn(plan.argv[0]!, plan.argv.slice(1), {
           cwd: process.cwd(),
           detached: plan.detached,
