@@ -5,7 +5,7 @@
  */
 import { test, expect } from "bun:test";
 import { createApp } from "../src/http/app.ts";
-import { type RepoYetiConfig } from "../src/config.ts";
+import type { RepoYetiConfig } from "../src/config.ts";
 import { aiKeyName, deleteSecret, aiKeyPoolName } from "../src/secrets.ts";
 import { resetCredentialPools } from "../src/ai/credential-pool.ts";
 
