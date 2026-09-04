@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { VERSION } from "../src/config.ts";
+import { findRepoRoot } from "./helpers/repo-root.ts";
 
 // The version is written in three places, and nothing kept them honest. web/package.json drifted
 // three releases behind (0.4.0 while the app shipped 0.7.0) purely because a release bump touched
@@ -15,7 +16,7 @@ import { VERSION } from "../src/config.ts";
 // So this is a guard, not a chore: a release that bumps one and forgets the others fails here
 // instead of shipping a daemon that misreports itself.
 
-const ROOT = resolve(import.meta.dir, "..");
+const ROOT = findRepoRoot(import.meta.dir);
 
 function versionOf(relPath: string): string {
   return JSON.parse(readFileSync(resolve(ROOT, relPath), "utf8")).version;

@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
+import { findRepoRoot } from "./helpers/repo-root.ts";
 
 // The Release workflow builds its body with scripts/release-notes.mjs. If that script breaks or
 // drifts from the CHANGELOG's shape, the failure lands on a published release page — after the
@@ -8,7 +9,7 @@ import { readFileSync } from "node:fs";
 // real CHANGELOG.md rather than a fixture: the thing that actually ships is the thing under test,
 // and an entry written in an unexpected shape fails the suite instead of the release.
 
-const ROOT = resolve(import.meta.dir, "..");
+const ROOT = findRepoRoot(import.meta.dir);
 const SCRIPT = resolve(ROOT, "scripts/release-notes.mjs");
 
 async function run(version: string): Promise<{ code: number; out: string }> {
