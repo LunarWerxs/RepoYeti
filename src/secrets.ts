@@ -146,6 +146,11 @@ export async function deleteSecret(name: string): Promise<void> {
 
 // ── secret-name scheme (one flat namespace under the SERVICE) ──────────────────
 export const aiKeyName = (provider: string): string => `ai/${provider}`;
+/** Additional (rotation-pool) keys for a provider, stored as a single JSON-array-of-strings
+ *  secret alongside the primary `aiKeyName` one. See src/ai/credential-pool.ts for why a
+ *  provider can hold more than one key — the primary key's own OS-keychain slot is untouched,
+ *  so a config from before this feature existed keeps working unchanged. */
+export const aiKeyPoolName = (provider: string): string => `ai/${provider}/pool`;
 export const OAUTH_CLIENT_SECRET = "oauth/clientSecret";
 /** Named-tunnel connector token — a credential that lets cloudflared run the owner's tunnel,
  *  so it's keychain-stored and stripped from config.json (see config.ts TunnelConfig). */

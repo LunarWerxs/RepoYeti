@@ -22,6 +22,7 @@
  *   - commit-message.ts   error/result types + HTTP plumbing + single commit-message drafting
  *   - commit-plan.ts      multi-commit "Smart Commit" planning
  *   - conflict-resolve.ts merge-conflict resolution (propose-only; the owner applies)
+ *   - credential-pool.ts  rotate across a provider's pool of keys on a rate-limit/auth failure
  */
 export type { AiModel, AiProviderRuntime } from "./adapters.ts";
 export {
@@ -77,3 +78,6 @@ export {
   parseConflictResolution,
   generateConflictResolution,
 } from "./conflict-resolve.ts";
+
+export type { AcquiredKey, KeyPoolSnapshot } from "./credential-pool.ts";
+export { withKeyRotation, acquireKeys, reportKeyOutcome, snapshotPool, resetCredentialPools } from "./credential-pool.ts";

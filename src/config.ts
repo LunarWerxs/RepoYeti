@@ -16,6 +16,7 @@ import {
   deleteSecret,
   keychainConfirmed,
   aiKeyName,
+  aiKeyPoolName,
   OAUTH_CLIENT_SECRET,
   TUNNEL_TOKEN,
   API_TOKEN,
@@ -181,6 +182,15 @@ export interface AiProviderCfg {
   /** Secret API key — kept in the OS keychain, hydrated into memory at boot, never on disk
    *  and never returned to a client. Optional because the on-disk shape omits it. */
   apiKey?: string;
+  /**
+   * Additional keys in this provider's rotation pool, beyond the primary `apiKey` — same
+   * keychain treatment (hydrated at boot under `aiKeyPoolName`, stripped from disk). An owner
+   * juggling several free-tier accounts for the same provider adds them here so Smart Commit /
+   * commit-message / conflict-resolve rotate to the next one instead of blocking on a single
+   * key's rate limit — see src/ai/credential-pool.ts. Empty/absent means "no pool": every call
+   * site already treats that the same as before this field existed.
+   */
+  apiKeys?: string[];
   /** The model selected for this provider (null until the owner picks one). */
   model: string | null;
   /** Non-secret API base URL for owner-supplied OpenAI-compatible endpoints. */
@@ -621,6 +631,20 @@ export function resolveApiKey(cfg: RepoYetiConfig, provider: AiProviderId): stri
   return cfg.ai?.providers?.[provider]?.apiKey ?? null;
 }
 
+/**
+ * Every usable API key for a provider's rotation pool — the primary `apiKey` first, then any
+ * `apiKeys` extras — deduped and with blanks dropped. Empty exactly when resolveApiKey() would
+ * be null AND no pool extras exist (e.g. a no-auth loopback `compatible` endpoint, or nothing
+ * configured yet); callers already know how to treat an empty key list for those cases.
+ */
+export function resolveApiKeyPool(cfg: RepoYetiConfig, provider: AiProviderId): string[] {
+  const p = cfg.ai?.providers?.[provider];
+  const all = [p?.apiKey, ...(p?.apiKeys ?? [])].filter(
+    (k): k is string => !!k && k.trim() !== "",
+  );
+  return Array.from(new Set(all));
+}
+
 /** Effective model for a provider — the owner's selection, or null when none is picked. */
 export function resolveModel(cfg: RepoYetiConfig, provider: AiProviderId): string | null {
   return cfg.ai?.providers?.[provider]?.model ?? null;
@@ -926,7 +950,10 @@ function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
   if (keychainConfirmed()) {
     if (clone.ai?.providers) {
       for (const p of Object.values(clone.ai.providers)) {
-        if (p) delete p.apiKey;
+        if (p) {
+          delete p.apiKey;
+          delete p.apiKeys;
+        }
       }
     }
     if (clone.oauth) delete clone.oauth.clientSecret;
@@ -991,7 +1018,12 @@ async function hydrateAiProviderSecrets(cfg: RepoYetiConfig): Promise<boolean> {
         delete p.apiKey;
         migrated = true;
       }
+      if (p.apiKeys?.length) {
+        delete p.apiKeys;
+        migrated = true;
+      }
       await deleteSecret(aiKeyName(id));
+      await deleteSecret(aiKeyPoolName(id));
       continue;
     }
     if (p.apiKey) {
@@ -1001,6 +1033,24 @@ async function hydrateAiProviderSecrets(cfg: RepoYetiConfig): Promise<boolean> {
       // No key in memory → hydrate from the keychain if one is stored.
       const k = await getSecret(aiKeyName(id));
       if (k) p.apiKey = k;
+    }
+    // Rotation-pool extras travel as ONE JSON-array secret rather than N separate keychain
+    // entries — adding/removing a pool member from Settings is then a single keychain write
+    // either way, same shape as the primary key's own plaintext-migrates-to-keychain path.
+    if (p.apiKeys?.length) {
+      if (await setSecret(aiKeyPoolName(id), JSON.stringify(p.apiKeys))) migrated = true;
+    } else {
+      const raw = await getSecret(aiKeyPoolName(id));
+      if (raw) {
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
+            p.apiKeys = parsed;
+          }
+        } catch {
+          /* corrupt pool secret — treat as no extra keys rather than throwing at boot */
+        }
+      }
     }
   }
   return migrated;
