@@ -233,7 +233,7 @@ async function buildPlan(repoId: string): Promise<BuiltPlan> {
     try {
       plan =
         hasKey && isAiProviderConfigured(cfg, provider) && model
-          ? // Rotates to the next pool key on a rate-limit/auth rejection — credential-pool.ts.
+          ? // Rotates to the next pool key on a rate-limit/auth rejection - credential-pool.ts.
             // Unattended and on a timer is exactly where a single spent free-tier key would
             // otherwise silently degrade every run to the heuristic fallback.
             await withKeyRotation(provider, apiKeys, (apiKey) =>

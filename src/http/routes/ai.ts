@@ -472,8 +472,8 @@ async function deleteProvider(c: Context, cfg: RepoYetiConfig) {
 }
 
 // Replace an already-connected provider's rotation-pool EXTRAS (never the primary `apiKey`,
-// which stays the `connect` flow's job). Submits the owner's full desired extras list — the
-// same replace-the-field shape putAiSettings already uses — rather than incremental add/remove
+// which stays the `connect` flow's job). Submits the owner's full desired extras list - the
+// same replace-the-field shape putAiSettings already uses - rather than incremental add/remove
 // endpoints, since Settings only ever needs to render "here is the list, save it".
 async function putProviderKeyPool(c: Context, cfg: RepoYetiConfig) {
   const provider = parseProvider(c);
@@ -501,7 +501,7 @@ async function putProviderKeyPool(c: Context, cfg: RepoYetiConfig) {
 }
 
 // Non-secret health snapshot of a provider's rotation pool (fingerprints + cooldown state only,
-// never a key) — reflects the CURRENTLY configured keys even before any generation call has run
+// never a key) - reflects the CURRENTLY configured keys even before any generation call has run
 // this process, so Settings can render pool status right after a PUT.
 function getProviderKeyPool(c: Context, cfg: RepoYetiConfig) {
   const provider = parseProvider(c);
@@ -516,7 +516,7 @@ type ProviderResolution =
 // Given an already-selected (or undefined) provider id, resolve its API key POOL + model, or the
 // error Response to return instead. This exact validation chain was duplicated across
 // postCommitMessage, postCommitPlan, and postConflictResolve before this extraction. `apiKeys` is
-// the full rotation pool (primary key first, then any extras) — empty only for a no-auth loopback
+// the full rotation pool (primary key first, then any extras) - empty only for a no-auth loopback
 // `compatible` endpoint, which every caller already knows to pass straight to withKeyRotation.
 function resolveProviderConfig(
   c: Context,
@@ -570,7 +570,7 @@ async function postCommitMessage(c: Context, cfg: RepoYetiConfig, guestAiUsage: 
   const admission = enterGuestAi(c, cfg, guestAiUsage);
   if (admission instanceof Response) return admission;
   try {
-    // Rotates to the next pool key on a rate-limit/auth rejection — see credential-pool.ts.
+    // Rotates to the next pool key on a rate-limit/auth rejection - see credential-pool.ts.
     const message = await withKeyRotation(provider, apiKeys, (apiKey) =>
       generateCommitMessage(
         provider,
@@ -648,7 +648,7 @@ async function postCommitPlan(c: Context, cfg: RepoYetiConfig, guestAiUsage: Map
   const admission = enterGuestAi(c, cfg, guestAiUsage);
   if (admission instanceof Response) return admission;
   try {
-    // Rotates to the next pool key on a rate-limit/auth rejection — see credential-pool.ts.
+    // Rotates to the next pool key on a rate-limit/auth rejection - see credential-pool.ts.
     const plan = await withKeyRotation(provider, apiKeys, (apiKey) =>
       generateCommitPlan(provider, apiKey, model, collected.input!, style, undefined, runtimeFor(cfg, provider)),
     );
@@ -708,7 +708,7 @@ async function postConflictResolve(c: Context, cfg: RepoYetiConfig) {
   }
 
   try {
-    // Rotates to the next pool key on a rate-limit/auth rejection — see credential-pool.ts.
+    // Rotates to the next pool key on a rate-limit/auth rejection - see credential-pool.ts.
     const resolution = await withKeyRotation(provider, apiKeys, (apiKey) =>
       generateConflictResolution(
         provider,

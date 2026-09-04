@@ -183,11 +183,11 @@ export interface AiProviderCfg {
    *  and never returned to a client. Optional because the on-disk shape omits it. */
   apiKey?: string;
   /**
-   * Additional keys in this provider's rotation pool, beyond the primary `apiKey` — same
+   * Additional keys in this provider's rotation pool, beyond the primary `apiKey` - same
    * keychain treatment (hydrated at boot under `aiKeyPoolName`, stripped from disk). An owner
    * juggling several free-tier accounts for the same provider adds them here so Smart Commit /
    * commit-message / conflict-resolve rotate to the next one instead of blocking on a single
-   * key's rate limit — see src/ai/credential-pool.ts. Empty/absent means "no pool": every call
+   * key's rate limit - see src/ai/credential-pool.ts. Empty/absent means "no pool": every call
    * site already treats that the same as before this field existed.
    */
   apiKeys?: string[];
@@ -632,8 +632,8 @@ export function resolveApiKey(cfg: RepoYetiConfig, provider: AiProviderId): stri
 }
 
 /**
- * Every usable API key for a provider's rotation pool — the primary `apiKey` first, then any
- * `apiKeys` extras — deduped and with blanks dropped. Empty exactly when resolveApiKey() would
+ * Every usable API key for a provider's rotation pool - the primary `apiKey` first, then any
+ * `apiKeys` extras - deduped and with blanks dropped. Empty exactly when resolveApiKey() would
  * be null AND no pool extras exist (e.g. a no-auth loopback `compatible` endpoint, or nothing
  * configured yet); callers already know how to treat an empty key list for those cases.
  */
@@ -1035,7 +1035,7 @@ async function hydrateAiProviderSecrets(cfg: RepoYetiConfig): Promise<boolean> {
       if (k) p.apiKey = k;
     }
     // Rotation-pool extras travel as ONE JSON-array secret rather than N separate keychain
-    // entries — adding/removing a pool member from Settings is then a single keychain write
+    // entries - adding/removing a pool member from Settings is then a single keychain write
     // either way, same shape as the primary key's own plaintext-migrates-to-keychain path.
     if (p.apiKeys?.length) {
       if (await setSecret(aiKeyPoolName(id), JSON.stringify(p.apiKeys))) migrated = true;
@@ -1048,7 +1048,7 @@ async function hydrateAiProviderSecrets(cfg: RepoYetiConfig): Promise<boolean> {
             p.apiKeys = parsed;
           }
         } catch {
-          /* corrupt pool secret — treat as no extra keys rather than throwing at boot */
+          /* corrupt pool secret - treat as no extra keys rather than throwing at boot */
         }
       }
     }

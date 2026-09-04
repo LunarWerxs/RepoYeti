@@ -2,19 +2,19 @@
  * Per-provider API key rotation pool.
  *
  * WHY: every AI provider in AI_ADAPTERS (src/ai/adapters.ts) held exactly ONE bring-your-own key
- * (config.ts `AiProviderCfg.apiKey`). An owner on a free tier (Groq, OpenRouter, Gemini — the
+ * (config.ts `AiProviderCfg.apiKey`). An owner on a free tier (Groq, OpenRouter, Gemini - the
  * providers AI_CATALOG marks `free`) who hits that tier's daily/per-minute cap had no fallback:
  * Smart Commit, commit-message drafting and conflict-resolve all block on the same 429 until the
  * provider's own window resets, even though an owner juggling several free accounts could add a
  * second key and keep going. Adapted from Hermes Agent's per-account credential pool
- * (agent/credential_pool.py + agent/account_usage.py, MIT, Copyright Nous Research) — the idea
+ * (agent/credential_pool.py + agent/account_usage.py, MIT, Copyright Nous Research) - the idea
  * (round-robin over a pool, cool a credential down by the error class it actually hit rather than
  * retrying it immediately) reimplemented fresh against RepoYeti's own config/secrets model and
  * error taxonomy (AiError/AiCode in ./commit-message.ts), not a port of Hermes's Python. Sibling
  * app ReDesign proves a close relative of this shape in the same stack (src/keyManager.ts).
  *
  * Deliberately IN-MEMORY only (no keyState.json-style persisted health file, unlike ReDesign's
- * KeyManager): a cooldown that resets on daemon restart is the right failure mode here — RepoYeti
+ * KeyManager): a cooldown that resets on daemon restart is the right failure mode here - RepoYeti
  * restarts far less often than a rate-limit window closes, and inventing a new non-secret-fact
  * file under ~/.repoyeti/ for this is not worth the extra surface for an M-effort feature. The
  * secret material itself never lives here longer than one call's closure; only a non-secret
@@ -23,18 +23,18 @@
 import type { AiProviderId } from "../config.ts";
 import { AiError, type AiCode } from "./commit-message.ts";
 
-/** Cooldown per outcome class, ms. A 429 backs off briefly — the provider's own window is
+/** Cooldown per outcome class, ms. A 429 backs off briefly - the provider's own window is
  *  usually what's exhausted, not the credential, and it may well recover inside a minute. An
  *  auth failure means the key itself is wrong/revoked, so it sits out far longer: retrying it
  *  every call would just spend a round trip re-learning what is already known. Any other AiCode
- *  (AI_UNREACHABLE, AI_BAD_REQUEST, AI_ERROR) is not this credential's fault — see the
- *  ROTATABLE set in withKeyRotation — so it has no entry here at all. */
+ *  (AI_UNREACHABLE, AI_BAD_REQUEST, AI_ERROR) is not this credential's fault - see the
+ *  ROTATABLE set in withKeyRotation - so it has no entry here at all. */
 const COOLDOWN_MS: Partial<Record<AiCode, number>> = {
   AI_RATE_LIMITED: 60_000,
   AI_AUTH_FAILED: 24 * 60 * 60 * 1000,
 };
 
-/** Outcome classes that mean THIS credential — not the request — is the reason the call failed,
+/** Outcome classes that mean THIS credential - not the request - is the reason the call failed,
  *  and so are worth spending the next key in the pool on. A bad request or an unreachable
  *  provider would fail identically on every key in the pool; rotating on those would just turn
  *  one failure into N identical ones. */
@@ -42,7 +42,7 @@ const ROTATABLE: ReadonlySet<AiCode> = new Set(["AI_RATE_LIMITED", "AI_AUTH_FAIL
 
 interface KeyHealth {
   key: string;
-  /** Non-secret fingerprint — a few leading chars (providers' own key prefixes, e.g. "sk-",
+  /** Non-secret fingerprint - a few leading chars (providers' own key prefixes, e.g. "sk-",
    *  "gsk_", are not secret) plus a short hash, so two different keys practically never collide
    *  but the fingerprint alone can never be turned back into the key. Used as the pool's stable
    *  identity across rebuilds and as the handle callers report an outcome against. */
@@ -63,7 +63,7 @@ interface Pool {
 
 const pools = new Map<AiProviderId, Pool>();
 
-/** djb2 over the key, rendered as 8 hex chars. Not cryptographic — it only has to make two
+/** djb2 over the key, rendered as 8 hex chars. Not cryptographic - it only has to make two
  *  different real-world API keys collide about as often as picking the same random 32-bit value
  *  twice, which is plenty for a health-tracking handle that is never treated as a secret. */
 function shortHash(s: string): string {
@@ -78,7 +78,7 @@ function fingerprint(key: string): string {
 }
 
 /** Rebuild `provider`'s pool from its currently-configured keys, carrying over health for any
- *  key that survives the rebuild (matched by fingerprint). Cheap — safe to call on every
+ *  key that survives the rebuild (matched by fingerprint). Cheap - safe to call on every
  *  resolution so an owner editing the key list in Settings takes effect on the very next call
  *  with no daemon restart. A key dropped from `keys` (owner removed it) simply does not appear
  *  in the rebuilt `entries`; nothing needs to actively evict it. */
@@ -114,7 +114,7 @@ export interface AcquiredKey {
  * Every key in `provider`'s pool NOT currently cooling down, ordered starting from the
  * round-robin cursor (so repeated calls spread load across the pool rather than always
  * hammering entries[0]). When every key is cooling, falls back to the single soonest-to-clear
- * one — a request that goes out and gets the provider's own honest error is a better answer to
+ * one - a request that goes out and gets the provider's own honest error is a better answer to
  * the owner than refusing to try a key that does exist.
  */
 export function acquireKeys(provider: AiProviderId, keys: readonly string[]): AcquiredKey[] {
@@ -134,7 +134,7 @@ export function acquireKeys(provider: AiProviderId, keys: readonly string[]): Ac
 }
 
 /** Record the outcome of one attempt against a specific key (by the `id` acquireKeys() handed
- *  back). A no-op if the pool was rebuilt since (e.g. the owner removed that key) — there is
+ *  back). A no-op if the pool was rebuilt since (e.g. the owner removed that key) - there is
  *  nothing left to update. */
 export function reportKeyOutcome(
   provider: AiProviderId,
@@ -158,7 +158,7 @@ export function reportKeyOutcome(
     entry.cooldownUntil = Date.now() + cooldown;
     entry.status = outcome.code === "AI_AUTH_FAILED" ? "dead" : "cooldown";
   }
-  // Any other code (AI_BAD_REQUEST, AI_UNREACHABLE, AI_ERROR) never penalizes the credential —
+  // Any other code (AI_BAD_REQUEST, AI_UNREACHABLE, AI_ERROR) never penalizes the credential -
   // see the ROTATABLE doc comment above; status/cooldown are left exactly as they were.
 }
 
@@ -197,7 +197,7 @@ export async function withKeyRotation<T>(
   throw lastErr ?? new AiError("AI_ERROR", "no usable API key");
 }
 
-/** Sanitized snapshot for diagnostics/Settings — fingerprints and health only, never a key. */
+/** Sanitized snapshot for diagnostics/Settings - fingerprints and health only, never a key. */
 export interface KeyPoolSnapshot {
   provider: AiProviderId;
   total: number;

@@ -300,7 +300,7 @@ export const ProviderUpdateSchema = z.object({
 });
 
 /** Extra rotation-pool keys for an already-connected provider (see src/ai/credential-pool.ts).
- *  Replaces the whole extras list — the handler dedupes and drops the primary key if resubmitted.
+ *  Replaces the whole extras list - the handler dedupes and drops the primary key if resubmitted.
  *  Capped well under any realistic owner-managed count; this is a few free-tier accounts, not a
  *  bulk credential dump. */
 export const AiKeyPoolSchema = z.object({
