@@ -66,9 +66,10 @@ const SCOPED_BY_LIST = new Set([
  *
  * Deliberately NOT forwarded (each was considered): `settings_changed`, `daemon_status`,
  * `identity_rules_changed`, `ai_key_invalid`, `approval_pending`, `approval_resolved`, `scan_*`,
- * `auto_update_*` — all owner-plane. `repo_identity_changed` / `repo_account_changed` name the
- * owner's credentials. `repo_auto_commit_changed` is a flag the guest's repo view flattens, so
- * forwarding it would put state on their dashboard that its controls can't act on.
+ * `auto_update_*`, `operational_error_changed` — all owner-plane. `repo_identity_changed` /
+ * `repo_account_changed` name the owner's credentials. `repo_auto_commit_changed` is a flag the
+ * guest's repo view flattens, so forwarding it would put state on their dashboard that its
+ * controls can't act on.
  */
 export function guestEventData(share: Share, event: string, payload: unknown): GuestEvent | null {
   if (SCOPED_BY_ID.has(event)) {

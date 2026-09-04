@@ -4,6 +4,23 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Grouped operational-error history.** The dashboard has always shown a repo's status right
+  now (ahead/behind, dirty, conflicted) but nothing about what has gone wrong operationally over
+  time: a fetch that has failed against a rotated SSH key five times in a row read identically to
+  one that failed once, moments ago, on a flaky connection. `runAction` (`src/service/core.ts`),
+  the single funnel every mutating git action (fetch/pull/push/commit/checkout/branch/stash/tag/
+  remote) already goes through, now records every failure, grouped by a fingerprint of
+  (repo, operation, error code), adapted from PostHog's issue-tracking grouping pattern
+  (`products/error_tracking/`, MIT). Repeated failures of the same kind bump an occurrence count
+  and refresh the message rather than piling up as separate rows. New owner-only routes:
+  `GET /api/errors` (the grouped list), `POST /api/errors/:fingerprint/mute`, and
+  `DELETE /api/errors/:fingerprint` - none reachable by a share-link guest, and the change events
+  they emit are not in the guest SSE allowlist either.
+
 ## [0.21.5] - 2026-08-19
 
 ### Added

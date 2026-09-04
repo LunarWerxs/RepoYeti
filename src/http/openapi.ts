@@ -87,6 +87,20 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/updates/restart": { summary: "Relaunch the daemon so an installed update takes over. 409 BUSY while work is in flight.", tags: ["system"] },
   "GET /api/openapi.json": { summary: "This OpenAPI 3.1 document (public, unauthenticated).", tags: ["system"] },
 
+  // ── grouped operational-error history (next to /api/status above) ────────────
+  "GET /api/errors": {
+    summary: "Grouped history of failed mutating VCS actions (fingerprinted by repo+op+code, with an occurrence count).",
+    tags: ["system"],
+  },
+  "POST /api/errors/:fingerprint/mute": {
+    summary: "Mute or unmute one error group (keeps its history; body: { muted?: boolean }, default true).",
+    tags: ["system"],
+  },
+  "DELETE /api/errors/:fingerprint": {
+    summary: "Dismiss one error group outright; a later matching failure starts a fresh row.",
+    tags: ["system"],
+  },
+
   // ── auth ──────────────────────────────────────────────────────────────────────
   "GET /api/auth/status": { summary: "Auth state: whether sign-in is enforced and who is signed in.", tags: ["auth"] },
   "GET /api/auth/me": { summary: "The signed-in owner's subject + email (nulls when local).", tags: ["auth"] },

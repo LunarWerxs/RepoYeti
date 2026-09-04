@@ -7,7 +7,7 @@
 import { enqueue } from "../opqueue.ts";
 import { diffStatsEnabled } from "../read/diffstat.ts";
 import { broadcast } from "../bus.ts";
-import { getRepo, setRepoStatus, setRepoOrder } from "../db.ts";
+import { getRepo, setRepoStatus, setRepoOrder, recordOperationalError } from "../db.ts";
 import { resolveRepoIdentity, enforceIdentityPolicy } from "../identity.ts";
 import { backendFor } from "../vcs/index.ts";
 import { authForRepo } from "../gh-account.ts";
@@ -106,6 +106,14 @@ export async function accountAuthFor(repo: RepoView): Promise<GitHubAuth | null>
 
 export async function runAction(
   repoId: string,
+  /**
+   * A short, stable name for what this call site does ("fetch", "pull", "checkout", ...), never
+   * shown to the user verbatim, only used to GROUP repeated failures (see
+   * db.ts recordOperationalError / operationalErrorFingerprint). Every runAction call site in
+   * service/actions.ts passes a distinct one; keep new call sites doing the same, or their
+   * failures will silently merge into whichever existing op string they happen to reuse.
+   */
+  op: string,
   action: VcsAction,
   markFetched = false,
   syncAccount = false,
@@ -114,14 +122,34 @@ export async function runAction(
 ): Promise<ActionOutcome> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found", repoId };
+  // Every early-exit below funnels through this before returning, so the grouped error history
+  // (Settings → Error history, next to the live health/status route) covers every way this
+  // function can fail, not just the ones that reach the git child process.
+  const record = (result: ActionResult): void => {
+    if (result.ok) return;
+    recordOperationalError({ repoId, repoName: repo.name, op, code: result.code, message: result.message });
+    // Owner-plane only: not in share/events.ts's allowlist, so a guest's SSE connection never
+    // sees it. Settings' error-history panel listens for this to refetch, same idiom as
+    // identity_rules_changed - the payload just needs to say something changed, not what.
+    broadcast("operational_error_changed", { repoId, op, code: result.code });
+  };
   if (repo.isSubmodule) {
-    return { ok: false, code: "SUBMODULE_NOT_ACTIONABLE", message: "submodule worktree is not actionable", repoId };
+    const result: ActionResult = {
+      ok: false,
+      code: "SUBMODULE_NOT_ACTIONABLE",
+      message: "submodule worktree is not actionable",
+    };
+    record(result);
+    return { ...result, repoId };
   }
   // ⭐ Identity Firewall: block before any network/commit op if this repo violates a pinned
   // identity rule. Checked BEFORE any credential is resolved, so a blocked repo never causes a
   // token to be read for it at all.
   const violation = enforceIdentityPolicy(repo);
-  if (violation) return { ...violation, repoId };
+  if (violation) {
+    record(violation);
+    return { ...violation, repoId };
+  }
   const identity = resolveRepoIdentity(repo);
   const backend = backendFor(repo.vcs);
   const result = await enqueue(repoId, async () => {
@@ -132,6 +160,7 @@ export async function runAction(
     const blocked = await precondition?.(backend, repo.absPath, identity, auth);
     return blocked ?? action(backend, repo.absPath, identity, auth);
   });
+  record(result);
   // Reflect the new reality (ahead/behind/dirty) to all clients — and hand it back to this one.
   const status = await refreshRepo(
     repoId,
