@@ -8,24 +8,24 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Added
 
-- **Auto-commit skips and sync failures now leave a reviewable trail (API only for now, no
-  dashboard UI yet).** The scheduled auto-commit timer already refused to touch a conflicted or
-  mid-operation repo, and already told any dashboard connected at that exact moment via SSE, but
-  nobody is always connected to an unattended timer, and once that broadcast passed, the only
-  record of the skip was gone. A repo could sit un-synced for days with nothing to show for it
-  beyond "auto-commit is on and yet this tree never moves." Every skip (`CONFLICT`,
-  `AI_UNAVAILABLE`, `ERROR`, …) and every otherwise-successful round that still carries a sync note
-  (e.g. `NON_FAST_FORWARD`) is now persisted as one incident row per open (repo, reason) pair
-  (repeat ticks of the same unresolved problem bump that row instead of piling up new ones),
-  capped at the newest 500 across all repos. New routes: `GET /api/auto-commit/incidents`
-  (optionally `?unackedOnly=1`) and `POST /api/auto-commit/incidents/:id/ack`, and nothing in the
-  dashboard calls them yet, so today this is reachable by direct HTTP request only. Data shape
-  adapted from Hermes Agent's `cron/incidents.py` (MIT).
-- **Grouped operational-error history (backend only, no dashboard panel yet).** The dashboard
-  has always shown a repo's status right now (ahead/behind, dirty, conflicted) but nothing about
-  what has gone wrong operationally over time: a fetch that has failed against a rotated SSH key
-  five times in a row read identically to one that failed once, moments ago, on a flaky
-  connection. `runAction` (`src/service/core.ts`), the single funnel every mutating git action
+- **Auto-commit skips and sync failures now leave a reviewable trail, with a panel to review it
+  in.** The scheduled auto-commit timer already refused to touch a conflicted or mid-operation
+  repo, and already told any dashboard connected at that exact moment via SSE, but nobody is
+  always connected to an unattended timer, and once that broadcast passed, the only record of the
+  skip was gone. A repo could sit un-synced for days with nothing to show for it beyond
+  "auto-commit is on and yet this tree never moves." Every skip (`CONFLICT`, `AI_UNAVAILABLE`,
+  `ERROR`, …) and every otherwise-successful round that still carries a sync note (e.g.
+  `NON_FAST_FORWARD`) is now persisted as one incident row per open (repo, reason) pair (repeat
+  ticks of the same unresolved problem bump that row instead of piling up new ones), capped at the
+  newest 500 across all repos. New routes: `GET /api/auto-commit/incidents` (optionally
+  `?unackedOnly=1`) and `POST /api/auto-commit/incidents/:id/ack`, surfaced in Settings →
+  Automation as an incident list under the auto-commit controls, with an unacked-count badge and
+  an Acknowledge button per row. Data shape adapted from Hermes Agent's `cron/incidents.py` (MIT).
+- **Grouped operational-error history, now with a Settings panel.** The dashboard has always
+  shown a repo's status right now (ahead/behind, dirty, conflicted) but nothing about what has
+  gone wrong operationally over time: a fetch that has failed against a rotated SSH key five times
+  in a row read identically to one that failed once, moments ago, on a flaky connection.
+  `runAction` (`src/service/core.ts`), the single funnel every mutating git action
   (fetch/pull/push/commit/checkout/branch/stash/tag/remote) already goes through, now records
   every failure, grouped by a fingerprint of (repo, operation, error code), adapted from
   PostHog's issue-tracking grouping pattern (`products/error_tracking/`, MIT). Repeated failures
@@ -33,9 +33,8 @@ All notable changes to RepoYeti are documented here. The format is based on
   separate rows. New owner-only routes: `GET /api/errors` (the grouped list),
   `POST /api/errors/:fingerprint/mute`, and `DELETE /api/errors/:fingerprint` - none reachable by
   a share-link guest, and the change events they emit are not in the guest SSE allowlist either.
-  This lands the storage and API only; no dashboard screen reads it yet (tracked in
-  `docs/todo/error-history-ui-panel.md`), so today the data is only visible to a direct API or
-  MCP caller.
+  Settings → Advanced now has an Operational errors panel listing every group with mute/unmute and
+  dismiss actions.
 - **AI providers can hold a rotation pool of keys, not just one.** Every provider (Groq, OpenAI,
   Gemini, ...) held exactly one bring-your-own key, so an owner on a free tier who hit that
   tier's rate limit blocked Smart Commit, commit-message drafting, conflict-resolve, and the
@@ -54,7 +53,7 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 - **"Restart to finish" is a button now** ([#23](https://github.com/LunarWerxs/RepoYeti/issues/23)).
   Installing an update by hand from the dashboard leaves the daemon serving the OLD build until
-  something restarts it — only the opt-in unattended update restarts on its own — so the version row
+  something restarts it - only the opt-in unattended update restarts on its own - so the version row
   correctly changed to **Restart to finish** and then stopped there. That is a statement of what has
   to happen next, shown on the one screen that could not make it happen: an installed PWA on a phone
   has no system tray and no terminal beside it, which is the setup this row exists for in the first
@@ -62,7 +61,7 @@ All notable changes to RepoYeti are documented here. The format is based on
   the owner to reach a real computer.
   Tapping the badge now relaunches the daemon through the auto-updater's **existing** handoff rather
   than a second restart mechanism: a detached successor is spawned carrying the port this daemon is
-  bound to, this one shuts down gracefully to release it, and the successor binds the same port — so
+  bound to, this one shuts down gracefully to release it, and the successor binds the same port, so
   the page you tapped from reconnects to the new version instead of hunting for a port that moved.
   That handoff already had to get three win32 traps right (WMI drops the environment block, so both
   the relaunch signal and the port ride as command-line flags; a non-detached child dies with the
@@ -71,7 +70,7 @@ All notable changes to RepoYeti are documented here. The format is based on
   and drops the sentinel telling the tray host to dispose its icon and exit.
   The restart is refused, with a reason, while work is in flight: an agent waiting on an MCP
   approval, a git operation running, or an update still installing (that one restarts itself when it
-  lands). Those are the same guards the unattended updater uses, minus its starvation cap — that cap
+  lands). Those are the same guards the unattended updater uses, minus its starvation cap - that cap
   exists because a loop nobody watches must not be starved into never updating at all, whereas here
   the owner is the retry, so refusing every time is safe as long as the refusal says why. Every
   connected dashboard, not just the one that asked, is told over SSE, so the disconnect that follows
@@ -82,7 +81,7 @@ All notable changes to RepoYeti are documented here. The format is based on
 ### Fixed
 
 - **The "Update installed" toast no longer says the app is restarting when it isn't.** A manual
-  update reported *Restarting to finish.* while nothing was restarting — the daemon kept serving the
+  update reported *Restarting to finish.* while nothing was restarting - the daemon kept serving the
   old build. It now says *Restart to finish*, which is both true and the name of the badge that does
   it.
 

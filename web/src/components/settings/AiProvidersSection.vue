@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, computed, nextTick, ref, useTemplateRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Check, Link2, Plus, Trash2, RefreshCw, X, ChevronDown } from "@lucide/vue";
+import { Check, Link2, Plus, Trash2, RefreshCw, X, ChevronDown, Save } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { ApiError } from "../../api";
@@ -165,10 +165,71 @@ watch(
       if (isConfigured(p.id) && rowFor(p.id).models.length === 0) {
         void refreshModels(p.id);
       }
+      if (isConfigured(p.id)) void store.loadKeyPool(p.id);
     }
   },
   { immediate: true },
 );
+
+// ── per-provider key rotation pool (src/ai/credential-pool.ts) ─────────────────────
+// GET never returns a raw key, so the pool's extras (every key besides the primary connected
+// above) are edited as a whole replace-the-list on Save, same shape as the Identity Firewall's
+// rule rows. `poolRows` seeds empty (there is nothing to prefill with): saving always replaces
+// the daemon's current extras with exactly what's in the list below, which is why a fresh Save
+// with an empty list is exactly "clear the backup keys".
+const poolRows = reactive<Record<string, string[]>>({});
+const poolSaving = reactive<Record<string, boolean>>({});
+function rowsFor(id: AiProviderId): string[] {
+  if (!poolRows[id]) poolRows[id] = [];
+  return poolRows[id]!;
+}
+function poolSnapshot(id: AiProviderId) {
+  return store.keyPools[id] ?? null;
+}
+const keyStatusVariant = (status: string): "success" | "warning" | "destructive" | "secondary" => {
+  switch (status) {
+    case "ok":
+      return "success";
+    case "cooldown":
+      return "warning";
+    case "dead":
+      return "destructive";
+    default:
+      return "secondary";
+  }
+};
+const keyStatusLabel = (status: string): string => {
+  switch (status) {
+    case "ok":
+      return t("settings.aiKeyStatusOk");
+    case "cooldown":
+      return t("settings.aiKeyStatusCooldown");
+    case "dead":
+      return t("settings.aiKeyStatusDead");
+    default:
+      return t("settings.aiKeyStatusUntested");
+  }
+};
+function addPoolRow(id: AiProviderId): void {
+  rowsFor(id).push("");
+}
+function removePoolRow(id: AiProviderId, i: number): void {
+  rowsFor(id).splice(i, 1);
+}
+async function savePoolRows(id: AiProviderId): Promise<void> {
+  const keys = rowsFor(id)
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0);
+  poolSaving[id] = true;
+  try {
+    await store.setKeyPool(id, keys);
+    toast.success(t("settings.aiKeyPoolSaved"));
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t("settings.aiKeyPoolSaveFailed"));
+  } finally {
+    poolSaving[id] = false;
+  }
+}
 
 async function connect(id: AiProviderId): Promise<void> {
   const row = rowFor(id);
@@ -576,6 +637,74 @@ async function onDiffDetail(detail: string): Promise<void> {
                 >
                   {{ $t("settings.compatibleDiscoveryUnavailable") }}
                 </p>
+
+                <!-- Backup keys (rotation pool): never shows a full key, only its masked
+                     fingerprint + health. See src/ai/credential-pool.ts. -->
+                <div class="flex flex-col gap-2 rounded-md border border-border/70 bg-background/35 p-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[11px] font-medium text-muted-foreground">
+                      {{ $t("settings.aiKeyPoolTitle") }}
+                    </span>
+                    <InfoHint :text="$t('settings.aiKeyPoolHint')" />
+                  </div>
+
+                  <div v-if="poolSnapshot(p.id)" class="flex flex-wrap gap-1.5">
+                    <span
+                      v-for="entry in poolSnapshot(p.id)!.entries"
+                      :key="entry.id"
+                      class="inline-flex items-center gap-1 rounded-full border border-border/70 py-0.5 pl-2 pr-1 text-[10.5px] mono text-muted-foreground"
+                    >
+                      {{ entry.id }}
+                      <Badge :variant="keyStatusVariant(entry.status)" class="px-1.5 py-0 text-[9.5px]">
+                        {{ keyStatusLabel(entry.status) }}
+                      </Badge>
+                    </span>
+                    <span v-if="!poolSnapshot(p.id)!.entries.length" class="text-[11px] text-muted-foreground/70">
+                      {{ $t("settings.aiKeyPoolNoKeys") }}
+                    </span>
+                  </div>
+
+                  <div class="flex flex-col gap-1.5">
+                    <div v-for="(_k, i) in rowsFor(p.id)" :key="i" class="flex items-center gap-1.5">
+                      <Input
+                        v-model="rowsFor(p.id)[i]"
+                        type="password"
+                        class="flex-1 text-[12px]"
+                        autocomplete="off"
+                        spellcheck="false"
+                        :aria-label="$t('settings.aiKeyPoolEntryLabel', { n: i + 1 })"
+                        :placeholder="$t('settings.aiKeyPoolPlaceholder')"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        class="shrink-0 text-muted-foreground hover:text-destructive"
+                        :aria-label="$t('settings.aiKeyPoolRemove')"
+                        @click="removePoolRow(p.id, i)"
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <Button variant="outline" size="sm" @click="addPoolRow(p.id)">
+                        <Plus />
+                        {{ $t("settings.aiKeyPoolAdd") }}
+                      </Button>
+                      <Button
+                        size="sm"
+                        class="ml-auto"
+                        :disabled="poolSaving[p.id]"
+                        @click="savePoolRows(p.id)"
+                      >
+                        <Save />
+                        {{ $t("settings.aiKeyPoolSave") }}
+                      </Button>
+                    </div>
+                    <p class="text-[11px] leading-relaxed text-muted-foreground">
+                      {{ $t("settings.aiKeyPoolSaveHint") }}
+                    </p>
+                  </div>
+                </div>
 
                 <div class="flex items-center gap-2">
                   <Button
