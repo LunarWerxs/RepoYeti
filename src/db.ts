@@ -391,6 +391,25 @@ export function initDb(): Database {
     );
     CREATE INDEX IF NOT EXISTS auto_commit_incidents_at ON auto_commit_incidents (at DESC);
   `);
+  // Dedup any pre-existing duplicate open (repo_id, reason) rows BEFORE the unique index below can
+  // be created (a DB written by an earlier, pre-dedup build of this feature could already have more
+  // than one unacked row for the same repo+reason), keep the newest by rowid, drop the rest. Same
+  // merge-then-guard order as mergeDuplicateIdentities below: the index creation fails outright on
+  // a table that still has duplicates, so the cleanup must run first, every boot, before it.
+  handle.exec(`
+    DELETE FROM auto_commit_incidents
+    WHERE acked_at IS NULL
+      AND rowid NOT IN (
+        SELECT MAX(rowid) FROM auto_commit_incidents WHERE acked_at IS NULL GROUP BY repo_id, reason
+      );
+    -- A repo stuck in the same failure mode (e.g. an unresolved CONFLICT) ticks forever, and
+    -- without this the shared 500-row cap belongs to whichever repo is currently noisiest,
+    -- evicting every OTHER repo's incidents the owner never acknowledged. Partial (only while
+    -- unacked) so a fresh occurrence AFTER an ack is a new, separately-reviewable incident, not a
+    -- silent bump of the row the owner already dismissed. See recordAutoCommitIncident's upsert.
+    CREATE UNIQUE INDEX IF NOT EXISTS auto_commit_incidents_open_repo_reason
+      ON auto_commit_incidents (repo_id, reason) WHERE acked_at IS NULL;
+  `);
   // Repair any temp-path repo rows already sitting in a pre-existing DB (historic test-fixture
   // writes and old whole-machine scans indexed under the OS temp dir, e.g. `%TEMP%\gm-*`, before
   // upsertRepo's hard guard existed). Same prevention-first shape as the identity merge below:
@@ -1640,9 +1659,12 @@ export function listShareEvents(shareId: string, limit = 100): ShareEvent[] {
 export interface AutoCommitIncident {
   id: string;
   repoId: string;
-  /** Repo name at the moment the incident happened - a later rename/removal must not blank a
+  /** Repo name as of the most recent occurrence - a later rename/removal must not blank a
    *  historic row (repoId is deliberately not a FK, same reasoning as ShareEvent above). */
   repoName: string;
+  /** Ms of the most recent occurrence. A repeat of the same (repoId, reason) while still unacked
+   *  bumps this forward on the SAME row instead of minting a new one - see
+   *  recordAutoCommitIncident - so this is "last seen", not "first seen". */
   at: number;
   /** Mirrors AutoCommitBlockedRepo.reason / AutoCommittedRepo.note (auto-commit.ts). */
   reason: string;
@@ -1680,10 +1702,28 @@ function rowToAutoCommitIncident(r: AutoCommitIncidentRow): AutoCommitIncident {
  * blocked repo and every done repo that still carries a sync `note`. Deliberately never throws:
  * a storage hiccup here must not stop the timer from finishing its round; it reports instead
  * (mirrors migrateAddColumn's non-fatal-but-loud posture above).
+ *
+ * Upserts on (repoId, reason) while unacked: a repo stuck in the same failure mode (e.g. an
+ * unresolved CONFLICT, exactly the case this feature exists to surface) would otherwise mint a
+ * fresh row every tick forever, and the 500-row cap is shared across ALL repos, so one repo
+ * stuck long enough would evict every OTHER repo's un-acknowledged incidents out from under them.
+ * Bumping the existing row's `at` instead keeps one row per open problem regardless of how many
+ * ticks it has survived, so the cap is spent on distinct problems, not repeat ticks of the same
+ * one. Once a row is acked, the next occurrence of the same (repoId, reason) is a fresh insert -
+ * a problem recurring after the owner dismissed it is new news, not a bump of old news.
  */
 export function recordAutoCommitIncident(input: { repoId: string; repoName: string; reason: string }): void {
   try {
     const db2 = getDb();
+    const existing = db2
+      .query(`SELECT id FROM auto_commit_incidents WHERE repo_id = ? AND reason = ? AND acked_at IS NULL`)
+      .get(input.repoId, input.reason) as { id: string } | null;
+    if (existing) {
+      db2
+        .query(`UPDATE auto_commit_incidents SET at = ?, repo_name = ? WHERE id = ?`)
+        .run(Date.now(), input.repoName, existing.id);
+      return; // same row bumped, so the cap below only needs to run when a row is newly added.
+    }
     db2
       .query(
         `INSERT INTO auto_commit_incidents (id, repo_id, repo_name, at, reason, acked_at)

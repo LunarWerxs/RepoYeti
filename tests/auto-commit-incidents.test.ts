@@ -50,6 +50,35 @@ test("recordAutoCommitIncident + listAutoCommitIncidents + ackAutoCommitIncident
   expect(stillAcked.ackedAt).toBe(firstAckedAt);
 });
 
+test("recordAutoCommitIncident dedupes on (repoId, reason) while unacked, instead of piling up rows", () => {
+  const repoId = `dedup-test-${randomUUID()}`;
+  recordAutoCommitIncident({ repoId, repoName: "stuck-repo", reason: "CONFLICT" });
+  const first = listAutoCommitIncidents({ limit: 500 }).filter((i) => i.repoId === repoId);
+  expect(first.length).toBe(1);
+  const firstAt = first[0]!.at;
+
+  // A repeat tick of the SAME still-unresolved problem must bump the existing row, not mint a
+  // second one - a repo stuck in CONFLICT forever would otherwise, over enough ticks, fill the
+  // shared 500-row cap by itself and evict every other repo's incidents (the bug this guards).
+  recordAutoCommitIncident({ repoId, repoName: "stuck-repo", reason: "CONFLICT" });
+  const stillOne = listAutoCommitIncidents({ limit: 500 }).filter((i) => i.repoId === repoId);
+  expect(stillOne.length).toBe(1);
+  expect(stillOne[0]!.id).toBe(first[0]!.id); // same row, not a new insert
+  expect(stillOne[0]!.at).toBeGreaterThanOrEqual(firstAt); // bumped forward ("last seen")
+
+  // A DIFFERENT reason for the same repo is a distinct open problem, not a dedup match.
+  recordAutoCommitIncident({ repoId, repoName: "stuck-repo", reason: "AI_UNAVAILABLE" });
+  expect(listAutoCommitIncidents({ limit: 500 }).filter((i) => i.repoId === repoId).length).toBe(2);
+
+  // Once acked, the SAME (repoId, reason) recurring is new news, not a bump of dismissed news.
+  ackAutoCommitIncident(stillOne[0]!.id);
+  recordAutoCommitIncident({ repoId, repoName: "stuck-repo", reason: "CONFLICT" });
+  const afterAck = listAutoCommitIncidents({ limit: 500 }).filter((i) => i.repoId === repoId);
+  expect(afterAck.length).toBe(3);
+  expect(afterAck.filter((i) => i.reason === "CONFLICT").length).toBe(2);
+  expect(afterAck.some((i) => i.reason === "CONFLICT" && i.ackedAt === null)).toBe(true);
+});
+
 test("unackedOnly narrows to rows not yet reviewed", () => {
   const repoId = `unacked-test-${randomUUID()}`;
   recordAutoCommitIncident({ repoId, repoName: "a", reason: "CONFLICT" });
