@@ -52,6 +52,7 @@ import {
 } from "../approvals.ts";
 import { setIdentityRulesConfig } from "../identity.ts";
 import * as health from "./routes/health.ts";
+import * as errors from "./routes/errors.ts";
 import * as auth from "./routes/auth.ts";
 import * as token from "./routes/token.ts";
 import * as mode from "./routes/mode.ts";
@@ -180,6 +181,7 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
 
   // Register every route module, preserving the original route registration order.
   health.register(app, deps);
+  errors.register(app, deps);
   auth.register(app, deps);
   token.register(app, deps);
   mode.register(app, deps);

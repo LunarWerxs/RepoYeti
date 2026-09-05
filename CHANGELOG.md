@@ -8,6 +8,21 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Added
 
+- **Grouped operational-error history (backend only, no dashboard panel yet).** The dashboard
+  has always shown a repo's status right now (ahead/behind, dirty, conflicted) but nothing about
+  what has gone wrong operationally over time: a fetch that has failed against a rotated SSH key
+  five times in a row read identically to one that failed once, moments ago, on a flaky
+  connection. `runAction` (`src/service/core.ts`), the single funnel every mutating git action
+  (fetch/pull/push/commit/checkout/branch/stash/tag/remote) already goes through, now records
+  every failure, grouped by a fingerprint of (repo, operation, error code), adapted from
+  PostHog's issue-tracking grouping pattern (`products/error_tracking/`, MIT). Repeated failures
+  of the same kind bump an occurrence count and refresh the message rather than piling up as
+  separate rows. New owner-only routes: `GET /api/errors` (the grouped list),
+  `POST /api/errors/:fingerprint/mute`, and `DELETE /api/errors/:fingerprint` - none reachable by
+  a share-link guest, and the change events they emit are not in the guest SSE allowlist either.
+  This lands the storage and API only; no dashboard screen reads it yet (tracked in
+  `docs/todo/error-history-ui-panel.md`), so today the data is only visible to a direct API or
+  MCP caller.
 - **AI providers can hold a rotation pool of keys, not just one.** Every provider (Groq, OpenAI,
   Gemini, ...) held exactly one bring-your-own key, so an owner on a free tier who hit that
   tier's rate limit blocked Smart Commit, commit-message drafting, conflict-resolve, and the
