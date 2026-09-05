@@ -6,7 +6,7 @@ import {
   saveConfig,
   AI_PROVIDERS,
   AI_CATALOG,
-  resolveApiKey,
+  resolveApiKeyPool,
   resolveModel,
   resolveAiBaseUrl,
   aiProviderUsesNoAuth,
@@ -26,16 +26,19 @@ import {
   looksSmallTierModel,
   normalizeCompatibleBaseUrl,
   isCompatibleLoopbackBaseUrl,
+  withKeyRotation,
+  snapshotPool,
   AiError,
   type AiModel,
   type AiCode,
 } from "../../ai.ts";
 import { jsonError, type ApiErrorCode } from "../../contract.ts";
-import { setSecret, deleteSecret, aiKeyName } from "../../secrets.ts";
+import { setSecret, deleteSecret, aiKeyName, aiKeyPoolName } from "../../secrets.ts";
 import {
   parseBody,
   AiSettingsSchema,
   ProviderUpdateSchema,
+  AiKeyPoolSchema,
   ConnectSchema,
   CommitMessageSchema,
   CommitPlanSchema,
@@ -392,15 +395,16 @@ async function postProviderConnect(c: Context, cfg: RepoYetiConfig) {
 async function getProviderModels(c: Context, cfg: RepoYetiConfig) {
   const provider = parseProvider(c);
   if (!provider) return jsonError(c, "BAD_PROVIDER", "unknown provider");
-  const apiKey =
-    resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
+  const apiKeys = resolveApiKeyPool(cfg, provider);
   // 404 (not the default 400): the named provider has no stored key to list models for.
-  if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
+  if ((apiKeys.length === 0 && !aiProviderUsesNoAuth(cfg, provider)) || !isAiProviderConfigured(cfg, provider)) {
     return jsonError(c, "NOT_CONFIGURED", "provider is not fully configured", 404);
   }
   try {
     try {
-      const models = await listModels(provider, apiKey, fetch, runtimeFor(cfg, provider));
+      const models = await withKeyRotation(provider, apiKeys, (key) =>
+        listModels(provider, key, fetch, runtimeFor(cfg, provider)),
+      );
       const saved = resolveModel(cfg, provider);
       if (provider === "compatible" && saved && !models.some((m) => m.id === saved)) {
         models.unshift({ id: saved, label: saved });
@@ -458,6 +462,7 @@ async function deleteProvider(c: Context, cfg: RepoYetiConfig) {
   if (!provider) return jsonError(c, "BAD_PROVIDER", "unknown provider");
   if (cfg.ai?.providers) delete cfg.ai.providers[provider];
   await deleteSecret(aiKeyName(provider)); // drop the key from the OS keychain too
+  await deleteSecret(aiKeyPoolName(provider)); // and any rotation-pool extras
   if (cfg.ai && cfg.ai.defaultProvider === provider) {
     cfg.ai.defaultProvider = undefined;
     cfg.ai.defaultProvider = effectiveDefaultProvider(cfg) ?? undefined;
@@ -466,13 +471,53 @@ async function deleteProvider(c: Context, cfg: RepoYetiConfig) {
   return c.json(aiPayload(cfg));
 }
 
+// Replace an already-connected provider's rotation-pool EXTRAS (never the primary `apiKey`,
+// which stays the `connect` flow's job). Submits the owner's full desired extras list - the
+// same replace-the-field shape putAiSettings already uses - rather than incremental add/remove
+// endpoints, since Settings only ever needs to render "here is the list, save it".
+async function putProviderKeyPool(c: Context, cfg: RepoYetiConfig) {
+  const provider = parseProvider(c);
+  if (!provider) return jsonError(c, "BAD_PROVIDER", "unknown provider");
+  const ai = ensureAi(cfg);
+  const entry = ai.providers[provider];
+  if (!entry || !isAiProviderConfigured(cfg, provider)) {
+    return jsonError(c, "NOT_CONFIGURED", "connect this provider first", 404);
+  }
+  const p = await parseBody(c, AiKeyPoolSchema);
+  if (!p.ok) return p.res;
+  const primary = entry.apiKey;
+  const deduped = Array.from(
+    new Set(p.data.apiKeys.map((k) => k.trim()).filter((k) => k && k !== primary)),
+  );
+  if (deduped.length) {
+    entry.apiKeys = deduped;
+    await setSecret(aiKeyPoolName(provider), JSON.stringify(deduped));
+  } else {
+    delete entry.apiKeys;
+    await deleteSecret(aiKeyPoolName(provider));
+  }
+  saveConfig(cfg);
+  return c.json({ ok: true, poolSize: deduped.length, settings: aiPayload(cfg) });
+}
+
+// Non-secret health snapshot of a provider's rotation pool (fingerprints + cooldown state only,
+// never a key) - reflects the CURRENTLY configured keys even before any generation call has run
+// this process, so Settings can render pool status right after a PUT.
+function getProviderKeyPool(c: Context, cfg: RepoYetiConfig) {
+  const provider = parseProvider(c);
+  if (!provider) return jsonError(c, "BAD_PROVIDER", "unknown provider");
+  return c.json(snapshotPool(provider, resolveApiKeyPool(cfg, provider)));
+}
+
 type ProviderResolution =
-  | { ok: true; provider: AiProviderId; apiKey: string; model: string }
+  | { ok: true; provider: AiProviderId; apiKeys: string[]; model: string }
   | { ok: false; res: Response };
 
-// Given an already-selected (or undefined) provider id, resolve its API key + model, or the
+// Given an already-selected (or undefined) provider id, resolve its API key POOL + model, or the
 // error Response to return instead. This exact validation chain was duplicated across
-// postCommitMessage, postCommitPlan, and postConflictResolve before this extraction.
+// postCommitMessage, postCommitPlan, and postConflictResolve before this extraction. `apiKeys` is
+// the full rotation pool (primary key first, then any extras) - empty only for a no-auth loopback
+// `compatible` endpoint, which every caller already knows to pass straight to withKeyRotation.
 function resolveProviderConfig(
   c: Context,
   cfg: RepoYetiConfig,
@@ -481,15 +526,16 @@ function resolveProviderConfig(
   if (!provider) {
     return { ok: false, res: jsonError(c, "NO_AI_PROVIDER", "no AI provider configured") };
   }
-  const apiKey = resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
-  if (apiKey === null || !isAiProviderConfigured(cfg, provider)) {
+  const apiKeys = resolveApiKeyPool(cfg, provider);
+  const hasKey = apiKeys.length > 0 || aiProviderUsesNoAuth(cfg, provider);
+  if (!hasKey || !isAiProviderConfigured(cfg, provider)) {
     return { ok: false, res: jsonError(c, "NO_AI_PROVIDER", `${provider} is not configured`) };
   }
   const model = resolveModel(cfg, provider);
   if (!model) {
     return { ok: false, res: jsonError(c, "NO_MODEL", `pick a model for ${provider} in Settings`) };
   }
-  return { ok: true, provider, apiKey, model };
+  return { ok: true, provider, apiKeys, model };
 }
 
 // Draft a commit message from the repo's diff using the default (or a chosen) provider.
@@ -507,7 +553,7 @@ async function postCommitMessage(c: Context, cfg: RepoYetiConfig, guestAiUsage: 
   const requested = guest || p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
   const resolved = resolveProviderConfig(c, cfg, requested ?? effectiveDefaultProvider(cfg));
   if (!resolved.ok) return resolved.res;
-  const { provider, apiKey, model } = resolved;
+  const { provider, apiKeys, model } = resolved;
 
   // With `paths`, draft from only those files (smart-commit per-group regenerate); else the
   // whole working tree (the normal "Generate" button). Both honor the owner's diff-detail dial.
@@ -524,15 +570,18 @@ async function postCommitMessage(c: Context, cfg: RepoYetiConfig, guestAiUsage: 
   const admission = enterGuestAi(c, cfg, guestAiUsage);
   if (admission instanceof Response) return admission;
   try {
-    const message = await generateCommitMessage(
-      provider,
-      apiKey,
-      model,
-      collected.diff!,
-      cfg.ai?.style ?? "conventional",
-      undefined,
-      collected.files ?? 0, // anchors the body's bullet floor to the real file count
-      runtimeFor(cfg, provider),
+    // Rotates to the next pool key on a rate-limit/auth rejection - see credential-pool.ts.
+    const message = await withKeyRotation(provider, apiKeys, (apiKey) =>
+      generateCommitMessage(
+        provider,
+        apiKey,
+        model,
+        collected.diff!,
+        cfg.ai?.style ?? "conventional",
+        undefined,
+        collected.files ?? 0, // anchors the body's bullet floor to the real file count
+        runtimeFor(cfg, provider),
+      ),
     );
     return c.json(guest ? { ok: true, message } : { ok: true, message, provider, model });
   } catch (e) {
@@ -581,7 +630,7 @@ async function postCommitPlan(c: Context, cfg: RepoYetiConfig, guestAiUsage: Map
   const requested = guest || p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
   const resolved = resolveProviderConfig(c, cfg, requested ?? effectiveDefaultProvider(cfg));
   if (!resolved.ok) return resolved.res;
-  const { provider, apiKey, model } = resolved;
+  const { provider, apiKeys, model } = resolved;
 
   // Empty selection means "nothing checked" → plan the whole tree, so an empty array is
   // treated the same as omitting `paths` entirely (never an accidental empty-scope plan).
@@ -599,14 +648,9 @@ async function postCommitPlan(c: Context, cfg: RepoYetiConfig, guestAiUsage: Map
   const admission = enterGuestAi(c, cfg, guestAiUsage);
   if (admission instanceof Response) return admission;
   try {
-    const plan = await generateCommitPlan(
-      provider,
-      apiKey,
-      model,
-      collected.input!,
-      style,
-      undefined,
-      runtimeFor(cfg, provider),
+    // Rotates to the next pool key on a rate-limit/auth rejection - see credential-pool.ts.
+    const plan = await withKeyRotation(provider, apiKeys, (apiKey) =>
+      generateCommitPlan(provider, apiKey, model, collected.input!, style, undefined, runtimeFor(cfg, provider)),
     );
     return c.json(guest ? { ok: true, plan } : { ok: true, plan, provider, model });
   } catch (e) {
@@ -655,7 +699,7 @@ async function postConflictResolve(c: Context, cfg: RepoYetiConfig) {
     p.data.provider == null ? undefined : (p.data.provider as AiProviderId);
   const resolved = resolveProviderConfig(c, cfg, requestedProvider ?? effectiveDefaultProvider(cfg));
   if (!resolved.ok) return resolved.res;
-  const { provider, apiKey, model } = resolved;
+  const { provider, apiKeys, model } = resolved;
 
   const file = await readConflictFile(id, p.data.path);
   if (!file.ok || !file.parsed) {
@@ -664,15 +708,18 @@ async function postConflictResolve(c: Context, cfg: RepoYetiConfig) {
   }
 
   try {
-    const resolution = await generateConflictResolution(
-      provider,
-      apiKey,
-      model,
-      file.path!,
-      file.text!,
-      file.parsed,
-      undefined,
-      runtimeFor(cfg, provider),
+    // Rotates to the next pool key on a rate-limit/auth rejection - see credential-pool.ts.
+    const resolution = await withKeyRotation(provider, apiKeys, (apiKey) =>
+      generateConflictResolution(
+        provider,
+        apiKey,
+        model,
+        file.path!,
+        file.text!,
+        file.parsed!,
+        undefined,
+        runtimeFor(cfg, provider),
+      ),
     );
     return c.json({
       ok: true,
@@ -707,6 +754,8 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/ai/providers/:provider/models", (c) => getProviderModels(c, cfg));
   app.put("/api/ai/providers/:provider", (c) => putProvider(c, cfg));
   app.delete("/api/ai/providers/:provider", (c) => deleteProvider(c, cfg));
+  app.get("/api/ai/providers/:provider/keys", (c) => getProviderKeyPool(c, cfg));
+  app.put("/api/ai/providers/:provider/keys", (c) => putProviderKeyPool(c, cfg));
   app.post("/api/repos/:id/commit-message", (c) => postCommitMessage(c, cfg, guestAiUsage));
   app.post("/api/repos/:id/commit-plan", (c) => postCommitPlan(c, cfg, guestAiUsage));
   app.post("/api/repos/:id/conflict-resolve", (c) => postConflictResolve(c, cfg));
