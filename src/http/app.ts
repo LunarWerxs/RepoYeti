@@ -52,6 +52,7 @@ import {
 } from "../approvals.ts";
 import { setIdentityRulesConfig } from "../identity.ts";
 import * as health from "./routes/health.ts";
+import * as errors from "./routes/errors.ts";
 import * as auth from "./routes/auth.ts";
 import * as token from "./routes/token.ts";
 import * as mode from "./routes/mode.ts";
@@ -79,6 +80,7 @@ import * as openapi from "./routes/openapi.ts";
 import * as mcp from "./routes/mcp.ts";
 import * as sync from "./routes/sync.ts";
 import * as approvals from "./routes/approvals.ts";
+import * as autoCommitIncidents from "./routes/auto-commit-incidents.ts";
 import * as shares from "./routes/shares.ts";
 import * as collaborations from "./routes/collaborations.ts";
 
@@ -180,6 +182,7 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
 
   // Register every route module, preserving the original route registration order.
   health.register(app, deps);
+  errors.register(app, deps);
   auth.register(app, deps);
   token.register(app, deps);
   mode.register(app, deps);
@@ -207,6 +210,7 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   mcp.register(app, deps);
   sync.register(app, deps);
   approvals.register(app, deps);
+  autoCommitIncidents.register(app, deps);
   collaborations.register(app, deps);
   // Share links: /api/shares/* (owner-gated like everything under /api/*) plus the public
   // GET /s/:token redemption. Registered before mountWeb so /s/... isn't eaten by the SPA fallback.

@@ -26,6 +26,9 @@ const BackgroundSyncSection = defineAsyncComponent(() => import("./settings/Back
 const AgentSafetySection = defineAsyncComponent(() => import("./settings/AgentSafetySection.vue"));
 const IdentityFirewallSection = defineAsyncComponent(() => import("./settings/IdentityFirewallSection.vue"));
 const AiProvidersSection = defineAsyncComponent(() => import("./settings/AiProvidersSection.vue"));
+const OperationalErrorsSection = defineAsyncComponent(
+  () => import("./settings/OperationalErrorsSection.vue"),
+);
 const ExperimentalServersSection = defineAsyncComponent(
   () => import("./settings/ExperimentalServersSection.vue"),
 );
@@ -163,7 +166,7 @@ watch(
         data-settings-tab="automation"
         class="flex flex-col gap-4"
       >
-        <AutoCommitSection />
+        <AutoCommitSection :open="open" />
         <BackgroundSyncSection />
         <AiProvidersSection :open="open" />
       </div>
@@ -183,6 +186,7 @@ watch(
         <!-- The Firewall pins a REQUIRED identity per path glob — meaningless (and unbuildable:
              every rule needs an identity to point at) until identities are in play at all. -->
         <IdentityFirewallSection v-if="store.identitiesRelevant" :open="open" />
+        <OperationalErrorsSection :open="open" />
         <ExperimentalServersSection :open="open" />
       </div>
     </div>

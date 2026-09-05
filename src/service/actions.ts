@@ -28,15 +28,17 @@ import { readGate } from "../gitgate.ts";
 import { collaborationFingerprint } from "../collaboration.ts";
 
 export const fetchRepo = (id: string): Promise<ActionOutcome> =>
-  runAction(id, (b, p, idn, auth) => b.fetch(p, idn, auth), true, true, undefined, true);
-export const pullRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.pull(p, idn, auth), true, true);
-export const pushRepo = (id: string): Promise<ActionOutcome> => runAction(id, (b, p, idn, auth) => b.push(p, idn, auth), false, true);
+  runAction(id, "fetch", (b, p, idn, auth) => b.fetch(p, idn, auth), true, true, undefined, true);
+export const pullRepo = (id: string): Promise<ActionOutcome> =>
+  runAction(id, "pull", (b, p, idn, auth) => b.pull(p, idn, auth), true, true);
+export const pushRepo = (id: string): Promise<ActionOutcome> =>
+  runAction(id, "push", (b, p, idn, auth) => b.push(p, idn, auth), false, true);
 export const commitRepo = (
   id: string,
   message: string,
   amend = false,
 ): Promise<ActionOutcome> =>
-  runAction(id, (b, p, idn) => b.commitAll(p, idn, message, amend));
+  runAction(id, "commit", (b, p, idn) => b.commitAll(p, idn, message, amend));
 
 /**
  * Commit only if the exact collaboration fingerprint observed by a remote peer is still current.
@@ -49,6 +51,7 @@ export const commitRepoWithFingerprint = (
 ): Promise<ActionOutcome> =>
   runAction(
     id,
+    "commit",
     (b, p, idn) => b.commitAll(p, idn, message, false),
     false,
     false,
@@ -67,27 +70,27 @@ export const commitRepoWithFingerprint = (
 
 // ── branch actions (switch / create / delete) ─────────────────────────────────────
 export const checkoutRepo = (id: string, branch: string): Promise<ActionOutcome> =>
-  runAction(id, (b, p) => b.checkout(p, branch));
+  runAction(id, "checkout", (b, p) => b.checkout(p, branch));
 export const createBranchRepo = (id: string, name: string, switchTo = true): Promise<ActionOutcome> =>
-  runAction(id, (b, p) => b.createBranch(p, name, switchTo));
+  runAction(id, "create-branch", (b, p) => b.createBranch(p, name, switchTo));
 export const deleteBranchRepo = (id: string, name: string): Promise<ActionOutcome> =>
-  runAction(id, (b, p) => b.deleteBranch(p, name));
+  runAction(id, "delete-branch", (b, p) => b.deleteBranch(p, name));
 
 // ── stash actions (save / pop / drop) ─────────────────────────────────────────────
 export const stashSaveRepo = (id: string, message?: string): Promise<ActionOutcome> =>
-  runAction(id, (b, p, idn) => b.stashSave(p, idn, message));
+  runAction(id, "stash-save", (b, p, idn) => b.stashSave(p, idn, message));
 export const stashPopRepo = (id: string, index = 0): Promise<ActionOutcome> =>
-  runAction(id, (b, p) => b.stashPop(p, index));
+  runAction(id, "stash-pop", (b, p) => b.stashPop(p, index));
 export const stashDropRepo = (id: string, index = 0): Promise<ActionOutcome> =>
-  runAction(id, (b, p) => b.stashDrop(p, index));
+  runAction(id, "stash-drop", (b, p) => b.stashDrop(p, index));
 
 // ── remote actions (set-url / remove origin) ──────────────────────────────────────
 // Local `.git/config` edits (no network). runAction refreshes status after, so the card's
 // remote URL + the cloud icon update over SSE immediately.
 export const setRemoteRepo = (id: string, name: string, url: string): Promise<ActionOutcome> =>
-  runAction(id, (_b, p) => gitRemoteSet(p, name, url));
+  runAction(id, "remote-set", (_b, p) => gitRemoteSet(p, name, url));
 export const removeRemoteRepo = (id: string, name: string): Promise<ActionOutcome> =>
-  runAction(id, (_b, p) => gitRemoteRemove(p, name));
+  runAction(id, "remote-remove", (_b, p) => gitRemoteRemove(p, name));
 
 // ── tag creation (git-only; the route guards on repo.vcs) ──────────────────────────
 export const createTagRepo = (
@@ -96,7 +99,7 @@ export const createTagRepo = (
   message?: string,
   push = false,
 ): Promise<ActionOutcome> =>
-  runAction(id, (_b, p, idn) => gitTagCreate(p, idn, name, message, push));
+  runAction(id, "tag-create", (_b, p, idn) => gitTagCreate(p, idn, name, message, push));
 
 // ── bulk fetch-all ────────────────────────────────────────────────────────────────
 export interface FetchAllResult {

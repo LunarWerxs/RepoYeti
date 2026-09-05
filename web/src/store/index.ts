@@ -20,6 +20,8 @@ import { useAi } from "./ai";
 import { useGitOps } from "./git-ops";
 import { useSources } from "./sources";
 import { useIdentities } from "./identities";
+import { useAutoCommitIncidents } from "./incidents";
+import { useOperationalErrors } from "./errors";
 import {
   useSettings,
   type BehindRepo,
@@ -300,6 +302,9 @@ export const useStore = defineStore("repoyeti", () => {
     setStyle,
     setDiffDetail,
     removeProvider,
+    keyPools,
+    loadKeyPool,
+    setKeyPool,
     genCommitMessage,
     genCommitPlan,
     smartCommit,
@@ -308,6 +313,24 @@ export const useStore = defineStore("repoyeti", () => {
     resolveConflict,
     applyConflict,
   } = useAi(busy, loadChanges, asResult, bumpHistoryRevision, applyActionStatus);
+
+  const {
+    incidents: autoCommitIncidents,
+    unacked: autoCommitIncidentsUnacked,
+    incidentsReady: autoCommitIncidentsReady,
+    incidentsLoading: autoCommitIncidentsLoading,
+    loadAutoCommitIncidents,
+    ackAutoCommitIncident,
+  } = useAutoCommitIncidents();
+
+  const {
+    errors: operationalErrors,
+    errorsReady: operationalErrorsReady,
+    errorsLoading: operationalErrorsLoading,
+    loadOperationalErrors,
+    setOperationalErrorMuted,
+    dismissOperationalError,
+  } = useOperationalErrors();
 
   const {
     branchesByRepo,
@@ -1075,6 +1098,9 @@ export const useStore = defineStore("repoyeti", () => {
     setStyle,
     setDiffDetail,
     removeProvider,
+    keyPools,
+    loadKeyPool,
+    setKeyPool,
     genCommitMessage,
     genCommitPlan,
     smartCommit,
@@ -1082,6 +1108,18 @@ export const useStore = defineStore("repoyeti", () => {
     readConflict,
     resolveConflict,
     applyConflict,
+    autoCommitIncidents,
+    autoCommitIncidentsUnacked,
+    autoCommitIncidentsReady,
+    autoCommitIncidentsLoading,
+    loadAutoCommitIncidents,
+    ackAutoCommitIncident,
+    operationalErrors,
+    operationalErrorsReady,
+    operationalErrorsLoading,
+    loadOperationalErrors,
+    setOperationalErrorMuted,
+    dismissOperationalError,
     authReady,
     authEnforced,
     authenticated,

@@ -87,6 +87,20 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/updates/restart": { summary: "Relaunch the daemon so an installed update takes over. 409 BUSY while work is in flight.", tags: ["system"] },
   "GET /api/openapi.json": { summary: "This OpenAPI 3.1 document (public, unauthenticated).", tags: ["system"] },
 
+  // ── grouped operational-error history (next to /api/status above) ────────────
+  "GET /api/errors": {
+    summary: "Grouped history of failed mutating VCS actions (fingerprinted by repo+op+code, with an occurrence count).",
+    tags: ["system"],
+  },
+  "POST /api/errors/:fingerprint/mute": {
+    summary: "Mute or unmute one error group (keeps its history; body: { muted?: boolean }, default true).",
+    tags: ["system"],
+  },
+  "DELETE /api/errors/:fingerprint": {
+    summary: "Dismiss one error group outright; a later matching failure starts a fresh row.",
+    tags: ["system"],
+  },
+
   // ── auth ──────────────────────────────────────────────────────────────────────
   "GET /api/auth/status": { summary: "Auth state: whether sign-in is enforced and who is signed in.", tags: ["auth"] },
   "GET /api/auth/me": { summary: "The signed-in owner's subject + email (nulls when local).", tags: ["auth"] },
@@ -360,6 +374,20 @@ export const META: Record<string, RouteMeta> = {
   "GET /api/approvals": { summary: "List MCP tool calls currently pending owner approve/deny.", tags: ["mcp"] },
   "POST /api/approvals/:id/approve": { summary: "Approve a pending MCP mutating tool call.", tags: ["mcp"] },
   "POST /api/approvals/:id/deny": { summary: "Deny a pending MCP mutating tool call.", tags: ["mcp"] },
+
+  // ── auto-commit incident review ──────────────────────────────────────────────
+  "GET /api/auto-commit/incidents": {
+    summary: "List auto-commit timer skips and sync failures the owner hasn't reviewed (or all, with ?unackedOnly=1).",
+    tags: ["repos"],
+    query: [
+      { name: "unackedOnly", description: "Only rows not yet acknowledged (\"1\" to enable).", enum: ["1"] },
+      { name: "limit", description: "Max rows to return (default 100, capped at 500)." },
+    ],
+  },
+  "POST /api/auto-commit/incidents/:id/ack": {
+    summary: "Mark one auto-commit incident reviewed.",
+    tags: ["repos"],
+  },
 };
 
 /** Hono path params (`:id`) → OpenAPI template params (`{id}`). */

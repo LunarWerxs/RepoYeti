@@ -7,7 +7,7 @@
  * *paths* and (later) keychain *handles*.
  */
 import { Database } from "bun:sqlite";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { DB_PATH, ensureConfigDir } from "./config.ts";
 import { isUnderTempDir } from "./paths.ts";
 import type { DiffStat } from "./read/diffstat.ts";
@@ -371,6 +371,67 @@ export function initDb(): Database {
       name       TEXT NOT NULL,
       ignored_at INTEGER NOT NULL
     );
+  `);
+  // Grouped operational-error history (adapted from PostHog's issue-fingerprint grouping,
+  // products/error_tracking/ - MIT). runAction (service/core.ts) is the single funnel every
+  // mutating git action goes through; on failure it computes a fingerprint from repo + op + code
+  // and upserts here instead of the daemon just logging to stderr and moving on. Without this an
+  // owner sees only the CURRENT health/status - a fetch that has failed 6 times in a row reads
+  // identically to one that failed once just now. `fingerprint` is a short hash (see
+  // operationalErrorFingerprint below), not the raw "repoId:op:code" string, so it stays a clean
+  // opaque path segment for the DELETE/mute routes.
+  handle.exec(`
+    CREATE TABLE IF NOT EXISTS operational_errors (
+      fingerprint   TEXT PRIMARY KEY,
+      repo_id       TEXT NOT NULL,
+      repo_name     TEXT NOT NULL,
+      op            TEXT NOT NULL,
+      code          TEXT NOT NULL,
+      message       TEXT NOT NULL,
+      occurrences   INTEGER NOT NULL DEFAULT 1,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at  INTEGER NOT NULL,
+      muted         INTEGER NOT NULL DEFAULT 0
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS operational_errors_last_seen ON operational_errors (last_seen_at);
+  `);
+  // Persisted counterpart to the repo_auto_commit_blocked / repo_auto_committed SSE broadcasts
+  // (src/auto-commit.ts) — those reach only whoever happens to be connected to the dashboard at
+  // the exact moment the timer fires. Without this table a skipped or partially-synced repo was
+  // reviewable only by having been staring at the dashboard when it happened; this survives past
+  // that so the owner can come back later and see what the unattended timer actually did.
+  //
+  // No REFERENCES on repo_id, same reasoning as share_events above: a repo can be removed or
+  // renamed after the incident happened, and the historic row must not go dangling or blank.
+  handle.exec(`
+    CREATE TABLE IF NOT EXISTS auto_commit_incidents (
+      id         TEXT PRIMARY KEY,
+      repo_id    TEXT NOT NULL,
+      repo_name  TEXT NOT NULL,
+      at         INTEGER NOT NULL,
+      reason     TEXT NOT NULL,
+      acked_at   INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS auto_commit_incidents_at ON auto_commit_incidents (at DESC);
+  `);
+  // Dedup any pre-existing duplicate open (repo_id, reason) rows BEFORE the unique index below can
+  // be created (a DB written by an earlier, pre-dedup build of this feature could already have more
+  // than one unacked row for the same repo+reason), keep the newest by rowid, drop the rest. Same
+  // merge-then-guard order as mergeDuplicateIdentities below: the index creation fails outright on
+  // a table that still has duplicates, so the cleanup must run first, every boot, before it.
+  handle.exec(`
+    DELETE FROM auto_commit_incidents
+    WHERE acked_at IS NULL
+      AND rowid NOT IN (
+        SELECT MAX(rowid) FROM auto_commit_incidents WHERE acked_at IS NULL GROUP BY repo_id, reason
+      );
+    -- A repo stuck in the same failure mode (e.g. an unresolved CONFLICT) ticks forever, and
+    -- without this the shared 500-row cap belongs to whichever repo is currently noisiest,
+    -- evicting every OTHER repo's incidents the owner never acknowledged. Partial (only while
+    -- unacked) so a fresh occurrence AFTER an ack is a new, separately-reviewable incident, not a
+    -- silent bump of the row the owner already dismissed. See recordAutoCommitIncident's upsert.
+    CREATE UNIQUE INDEX IF NOT EXISTS auto_commit_incidents_open_repo_reason
+      ON auto_commit_incidents (repo_id, reason) WHERE acked_at IS NULL;
   `);
   // Repair any temp-path repo rows already sitting in a pre-existing DB (historic test-fixture
   // writes and old whole-machine scans indexed under the OS temp dir, e.g. `%TEMP%\gm-*`, before
@@ -765,6 +826,122 @@ export function unignorePath(absPath: string): void {
   getDb().query(`DELETE FROM ignored_paths WHERE abs_path = ?`).run(absPath);
 }
 
+// ── Grouped operational-error history ───────────────────────────────────────────────────
+//
+// Adapted from PostHog's issue-fingerprint grouping (products/error_tracking/, MIT): cluster
+// recurring failures by a stable signature instead of a flat log or a one-shot toast. See the
+// `operational_errors` CREATE TABLE above for why this exists.
+
+export interface OperationalErrorView {
+  fingerprint: string;
+  repoId: string;
+  repoName: string;
+  op: string;
+  code: string;
+  message: string;
+  occurrences: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  muted: boolean;
+}
+
+interface OperationalErrorRow {
+  fingerprint: string;
+  repo_id: string;
+  repo_name: string;
+  op: string;
+  code: string;
+  message: string;
+  occurrences: number;
+  first_seen_at: number;
+  last_seen_at: number;
+  muted: number;
+}
+
+function toOperationalErrorView(r: OperationalErrorRow): OperationalErrorView {
+  return {
+    fingerprint: r.fingerprint,
+    repoId: r.repo_id,
+    repoName: r.repo_name,
+    op: r.op,
+    code: r.code,
+    message: r.message,
+    occurrences: r.occurrences,
+    firstSeenAt: r.first_seen_at,
+    lastSeenAt: r.last_seen_at,
+    muted: r.muted === 1,
+  };
+}
+
+/**
+ * Stable id for one (repo, operation, code) group - same short-hash idiom as `idFor` in
+ * identity-detect.ts (sha1, hex, 16 chars): plenty of collision resistance for a local per-machine
+ * log, and a clean opaque path segment for the mute/dismiss routes, unlike the raw
+ * "repoId:op:code" string, which would need URL-encoding and could still collide with a route
+ * pattern if an op or code ever contained a slash.
+ */
+export function operationalErrorFingerprint(repoId: string, op: string, code: string): string {
+  return createHash("sha1").update([repoId, op, code].join("\0")).digest("hex").slice(0, 16);
+}
+
+/**
+ * Record one failed mutating action, grouped by (repo, op, code), see
+ * `operationalErrorFingerprint`. The first occurrence inserts a row; every later one bumps
+ * `occurrences` and refreshes `message`/`last_seen_at` (the newest failure's message is usually
+ * the more useful one, e.g. a changed SSH host-key fingerprint) without disturbing
+ * `first_seen_at` or a manually-set `muted` flag. Called from service/core.ts's `runAction`, the
+ * single funnel every mutating VCS action goes through, so every call site is covered without
+ * each action remembering to log its own failure.
+ */
+export function recordOperationalError(input: {
+  repoId: string;
+  repoName: string;
+  op: string;
+  code: string;
+  message: string;
+}): void {
+  const fingerprint = operationalErrorFingerprint(input.repoId, input.op, input.code);
+  const now = Date.now();
+  getDb()
+    .query(
+      `INSERT INTO operational_errors
+         (fingerprint, repo_id, repo_name, op, code, message, occurrences, first_seen_at, last_seen_at, muted)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
+       ON CONFLICT(fingerprint) DO UPDATE SET
+         repo_name = excluded.repo_name,
+         message = excluded.message,
+         occurrences = operational_errors.occurrences + 1,
+         last_seen_at = excluded.last_seen_at`,
+    )
+    .run(fingerprint, input.repoId, input.repoName, input.op, input.code, input.message, now, now);
+}
+
+/** Every grouped operational error, most-recently-seen first - the "this repo's fetch has failed
+ *  N times" list next to the live health/status route. */
+export function listOperationalErrors(): OperationalErrorView[] {
+  const rows = getDb()
+    .query(`SELECT * FROM operational_errors ORDER BY last_seen_at DESC`)
+    .all() as OperationalErrorRow[];
+  return rows.map(toOperationalErrorView);
+}
+
+/** Toggle a group's mute flag (silence it from an "unread" badge without deleting its history).
+ *  Returns false if the fingerprint is unknown, so the route can answer 404 instead of a false ok. */
+export function setOperationalErrorMuted(fingerprint: string, muted: boolean): boolean {
+  const result = getDb()
+    .query(`UPDATE operational_errors SET muted = ? WHERE fingerprint = ?`)
+    .run(muted ? 1 : 0, fingerprint);
+  return result.changes > 0;
+}
+
+/** Dismiss one group outright. The next matching failure starts a fresh row/count: dismissing is
+ *  "I've dealt with this", not "stop telling me forever" (mute is that). Returns false if the
+ *  fingerprint was already gone/unknown. */
+export function dismissOperationalError(fingerprint: string): boolean {
+  const result = getDb().query(`DELETE FROM operational_errors WHERE fingerprint = ?`).run(fingerprint);
+  return result.changes > 0;
+}
+
 /**
  * Remove one repo from the index. `ignore: true` (the default for an owner-initiated removal)
  * also tombstones the path so a rescan can't bring it straight back; `ignore: false` is the
@@ -786,6 +963,10 @@ export function forgetRepo(id: string, ignore = true): RepoView | null {
     d.query(`DELETE FROM share_repos WHERE repo_id = ?`).run(id);
     d.query(`DELETE FROM shares WHERE id NOT IN (SELECT share_id FROM share_repos)`).run();
     d.query(`DELETE FROM git_commit_stats WHERE repo_id = ?`).run(id);
+    // Unlike share_events (an audit trail that must outlive the share it logged), an
+    // operational-error group has no meaning once its repo is gone - there is nothing left to
+    // mute/dismiss/retry against, so it is cleaned up here rather than kept.
+    d.query(`DELETE FROM operational_errors WHERE repo_id = ?`).run(id);
     d.query(`DELETE FROM repos WHERE id = ?`).run(id);
   });
   tx();
@@ -811,9 +992,11 @@ export function deleteRepos(ids: string[]): void {
   const d = getDb();
   const stmt = d.query(`DELETE FROM repos WHERE id = ?`);
   const clearStats = d.query(`DELETE FROM git_commit_stats WHERE repo_id = ?`);
+  const clearErrors = d.query(`DELETE FROM operational_errors WHERE repo_id = ?`);
   const tx = d.transaction((xs: string[]) => {
     for (const id of xs) {
       clearStats.run(id);
+      clearErrors.run(id);
       stmt.run(id);
     }
   });
@@ -1603,4 +1786,144 @@ export function listShareEvents(shareId: string, limit = 100): ShareEvent[] {
     repoId: r.repo_id,
     outcome: r.outcome === "allowed" ? "allowed" : "denied",
   }));
+}
+
+// ── auto-commit incidents ────────────────────────────────────────────────────────
+//
+// Adapted from Hermes Agent cron/incidents.py (MIT, Copyright Nous Research) for RepoYeti - the
+// incident-tracking DATA SHAPE only (one row per failed/skipped scheduled run, reviewable and
+// acknowledgeable), reimplemented against this repo's own SQLite/db.ts conventions, not ported
+// line-for-line.
+
+/**
+ * One repo the auto-commit timer could not fully handle on a round: a hard skip (`CONFLICT`,
+ * `AI_UNAVAILABLE`, `ERROR`, …) or a sync note on an otherwise-successful round (e.g.
+ * `NON_FAST_FORWARD`). See the table comment in initDb() for why this is persisted rather than
+ * left to the SSE broadcast alone.
+ */
+export interface AutoCommitIncident {
+  id: string;
+  repoId: string;
+  /** Repo name as of the most recent occurrence - a later rename/removal must not blank a
+   *  historic row (repoId is deliberately not a FK, same reasoning as ShareEvent above). */
+  repoName: string;
+  /** Ms of the most recent occurrence. A repeat of the same (repoId, reason) while still unacked
+   *  bumps this forward on the SAME row instead of minting a new one - see
+   *  recordAutoCommitIncident - so this is "last seen", not "first seen". */
+  at: number;
+  /** Mirrors AutoCommitBlockedRepo.reason / AutoCommittedRepo.note (auto-commit.ts). */
+  reason: string;
+  /** Ms the owner acknowledged it, or null while still unreviewed. */
+  ackedAt: number | null;
+}
+
+interface AutoCommitIncidentRow {
+  id: string;
+  repo_id: string;
+  repo_name: string;
+  at: number;
+  reason: string;
+  acked_at: number | null;
+}
+
+/** Housekeeping bound, mirrors SHARE_EVENT_CAP - a stuck timer retrying every minute forever must
+ *  not grow the DB forever. One shared cap across all repos (there is one timer, not one
+ *  row-owner per repo the way a share link owns its own audit trail). */
+const AUTO_COMMIT_INCIDENT_CAP = 500;
+
+function rowToAutoCommitIncident(r: AutoCommitIncidentRow): AutoCommitIncident {
+  return {
+    id: r.id,
+    repoId: r.repo_id,
+    repoName: r.repo_name,
+    at: r.at,
+    reason: r.reason,
+    ackedAt: r.acked_at,
+  };
+}
+
+/**
+ * Record one incident and prune back to the cap. Called from auto-commit.ts's tick() for every
+ * blocked repo and every done repo that still carries a sync `note`. Deliberately never throws:
+ * a storage hiccup here must not stop the timer from finishing its round; it reports instead
+ * (mirrors migrateAddColumn's non-fatal-but-loud posture above).
+ *
+ * Upserts on (repoId, reason) while unacked: a repo stuck in the same failure mode (e.g. an
+ * unresolved CONFLICT, exactly the case this feature exists to surface) would otherwise mint a
+ * fresh row every tick forever, and the 500-row cap is shared across ALL repos, so one repo
+ * stuck long enough would evict every OTHER repo's un-acknowledged incidents out from under them.
+ * Bumping the existing row's `at` instead keeps one row per open problem regardless of how many
+ * ticks it has survived, so the cap is spent on distinct problems, not repeat ticks of the same
+ * one. Once a row is acked, the next occurrence of the same (repoId, reason) is a fresh insert -
+ * a problem recurring after the owner dismissed it is new news, not a bump of old news.
+ */
+export function recordAutoCommitIncident(input: { repoId: string; repoName: string; reason: string }): void {
+  try {
+    const db2 = getDb();
+    const existing = db2
+      .query(`SELECT id FROM auto_commit_incidents WHERE repo_id = ? AND reason = ? AND acked_at IS NULL`)
+      .get(input.repoId, input.reason) as { id: string } | null;
+    if (existing) {
+      db2
+        .query(`UPDATE auto_commit_incidents SET at = ?, repo_name = ? WHERE id = ?`)
+        .run(Date.now(), input.repoName, existing.id);
+      return; // same row bumped, so the cap below only needs to run when a row is newly added.
+    }
+    db2
+      .query(
+        `INSERT INTO auto_commit_incidents (id, repo_id, repo_name, at, reason, acked_at)
+         VALUES (?, ?, ?, ?, ?, NULL)`,
+      )
+      .run(randomUUID(), input.repoId, input.repoName, Date.now(), input.reason);
+    db2
+      .query(
+        // Same OFFSET cap-1 shape as logShareEvent's prune, pruned by rowid (not `at`, which is
+        // millisecond-resolution and ties within one round) so "newest" stays unambiguous.
+        `DELETE FROM auto_commit_incidents
+         WHERE rowid < (SELECT rowid FROM auto_commit_incidents ORDER BY rowid DESC LIMIT 1 OFFSET ?)`,
+      )
+      .run(AUTO_COMMIT_INCIDENT_CAP - 1);
+  } catch (e) {
+    console.error("[repoyeti] failed to record auto-commit incident:", e);
+  }
+}
+
+/** Most recent incidents first (rowid tiebreak, same reasoning as listShareEvents).
+ *  `unackedOnly` narrows to rows the owner hasn't reviewed yet: what the dashboard's default
+ *  "needs attention" view reads from. */
+export function listAutoCommitIncidents(
+  opts: { limit?: number; unackedOnly?: boolean } = {},
+): AutoCommitIncident[] {
+  const limit = Math.max(1, Math.min(opts.limit ?? 100, AUTO_COMMIT_INCIDENT_CAP));
+  const where = opts.unackedOnly ? "WHERE acked_at IS NULL" : "";
+  return (
+    getDb()
+      .query(
+        `SELECT id, repo_id, repo_name, at, reason, acked_at FROM auto_commit_incidents
+         ${where} ORDER BY at DESC, rowid DESC LIMIT ?`,
+      )
+      .all(limit) as AutoCommitIncidentRow[]
+  ).map(rowToAutoCommitIncident);
+}
+
+/** How many incidents the owner hasn't acknowledged yet: the dashboard badge count. */
+export function countUnackedAutoCommitIncidents(): number {
+  const r = getDb()
+    .query(`SELECT count(*) AS n FROM auto_commit_incidents WHERE acked_at IS NULL`)
+    .get() as { n: number };
+  return r.n;
+}
+
+/** Mark one incident reviewed. Returns false when `id` doesn't exist (the route treats that as a
+ *  404). Acking an already-acked row is a no-op success rather than a fresh timestamp, so a
+ *  double-click (or two dashboard tabs) can't shuffle the review time. */
+export function ackAutoCommitIncident(id: string): boolean {
+  const existing = getDb().query(`SELECT acked_at FROM auto_commit_incidents WHERE id = ?`).get(id) as
+    | { acked_at: number | null }
+    | null;
+  if (!existing) return false;
+  if (existing.acked_at == null) {
+    getDb().query(`UPDATE auto_commit_incidents SET acked_at = ? WHERE id = ?`).run(Date.now(), id);
+  }
+  return true;
 }

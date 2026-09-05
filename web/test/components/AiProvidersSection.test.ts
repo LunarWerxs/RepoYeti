@@ -173,6 +173,10 @@ describe("AiProvidersSection — OpenAI-compatible provider", () => {
       models: [{ id: "acme/chat", label: "acme/chat" }],
       discoveryAvailable: false,
     });
+    // A configured provider also triggers the key-pool status fetch on mount (see
+    // AiProvidersSection's open-watcher): mock it too, same as listProviderModels above, so
+    // this test isn't exercising a real network call.
+    vi.spyOn(store, "loadKeyPool").mockResolvedValue(undefined);
 
     const section = mountSection();
     await flushPromises();
@@ -190,5 +194,144 @@ describe("AiProvidersSection — OpenAI-compatible provider", () => {
       "This endpoint did not provide a model list. RepoYeti is using your saved manual model instead.",
     );
     expect(section.text()).not.toContain("AI Pass");
+  });
+});
+
+describe("AiProvidersSection - backup key pool (src/ai/credential-pool.ts)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    activeWrapper?.unmount();
+    activeWrapper = undefined;
+    vi.restoreAllMocks();
+  });
+
+  function configureGroq() {
+    const store = useStore();
+    store.aiCatalog = [{ id: "groq", label: "Groq", keyPlaceholder: "gsk_…" }];
+    store.aiSettings = {
+      ...store.aiSettings,
+      providers: { groq: { configured: true, model: "llama-3.3-70b-versatile" } },
+      defaultProvider: "groq",
+    };
+    vi.spyOn(store, "listProviderModels").mockResolvedValue({
+      models: [{ id: "llama-3.3-70b-versatile", label: "llama-3.3-70b-versatile" }],
+      discoveryAvailable: true,
+    });
+    return store;
+  }
+
+  async function openGroqRow(section: VueWrapper): Promise<void> {
+    const providerButton = section.findAll("button").find((b) => b.text().includes("Groq"));
+    expect(providerButton).toBeDefined();
+    await providerButton!.trigger("click");
+    await flushPromises();
+  }
+
+  it("shows masked fingerprints and health for the pool, never a raw key", async () => {
+    const store = configureGroq();
+    vi.spyOn(store, "loadKeyPool").mockResolvedValue(undefined);
+    store.keyPools = {
+      groq: {
+        provider: "groq",
+        total: 2,
+        available: 1,
+        entries: [
+          { id: "gsk_…aaaa1111", status: "ok", successes: 4, failures: 0, lastError: null, lastUsedAt: 1 },
+          {
+            id: "gsk_…bbbb2222",
+            status: "cooldown",
+            successes: 0,
+            failures: 2,
+            lastError: "rate limited",
+            lastUsedAt: 2,
+          },
+        ],
+      },
+    };
+
+    const section = mountSection();
+    await flushPromises();
+    await openGroqRow(section);
+
+    expect(section.text()).toContain("gsk_…aaaa1111");
+    expect(section.text()).toContain("gsk_…bbbb2222");
+    expect(section.text()).toContain(i18n.global.t("settings.aiKeyStatusOk"));
+    expect(section.text()).toContain(i18n.global.t("settings.aiKeyStatusCooldown"));
+    // The real secret value must never reach the rendered DOM.
+    expect(section.text()).not.toContain("rate limited");
+  });
+
+  it("adding a row then saving replaces the pool with exactly the typed keys", async () => {
+    const store = configureGroq();
+    vi.spyOn(store, "loadKeyPool").mockResolvedValue(undefined);
+    const setKeyPool = vi.spyOn(store, "setKeyPool").mockResolvedValue(undefined);
+
+    const section = mountSection();
+    await flushPromises();
+    await openGroqRow(section);
+
+    const addButton = section
+      .findAll("button")
+      .find((b) => b.text().includes(i18n.global.t("settings.aiKeyPoolAdd")));
+    expect(addButton).toBeDefined();
+    await addButton!.trigger("click");
+    await nextTick();
+
+    const keyInput = section.get(
+      `input[aria-label="${i18n.global.t("settings.aiKeyPoolEntryLabel", { n: 1 })}"]`,
+    );
+    await keyInput.setValue("extra-backup-key");
+
+    const saveButton = section
+      .findAll("button")
+      .find((b) => b.text().includes(i18n.global.t("settings.aiKeyPoolSave")));
+    expect(saveButton).toBeDefined();
+    await saveButton!.trigger("click");
+    await flushPromises();
+
+    expect(setKeyPool).toHaveBeenCalledWith("groq", ["extra-backup-key"]);
+  });
+
+  it("removing a row before saving drops it from the submitted list", async () => {
+    const store = configureGroq();
+    vi.spyOn(store, "loadKeyPool").mockResolvedValue(undefined);
+    const setKeyPool = vi.spyOn(store, "setKeyPool").mockResolvedValue(undefined);
+
+    const section = mountSection();
+    await flushPromises();
+    await openGroqRow(section);
+
+    const addLabel = i18n.global.t("settings.aiKeyPoolAdd");
+    const addButton = () => section.findAll("button").find((b) => b.text().includes(addLabel));
+    await addButton()!.trigger("click");
+    await nextTick();
+    await addButton()!.trigger("click");
+    await nextTick();
+
+    await section
+      .get(`input[aria-label="${i18n.global.t("settings.aiKeyPoolEntryLabel", { n: 1 })}"]`)
+      .setValue("keep-me");
+    await section
+      .get(`input[aria-label="${i18n.global.t("settings.aiKeyPoolEntryLabel", { n: 2 })}"]`)
+      .setValue("drop-me");
+
+    const removeButton = section
+      .findAll(`button[aria-label="${i18n.global.t("settings.aiKeyPoolRemove")}"]`)
+      .at(1); // remove the SECOND row ("drop-me")
+    expect(removeButton).toBeDefined();
+    await removeButton!.trigger("click");
+    await nextTick();
+
+    const saveButton = section
+      .findAll("button")
+      .find((b) => b.text().includes(i18n.global.t("settings.aiKeyPoolSave")));
+    await saveButton!.trigger("click");
+    await flushPromises();
+
+    expect(setKeyPool).toHaveBeenCalledWith("groq", ["keep-me"]);
   });
 });

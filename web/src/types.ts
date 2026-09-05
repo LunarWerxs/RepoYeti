@@ -1045,3 +1045,52 @@ export interface CollaborationInvitePreview {
   };
   repos: Array<{ id: string; name: string; displayName: string | null }>;
 }
+
+// ── auto-commit incident ledger: mirrors src/db.ts AutoCommitIncident ──────────────
+// A repo the unattended auto-commit timer skipped (or only partially synced) while nobody was
+// watching the dashboard. Owner-only, same as every other Automation-tab surface.
+export interface AutoCommitIncident {
+  id: string;
+  repoId: string;
+  repoName: string;
+  /** Ms of the most recent occurrence ("last seen", not "first seen" - see db.ts). */
+  at: number;
+  reason: string;
+  /** Ms the owner acknowledged it, or null while still unreviewed. */
+  ackedAt: number | null;
+}
+
+// ── grouped operational errors: mirrors src/db.ts OperationalErrorView ────────────
+// The "what has gone wrong, and how often" history for failed mutating git actions, grouped by
+// (repo, op, code). Owner-only.
+export interface OperationalErrorView {
+  fingerprint: string;
+  repoId: string;
+  repoName: string;
+  op: string;
+  code: string;
+  message: string;
+  occurrences: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  muted: boolean;
+}
+
+// ── per-provider AI key rotation pool: mirrors src/ai/credential-pool.ts ──────────
+// Sanitized health snapshot only: a fingerprint identifies a pooled key, never the key itself.
+export interface AiKeyHealth {
+  id: string;
+  cooldownUntil: number;
+  status: "untested" | "ok" | "cooldown" | "dead";
+  successes: number;
+  failures: number;
+  lastError: string | null;
+  lastUsedAt: number | null;
+}
+
+export interface AiKeyPoolSnapshot {
+  provider: AiProviderId;
+  total: number;
+  available: number;
+  entries: AiKeyHealth[];
+}

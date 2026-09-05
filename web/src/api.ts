@@ -6,9 +6,11 @@ import type {
   AccountsSnapshot,
   ActionResult,
   AiCatalogEntry,
+  AiKeyPoolSnapshot,
   AiModelDiscovery,
   AiProviderId,
   AiSettings,
+  AutoCommitIncident,
   BranchList,
   BuzzCommunity,
   BuzzConfig,
@@ -34,6 +36,7 @@ import type {
   HistoryActivityScale,
   Identity,
   IdentityRule,
+  OperationalErrorView,
   IncomingResult,
   LogAuthorFilter,
   LogResult,
@@ -579,6 +582,40 @@ export const api = {
   setIdentityRules: (rules: IdentityRule[]) =>
     req<{ ok: boolean; rules: IdentityRule[] }>("PUT", "/api/identity-rules", { rules }).then((r) => r.rules),
 
+  // ── auto-commit incident ledger — the reviewable counterpart to auto-commit.ts's SSE
+  // broadcasts (src/http/routes/auto-commit-incidents.ts) ──────────────────────────────
+  autoCommitIncidents: {
+    /** Most-recently-seen first. `unackedOnly` narrows to what the owner hasn't reviewed. */
+    list: (opts: { unackedOnly?: boolean; limit?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (opts.unackedOnly) q.set("unackedOnly", "1");
+      if (opts.limit) q.set("limit", String(opts.limit));
+      const qs = q.toString();
+      return req<{ incidents: AutoCommitIncident[]; unacked: number }>(
+        "GET",
+        `/api/auto-commit/incidents${qs ? `?${qs}` : ""}`,
+      );
+    },
+    /** Mark one incident reviewed. Throws ApiError (NOT_FOUND) if the id is gone. */
+    ack: (id: string) => req<{ ok: boolean }>("POST", `/api/auto-commit/incidents/${id}/ack`),
+  },
+
+  // ── grouped operational errors — src/http/routes/errors.ts ──────────────────────────
+  errors: {
+    /** Every grouped error, most-recently-seen first. */
+    list: () => req<{ ok: boolean; errors: OperationalErrorView[] }>("GET", "/api/errors").then((r) => r.errors),
+    /** Mute (default) or unmute one group — keeps its history, just stops calling it out. */
+    setMuted: (fingerprint: string, muted: boolean) =>
+      req<{ ok: boolean; fingerprint: string; muted: boolean }>(
+        "POST",
+        `/api/errors/${encodeURIComponent(fingerprint)}/mute`,
+        { muted },
+      ),
+    /** Dismiss one group outright. A later matching failure starts a fresh count. */
+    dismiss: (fingerprint: string) =>
+      req<{ ok: boolean; fingerprint: string }>("DELETE", `/api/errors/${encodeURIComponent(fingerprint)}`),
+  },
+
   // ── GitHub (gh) accounts — read + switch the machine's active account ──────────
   /** The machine's authenticated GitHub accounts + which is active + the global git author. */
   accounts: () => req<AccountsSnapshot>("GET", "/api/accounts"),
@@ -891,6 +928,17 @@ export const api = {
       req<AiSettings>("PUT", `/api/ai/providers/${provider}`, patch),
     removeProvider: (provider: AiProviderId) =>
       req<AiSettings>("DELETE", `/api/ai/providers/${provider}`),
+    /** Sanitized rotation-pool health for a connected provider: fingerprints only, never a key. */
+    keyPool: (provider: AiProviderId) =>
+      req<AiKeyPoolSnapshot>("GET", `/api/ai/providers/${provider}/keys`),
+    /** Replace the provider's rotation-pool EXTRAS (never the primary key, which `connect` owns).
+     *  Submits the full desired list; the handler dedupes and drops the primary if resubmitted. */
+    setKeyPool: (provider: AiProviderId, apiKeys: string[]) =>
+      req<{ ok: boolean; poolSize: number; settings: AiSettings }>(
+        "PUT",
+        `/api/ai/providers/${provider}/keys`,
+        { apiKeys },
+      ),
     /** Draft a commit message from the repo's diff. With `paths`, scope it to just those
      *  files (smart-commit per-group regenerate); omit for the whole working tree. */
     commitMessage: (repoId: string, provider?: AiProviderId, paths?: string[]) =>

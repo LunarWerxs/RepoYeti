@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { toast } from "vue-sonner";
+import { Check, CircleAlert } from "@lucide/vue";
 import { useStore } from "../../store";
+import { ApiError } from "../../api";
+import { fromNow } from "@/lib/util";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import SettingsRow from "@/shell/SettingsRow.vue";
 import InfoHint from "@/shell/InfoHint.vue";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -16,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+const props = defineProps<{ open?: boolean }>();
 const store = useStore();
 const { t } = useI18n();
 
@@ -99,6 +105,27 @@ const on = computed(() => store.autoCommit);
 // menu. Surface how many are opted in right here so "I flipped it on, why is nothing happening?"
 // answers itself (the answer is almost always "no repo is opted in yet").
 const optedInCount = computed(() => store.repos.filter((r) => r.autoCommit).length);
+
+// ── incident ledger: repos the unattended timer skipped, or only partially synced ──────
+// (src/http/routes/auto-commit-incidents.ts). Loaded when the Settings sheet opens, same
+// on-open refresh pattern as IdentityFirewallSection.
+watch(
+  () => props.open,
+  (isOpen) => {
+    if (isOpen) void store.loadAutoCommitIncidents();
+  },
+  { immediate: true },
+);
+const unackedIncidents = computed(() => store.autoCommitIncidents.filter((i) => i.ackedAt == null));
+const ackedIncidents = computed(() => store.autoCommitIncidents.filter((i) => i.ackedAt != null));
+
+async function ack(id: string): Promise<void> {
+  try {
+    await store.ackAutoCommitIncident(id);
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : t("settings.autoCommitIncidentAckFailed"));
+  }
+}
 </script>
 
 <template>
@@ -211,5 +238,50 @@ const optedInCount = computed(() => store.repos.filter((r) => r.autoCommit).leng
         </div>
       </div>
     </ExpandTransition>
+
+    <!-- Incident ledger: a repo the unattended timer skipped, or only partially synced, while
+         nobody was watching the dashboard (src/http/routes/auto-commit-incidents.ts). Shown
+         whenever there's history, independent of whether auto-commit is on right now: the
+         owner may have turned it off precisely BECAUSE of one of these. -->
+    <div v-if="store.autoCommitIncidents.length" class="flex flex-col gap-2 px-3.5 py-3">
+      <div class="flex items-center gap-1.5">
+        <span class="text-[12px] text-muted-foreground">{{ $t("settings.autoCommitIncidents") }}</span>
+        <Badge v-if="unackedIncidents.length" variant="warning" class="px-1.5 py-0 text-[10px]">
+          {{ unackedIncidents.length }}
+        </Badge>
+        <InfoHint :text="$t('settings.autoCommitIncidentsHint')" />
+      </div>
+
+      <div class="flex flex-col gap-1.5">
+        <div
+          v-for="incident in unackedIncidents"
+          :key="incident.id"
+          class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 p-2.5"
+        >
+          <CircleAlert :size="14" class="mt-0.5 shrink-0 text-warning" />
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-[12.5px] font-medium">{{ incident.repoName }}</p>
+            <p class="text-[11.5px] text-muted-foreground">{{ incident.reason }} · {{ fromNow(incident.at) }}</p>
+          </div>
+          <Button size="sm" variant="outline" class="shrink-0" @click="ack(incident.id)">
+            <Check />
+            {{ $t("settings.autoCommitIncidentAck") }}
+          </Button>
+        </div>
+
+        <!-- already-reviewed history, collapsed visually behind lower emphasis -->
+        <div
+          v-for="incident in ackedIncidents.slice(0, 5)"
+          :key="incident.id"
+          class="flex items-start gap-2 rounded-lg border border-border/60 bg-secondary/30 p-2.5 opacity-70"
+        >
+          <Check :size="14" class="mt-0.5 shrink-0 text-muted-foreground" />
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-[12.5px] font-medium">{{ incident.repoName }}</p>
+            <p class="text-[11.5px] text-muted-foreground">{{ incident.reason }} · {{ fromNow(incident.at) }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </SettingsGroup>
 </template>

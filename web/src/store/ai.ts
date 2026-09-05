@@ -4,6 +4,7 @@ import type {
   ActionName,
   ActionResult,
   AiCatalogEntry,
+  AiKeyPoolSnapshot,
   AiModelDiscovery,
   AiProviderId,
   AiSettings,
@@ -183,6 +184,26 @@ export function useAi(
   async function removeProvider(provider: AiProviderId): Promise<void> {
     aiSettings.value = await api.ai.removeProvider(provider);
   }
+
+  // ── per-provider key rotation pool (src/ai/credential-pool.ts) ─────────────────
+  // Sanitized health snapshot only: GET never returns a raw key, so the pool's extras are
+  // edited as a whole replace-the-list operation (same shape as setIdentityRules), never as
+  // incremental add/remove against a value the browser doesn't have.
+  const keyPools = ref<Partial<Record<AiProviderId, AiKeyPoolSnapshot>>>({});
+  async function loadKeyPool(provider: AiProviderId): Promise<void> {
+    try {
+      keyPools.value = { ...keyPools.value, [provider]: await api.ai.keyPool(provider) };
+    } catch {
+      /* pool status is diagnostic-only: a failed read just leaves the section empty */
+    }
+  }
+  /** Replace the provider's rotation-pool extras. Throws ApiError → the caller toasts; refreshes
+   *  both the pool snapshot and the redacted settings (poolSize can move the modelTier hint). */
+  async function setKeyPool(provider: AiProviderId, apiKeys: string[]): Promise<void> {
+    const r = await api.ai.setKeyPool(provider, apiKeys);
+    aiSettings.value = r.settings;
+    await loadKeyPool(provider);
+  }
   /** Draft a commit message from the repo's diff (or just `paths`, for smart-commit per-group
    *  regenerate). Throws ApiError → caller toasts. */
   async function genCommitMessage(repoId: string, provider?: AiProviderId, paths?: string[]): Promise<string> {
@@ -280,6 +301,9 @@ export function useAi(
     setStyle,
     setDiffDetail,
     removeProvider,
+    keyPools,
+    loadKeyPool,
+    setKeyPool,
     genCommitMessage,
     genCommitPlan,
     smartCommit,
