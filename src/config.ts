@@ -128,7 +128,7 @@ export interface AiCatalogEntry {
 export const AI_CATALOG: readonly AiCatalogEntry[] = [
   { id: "groq",       label: "Groq",      url: "console.groq.com/keys",    keyPlaceholder: "gsk_…",     free: true, suggested: true, recommended: "llama-3.3-70b-versatile" },
   { id: "openrouter", label: "OpenRouter", url: "openrouter.ai/keys",       keyPlaceholder: "sk-or-…",   free: true, recommended: "meta-llama/llama-3.3-70b-instruct:free" },
-  { id: "gemini",     label: "Gemini",     url: "aistudio.google.com",      keyPlaceholder: "AIza…",     free: true, recommended: "gemini-2.0-flash" },
+  { id: "gemini",     label: "Gemini",     url: "aistudio.google.com",      keyPlaceholder: "AIza…",     free: true, recommended: "gemini-flash-latest" },
   { id: "anthropic",  label: "Claude",     url: "console.anthropic.com",    keyPlaceholder: "sk-ant-…",              recommended: "claude-3-5-haiku-latest" },
   { id: "openai",     label: "ChatGPT",    url: "platform.openai.com",      keyPlaceholder: "sk-…",                  recommended: "gpt-4o-mini" },
   { id: "deepseek",   label: "DeepSeek",   url: "platform.deepseek.com",    keyPlaceholder: "sk-…",                  recommended: "deepseek-chat" },

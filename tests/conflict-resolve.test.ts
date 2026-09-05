@@ -201,7 +201,7 @@ test("assessResolution flags an emptied region and a suspiciously short one", ()
 test("looksSmallTierModel recognises the small/fast tiers, including catalog defaults", () => {
   // These three ARE this app's own `recommended` models (config.ts AI_CATALOG). Matching them is
   // the intended result: they were picked for cheap commit messages, and a merge is not that.
-  for (const m of ["gpt-4o-mini", "gemini-2.0-flash", "claude-3-5-haiku-latest"]) {
+  for (const m of ["gpt-4o-mini", "gemini-flash-latest", "claude-3-5-haiku-latest"]) {
     expect(looksSmallTierModel(m)).toBe(true);
   }
   for (const m of ["llama-3.1-8b-instant", "qwen2.5-7b-instruct", "gemma-2-2b-it", "phi-4-mini", "ministral-3b"]) {
