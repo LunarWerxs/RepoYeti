@@ -374,6 +374,20 @@ export const META: Record<string, RouteMeta> = {
   "GET /api/approvals": { summary: "List MCP tool calls currently pending owner approve/deny.", tags: ["mcp"] },
   "POST /api/approvals/:id/approve": { summary: "Approve a pending MCP mutating tool call.", tags: ["mcp"] },
   "POST /api/approvals/:id/deny": { summary: "Deny a pending MCP mutating tool call.", tags: ["mcp"] },
+
+  // ── auto-commit incident review ──────────────────────────────────────────────
+  "GET /api/auto-commit/incidents": {
+    summary: "List auto-commit timer skips and sync failures the owner hasn't reviewed (or all, with ?unackedOnly=1).",
+    tags: ["repos"],
+    query: [
+      { name: "unackedOnly", description: "Only rows not yet acknowledged (\"1\" to enable).", enum: ["1"] },
+      { name: "limit", description: "Max rows to return (default 100, capped at 500)." },
+    ],
+  },
+  "POST /api/auto-commit/incidents/:id/ack": {
+    summary: "Mark one auto-commit incident reviewed.",
+    tags: ["repos"],
+  },
 };
 
 /** Hono path params (`:id`) → OpenAPI template params (`{id}`). */

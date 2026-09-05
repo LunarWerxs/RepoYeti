@@ -8,6 +8,19 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Added
 
+- **Auto-commit skips and sync failures now leave a reviewable trail (API only for now, no
+  dashboard UI yet).** The scheduled auto-commit timer already refused to touch a conflicted or
+  mid-operation repo, and already told any dashboard connected at that exact moment via SSE, but
+  nobody is always connected to an unattended timer, and once that broadcast passed, the only
+  record of the skip was gone. A repo could sit un-synced for days with nothing to show for it
+  beyond "auto-commit is on and yet this tree never moves." Every skip (`CONFLICT`,
+  `AI_UNAVAILABLE`, `ERROR`, …) and every otherwise-successful round that still carries a sync note
+  (e.g. `NON_FAST_FORWARD`) is now persisted as one incident row per open (repo, reason) pair
+  (repeat ticks of the same unresolved problem bump that row instead of piling up new ones),
+  capped at the newest 500 across all repos. New routes: `GET /api/auto-commit/incidents`
+  (optionally `?unackedOnly=1`) and `POST /api/auto-commit/incidents/:id/ack`, and nothing in the
+  dashboard calls them yet, so today this is reachable by direct HTTP request only. Data shape
+  adapted from Hermes Agent's `cron/incidents.py` (MIT).
 - **Grouped operational-error history (backend only, no dashboard panel yet).** The dashboard
   has always shown a repo's status right now (ahead/behind, dirty, conflicted) but nothing about
   what has gone wrong operationally over time: a fetch that has failed against a rotated SSH key
