@@ -4,6 +4,22 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **AI providers can hold a rotation pool of keys, not just one.** Every provider (Groq, OpenAI,
+  Gemini, ...) held exactly one bring-your-own key, so an owner on a free tier who hit that
+  tier's rate limit blocked Smart Commit, commit-message drafting, conflict-resolve, and the
+  unattended auto-commit timer until the provider's own window reset, even though an owner
+  juggling several free accounts for the same provider had a second key sitting unused. A
+  provider's config can now carry additional pool keys (`PUT /api/ai/providers/:provider/keys`);
+  every generation/model-list call tries the pool in round-robin order and cools a key down only
+  on the outcome that is actually its fault (rate-limited or auth-rejected), so a spent free-tier
+  key no longer stalls the daemon while a working one sits idle in Settings.
+  `GET /api/ai/providers/:provider/keys` shows non-secret per-key health (a fingerprint and
+  cooldown state, never the key itself).
+
 ## [0.21.5] - 2026-08-19
 
 ### Added

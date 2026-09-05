@@ -299,6 +299,14 @@ export const ProviderUpdateSchema = z.object({
   makeDefault: z.boolean().optional(),
 });
 
+/** Extra rotation-pool keys for an already-connected provider (see src/ai/credential-pool.ts).
+ *  Replaces the whole extras list - the handler dedupes and drops the primary key if resubmitted.
+ *  Capped well under any realistic owner-managed count; this is a few free-tier accounts, not a
+ *  bulk credential dump. */
+export const AiKeyPoolSchema = z.object({
+  apiKeys: z.array(z.string().min(1).max(2048)).max(8),
+});
+
 export const CommitMessageSchema = z.object({
   provider: z.string().optional(),
   // When present, draft the message from ONLY these paths (smart-commit per-group regenerate).

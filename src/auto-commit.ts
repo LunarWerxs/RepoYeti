@@ -29,7 +29,7 @@ import { currentGitOperation } from "./git.ts";
 import { smartCommitRepo, pullRepo, pushRepo, planCommitInput } from "./service/index.ts";
 import {
   effectiveDefaultProvider,
-  resolveApiKey,
+  resolveApiKeyPool,
   resolveAiBaseUrl,
   aiProviderUsesNoAuth,
   isAiProviderConfigured,
@@ -37,7 +37,13 @@ import {
   DEFAULT_DIFF_DETAIL,
   type RepoYetiConfig,
 } from "./config.ts";
-import { generateCommitPlan, heuristicPlan, type CommitPlan, type CommitPlanGroup } from "./ai.ts";
+import {
+  generateCommitPlan,
+  heuristicPlan,
+  withKeyRotation,
+  type CommitPlan,
+  type CommitPlanGroup,
+} from "./ai.ts";
 
 /** Interval-mode cadence bounds (seconds): 1 min floor (auto-commit is heavier than a fetch),
  *  24 h ceiling. Default 15 min. */
@@ -220,21 +226,20 @@ async function buildPlan(repoId: string): Promise<BuiltPlan> {
   let plan: CommitPlan;
   let degraded = false;
   if (cfg && provider) {
-    const apiKey =
-      resolveApiKey(cfg, provider) ?? (aiProviderUsesNoAuth(cfg, provider) ? "" : null);
+    const apiKeys = resolveApiKeyPool(cfg, provider);
+    const hasKey = apiKeys.length > 0 || aiProviderUsesNoAuth(cfg, provider);
     const model = resolveModel(cfg, provider);
     const style = cfg.ai?.style ?? "conventional";
     try {
       plan =
-        apiKey !== null && isAiProviderConfigured(cfg, provider) && model
-          ? await generateCommitPlan(
-              provider,
-              apiKey,
-              model,
-              input,
-              style,
-              undefined,
-              { baseUrl: resolveAiBaseUrl(cfg, provider) ?? undefined },
+        hasKey && isAiProviderConfigured(cfg, provider) && model
+          ? // Rotates to the next pool key on a rate-limit/auth rejection - credential-pool.ts.
+            // Unattended and on a timer is exactly where a single spent free-tier key would
+            // otherwise silently degrade every run to the heuristic fallback.
+            await withKeyRotation(provider, apiKeys, (apiKey) =>
+              generateCommitPlan(provider, apiKey, model, input, style, undefined, {
+                baseUrl: resolveAiBaseUrl(cfg, provider) ?? undefined,
+              }),
             )
           : heuristicPlan(input);
     } catch {
