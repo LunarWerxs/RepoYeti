@@ -123,14 +123,16 @@ export async function runAction(
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found", repoId };
   // Every early-exit below funnels through this before returning, so the grouped error history
-  // (Settings → Error history, next to the live health/status route) covers every way this
-  // function can fail, not just the ones that reach the git child process.
+  // (GET /api/errors, see src/http/routes/errors.ts) covers every way this function can fail,
+  // not just the ones that reach the git child process. This is backend-only groundwork - no
+  // dashboard panel reads it yet, tracked in docs/todo/error-history-ui-panel.md.
   const record = (result: ActionResult): void => {
     if (result.ok) return;
     recordOperationalError({ repoId, repoName: repo.name, op, code: result.code, message: result.message });
     // Owner-plane only: not in share/events.ts's allowlist, so a guest's SSE connection never
-    // sees it. Settings' error-history panel listens for this to refetch, same idiom as
-    // identity_rules_changed - the payload just needs to say something changed, not what.
+    // sees it. Broadcast now so a future Settings error-history panel can listen and refetch,
+    // same idiom as identity_rules_changed - the payload just needs to say something changed,
+    // not what. Nothing subscribes to this event yet (see docs/todo/error-history-ui-panel.md).
     broadcast("operational_error_changed", { repoId, op, code: result.code });
   };
   if (repo.isSubmodule) {

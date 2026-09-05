@@ -16,6 +16,8 @@ import {
   setOperationalErrorMuted,
   dismissOperationalError,
   operationalErrorFingerprint,
+  forgetRepo,
+  deleteRepos,
 } from "../src/db.ts";
 import { pushRepo } from "../src/service/actions.ts";
 import { createApp } from "../src/http/app.ts";
@@ -142,3 +144,27 @@ test("GET/mute/dismiss over HTTP round-trip against a real recorded failure", as
   const redelRes = await app.request(`/api/errors/${fingerprint}`, { method: "DELETE" });
   expect(redelRes.status).toBe(404);
 }, 30_000);
+
+// ── cleanup on repo removal ──────────────────────────────────────────────────────────────
+
+test("forgetRepo also clears that repo's operational-error rows, not just git_commit_stats", () => {
+  const dir = mkScratchDir("err-cleanup-forget-");
+  const id = mustUpsertRepo(dir, "err-cleanup", "auto", false);
+  recordOperationalError({ repoId: id, repoName: "err-cleanup", op: "fetch", code: "NO_REMOTE", message: "m" });
+  expect(listOperationalErrors().some((e) => e.repoId === id)).toBe(true);
+
+  forgetRepo(id);
+
+  expect(listOperationalErrors().some((e) => e.repoId === id)).toBe(false);
+});
+
+test("deleteRepos also clears operational-error rows for every id removed", () => {
+  const dir = mkScratchDir("err-cleanup-bulk-");
+  const id = mustUpsertRepo(dir, "err-cleanup-bulk", "auto", false);
+  recordOperationalError({ repoId: id, repoName: "err-cleanup-bulk", op: "push", code: "NO_REMOTE", message: "m" });
+  expect(listOperationalErrors().some((e) => e.repoId === id)).toBe(true);
+
+  deleteRepos([id]);
+
+  expect(listOperationalErrors().some((e) => e.repoId === id)).toBe(false);
+});

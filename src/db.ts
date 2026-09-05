@@ -925,6 +925,10 @@ export function forgetRepo(id: string, ignore = true): RepoView | null {
     d.query(`DELETE FROM share_repos WHERE repo_id = ?`).run(id);
     d.query(`DELETE FROM shares WHERE id NOT IN (SELECT share_id FROM share_repos)`).run();
     d.query(`DELETE FROM git_commit_stats WHERE repo_id = ?`).run(id);
+    // Unlike share_events (an audit trail that must outlive the share it logged), an
+    // operational-error group has no meaning once its repo is gone - there is nothing left to
+    // mute/dismiss/retry against, so it is cleaned up here rather than kept.
+    d.query(`DELETE FROM operational_errors WHERE repo_id = ?`).run(id);
     d.query(`DELETE FROM repos WHERE id = ?`).run(id);
   });
   tx();
@@ -950,9 +954,11 @@ export function deleteRepos(ids: string[]): void {
   const d = getDb();
   const stmt = d.query(`DELETE FROM repos WHERE id = ?`);
   const clearStats = d.query(`DELETE FROM git_commit_stats WHERE repo_id = ?`);
+  const clearErrors = d.query(`DELETE FROM operational_errors WHERE repo_id = ?`);
   const tx = d.transaction((xs: string[]) => {
     for (const id of xs) {
       clearStats.run(id);
+      clearErrors.run(id);
       stmt.run(id);
     }
   });
