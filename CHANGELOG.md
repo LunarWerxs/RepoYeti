@@ -4,6 +4,21 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Auto-commit skips and sync failures now leave a reviewable trail.** The scheduled auto-commit
+  timer already refused to touch a conflicted or mid-operation repo, and already told any dashboard
+  connected at that exact moment via SSE, but nobody is always connected to an unattended timer,
+  and once that broadcast passed, the only record of the skip was gone. A repo could sit un-synced
+  for days with nothing to show for it beyond "auto-commit is on and yet this tree never moves."
+  Every skip (`CONFLICT`, `AI_UNAVAILABLE`, `ERROR`, …) and every otherwise-successful round that
+  still carries a sync note (e.g. `NON_FAST_FORWARD`) is now persisted as an incident row, capped
+  at the newest 500. New routes: `GET /api/auto-commit/incidents` (optionally `?unackedOnly=1`) and
+  `POST /api/auto-commit/incidents/:id/ack`. Data shape adapted from Hermes Agent's
+  `cron/incidents.py` (MIT).
+
 ## [0.21.5] - 2026-08-19
 
 ### Added

@@ -79,6 +79,7 @@ import * as openapi from "./routes/openapi.ts";
 import * as mcp from "./routes/mcp.ts";
 import * as sync from "./routes/sync.ts";
 import * as approvals from "./routes/approvals.ts";
+import * as autoCommitIncidents from "./routes/auto-commit-incidents.ts";
 import * as shares from "./routes/shares.ts";
 import * as collaborations from "./routes/collaborations.ts";
 
@@ -207,6 +208,7 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   mcp.register(app, deps);
   sync.register(app, deps);
   approvals.register(app, deps);
+  autoCommitIncidents.register(app, deps);
   collaborations.register(app, deps);
   // Share links: /api/shares/* (owner-gated like everything under /api/*) plus the public
   // GET /s/:token redemption. Registered before mountWeb so /s/... isn't eaten by the SPA fallback.

@@ -15,6 +15,11 @@
  * (and skipping the push if the pull fails) mirrors the "commit & sync" order so an unattended
  * run can't publish over a diverged remote.
  *
+ * INCIDENTS: every skip and every non-fatal sync note is also persisted as a row via
+ * `recordAutoCommitIncident` (db.ts), so a repo the timer skipped while nobody was watching the
+ * dashboard is still reviewable later (GET/POST /api/auto-commit/incidents). The SSE broadcasts
+ * below stay the live signal; the incidents table is what survives past the moment they fired.
+ *
  * Enable + cadence + pull/push + the AI-unavailable policy are owner settings (cfg.autoCommit*).
  * Timer shape mirrors
  * remote-sync.ts: a self-rescheduling setTimeout (never setInterval) so a slow round can't stack.
@@ -22,7 +27,7 @@
  * primed + toggled live from src/http/app.ts + PUT /api/settings. Git-only for now (a Lore repo
  * is centralized and simply never opted in here).
  */
-import { getWatchableRepos, getRepo, type RepoStatus, type RepoView } from "./db.ts";
+import { getWatchableRepos, getRepo, recordAutoCommitIncident, type RepoStatus, type RepoView } from "./db.ts";
 import { broadcast } from "./bus.ts";
 import { backendFor } from "./vcs/index.ts";
 import { currentGitOperation } from "./git.ts";
@@ -340,10 +345,21 @@ async function tick(): Promise<{ done: AutoCommittedRepo[]; blocked: AutoCommitB
   for (const r of repos) {
     try {
       const out = await processRepo(r);
-      if (out.done) done.push(out.done);
-      if (out.blocked) blocked.push(out.blocked);
+      if (out.done) {
+        done.push(out.done);
+        // A `note` on an otherwise-successful round means pull or push didn't fully complete
+        // (e.g. NON_FAST_FORWARD): worth a reviewable row, not just the moment's SSE broadcast.
+        if (out.done.note) {
+          recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: out.done.note });
+        }
+      }
+      if (out.blocked) {
+        blocked.push(out.blocked);
+        recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: out.blocked.reason });
+      }
     } catch {
       blocked.push({ id: r.id, name: r.name, reason: "ERROR" });
+      recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: "ERROR" });
     }
   }
   if (done.length > 0) broadcast("repo_auto_committed", { repos: done });
