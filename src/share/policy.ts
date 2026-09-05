@@ -279,6 +279,11 @@ export const OWNER_ONLY: readonly string[] = [
   "GET /api/ai/providers/:provider/models",
   "PUT /api/ai/providers/:provider",
   "DELETE /api/ai/providers/:provider",
+  // per-provider key rotation pool — same plane as the provider config above: a guest choosing or
+  // reading which keys fund the owner's AI calls is exactly the credential surface this list exists
+  // to keep owner-only, even though the GET body itself is non-secret (fingerprint + cooldown only).
+  "GET /api/ai/providers/:provider/keys",
+  "PUT /api/ai/providers/:provider/keys",
   // agent surface + its safety rail
   "POST /api/mcp",
   "GET /api/approvals",
@@ -289,6 +294,18 @@ export const OWNER_ONLY: readonly string[] = [
   "PUT /api/settings/sync",
   "POST /api/settings/sync/pull",
   "POST /api/settings/sync/push",
+  // grouped operational-error history — a fleet-wide operational log across every repo, keyed by
+  // fingerprint rather than repo id, so it cannot be scoped to a single share the way the per-repo
+  // routes above are. Muting/deleting an entry also silences a real signal for the owner, which a
+  // guest must never be able to do.
+  "GET /api/errors",
+  "POST /api/errors/:fingerprint/mute",
+  "DELETE /api/errors/:fingerprint",
+  // auto-commit incident log — same reasoning as the operational-error history above: an
+  // unattended-timer diagnostic feed across every repo, not something a share's scope can cover,
+  // and acknowledging one is the owner dismissing their own review queue.
+  "GET /api/auto-commit/incidents",
+  "POST /api/auto-commit/incidents/:id/ack",
   // public probes — unauthenticated by design, never guest-gated
   "GET /api/health",
   "GET /api/openapi.json",
