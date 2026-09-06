@@ -15,7 +15,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, extname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse } from "@vue/compiler-sfc";
+import { parse } from "vue/compiler-sfc";
 
 const WEB = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const SRC = join(WEB, "src");
