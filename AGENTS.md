@@ -110,8 +110,7 @@ binary into a public release without knowing what changed in it.
 - **Watch the fix work in a real browser before you claim it.** The popper bug above was "fixed"
   once, with a confident code comment naming the wrong cause, and three more components then copied
   that comment. A fix nobody watched is a hypothesis.
-- **A local red may belong to another agent.** Several sessions run against this tree at once. Check
-  `git status --short` and file mtimes before you "fix" a failure you did not cause.
+- A local red may belong to another agent editing this tree - check `git status --short` and file mtimes first (global CLAUDE.md, localci section).
 
 ## Changelog and releases
 
