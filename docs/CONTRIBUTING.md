@@ -10,8 +10,15 @@ bun run install:all                  # daemon deps + dashboard deps (web/ is its
 bun run src/index.ts add-root <dir>  # register a folder to scan
 bun run src/index.ts start           # boot the daemon on :7171
 
+bun run dev                          # the same daemon under Bun's file watcher, with REPOYETI_DEV=1
 bun run --cwd web dev                # web dev server on :4319 (proxies /api → :7171)
 ```
+
+Run the daemon through `bun run dev` when you use the `:4319` dev server. The `/api/*` loopback
+guard runs in exact-origin mode and only admits the Vite origin under `REPOYETI_DEV=1` (which
+`scripts/dev.ts` sets); against a plain `start` the dev server's requests are refused with
+`403 origin not in allowlist`, exactly as a page on any other local port would be. A dev server on a
+different port goes in `REPOYETI_DEV_ORIGINS` (comma-separated origins).
 
 ## Before you push
 

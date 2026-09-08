@@ -11,7 +11,8 @@ import type { RepoYetiConfig } from "../config.ts";
 import { jsonError } from "../contract.ts";
 import { API_BODY_LIMIT } from "../schemas.ts";
 import { authMiddleware, isRemoteRequest } from "../auth.ts";
-import { loopbackGuard } from "../loopback-guard.mjs";
+import { createLoopbackGuard } from "../loopback-guard.mjs";
+import { getServerPort } from "../runtime.ts";
 import { asForeground } from "../gitgate.ts";
 import { mountWeb } from "./web.ts";
 import type { Deps } from "./deps.ts";
@@ -88,6 +89,47 @@ export interface AppHooks {
   requestShutdown?: () => void;
 }
 
+/**
+ * The Vite dev server's origins (web/vite.config.ts `server.port`, proxying /api → the daemon).
+ * Only ever admitted under REPOYETI_DEV=1 — the flag scripts/dev.ts sets on the watched daemon —
+ * because a browser fetch from the Vite page reaches the daemon with `Origin: http://localhost:4319`
+ * and would otherwise be indistinguishable from the foreign-local-port attack below. Override or
+ * extend with REPOYETI_DEV_ORIGINS (comma-separated) when the dev server runs somewhere else.
+ */
+const VITE_DEV_ORIGINS = ["http://localhost:4319", "http://127.0.0.1:4319"];
+
+/**
+ * The exact browser origins a loopback /api/* request may carry. This is the guard's opt-in
+ * EXACT-ORIGIN mode (loopback-guard.mjs, AH-11), and it exists because the guard's default is too
+ * loose for this daemon: by default any loopback Origin passes, whatever its port. Per the Fetch
+ * spec a site ignores the port, so a page served from ANY other local port — a preview server, a
+ * docs build, another daemon's dashboard, a tab a repo's own `npm run dev` opened — is "same-site"
+ * with this API. Its browser stamps `Sec-Fetch-Site: same-site`, the guard's default accepts the
+ * loopback Origin, and a simple text/plain POST from that page drives a mutating route with no
+ * CORS preflight to stop it. In local mode that is an unauthenticated write; in remote mode the
+ * owner's session cookie is host-scoped (cookies do not see ports) and rides along on it.
+ *
+ * So the allowlist is the daemon's OWN origin, in every spelling a browser can reach it by:
+ * 127.0.0.1, localhost, and ::1 on the port it actually bound. A THUNK, read per request, because
+ * that port is only known after listen() — `findFreePort` may have hopped off `cfg.port` — and
+ * `createApp()` runs before it. Before the bind (a test, a CLI verb) the configured port stands in.
+ *
+ * Non-browser clients (curl, the tray probe, MCP over stdio, the CLI verbs) send no Origin and are
+ * untouched by this: the guard only consults the allowlist when an Origin is present.
+ */
+export function trustedLocalOrigins(cfg: Pick<RepoYetiConfig, "port">): string[] {
+  const port = getServerPort() || cfg.port;
+  const origins = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, `http://[::1]:${port}`];
+  if (process.env.REPOYETI_DEV === "1") {
+    const extra = (process.env.REPOYETI_DEV_ORIGINS ?? "")
+      .split(",")
+      .map((s) => s.trim().replace(/\/+$/, ""))
+      .filter(Boolean);
+    origins.push(...(extra.length ? extra : VITE_DEV_ORIGINS));
+  }
+  return origins;
+}
+
 export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   // Startup side-effects: prime the runtime flags from this daemon's config before serving.
   // Sync the runtime diff-stats flag to this daemon's config (off by default).
@@ -142,13 +184,16 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   // CSRF / drive-by-RCE guard for the OPEN loopback path. In local mode the /api/* surface is
   // unauthenticated, so a malicious web page the owner visits could POST /api/repos/:id/remote,
   // /api/repos/clone, a commit + push, etc. and drive `git` with the owner's credentials — a
-  // drive-by RCE. loopbackGuard rejects browser cross-site requests (Sec-Fetch-Site: cross-site,
-  // non-loopback Origin, non-loopback Host — also catches the simple-request CORS bypass and
-  // DNS-rebinding). It runs ONLY on the local path: a genuine tunnel request (isRemoteRequest)
-  // legitimately carries a non-loopback Host/Origin and is already CSRF-gated by the SameSite
-  // session cookie + authMiddleware, so the loopback guard must skip it. Registered BEFORE the auth
-  // gate so the cheap provenance check fronts it. See src/http/loopback-guard.ts.
-  app.use("/api/*", (c, next) => (isRemoteRequest(c) ? next() : loopbackGuard(c, next)));
+  // drive-by RCE. The guard rejects browser cross-site requests (Sec-Fetch-Site: cross-site,
+  // non-loopback Host — also catches the simple-request CORS bypass and DNS-rebinding) and, in the
+  // exact-origin mode wired here, any Origin that is not this daemon's own (trustedLocalOrigins
+  // above: a page on ANOTHER loopback port is same-site, not same-origin, and the guard's default
+  // would have let it through). It runs ONLY on the local path: a genuine tunnel request
+  // (isRemoteRequest) legitimately carries a non-loopback Host/Origin and is already CSRF-gated by
+  // the SameSite session cookie + authMiddleware, so the loopback guard must skip it. Registered
+  // BEFORE the auth gate so the cheap provenance check fronts it. See src/loopback-guard.mjs.
+  const guard = createLoopbackGuard({ allowedOrigins: () => trustedLocalOrigins(cfg) });
+  app.use("/api/*", (c, next) => (isRemoteRequest(c) ? next() : guard(c, next)));
   // Auth gate — applies to /api/* only; no-op when OIDC isn't configured (local mode).
   // MUST be registered first so it fronts every /api/* route below.
   app.use("/api/*", authMiddleware(cfg));

@@ -343,6 +343,12 @@ export function setServerPort(port: number): void {
   serverPort = port;
 }
 
+/** The port the daemon actually bound, or 0 before `listen()` has run (createApp() in a test, a
+ *  one-shot CLI verb). Callers that need an origin before that fall back to the configured port. */
+export function getServerPort(): number {
+  return serverPort;
+}
+
 export function getTunnelUrl(): string | null {
   return tunnelUrl;
 }

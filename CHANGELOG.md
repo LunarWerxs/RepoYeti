@@ -18,6 +18,22 @@ All notable changes to RepoYeti are documented here. The format is based on
   terms. This marks the 1.0 version boundary; it does not certify that every issue
   identified in the codebase audit has been resolved.
 
+### Security
+
+- **A page on another local port can no longer drive the daemon's API.** The loopback guard in
+  front of `/api/*` ran in its default mode, which accepts any loopback `Origin` whatever its port.
+  Per the Fetch spec a site ignores the port, so a preview server, a docs build or another daemon's
+  dashboard on `127.0.0.1:<other>` was same-site with RepoYeti: its browser stamped
+  `Sec-Fetch-Site: same-site`, a simple `text/plain` POST needed no CORS preflight, and in local
+  mode the route ran unauthenticated (in remote mode the host-scoped owner cookie rode along, since
+  cookies do not see ports). The 1.0 audit reproduced the guard's decision for
+  `Origin: http://127.0.0.1:31337`: allowed. The guard now runs in its exact-origin mode against the
+  origin the daemon actually bound (`127.0.0.1`, `localhost` and `::1` on the bound port, read per
+  request so a port hop is followed). The Vite dev origin is admitted only under `REPOYETI_DEV=1`
+  (`bun run dev`) or an explicit `REPOYETI_DEV_ORIGINS`. Non-browser clients send no `Origin` and
+  are unaffected. The existing tests covered a cross-site origin and the daemon's own; the
+  foreign-local-port case is now a regression test.
+
 ### Added
 
 - **Auto-commit skips and sync failures now leave a reviewable trail, with a panel to review it
