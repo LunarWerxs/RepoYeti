@@ -11,7 +11,7 @@
 </p>
 
 <p>
-  <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-3ddc84" />
+  <img alt="PolyForm Noncommercial license" src="https://img.shields.io/badge/license-PolyForm_Noncommercial-3ddc84" />
   <img alt="Runtime: Bun" src="https://img.shields.io/badge/runtime-Bun-3ddc84" />
   <img alt="Dashboard: Vue 3 PWA" src="https://img.shields.io/badge/dashboard-Vue%203%20PWA-3ddc84" />
   <img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-yes-3ddc84" />
@@ -153,7 +153,7 @@ Cloud sign-in and settings sync are entirely optional and off by default; core g
 ## FAQ
 
 **Is RepoYeti free?**
-Yes. RepoYeti is MIT licensed and free to download, self-host, and run. Optional cloud features, sign-in and settings sync, are off by default and not required; core git management works entirely self-hosted with no LunarWerx account. The only paid part of the workflow is whatever AI provider key you choose for Smart Commit.
+RepoYeti 1.0.0 is free to download, self-host, and run for purposes permitted by the PolyForm Noncommercial License 1.0.0. Commercial use outside those permissions requires a separate license from LunarWerx Studios. Optional cloud features, sign-in and settings sync, are off by default and not required; core git management works entirely self-hosted with no LunarWerx account. Your chosen AI provider may charge for Smart Commit usage.
 
 **Does it work offline?**
 Yes, for local repo work. Browsing your repos, viewing commit history, and diffing don't need an internet connection or any account. Fetching or pushing to a remote still needs whatever network access that remote requires, and reaching the dashboard from your phone needs a Cloudflare tunnel. No LunarWerx account is required for any of it.
@@ -175,6 +175,6 @@ By design. RepoYeti leaves out force-push, `reset --hard`, and rebase entirely: 
 
 ## License
 
-[MIT](LICENSE) © LunarWerx Studios. Bundled file-type icons are [`vscode-icons`](https://github.com/vscode-icons/vscode-icons) (icon artwork under CC BY-SA).
+[PolyForm Noncommercial 1.0.0](LICENSE) © LunarWerx Studios, starting with RepoYeti 1.0.0. The source is available; commercial use outside the license's permissions requires a separate license. Earlier MIT grants remain in effect for earlier copies; see [licensing details](LICENSING.md). Bundled file-type icons are [`vscode-icons`](https://github.com/vscode-icons/vscode-icons) (icon artwork under CC BY-SA).
 
 Made by [LunarWerx Studios](https://lunarwerx.com). Also building [AgentHydra](https://agenthydra.lunarwerx.com), [DevWebUI](https://devwebui.lunarwerx.com), and [ReDesign](https://redesign.lunarwerx.com).

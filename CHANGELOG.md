@@ -6,6 +6,18 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-08
+
+### Changed
+
+- **RepoYeti's new releases use PolyForm Noncommercial 1.0.0.** The source remains
+  available for use under the license's permitted purposes; commercial use outside
+  those permissions requires a separate license. Earlier MIT grants remain in
+  effect for earlier copies, and third-party licenses are preserved. Package
+  metadata, contributor guidance, and bundled license notices now state the new
+  terms. This marks the 1.0 version boundary; it does not certify that every issue
+  identified in the codebase audit has been resolved.
+
 ### Added
 
 - **Auto-commit skips and sync failures now leave a reviewable trail, with a panel to review it
@@ -1594,6 +1606,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
 [#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
 [#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[1.0.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.5...v1.0.0
 [0.21.5]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.4...v0.21.5
 [0.21.4]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.2...v0.21.3

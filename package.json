@@ -3,7 +3,7 @@
   "version": "0.21.5",
   "description": "System-wide remote git manager — a background daemon with a mobile dashboard.",
   "type": "module",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "author": "L0garithmic <2claude@lunarwerx.com>",
   "repository": {
     "type": "git",

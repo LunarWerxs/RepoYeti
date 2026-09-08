@@ -1,0 +1,30 @@
+# RepoYeti licensing
+
+Starting with version 1.0.0, RepoYeti's licensor-owned code is offered under the
+[PolyForm Noncommercial License 1.0.0](LICENSE)
+(`PolyForm-Noncommercial-1.0.0`). Copyright 2026 LunarWerx Studios.
+
+The source remains available. Use for purposes permitted by that license is free;
+commercial use outside its permissions requires a separate license from LunarWerx
+Studios. See the license for its definitions and permitted organizational uses.
+This is a source-available license with a noncommercial restriction, not an
+unrestricted open-source license.
+
+## Earlier releases
+
+RepoYeti versions through 0.21.5 were offered under MIT. Changing the terms of
+future releases or removing downloads does not retract permissions already
+granted for those earlier copies. Their original copyright and MIT notice is
+preserved in [LICENSES/MIT-legacy.txt](LICENSES/MIT-legacy.txt).
+
+## Third-party material
+
+Dependencies, bundled artwork, fonts, and externally authored code retain their
+own licenses and notices. The RepoYeti license does not replace those terms.
+Bundled file-type icons are from [vscode-icons](https://github.com/vscode-icons/vscode-icons)
+and carry their separate CC BY-SA artwork license. Existing source attributions
+and dependency license files must be retained when redistributing that material.
+
+The dashboard includes the RepoYeti license at `/LICENSE.txt`, its notices at
+`/NOTICE.txt`, and the historical MIT text at `/MIT-legacy.txt`. These files are
+embedded by the existing release build along with the dashboard.
