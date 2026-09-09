@@ -36,7 +36,8 @@ bun run build        # runs i18n:check, then vue-tsc type-check + production bui
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push / PR. For a fast local
-gate, enable the bundled pre-commit hook (runs `i18n:check` before each commit):
+gate, enable the bundled pre-commit hook (it runs `i18n:check`, Biome lint, both typechecks and
+the kit-sync guard before each commit):
 
 ```sh
 git config core.hooksPath .githooks   # one-time, per clone
@@ -44,11 +45,15 @@ git config core.hooksPath .githooks   # one-time, per clone
 
 Bypass a single commit with `git commit --no-verify`; disable with `git config --unset core.hooksPath`.
 
-Please leave the `--timeout 20000` on the `test` script alone. Nearly every test here shells out to
-git, and a subprocess test times the machine rather than its own assertions: a cold Windows CI
-runner has been measured at roughly 10x a dev box on that class, against bun's 5s default. One
-repo-wide allowance is the right answer at this scale, and dropping it would put 231 tests back on
-5s. `bun run check:spawntimeout` stands down while the flag is there and names all 231 if it goes.
+The subprocess test timeout lives in the test files, not on the command line. Nearly every test
+here shells out to git, and a subprocess test times the machine rather than its own assertions: a
+cold Windows CI runner has been measured at roughly 10x a dev box on that class, against bun's 5s
+default. Every file whose tests spawn calls `useSuiteTimeout()` (`tests/helpers/timeouts.ts`) at
+its top, which holds for the whole run however many files are in it, and
+`bun run check:spawntimeout` fails on a spawning test file that forgets it. The two tidier-looking
+homes were measured as false greens on bun 1.4: `timeout` under `bunfig.toml`'s `[test]` table is
+ignored, and `setDefaultTimeout()` from the preload applies only when a single file runs. A test
+that needs more than the shared 20s says so in its own third argument.
 
 Please keep the git-action safety guards intact. Operations return first-class error codes
 (`DIRTY_WORKING_TREE`, `NON_FAST_FORWARD`, `DETACHED_HEAD`, `SSH_AUTH_FAILED`, …) and never

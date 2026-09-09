@@ -89,8 +89,8 @@ $RECYCLE.BIN/
 .turbo/
 *.local
 
-# Local root rebuild convenience wrapper (delegates to misc/Rebuild.bat)
-/Rebuild.bat
+# Local root rebuild convenience wrapper (delegates to misc/rebuild_repoyeti.bat)
+/rebuild_repoyeti.bat
 
 # wrangler local miniflare state (relay dev)
 relay/.wrangler/

@@ -20,7 +20,8 @@
 #    root configured — RepoYeti gets a domain-specific MessageBox for that case
 #    (NoScanRootHint) with the exact `add-root` remediation command.
 #  * "Rebuild & Restart" is dev-only — it shows only when REPOYETI_DEV=1 is set in the
-#    environment; public users rebuild via misc/Rebuild.bat instead.
+#    environment; source-checkout users rebuild via misc/rebuild_repoyeti.bat instead, and a
+#    compiled release embeds the dashboard, so it has nothing to rebuild.
 #  * Cold start can take up to 60s (large scan roots), well above the engine's
 #    12-15s family default — pinned via StartupWaitSec/WorkerWaitSec.
 param([int]$Port = 7171, [switch]$SelfTest)   # preferred port (matches config.ts DEFAULTS)
@@ -65,7 +66,7 @@ $TrayConfig = @{
 
   RebuildCommand      = "bun run --cwd web build:fast"
   RebuildLogName      = "RepoYeti-Rebuild.log"
-  IsDevTree           = ($env:REPOYETI_DEV -eq "1")   # dev-only: "Rebuild & Restart" shows only when REPOYETI_DEV=1 (public users use misc/Rebuild.bat)
+  IsDevTree           = ($env:REPOYETI_DEV -eq "1")   # dev-only: "Rebuild & Restart" shows only when REPOYETI_DEV=1 (source checkouts use misc/rebuild_repoyeti.bat; compiled releases have nothing to rebuild)
 
   SentinelFile         = Join-Path $repoyetiHome "shutdown.request"
   ShutdownTokenEnvVar  = $null   # force-kill flavor — no HTTP shutdown token

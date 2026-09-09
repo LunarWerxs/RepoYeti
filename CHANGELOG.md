@@ -88,7 +88,25 @@ All notable changes to RepoYeti are documented here. The format is based on
   concurrent requests, which is exactly the process burst the gate exists to prevent (measured at
   20 to 40 git children on Windows in the incident that introduced the gate). The chunks now run
   one at a time; a failing chunk still costs only its own statistics.
-
+- **The privacy copy now says what actually leaves the machine.** The README, the website and the
+  Settings → AI description said code never leaves the machine and keys never leave the daemon.
+  Neither is true as written: Smart Commit, AI commit messages and AI conflict resolution send the
+  changed file list and diff (or the conflicted text) to the AI provider you configured, and the
+  key is transmitted to that provider to authenticate; Git traffic goes to your own remotes; and
+  optional settings sync sends dashboard preferences to Connections. What was always true, and is
+  now what the copy claims, is that nothing is mirrored or uploaded to RepoYeti's own servers and
+  nothing reaches an AI unless you use those features. The update-check ping description is
+  unchanged.
+- **Release notes and contributor instructions no longer describe a build that does not ship.**
+  The generated GitHub release notes told people to keep a `web` folder beside the executable,
+  and a test locked that sentence in; the binaries have embedded the dashboard for many releases.
+  The notes now describe the single self-contained binary, list the Windows tray bundle, and
+  explain how compiled installs update (only from this repository's release assets, verified
+  against the published checksums). The contributor guide and `AGENTS.md` described a
+  `--timeout 20000` flag that moved into the per-file `useSuiteTimeout()` helper, and a pre-commit
+  hook that "runs i18n:check" when it runs lint, both typechecks and the kit guard too. The
+  website's README claimed no JavaScript and no external fonts; the page loads Inter from Google
+  Fonts and a small analytics pixel, and now says so.
 - **A file save can no longer overwrite an edit that landed first.** The viewer's Edit mode saved
   with no notion of which version it was editing, so two dashboards (or a phone and a desktop
   editor) silently overwrote each other. The conflict resolver did check a content hash, but it
@@ -114,6 +132,15 @@ All notable changes to RepoYeti are documented here. The format is based on
   cherry-pick or revert is in progress (new code `OPERATION_IN_PROGRESS`), as git itself refuses it: the
   repository's unmerged entries used to make the commit fail by accident, and the scratch index
   has none.
+
+### Internal
+
+- **The Windows rebuild helper is `misc/rebuild_repoyeti.bat`.** `misc/Rebuild.bat` was renamed
+  with its callers (the root `.gitignore` entry for the convenience wrapper and the tray adapter's
+  guidance) so no reference dangles, and it keeps the window open on a failed build, because the
+  file is double-clicked and a console that closes on its own takes the only diagnostics with it.
+  It is for source checkouts only: a compiled release embeds the dashboard and has nothing to
+  rebuild, so it is deliberately not part of the tray bundle.
 
 ### Added
 

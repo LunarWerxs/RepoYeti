@@ -45,9 +45,12 @@ bun run --cwd web test     # Vitest
 bun run --cwd web build    # runs i18n:check, then vue-tsc, then the bundle
 ```
 
-`bun test` on its own from the repo root will glob the dashboard's Vitest files and report failures
-that are not real. The `test` script is scoped to `tests/` for exactly that reason. Leave its
-`--timeout 20000` alone; `docs/CONTRIBUTING.md` explains what happens if you don't.
+`bun test` on its own from the repo root would glob the dashboard's Vitest files and report failures
+that are not real; `bunfig.toml` ignores `web/**` and the `test` script is scoped to `tests/` for
+exactly that reason. The subprocess timeout lives in the test files themselves: every file that
+spawns calls `useSuiteTimeout()` (`tests/helpers/timeouts.ts`), and `check:spawntimeout` enforces
+it. Do not move it to the command line or to `bunfig.toml`; `docs/CONTRIBUTING.md` explains why
+both of those were measured as false greens.
 
 Enable the pre-commit hook once per clone: `git config core.hooksPath .githooks`.
 

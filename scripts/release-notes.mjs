@@ -96,17 +96,21 @@ ${section}
 
 ## Install
 
-Download the bundle for your platform, extract the whole folder, and run the RepoYeti executable.
-No install step or runtime is required; keep the bundled \`web\` folder beside the executable.
+Download the archive for your platform, extract it, and run the RepoYeti executable. It is a
+single self-contained binary with the dashboard embedded; no install step, runtime, or sidecar
+folder is required.
 
 | Platform | Asset |
 | --- | --- |
 | Linux (x64) | \`repoyeti-linux-x64.tar.gz\` |
 | macOS (Apple silicon) | \`repoyeti-macos-arm64.tar.gz\` |
 | Windows (x64) | \`repoyeti-windows-x64.zip\` |
+| Windows (x64), with the system-tray toolkit | \`repoyeti-windows-x64-with-tray.zip\` |
 
-Source checkouts can update in-app. Portable-bundle installs update by downloading and extracting
-the newer archive; nothing is installed without your say-so.
+Compiled installs check GitHub Releases for updates and can install one from the dashboard (or
+unattended, if you turn auto-update on); an update is only ever downloaded from this repository's
+release assets and is verified against the published \`SHA256SUMS.txt\` before it is installed.
+Source checkouts update in-app with git.
 Full history: [CHANGELOG.md](https://github.com/${repo}/blob/main/CHANGELOG.md)
 `;
 

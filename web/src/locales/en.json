@@ -921,7 +921,7 @@
     "close": "Close"
   },
   "settings": {
-    "aiDescription": "Bring your own key for any provider. Groq is the suggested one (free + fast, ~30s to set up). RepoYeti uses the key on this machine only; it never leaves the daemon, and generating a message sends the repo's diff to the selected provider.",
+    "aiDescription": "Bring your own key for any provider. Groq is the suggested one (free + fast, ~30s to set up). RepoYeti keeps the key on this machine and sends it only to that provider; generating a message sends the repo's diff to the selected provider.",
     "aiCommitEnable": "AI commit messages",
     "aiCommitEnableHint": "Show the ✨ Generate and Auto buttons on repo cards. On even without a key: clicking one then prompts you to add a key. Turn off to hide them entirely.",
     "aiCommitEnableFailed": "Could not change AI commit messages",

@@ -89,6 +89,12 @@ test("the notes carry the install table and the changelog link", async () => {
   expect(out).toContain("repoyeti-windows-x64.zip");
   expect(out).toContain("repoyeti-macos-arm64.tar.gz");
   expect(out).toContain("repoyeti-linux-x64.tar.gz");
-  expect(out).toContain("bundled `web` folder");
+  expect(out).toContain("repoyeti-windows-x64-with-tray.zip");
+  // The binaries embed the dashboard (scripts/build.ts); the notes used to tell people to keep a
+  // `web` folder beside the executable, which no release has shipped since the embed landed.
+  expect(out).toContain("single self-contained binary");
+  // Scoped to the generated Install section: the changelog body above it legitimately narrates
+  // the old wording when it describes this very fix.
+  expect(out.split("## Install")[1]).not.toContain("`web` folder");
   expect(out).toContain("CHANGELOG.md");
 });
