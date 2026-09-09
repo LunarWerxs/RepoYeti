@@ -41,14 +41,25 @@ watch(open, (isOpen) => {
   }
 });
 
-function start(): void {
+async function start(): Promise<void> {
   if (store.scanning) return;
-  if (mode.value === "folder") {
-    const path = folderPath.value.trim();
-    if (!path) return;
-    void store.startScan({ path });
-  } else {
-    void store.startScan();
+  const path = mode.value === "folder" ? folderPath.value.trim() : undefined;
+  if (mode.value === "folder" && !path) return;
+  try {
+    await store.startScan(path ? { path } : undefined);
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "Unknown error";
+    toast.error(t("scan.startFailed", { reason }));
+  }
+}
+
+/** The modal's X while a scan is running — awaits the cancel request and toasts on failure so a
+ *  dropped connection doesn't just leave the spinner looking stuck with no explanation. */
+async function cancel(): Promise<void> {
+  try {
+    await store.cancelScan();
+  } catch {
+    toast.error(t("scan.cancelFailed"));
   }
 }
 
@@ -157,21 +168,23 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
       >
         <div class="flex min-w-0 items-center gap-2 text-[13px]">
           <Loader2 :size="15" class="shrink-0 animate-spin text-info" />
-          <span>{{ $t("scan.scanning") }}</span>
+          <span>{{ store.scanCancelRequested ? $t("scan.stopping") : $t("scan.scanning") }}</span>
           <span class="truncate text-muted-foreground">{{ $t("scan.foundCount", { count: store.scanFound }) }}</span>
         </div>
         <Tooltip>
           <TooltipTrigger as-child>
             <button
               type="button"
-              class="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-              :aria-label="$t('scan.stop')"
-              @click="store.cancelScan()"
+              class="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
+              :disabled="store.scanCancelRequested"
+              :aria-label="store.scanCancelRequested ? $t('scan.stopping') : $t('scan.stop')"
+              @click="cancel"
             >
-              <X :size="15" />
+              <Loader2 v-if="store.scanCancelRequested" :size="15" class="animate-spin" />
+              <X v-else :size="15" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>{{ $t("scan.stop") }}</TooltipContent>
+          <TooltipContent>{{ store.scanCancelRequested ? $t("scan.stopping") : $t("scan.stop") }}</TooltipContent>
         </Tooltip>
       </div>
       <div

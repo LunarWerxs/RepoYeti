@@ -193,6 +193,7 @@ export const OWNER_ONLY: readonly string[] = [
   "DELETE /api/roots",
   "POST /api/scan",
   "POST /api/scan/cancel",
+  "GET /api/scan",
   // lore servers
   "GET /api/servers",
   "POST /api/servers",

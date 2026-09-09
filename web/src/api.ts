@@ -391,6 +391,9 @@ export const api = {
     req<{ ok: boolean; running: boolean; scope?: string }>("POST", "/api/scan", body ?? {}),
   /** Stop the in-flight scan. `cancelled` is false when no scan was running. */
   cancelScan: () => req<{ ok: boolean; cancelled: boolean }>("POST", "/api/scan/cancel"),
+  /** Whether a scan job is in flight on the daemon right now — used to reconcile the UI after an
+   *  SSE reconnect, when a `scan_done`/`scan_cancelled` broadcast may have been missed entirely. */
+  scanStatus: () => req<{ ok: boolean; running: boolean }>("GET", "/api/scan"),
 
   // ── lore servers (registry + clone-from-server) ──────────────────────────────
   servers: () => req<{ servers: LoreServer[] }>("GET", "/api/servers").then((r) => r.servers),

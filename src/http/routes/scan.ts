@@ -36,4 +36,8 @@ export function register(app: Hono, _deps: Deps): void {
   });
   // Stop the in-flight scan (the modal's X). Repos found so far stay indexed.
   app.post("/api/scan/cancel", (c) => c.json({ ok: true, cancelled: cancelScan() }));
+  // Whether a scan is in flight RIGHT NOW. The lifecycle streams over SSE, so a phone that lost
+  // the stream mid-scan (or asked to stop and never saw `scan_cancelled`) has nothing to reconcile
+  // against on reconnect; this is that answer. Read-only (1.0 audit, item 20).
+  app.get("/api/scan", (c) => c.json({ ok: true, running: isScanning() }));
 }

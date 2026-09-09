@@ -260,6 +260,7 @@ export const META: Record<string, RouteMeta> = {
   "DELETE /api/roots": { summary: "Remove a discovery scan root.", body: RootPathSchema, tags: ["roots"] },
   "POST /api/scan": { summary: "Rescan all configured scan roots for new repositories.", tags: ["roots"] },
   "POST /api/scan/cancel": { summary: "Cancel the in-flight project scan.", tags: ["roots"] },
+  "GET /api/scan": { summary: "Whether a project scan is in flight right now (reconnect reconciliation).", tags: ["roots"] },
 
   // ── lore servers ───────────────────────────────────────────────────────────────
   "GET /api/servers": { summary: "List registered Lore servers.", tags: ["servers"] },

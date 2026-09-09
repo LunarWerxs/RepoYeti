@@ -203,6 +203,11 @@ export const useStore = defineStore("repoyeti", () => {
   const scanNew = ref(0); // of those, how many were not previously known
   const scanDone = ref(false); // a scan has finished (or was stopped) → show the summary
   const lastScanCancelled = ref(false); // the finished scan ended via the Stop (X) control
+  // The phone asked the daemon to stop a scan and is waiting on confirmation — distinct from
+  // lastScanCancelled, which means the daemon already CONFIRMED the stop. Drives the "Stopping…"
+  // state on the cancel control so it doesn't look inert while the request is in flight (or,
+  // worse, forever, if the stop request never reaches the daemon at all).
+  const scanCancelRequested = ref(false);
   // The genuinely-new repos this scan turned up, collected from the `repo_added` events it emits.
   // The daemon indexes as it walks, so this is a review list for what already happened — the modal
   // uses it to name every find and to offer removing the ones the owner didn't want.
@@ -418,6 +423,7 @@ export const useStore = defineStore("repoyeti", () => {
     removeScanRoot,
     startScan,
     cancelScan,
+    reconcileScan,
     loadServers,
     addServer,
     removeServer,
@@ -443,6 +449,7 @@ export const useStore = defineStore("repoyeti", () => {
     scanNew,
     scanDone,
     lastScanCancelled,
+    scanCancelRequested,
     upsertRepo,
   );
 
@@ -937,6 +944,7 @@ export const useStore = defineStore("repoyeti", () => {
       scanNew,
       scanDone,
       lastScanCancelled,
+      scanCancelRequested,
       scanNewRepos,
       collectingScanRepos,
       isGuest,
@@ -958,6 +966,10 @@ export const useStore = defineStore("repoyeti", () => {
             autoUpdateApplying.value = false;
             autoUpdateRestarting.value = false;
             void loadAll();
+            // The daemon has no event replay: a scan_done/scan_cancelled broadcast fired while
+            // this client was offline is gone for good. Ask directly rather than trust the stale
+            // `scanning` flag — reconcileScan no-ops unless it was left true.
+            void reconcileScan();
           }
           connected.value = isOpen;
           if (isOpen) hasConnectedOnce = true;
@@ -1059,11 +1071,13 @@ export const useStore = defineStore("repoyeti", () => {
     scanNew,
     scanDone,
     lastScanCancelled,
+    scanCancelRequested,
     scanNewRepos,
     scanReturnToAdd,
     dropScanNewRepo,
     startScan,
     cancelScan,
+    reconcileScan,
     loadServers,
     addServer,
     removeServer,
@@ -1388,6 +1402,7 @@ type SseEventCtx = Pick<
     scanNew: Ref<number>;
     scanDone: Ref<boolean>;
     lastScanCancelled: Ref<boolean>;
+    scanCancelRequested: Ref<boolean>;
     scanNewRepos: Ref<Array<{ id: string; name: string; absPath: string }>>;
     collectingScanRepos: Ref<boolean>;
     isGuest: ComputedRef<boolean>;
@@ -1655,6 +1670,7 @@ function handleScanStarted(_payload: any, ctx: SseEventCtx): void {
   ctx.scanning.value = true;
   ctx.scanDone.value = false;
   ctx.lastScanCancelled.value = false;
+  ctx.scanCancelRequested.value = false;
   ctx.scanFound.value = 0;
   ctx.scanNew.value = 0;
   ctx.scanNewRepos.value = [];
@@ -1675,6 +1691,9 @@ function handleScanFinished(payload: any, eventName: string, ctx: SseEventCtx): 
   ctx.scanDone.value = true;
   ctx.collectingScanRepos.value = false;
   ctx.lastScanCancelled.value = eventName === "scan_cancelled";
+  // The daemon confirmed the stop (or the scan simply finished on its own) — any outstanding
+  // "phone asked, still waiting" state is resolved either way.
+  ctx.scanCancelRequested.value = false;
   if (typeof payload.found === "number") ctx.scanFound.value = payload.found;
   if (typeof payload.added === "number") ctx.scanNew.value = payload.added;
   // Surface genuinely-new projects even if the scan was stopped early.

@@ -112,6 +112,14 @@ All notable changes to RepoYeti are documented here. The format is based on
   shown as hidden, by name) and serves it at `GET /api/approvals/:id`; the list and the live
   events keep carrying only the short summary. The dashboard's expandable view of it follows in a
   separate change.
+- **A scan that fails to start or stop now says so, and a phone that lost the stream mid-scan
+  recovers.** The Scan modal started a scan with an unhandled promise and asked for cancellation
+  without handling a failed request: a failed start cleared the spinner with no explanation, and a
+  failed stop left the modal waiting for a `scan_cancelled` event a disconnected phone never
+  received. Start and stop are awaited and report a localized, retryable error; the stop control
+  shows "Stopping…" until the daemon confirms; and on SSE reconnect the dashboard asks the new
+  `GET /api/scan` whether a scan is still running, settling the spinner if not, and leaving it
+  alone when the question itself fails (an unknown server-side job is never marked stopped).
 
 - **"Create and push tag" pushes through the repo's selected GitHub account, and a failed push can
   be retried.** The tag push carried the identity's SSH options but not the HTTPS credential an

@@ -14,6 +14,7 @@ export function useSources(
   scanNew: Ref<number>,
   scanDone: Ref<boolean>,
   lastScanCancelled: Ref<boolean>,
+  scanCancelRequested: Ref<boolean>,
   upsertRepo: (repo: Repo) => void,
 ) {
   // Scan roots (discovery directories) — lazily loaded when Settings opens.
@@ -53,6 +54,7 @@ export function useSources(
     scanning.value = true;
     scanDone.value = false;
     lastScanCancelled.value = false;
+    scanCancelRequested.value = false;
     scanFound.value = 0;
     scanNew.value = 0;
     try {
@@ -62,9 +64,43 @@ export function useSources(
       throw e;
     }
   }
-  /** Stop the in-flight scan (the modal's X). The scan_cancelled SSE event settles the state. */
+  /**
+   * Stop the in-flight scan (the modal's X). `scanCancelRequested` flips on optimistically so the
+   * UI can show "Stopping…" while it waits for the daemon's `scan_cancelled` SSE event to settle
+   * `lastScanCancelled`; if the request itself fails (a disconnected phone, a dropped tunnel), roll
+   * it back and rethrow so the caller can toast instead of leaving the control stuck disabled.
+   */
   async function cancelScan(): Promise<void> {
-    await api.cancelScan();
+    scanCancelRequested.value = true;
+    try {
+      await api.cancelScan();
+    } catch (e) {
+      scanCancelRequested.value = false;
+      throw e;
+    }
+  }
+
+  /**
+   * Reconcile scan state after an SSE (re)connect. The daemon has no event replay, so a
+   * `scan_done`/`scan_cancelled` broadcast fired while this client was offline (a phone that
+   * backgrounded, a flaky network) is lost for good — without this, `scanning` stays true forever
+   * and the modal spins on a scan that already finished. Only settle the UI when the daemon
+   * CONFIRMS the job is gone; a rejected status check leaves everything as-is rather than guessing
+   * an unknown server-side job has stopped.
+   */
+  async function reconcileScan(): Promise<void> {
+    if (!scanning.value) return;
+    let status: { running: boolean };
+    try {
+      status = await api.scanStatus();
+    } catch {
+      return; // unknown — never mark it stopped on a failed check
+    }
+    if (status.running) return; // still running — leave everything as-is
+    scanning.value = false;
+    scanDone.value = true;
+    lastScanCancelled.value = scanCancelRequested.value;
+    scanCancelRequested.value = false;
   }
   // ── lore servers ─────────────────────────────────────────────────────────────
   async function loadServers(): Promise<void> {
@@ -222,6 +258,7 @@ export function useSources(
     removeScanRoot,
     startScan,
     cancelScan,
+    reconcileScan,
     loadServers,
     addServer,
     removeServer,

@@ -3,12 +3,15 @@ import { mount } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import { useStore } from "@/store";
+import { api } from "@/api";
 import ScanProjects from "@/components/ScanProjects.vue";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("vue-sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() },
 }));
+
+import { toast } from "vue-sonner";
 
 let activeWrapper: ReturnType<typeof mount> | undefined;
 
@@ -204,6 +207,108 @@ describe("ScanProjects.vue", () => {
 
       expect(store.addRepoOpen).toBe(false);
       expect(store.scanReturnToAdd).toBe(false);
+    });
+  });
+
+  // Audit item 20: a failed start/stop used to fail silently — the optimistic flag cleared (or
+  // never cleared) with no explanation, and a stopped spinner had nothing to fall back on if the
+  // daemon's confirmation event never arrived.
+  describe("start/stop failure handling", () => {
+    it("shows the startFailed toast and leaves scanning off when the start request fails", async () => {
+      const store = useStore();
+      store.roots = ["/tmp/code"];
+      vi.spyOn(api, "startScan").mockRejectedValue(new Error("network down"));
+      mountScan();
+      await flush();
+
+      buttonWithText("Start scan")!.click();
+      await flush();
+
+      expect(toast.error).toHaveBeenCalledWith("Couldn't start the scan: network down");
+      expect(store.scanning).toBe(false);
+    });
+
+    it("shows the cancelFailed toast and clears scanCancelRequested when the stop request fails", async () => {
+      const store = useStore();
+      store.scanning = true;
+      vi.spyOn(api, "cancelScan").mockRejectedValue(new Error("offline"));
+      mountScan();
+      await flush();
+
+      const stop = document.body.querySelector('[aria-label="Stop scan"]') as HTMLElement;
+      stop.click();
+      await flush();
+
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't stop the scan. Check the connection and try again.",
+      );
+      expect(store.scanCancelRequested).toBe(false);
+    });
+
+    it("shows Stopping… and disables the stop control while a cancel is in flight", async () => {
+      const store = useStore();
+      store.scanning = true;
+      let resolveCancel!: () => void;
+      vi.spyOn(api, "cancelScan").mockReturnValue(
+        new Promise((resolve) => {
+          resolveCancel = () => resolve({ ok: true, cancelled: true });
+        }),
+      );
+      mountScan();
+      await flush();
+
+      const stop = document.body.querySelector('[aria-label="Stop scan"]') as HTMLElement | null;
+      stop!.click();
+      await flush();
+
+      expect(store.scanCancelRequested).toBe(true);
+      expect(document.body.textContent ?? "").toContain("Stopping…");
+      const stopping = document.body.querySelector('[aria-label="Stopping…"]') as HTMLElement | null;
+      expect(stopping).toBeTruthy();
+      expect(stopping!.hasAttribute("disabled")).toBe(true);
+
+      resolveCancel();
+      await flush();
+    });
+  });
+
+  // reconcileScan is the SSE-reconnect reconciliation: the daemon has no event replay, so a
+  // scan_done/scan_cancelled broadcast fired while a phone was offline is gone for good unless
+  // something re-asks directly. No dedicated store-level scan test file exists (grepped web/test
+  // for startScan/scan_cancelled), so it lives here alongside the rest of the scan behavior.
+  describe("reconcileScan", () => {
+    it("settles the spinner when the daemon confirms the scan is no longer running", async () => {
+      const store = useStore();
+      store.scanning = true;
+      store.scanCancelRequested = true;
+      vi.spyOn(api, "scanStatus").mockResolvedValue({ ok: true, running: false });
+
+      await store.reconcileScan();
+
+      expect(store.scanning).toBe(false);
+      expect(store.scanDone).toBe(true);
+      expect(store.lastScanCancelled).toBe(true);
+      expect(store.scanCancelRequested).toBe(false);
+    });
+
+    it("leaves scanning untouched when the status check is rejected", async () => {
+      const store = useStore();
+      store.scanning = true;
+      vi.spyOn(api, "scanStatus").mockRejectedValue(new Error("offline"));
+
+      await store.reconcileScan();
+
+      expect(store.scanning).toBe(true);
+    });
+
+    it("leaves scanning untouched when the daemon reports the job is still running", async () => {
+      const store = useStore();
+      store.scanning = true;
+      vi.spyOn(api, "scanStatus").mockResolvedValue({ ok: true, running: true });
+
+      await store.reconcileScan();
+
+      expect(store.scanning).toBe(true);
     });
   });
 });
