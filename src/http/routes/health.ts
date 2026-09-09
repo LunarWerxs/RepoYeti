@@ -256,13 +256,18 @@ function postShutdown(c: Context, requestShutdown: Deps["requestShutdown"]) {
 
 type SettingsUpdateBody = z.infer<typeof SettingsUpdateSchema>;
 
-function applyDiffStatsField(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
-  if (typeof b.diffStats !== "boolean") return;
+// Returns whether diffStats was accepted, so the caller can call refreshAllRepos() at most
+// once for the whole request instead of once per field that happens to need it.
+function applyDiffStatsField(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+): boolean {
+  if (typeof b.diffStats !== "boolean") return false;
   cfg.diffStats = b.diffStats;
   setDiffStatsEnabled(b.diffStats);
-  saveConfig(cfg);
-  broadcast("settings_changed", { diffStats: cfg.diffStats });
-  refreshAllRepos();
+  Object.assign(changed, { diffStats: cfg.diffStats });
+  return true;
 }
 
 // Work-tree display knobs. Pure rendering choices — the numbers/percentages and the char-delta
@@ -270,11 +275,14 @@ function applyDiffStatsField(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
 // there is nothing to recompute: no refreshAllRepos() call here. Returns whether
 // changesStatDisplay was present but junk, so the caller can reject the request AFTER every
 // other field has already been applied (see the call-site comment).
-function applyWorkTreeDisplayFields(cfg: RepoYetiConfig, b: SettingsUpdateBody): boolean {
+function applyWorkTreeDisplayFields(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+): boolean {
   if (b.changesStatDisplay === "numbers" || b.changesStatDisplay === "bars") {
     cfg.changesStatDisplay = b.changesStatDisplay;
-    saveConfig(cfg);
-    broadcast("settings_changed", { changesStatDisplay: cfg.changesStatDisplay });
+    Object.assign(changed, { changesStatDisplay: cfg.changesStatDisplay });
   }
   const badStatDisplay =
     b.changesStatDisplay !== undefined &&
@@ -282,176 +290,180 @@ function applyWorkTreeDisplayFields(cfg: RepoYetiConfig, b: SettingsUpdateBody):
     b.changesStatDisplay !== "bars";
   if (typeof b.changesChars === "boolean") {
     cfg.changesChars = b.changesChars;
-    saveConfig(cfg);
-    broadcast("settings_changed", { changesChars: cfg.changesChars });
+    Object.assign(changed, { changesChars: cfg.changesChars });
   }
   return badStatDisplay;
 }
 
-function applyRemoteAccessFields(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
+function applyRemoteAccessFields(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+) {
   if (typeof b.remoteEditing === "boolean") {
     cfg.remoteEditing = b.remoteEditing;
-    saveConfig(cfg);
-    broadcast("settings_changed", { remoteEditing: cfg.remoteEditing });
+    Object.assign(changed, { remoteEditing: cfg.remoteEditing });
   }
   if (typeof b.remoteBrowse === "boolean") {
     cfg.remoteBrowse = b.remoteBrowse;
-    saveConfig(cfg);
-    broadcast("settings_changed", { remoteBrowse: cfg.remoteBrowse });
+    Object.assign(changed, { remoteBrowse: cfg.remoteBrowse });
   }
 }
 
-function applyDiffPatchFields(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
+function applyDiffPatchFields(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+) {
   if (typeof b.diffPatchBytes === "number" && Number.isFinite(b.diffPatchBytes)) {
     // setDiffPatchBytes clamps → persist the clamped value, not the raw input.
     cfg.diffPatchBytes = setDiffPatchBytes(b.diffPatchBytes);
-    saveConfig(cfg);
-    broadcast("settings_changed", { diffPatchBytes: cfg.diffPatchBytes });
+    Object.assign(changed, { diffPatchBytes: cfg.diffPatchBytes });
   }
   if (typeof b.diffPatchEnabled === "boolean") {
     cfg.diffPatchEnabled = b.diffPatchEnabled;
     setDiffPatchEnabled(b.diffPatchEnabled);
-    saveConfig(cfg);
-    broadcast("settings_changed", { diffPatchEnabled: cfg.diffPatchEnabled });
+    Object.assign(changed, { diffPatchEnabled: cfg.diffPatchEnabled });
   }
 }
 
-function applyRemoteSyncFields(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
+function applyRemoteSyncFields(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+) {
   if (typeof b.syncCheck === "boolean") {
     // Toggling the check starts/stops the daemon-wide fetch timer (see remote-sync.ts).
     cfg.syncCheck = b.syncCheck;
     setSyncCheckEnabled(b.syncCheck);
-    saveConfig(cfg);
-    broadcast("settings_changed", { syncCheck: cfg.syncCheck });
+    Object.assign(changed, { syncCheck: cfg.syncCheck });
   }
   if (typeof b.syncIntervalSecs === "number" && Number.isFinite(b.syncIntervalSecs)) {
     // setSyncIntervalSecs clamps to [30, 3600] → persist the clamped value, not the raw input.
     cfg.syncIntervalSecs = setSyncIntervalSecs(b.syncIntervalSecs);
-    saveConfig(cfg);
-    broadcast("settings_changed", { syncIntervalSecs: cfg.syncIntervalSecs });
+    Object.assign(changed, { syncIntervalSecs: cfg.syncIntervalSecs });
   }
   if (typeof b.keepInSync === "boolean") {
     cfg.keepInSync = b.keepInSync;
     setKeepInSync(b.keepInSync);
-    saveConfig(cfg);
-    broadcast("settings_changed", { keepInSync: cfg.keepInSync });
+    Object.assign(changed, { keepInSync: cfg.keepInSync });
   }
 }
 
 // ── auto-commit timer settings ──────────────────────────────────────────
-function applyAutoCommitFields(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
+function applyAutoCommitFields(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+) {
   if (typeof b.autoCommit === "boolean") {
     // Toggling this starts/stops the daemon-wide auto-commit timer (see auto-commit.ts).
     cfg.autoCommit = b.autoCommit;
     setAutoCommitEnabled(b.autoCommit);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoCommit: cfg.autoCommit });
+    Object.assign(changed, { autoCommit: cfg.autoCommit });
   }
   if (b.autoCommitMode === "interval" || b.autoCommitMode === "daily") {
     cfg.autoCommitMode = b.autoCommitMode;
     setAutoCommitMode(b.autoCommitMode);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoCommitMode: cfg.autoCommitMode });
+    Object.assign(changed, { autoCommitMode: cfg.autoCommitMode });
   }
   if (typeof b.autoCommitIntervalSecs === "number" && Number.isFinite(b.autoCommitIntervalSecs)) {
     // setAutoCommitIntervalSecs clamps to [60, 86400] → persist the clamped value.
     cfg.autoCommitIntervalSecs = setAutoCommitIntervalSecs(b.autoCommitIntervalSecs);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoCommitIntervalSecs: cfg.autoCommitIntervalSecs });
+    Object.assign(changed, { autoCommitIntervalSecs: cfg.autoCommitIntervalSecs });
   }
   if (typeof b.autoCommitAt === "string") {
     // setAutoCommitAt normalises "HH:MM" → persist the normalised value.
     cfg.autoCommitAt = setAutoCommitAt(b.autoCommitAt);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoCommitAt: cfg.autoCommitAt });
+    Object.assign(changed, { autoCommitAt: cfg.autoCommitAt });
   }
   if (typeof b.autoCommitPull === "boolean") {
     cfg.autoCommitPull = b.autoCommitPull;
     setAutoCommitPull(b.autoCommitPull);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoCommitPull: cfg.autoCommitPull });
+    Object.assign(changed, { autoCommitPull: cfg.autoCommitPull });
   }
   if (typeof b.autoCommitPush === "boolean") {
     cfg.autoCommitPush = b.autoCommitPush;
     setAutoCommitPush(b.autoCommitPush);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoCommitPush: cfg.autoCommitPush });
+    Object.assign(changed, { autoCommitPush: cfg.autoCommitPush });
   }
   if (b.autoCommitAiFallback === "skip" || b.autoCommitAiFallback === "basic") {
     cfg.autoCommitAiFallback = b.autoCommitAiFallback;
     setAutoCommitAiFallback(b.autoCommitAiFallback);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoCommitAiFallback: cfg.autoCommitAiFallback });
+    Object.assign(changed, { autoCommitAiFallback: cfg.autoCommitAiFallback });
   }
 }
 
 // ── auto-update timer settings ──────────────────────────────────────────
-function applyAutoUpdateFields(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
+function applyAutoUpdateFields(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+) {
   if (typeof b.autoUpdate === "boolean") {
     // Toggling this starts/stops the daemon-wide auto-update timer (see auto-update.ts).
     cfg.autoUpdate = b.autoUpdate;
     setAutoUpdateEnabled(b.autoUpdate);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoUpdate: cfg.autoUpdate });
+    Object.assign(changed, { autoUpdate: cfg.autoUpdate });
   }
   if (typeof b.updateNotify === "boolean") {
     cfg.updateNotify = b.updateNotify;
     setUpdateNotifyEnabled(b.updateNotify);
-    saveConfig(cfg);
-    broadcast("settings_changed", { updateNotify: cfg.updateNotify });
+    Object.assign(changed, { updateNotify: cfg.updateNotify });
   }
   if (typeof b.autoUpdateIntervalSecs === "number" && Number.isFinite(b.autoUpdateIntervalSecs)) {
     // setAutoUpdateIntervalSecs clamps to [900, 604800] → persist the clamped value.
     cfg.autoUpdateIntervalSecs = setAutoUpdateIntervalSecs(b.autoUpdateIntervalSecs);
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoUpdateIntervalSecs: cfg.autoUpdateIntervalSecs });
+    Object.assign(changed, { autoUpdateIntervalSecs: cfg.autoUpdateIntervalSecs });
   }
 }
 
-function applyMiscFlagFields(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
+function applyMiscFlagFields(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+) {
   if (typeof b.autoScan === "boolean") {
     // Pure stored flag; no runtime call (the web client is what acts on it at boot).
     cfg.autoScan = b.autoScan;
-    saveConfig(cfg);
-    broadcast("settings_changed", { autoScan: cfg.autoScan });
+    Object.assign(changed, { autoScan: cfg.autoScan });
   }
   if (typeof b.loreServersEnabled === "boolean") {
     // Pure stored flag: no runtime call, just whether the Settings section is expanded.
     cfg.loreServersEnabled = b.loreServersEnabled;
-    saveConfig(cfg);
-    broadcast("settings_changed", { loreServersEnabled: cfg.loreServersEnabled });
+    Object.assign(changed, { loreServersEnabled: cfg.loreServersEnabled });
   }
   if (typeof b.portableMode === "boolean") {
     cfg.portableMode = b.portableMode;
-    saveConfig(cfg);
     // Keep runtime.json current so the tray launcher picks up the new preference on its
     // very next cold start, even though it never talks to this daemon to learn it.
     updateInstanceInfo({ portableMode: cfg.portableMode });
-    broadcast("settings_changed", { portableMode: cfg.portableMode });
+    Object.assign(changed, { portableMode: cfg.portableMode });
   }
   if (typeof b.hideTrayIcon === "boolean") {
     cfg.hideTrayIcon = b.hideTrayIcon;
-    saveConfig(cfg);
     // Keep runtime.json current so the tray host's live watch-timer re-read picks up the
     // new preference within a few seconds, without a restart — see misc/RepoYeti-Tray.ps1.
     updateInstanceInfo({ hideTrayIcon: cfg.hideTrayIcon });
-    broadcast("settings_changed", { hideTrayIcon: cfg.hideTrayIcon });
+    Object.assign(changed, { hideTrayIcon: cfg.hideTrayIcon });
   }
 }
 
 // ── ⭐ Agent Safety Rail settings ────────────────────────────────────────
-function applyAgentSafetyRailFields(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
+function applyAgentSafetyRailFields(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+) {
   if (typeof b.mcpApprovalGate === "boolean") {
     cfg.mcpApprovalGate = b.mcpApprovalGate;
     setApprovalGateEnabled(b.mcpApprovalGate);
-    saveConfig(cfg);
-    broadcast("settings_changed", { mcpApprovalGate: cfg.mcpApprovalGate });
+    Object.assign(changed, { mcpApprovalGate: cfg.mcpApprovalGate });
   }
   if (typeof b.mcpApprovalTimeoutSecs === "number" && Number.isFinite(b.mcpApprovalTimeoutSecs)) {
     // setApprovalTimeoutSecs clamps to [10, 3600] → persist the clamped value.
     cfg.mcpApprovalTimeoutSecs = setApprovalTimeoutSecs(b.mcpApprovalTimeoutSecs);
-    saveConfig(cfg);
-    broadcast("settings_changed", { mcpApprovalTimeoutSecs: cfg.mcpApprovalTimeoutSecs });
+    Object.assign(changed, { mcpApprovalTimeoutSecs: cfg.mcpApprovalTimeoutSecs });
   }
   // Auto-deny and auto-approve are MUTUALLY EXCLUSIVE. With both armed, a pending approval has
   // two timers racing to opposite verdicts and the outcome is decided by whichever timeout
@@ -466,70 +478,80 @@ function applyAgentSafetyRailFields(cfg: RepoYetiConfig, b: SettingsUpdateBody) 
   if (typeof b.mcpAutoDeny === "boolean") {
     cfg.mcpAutoDeny = b.mcpAutoDeny;
     setAutoDenyEnabled(b.mcpAutoDeny);
-    const patch: Record<string, boolean> = { mcpAutoDeny: cfg.mcpAutoDeny };
+    changed.mcpAutoDeny = cfg.mcpAutoDeny;
     if (b.mcpAutoDeny) {
       cfg.mcpAutoApprove = false;
       setAutoApproveEnabled(false);
-      patch.mcpAutoApprove = false;
+      changed.mcpAutoApprove = false;
     }
-    saveConfig(cfg);
-    broadcast("settings_changed", patch);
   }
   if (typeof b.mcpAutoApprove === "boolean") {
     cfg.mcpAutoApprove = b.mcpAutoApprove;
     setAutoApproveEnabled(b.mcpAutoApprove);
-    const patch: Record<string, boolean> = { mcpAutoApprove: cfg.mcpAutoApprove };
+    changed.mcpAutoApprove = cfg.mcpAutoApprove;
     if (b.mcpAutoApprove) {
       cfg.mcpAutoDeny = false;
       setAutoDenyEnabled(false);
-      patch.mcpAutoDeny = false;
+      changed.mcpAutoDeny = false;
     }
-    saveConfig(cfg);
-    broadcast("settings_changed", patch);
   }
   if (typeof b.mcpAutoApproveTimeoutSecs === "number" && Number.isFinite(b.mcpAutoApproveTimeoutSecs)) {
     // setApproveTimeoutSecs clamps to [10, 3600] → persist the clamped value.
     cfg.mcpAutoApproveTimeoutSecs = setApproveTimeoutSecs(b.mcpAutoApproveTimeoutSecs);
-    saveConfig(cfg);
-    broadcast("settings_changed", { mcpAutoApproveTimeoutSecs: cfg.mcpAutoApproveTimeoutSecs });
+    Object.assign(changed, { mcpAutoApproveTimeoutSecs: cfg.mcpAutoApproveTimeoutSecs });
   }
 }
 
 // "Open with…" default editor. An empty string clears the preference (auto-pick the first
 // installed editor); any other value must be a known catalog id, else it's ignored.
-function applyDefaultEditorField(cfg: RepoYetiConfig, b: SettingsUpdateBody) {
+function applyDefaultEditorField(
+  cfg: RepoYetiConfig,
+  b: SettingsUpdateBody,
+  changed: Record<string, unknown>,
+) {
   if (typeof b.defaultEditor !== "string") return;
   if (b.defaultEditor === "") cfg.defaultEditor = undefined;
   else if (isKnownEditor(b.defaultEditor)) cfg.defaultEditor = b.defaultEditor;
   if (b.defaultEditor === "" || isKnownEditor(b.defaultEditor)) {
-    saveConfig(cfg);
-    broadcast("settings_changed", { defaultEditor: cfg.defaultEditor ?? null });
+    Object.assign(changed, { defaultEditor: cfg.defaultEditor ?? null });
   }
 }
 
-// Owner UI settings. Currently just the diff-stats toggle: flipping it persists the
-// config, updates the runtime flag, tells every client over SSE, and re-reads all repos
-// so each card's aggregate stat appears/clears immediately.
+// Owner UI settings. Each field above is applied as an independent, best-effort block (same
+// order, same runtime setters, same clamping as always — see the comments on each apply*Fields
+// helper) but persistence is now batched: every accepted field is merged into one `changed`
+// patch, and this handler does exactly ONE saveConfig + ONE settings_changed broadcast for the
+// whole request instead of one pair per field, and calls refreshAllRepos() at most once. A
+// multi-field PUT used to serialise config.json once per field and fan out an overlapping SSE
+// burst; that redundant I/O and event noise is the thing this batching removes.
 async function putSettings(c: Context, cfg: RepoYetiConfig) {
     const p = await parseBody(c, SettingsUpdateSchema);
     if (!p.ok) return p.res;
     const b = p.data;
-    applyDiffStatsField(cfg, b);
+    const changed: Record<string, unknown> = {};
+    const diffStatsChanged = applyDiffStatsField(cfg, b, changed);
     // Junk is not persisted (an unrecognized value would sit in config.json until some client
     // happened to overwrite it) but it must NOT abort the request either. This handler's whole
     // convention is independent, best-effort per-field blocks, and an early `return` here meant a
     // body like {changesStatDisplay:"pie-chart", remoteEditing:false} silently dropped
     // remoteEditing and every other key ordered after it — while keys ordered BEFORE it were
     // already committed. Flag it, keep applying the rest, answer 400 at the end.
-    const badStatDisplay = applyWorkTreeDisplayFields(cfg, b);
-    applyRemoteAccessFields(cfg, b);
-    applyDiffPatchFields(cfg, b);
-    applyRemoteSyncFields(cfg, b);
-    applyAutoCommitFields(cfg, b);
-    applyAutoUpdateFields(cfg, b);
-    applyMiscFlagFields(cfg, b);
-    applyAgentSafetyRailFields(cfg, b);
-    applyDefaultEditorField(cfg, b);
+    const badStatDisplay = applyWorkTreeDisplayFields(cfg, b, changed);
+    applyRemoteAccessFields(cfg, b, changed);
+    applyDiffPatchFields(cfg, b, changed);
+    applyRemoteSyncFields(cfg, b, changed);
+    applyAutoCommitFields(cfg, b, changed);
+    applyAutoUpdateFields(cfg, b, changed);
+    applyMiscFlagFields(cfg, b, changed);
+    applyAgentSafetyRailFields(cfg, b, changed);
+    applyDefaultEditorField(cfg, b, changed);
+    // One save + one broadcast for the whole request (see the block comment above) — only if
+    // at least one field was actually accepted; a request with nothing to apply does nothing.
+    if (Object.keys(changed).length > 0) {
+      saveConfig(cfg);
+      broadcast("settings_changed", changed);
+      if (diffStatsChanged) refreshAllRepos();
+    }
     // Every other field has now been applied (see the badStatDisplay comment above): the 400 says
     // "this one value was rejected", not "nothing happened".
     if (badStatDisplay) {

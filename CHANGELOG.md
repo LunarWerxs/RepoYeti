@@ -130,6 +130,13 @@ All notable changes to RepoYeti are documented here. The format is based on
   order, the moment it lands (on the failure path too), and a status older than the one already
   installed is never applied, so a late frame cannot move a card backwards. Covered by store tests
   with a deferred list request and a fake stream, including the reconnect resync.
+- **Saving several settings at once writes the config file once.** `PUT /api/settings` applied
+  each field as an independent block that serialised and atomically replaced `config.json` and
+  emitted its own `settings_changed` event, so a multi-field save meant one file replacement and one
+  SSE frame per field, overlapping. Every accepted field is still applied in the same order with the
+  same runtime effects and the same clamping, and the documented partial-acceptance rule still
+  holds (an unrecognised `changesStatDisplay` is refused after everything else has been applied),
+  but the durable save and the notification now happen once, with one merged payload.
 
 - **"Create and push tag" pushes through the repo's selected GitHub account, and a failed push can
   be retried.** The tag push carried the identity's SSH options but not the HTTPS credential an
