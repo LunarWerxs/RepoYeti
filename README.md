@@ -15,6 +15,7 @@
   <img alt="Runtime: Bun" src="https://img.shields.io/badge/runtime-Bun-3ddc84" />
   <img alt="Dashboard: Vue 3 PWA" src="https://img.shields.io/badge/dashboard-Vue%203%20PWA-3ddc84" />
   <img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-yes-3ddc84" />
+  <a href="https://discord.gg/PsWpeNUzhk"><img alt="Discord: join the community" src="https://img.shields.io/badge/Discord-join_the_community-5865F2?logo=discord&logoColor=white" /></a>
 </p>
 
 </div>
