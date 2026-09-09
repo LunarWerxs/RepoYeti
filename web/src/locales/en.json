@@ -1292,7 +1292,14 @@
     "approve": "Approve",
     "approveAria": "Approve {tool}",
     "deny": "Deny",
-    "denyAria": "Deny {tool}"
+    "denyAria": "Deny {tool}",
+    "showRequest": "Show full request",
+    "hideRequest": "Hide request",
+    "hiddenValue": "hidden (secret-like field)",
+    "truncated": "Some values were shortened for display; the tool receives the full arguments.",
+    "noArguments": "No arguments.",
+    "loadingRequest": "Loading the full request…",
+    "requestUnavailable": "The full request is no longer available; the call may already have been resolved."
   },
   "time": {
     "daysAgo": "{n}d ago",

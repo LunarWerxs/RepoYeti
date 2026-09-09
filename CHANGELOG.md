@@ -110,8 +110,9 @@ All notable changes to RepoYeti are documented here. The format is based on
   before approval. The daemon now keeps a bounded, secret-redacted copy of the exact request the
   tool will run with (per-value and whole-request ceilings; token/secret/password-style fields
   shown as hidden, by name) and serves it at `GET /api/approvals/:id`; the list and the live
-  events keep carrying only the short summary. The dashboard's expandable view of it follows in a
-  separate change.
+  events keep carrying only the short summary. The approval card gained a "Show full request"
+  toggle that fetches it on first expand and renders every argument in full, hidden fields as a
+  labelled placeholder, with a note when anything was shortened for display.
 - **A scan that fails to start or stop now says so, and a phone that lost the stream mid-scan
   recovers.** The Scan modal started a scan with an unhandled promise and asked for cancellation
   without handling a failed request: a failed start cleared the spinner with no explanation, and a

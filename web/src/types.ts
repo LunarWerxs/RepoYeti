@@ -951,6 +951,24 @@ export interface PendingApproval {
   autoAction: "approve" | "deny" | null;
 }
 
+/** Full request behind a pending approval's clipped `argsSummary` (mirrors the daemon's on-demand
+ *  GET /api/approvals/:id). `args` omits `repo` (shown separately); string values are clipped at
+ *  4096 characters and `truncated` is set when anything was clipped or dropped; `hidden` lists
+ *  argument names whose values were replaced with the literal string "[hidden]" (secret-looking
+ *  fields). */
+export interface ApprovalRequestView {
+  tool: string;
+  args: Record<string, unknown>;
+  truncated: boolean;
+  hidden: string[];
+}
+
+/** A pending approval plus its full request detail (GET /api/approvals/:id). 404s once the call
+ *  has been approved/denied/timed out. */
+export interface ApprovalDetails extends PendingApproval {
+  request: ApprovalRequestView;
+}
+
 // ── share links ───────────────────────────────────────────────────────────────
 /** What a share link may do. "control" is a superset of "view" (mirrors src/share/policy.ts). */
 export type SharePerm = "view" | "control";

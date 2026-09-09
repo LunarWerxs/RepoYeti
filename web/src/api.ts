@@ -10,6 +10,7 @@ import type {
   AiModelDiscovery,
   AiProviderId,
   AiSettings,
+  ApprovalDetails,
   AutoCommitIncident,
   BranchList,
   BuzzCommunity,
@@ -558,6 +559,9 @@ export const api = {
   // ── ⭐ Agent Safety Rail — pending MCP tool-call approvals ────────────────────
   /** Every MCP mutating tool call currently awaiting owner approve/deny. */
   listApprovals: () => req<{ approvals: PendingApproval[] }>("GET", "/api/approvals").then((r) => r.approvals),
+  /** Full request behind a pending approval's clipped `argsSummary`. Throws ApiError "NOT_FOUND"
+   *  (404) once the call has already been approved/denied/timed out. */
+  approvalDetails: (id: string) => req<ApprovalDetails>("GET", `/api/approvals/${id}`),
   approveCall: (id: string) => req<{ ok: boolean }>("POST", `/api/approvals/${id}/approve`),
   denyCall: (id: string) => req<{ ok: boolean }>("POST", `/api/approvals/${id}/deny`),
 
