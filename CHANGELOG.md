@@ -6,6 +6,24 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **A browser gate now runs in CI and blocks a release.** Three things this project depends on were
+  invisible to every test it had, because all three only exist once a real browser has laid out a
+  page and stamped a request. The loopback guard's foreign-origin refusal was proven by fabricating
+  headers and calling the app directly, which tests the decision table and not the premise it rests
+  on. The SSE reconnect tests mock `@vueuse/core`, so no `EventSource` is ever opened. The popper
+  guard reads Vue templates, so it proves the anchor wiring is structurally right and says nothing
+  about whether the menu lands on screen, which is exactly how issue #15 shipped four times with
+  correct aria and nothing logged. `bun run --cwd web test:gate` boots an isolated daemon on an
+  ephemeral port with a throwaway state directory, its own scratch repositories and an in-memory
+  keychain, serves an attack page from a second loopback port, and checks that a page on another
+  local port cannot drive a write, that a dashboard which loses its stream converges on the
+  daemon's truth when it returns, and that every menu and popover opens inside the window and is
+  reachable. It needs nothing running and touches nothing of yours, which is why it can run
+  anywhere. Measured against a daemon with the fix removed: the foreign page's write succeeds and
+  the gate goes red. The older `test:e2e` suite is unchanged and still the developer one.
+
 ## [1.0.0] - 2026-09-08
 
 ### Changed

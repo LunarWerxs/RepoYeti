@@ -16,7 +16,9 @@
     "i18n:check": "node scripts/i18n-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "//test:gate": "The RELEASE browser gate: three facts no unit test can establish (exact-origin refusal, SSE reconnect hydration, menus landing on screen). Unlike test:e2e it needs NOTHING running — its global setup boots an isolated daemon on an ephemeral port with a throwaway state dir. It does need `bun run build` first (the daemon serves dist) and a browser binary (`bunx playwright install chromium`).",
+    "test:gate": "playwright test -c playwright.gate.config.ts"
   },
   "dependencies": {
     "@cnct/connect": "^1.5.1",
@@ -52,7 +54,7 @@
     "unplugin-icons": "^23.0.1",
     "vite": "^8.1.0",
     "vite-plugin-pwa": "^1.3.0",
-    "vitest": "^4.1.9",
+    "vitest": "^4.1.11",
     "vue-tsc": "^3.3.5"
   },
   "//overrides": "Do NOT pin brace-expansion to one version. minimatch 5/9 want ^2 (`module.exports = expand`); minimatch 10 — what workbox-build's glob uses — wants ^5 (named `expand` export). A flat 2.1.2 pin made the PWA build throw '(0 , brace_expansion_1.expand) is not a function' inside workbox's globbing, which is only a *warning*: the build stayed green while the precache silently shrank to the 6 public/ files, so the app shell was never cached offline. Bun does not support nested overrides (it warns and ignores them), so each requester must resolve on its own; every line is past the CVE-2025-5889 ReDoS fix (1.1.12 / 2.0.2 / 3.0.1 / 4.0.1), so natural resolution stays patched.",

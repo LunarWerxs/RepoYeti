@@ -99,9 +99,41 @@ jobs:
       - if: runner.os == 'Linux'
         run: bun run --cwd web test
 
+  # The browser gate, same job as CI's (see .github/workflows/ci.yml for what it covers and why).
+  # It is here as well as there because tagging is the moment nobody is watching: the three things
+  # it checks — a foreign local page cannot drive a write, a reconnecting dashboard converges, and
+  # menus open on screen — are all things that shipped broken before, and none of them can be seen
+  # by a build or by the unit suites. Linux only: it tests Chromium's behaviour and the dashboard's
+  # layout, not the daemon's platform coverage, which is preflight's matrix.
+  browser:
+    name: browser gate (loopback origin + reconnect + menus)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+      - run: bun install --frozen-lockfile
+      - run: bun install --cwd web --frozen-lockfile
+      - run: bun run --cwd web build
+      - run: bunx playwright install --with-deps chromium
+        working-directory: web
+      - run: bun run --cwd web test:gate
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: browser-gate-diagnostics
+          path: |
+            web/.playwright/browser-gate/daemon.log
+            web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   build:
     name: build (${{ matrix.os }})
-    needs: preflight
+    # Both gates, not just the suite: a release that publishes past a red browser gate is exactly
+    # the case the gate exists for.
+    needs: [preflight, browser]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

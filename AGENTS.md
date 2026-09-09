@@ -43,6 +43,9 @@ bun run check:coverage     # coverage floor
 # dashboard
 bun run --cwd web test     # Vitest
 bun run --cwd web build    # runs i18n:check, then vue-tsc, then the bundle
+
+# browser gate (needs the build above, plus `bunx playwright install chromium` once)
+bun run --cwd web test:gate
 ```
 
 `bun test` on its own from the repo root would glob the dashboard's Vitest files and report failures
@@ -112,7 +115,13 @@ binary into a public release without knowing what changed in it.
   resolves asynchronously and reads as broken for a tick even when it is healthy.
 - **Watch the fix work in a real browser before you claim it.** The popper bug above was "fixed"
   once, with a confident code comment naming the wrong cause, and three more components then copied
-  that comment. A fix nobody watched is a hypothesis.
+  that comment. A fix nobody watched is a hypothesis. `bun run --cwd web test:gate` is that watching,
+  automated: it boots an isolated daemon on an ephemeral port with a throwaway state directory (so
+  it needs nothing running and touches nothing of yours) and checks the three things only a browser
+  can see: a page on another loopback port cannot drive a write, a dashboard that loses its event
+  stream converges when it returns, and every menu opens inside the window. It runs in CI and gates
+  the release. The older `test:e2e` suite is the developer one and still needs your live daemon plus
+  `bun run dev`.
 - A local red may belong to another agent editing this tree - check `git status --short` and file mtimes first (global CLAUDE.md, localci section).
 
 ## Changelog and releases

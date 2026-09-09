@@ -78,6 +78,63 @@ jobs:
         run: bun audit || true
       - run: bun run test # Vitest: pure-lib units + component render + store smoke (no server needed)
       - run: bun run build # vue-tsc type-check + production bundle (re-runs i18n:check)
-      # The Playwright SSE E2E (test:e2e) is intentionally NOT in CI — it needs a live daemon + a
-      # registered repo + a browser binary. Run it locally: start the daemon + `bun run dev`, then
-      # `bunx playwright install chromium && bun run test:e2e`.
+      # The Playwright DEVELOPER suite (test:e2e) is still intentionally NOT in CI — it needs a
+      # live daemon with the owner's real repositories plus a Vite dev server, so it can only run
+      # on a developer machine: start the daemon + `bun run dev`, then `bunx playwright install
+      # chromium && bun run test:e2e`. The RELEASE gate (test:gate) has no such requirement and
+      # runs in the `browser` job below.
+
+  # ── the browser gate ────────────────────────────────────────────────────────────────
+  # Three facts about this app that no unit test can establish, because all three only exist once
+  # a real browser has laid out a page and stamped a request:
+  #   · a page on ANOTHER loopback port cannot drive a mutating API call (the exact-origin guard);
+  #   · a dashboard that loses its event stream converges on the daemon's truth when it returns;
+  #   · every menu and popover opens inside the window (issue #15 shipped broken four times, with
+  #     correct aria and nothing logged, because the failure is geometry).
+  # It boots its own isolated daemon on an ephemeral port with a throwaway state directory, so it
+  # needs nothing running and touches nothing of the developer's. Kept deliberately small: a broad
+  # end-to-end suite nobody trusts is worse than three facts that are actually checked.
+  browser:
+    name: browser gate (loopback origin + reconnect + menus)
+    # One OS is enough: what this covers is Chromium's own behaviour and the dashboard's layout,
+    # neither of which is per-platform. The daemon's platform coverage is the daemon job's matrix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-gate-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
+          restore-keys: bun-gate-${{ runner.os }}-
+      # Both halves: the gate runs the daemon FROM SOURCE (root deps) against the built dashboard
+      # (web deps), which is the same pairing a release binary ships.
+      - run: bun install --frozen-lockfile
+      - run: bun install --cwd web --frozen-lockfile
+      - run: bun run --cwd web build
+      # ~150 MB of browser. Keyed on the lockfile, so it is re-downloaded only when the pinned
+      # @playwright/test moves.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: playwright-${{ runner.os }}-
+      # --with-deps runs whether or not the browser itself was restored from the cache: the system
+      # libraries live outside that path and a runner image refresh can drop them.
+      - run: bunx playwright install --with-deps chromium
+        working-directory: web
+      - run: bun run --cwd web test:gate
+      # The gate's own daemon log and any Playwright trace, so a red run is diagnosable without
+      # reproducing it locally. Only on failure; a green run has nothing worth keeping.
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: browser-gate-diagnostics
+          path: |
+            web/.playwright/browser-gate/daemon.log
+            web/.playwright/browser-gate/gate.json
+            web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
