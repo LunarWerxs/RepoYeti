@@ -201,6 +201,18 @@ describe("FileViewerInner save staleness (expectedHash)", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
+  /** The slice of the component's instance these tests drive. `wrapper.vm` is typed as the public
+   *  props surface only, so the internal refs/functions are reached through this shape. */
+  interface ViewerVm {
+    startEdit(): void;
+    save(): Promise<void>;
+    editorViewer: unknown;
+    draft: string;
+    dirty: boolean;
+    content: string;
+    editing: boolean;
+  }
+
   /** Mounts in Content mode, waits for the load, then flips into edit mode. Returns `vm` so each
    *  test can seed the dirty buffer and call `save()` in one synchronous stretch (see `armSave`). */
   async function mountAndEdit(loadedHash: string) {
@@ -219,15 +231,13 @@ describe("FileViewerInner save staleness (expectedHash)", () => {
       global: { plugins: [pinia, i18n] },
     });
     await flushPromises();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const vm = wrapper.vm as any;
+    const vm = wrapper.vm as unknown as ViewerVm;
     vm.startEdit();
     await flushPromises();
     return { wrapper, vm };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function armSave(vm: any, draftValue: string): void {
+  function armSave(vm: ViewerVm, draftValue: string): void {
     // shallowMount stubs MonacoViewer, and Vue rebinds the `ref="editorViewer"` template ref on
     // every render it patches — including the one still queued from entering edit mode — so
     // nulling it out only sticks for as long as nothing yields to that pending render. Set it
