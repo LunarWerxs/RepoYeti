@@ -47,6 +47,25 @@ All notable changes to RepoYeti are documented here. The format is based on
   The responses say what happened (`durable`, `keychainCleared`, `store`), and `repoyeti token`
   prints the note. Covered by regression tests with an injected failing store, including the
   simulated restart.
+- **Binary updates now come only from the RepoYeti release location on GitHub, bounded in bytes
+  and time.** The update check's metadata comes from the Connections Studio proxy (GitHub's API as
+  the fallback), and that JSON used to supply both the archive URL and the checksum-manifest URL.
+  Both were fetched from wherever they pointed with redirects followed blindly, and a manifest that
+  agreed with the archive was taken as proof. A checksum from the same untrusted source proves the
+  transfer was intact, not who published it: a wrong or compromised proxy response could name any
+  host and any file, and the updater renames what it downloads over the running executable. Asset
+  URLs are now accepted only when they are exactly the GitHub release-asset location for
+  `LunarWerxs/RepoYeti`, the release's own tag and the expected asset name; redirects are followed
+  by hand and must land on `github.com` or a `*.githubusercontent.com` host; the byte count is
+  bound to the size the release lists and to an absolute ceiling; the SHA-256 is computed over the
+  stream (the archive is no longer read whole into memory); the manifest is fetched first, so an
+  unverifiable release is refused before the large download; and the release record the version
+  check returned is the one staged from, instead of asking "latest" twice and verifying a newer
+  release against the older tag. Every transfer and the extractor have a deadline, so a body that
+  sends headers and never finishes no longer holds the daemon in "applying" forever, deferring
+  later updates and refusing a dashboard restart. Malformed metadata is refused. This is not a
+  signature over the release: the trust established is "GitHub served this for LunarWerxs/RepoYeti
+  under this tag", which is the trust the release workflow already rests on.
 
 ### Fixed
 

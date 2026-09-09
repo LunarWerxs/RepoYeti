@@ -64,7 +64,8 @@ export type ApiErrorCode =
   | "CONFLICT_STALE"
   // ── file viewer save (mirror src/service/files.ts writeFileContent) ──
   /** The file on disk no longer matches the `expectedHash` the save was made against — another
-   *  save or an external editor got there first; the caller must reload before writing. */
+   *  save or an external editor got there first, so the caller must reload before writing.
+   *  (No semicolons in these comments: check-error-codes.ts reads the union up to the first one.) */
   | "FILE_STALE"
   // ── daemon lifecycle (mirror src/auto-update.ts requestRelaunch) ──
   /** Work is in flight on the daemon right now, so it will not restart out from under it. */
