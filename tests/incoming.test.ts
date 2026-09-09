@@ -383,3 +383,27 @@ test("/incoming?fetch=1 returns an error result instead of blessing stale refs a
   expect(body.message).toBeTruthy();
   expect(body.commits).toEqual([]);
 });
+
+// ── paths are decoded from git's NUL-delimited records; renames carry both sides (audit item 18) ──
+test("incoming files keep a non-ASCII name as itself and report a rename with both sides", async () => {
+  const { work, other } = await fixture();
+  const O = git(other);
+  const accented = "héllo wörld.txt";
+  writeFileSync(join(other, accented), "x\n");
+  await O("mv", "a.txt", "renamed.txt");
+  await O("add", "-A");
+  await O("commit", "-q", "-m", "feat: accents + rename");
+  await O("push", "-q", "origin", "main");
+  await git(work)("fetch", "-q");
+
+  const r = await readIncoming(work);
+  expect(r.ok).toBe(true);
+  const byPath = Object.fromEntries(r.files.map((f) => [f.path, f]));
+  // The exact filename (the human format would have said "h\303\251llo w\303\266rld.txt").
+  expect(byPath[accented]).toMatchObject({ status: "A", addedLines: 1, removedLines: 0 });
+  // The rename is one record with both sides, not git's "a.txt => renamed.txt" rendering.
+  expect(byPath["renamed.txt"]).toMatchObject({ status: "R", from: "a.txt" });
+  expect(Object.keys(byPath).some((p) => p.includes("\\303") || p.includes("=>"))).toBe(false);
+  // The per-commit totals decoded from `log -z --numstat` count both rows.
+  expect(r.commits[0]?.stat).toMatchObject({ filesChanged: 2, addedLines: 1, removedLines: 0 });
+}, UPSTREAM_ROUND_TIMEOUT_MS);

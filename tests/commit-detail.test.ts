@@ -164,3 +164,79 @@ test("getCommit caps the file list at COMMIT_FILES_CAP and reports filesTotal", 
     }
   }
 });
+
+// ── paths are decoded from git's NUL-delimited records, never from its quoted spelling (audit item 18) ──
+// Under the default core.quotePath, the human-oriented --name-status/--numstat output C-quotes any
+// non-ASCII path ("h\303\251llo.txt"), and a tab or newline in a path breaks a line/tab split
+// outright. The readers now ask for `-z` and decode one shared record grammar, joining stats to
+// files by identity rather than by row position.
+test("getCommit returns a non-ASCII path as itself and a rename with both sides and its stats", async () => {
+  const dir = mkScratchDir("ry-commit-z-");
+  try {
+    await $`git -C ${dir} init -q -b main`.quiet();
+    await $`git -C ${dir} config user.name T`.quiet();
+    await $`git -C ${dir} config user.email t@t.io`.quiet();
+    await $`git -C ${dir} config core.quotepath true`.quiet(); // the default, pinned so the test means the same everywhere
+    const accented = "héllo wörld.txt";
+    writeFileSync(join(dir, accented), "one\n");
+    writeFileSync(join(dir, "old-name.txt"), "same\ncontent\nhere\n");
+    await $`git -C ${dir} add -A`.quiet();
+    await $`git -C ${dir} commit -q -m base`.quiet();
+    writeFileSync(join(dir, accented), "one\ntwo\nthree\n");
+    await $`git -C ${dir} mv old-name.txt new-name.txt`.quiet();
+    await $`git -C ${dir} add -A`.quiet();
+    await $`git -C ${dir} commit -q -m "feat: rename + accents"`.quiet();
+
+    const reg = await registerRepo(dir);
+    const id = reg.repo!.id;
+    const head = (await getLog(id, 10)).commits[0]!;
+    const detail = await getCommit(id, head.hash);
+    expect(detail.ok).toBe(true);
+
+    const byPath = Object.fromEntries(detail.files.map((f) => [f.path, f]));
+    // The exact filename, not "h\303\251llo w\303\266rld.txt".
+    expect(byPath[accented]).toMatchObject({ status: "M", adds: 2, dels: 0 });
+    expect(Object.keys(byPath).some((p) => p.includes("\\303"))).toBe(false);
+    // The rename carries both sides, and its (zero) stat joined the right record.
+    expect(byPath["new-name.txt"]).toMatchObject({ status: "R", from: "old-name.txt", adds: 0, dels: 0 });
+    expect(detail.files).toHaveLength(2);
+  } finally {
+    stopWatching();
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* Windows watcher-handle race: best-effort, the scratch root sweep reclaims it */
+    }
+  }
+});
+
+test.skipIf(process.platform === "win32")("getCommit decodes a path containing a tab and one containing a newline (Unix only)", async () => {
+  // Windows forbids both characters in filenames, so this proves the decoder where the names are legal.
+  const dir = mkScratchDir("ry-commit-ctrl-");
+  try {
+    await $`git -C ${dir} init -q -b main`.quiet();
+    await $`git -C ${dir} config user.name T`.quiet();
+    await $`git -C ${dir} config user.email t@t.io`.quiet();
+    const tabbed = "with\ttab.txt";
+    const newlined = "with\nnewline.txt";
+    writeFileSync(join(dir, tabbed), "a\n");
+    writeFileSync(join(dir, newlined), "b\n");
+    await $`git -C ${dir} add -A`.quiet();
+    await $`git -C ${dir} commit -q -m "odd names"`.quiet();
+
+    const reg = await registerRepo(dir);
+    const id = reg.repo!.id;
+    const head = (await getLog(id, 10)).commits[0]!;
+    const detail = await getCommit(id, head.hash);
+    const paths = detail.files.map((f) => f.path).sort();
+    expect(paths).toEqual([tabbed, newlined].sort());
+    for (const f of detail.files) expect(f).toMatchObject({ status: "A", adds: 1, dels: 0 });
+  } finally {
+    stopWatching();
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* Windows watcher-handle race: best-effort, the scratch root sweep reclaims it */
+    }
+  }
+});

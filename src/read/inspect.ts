@@ -13,6 +13,7 @@
  */
 import { gitFor } from "../git.ts";
 import { readGate } from "../gitgate.ts";
+import { parseNameStatusZ, parseNumstatZ, recordKey, splitShowZ } from "./git-records.ts";
 
 const US = "\x1f"; // field separator (unit separator) — can't appear in a ref name or subject
 
@@ -458,35 +459,32 @@ function parseCommitHeaderLine(headerLine: string) {
   return { full, short, an, ae, at, cn, ce, ct, subject, parents };
 }
 
-/** Parse `--name-status` lines (everything after the header) into the changed-file list. */
-function parseNameStatusFiles(lines: string[]): CommitFile[] {
-  const files: CommitFile[] = [];
-  for (const l of lines) {
-    const t = l.trim();
-    if (!t) continue;
-    const parts = t.split("\t");
-    const status = (parts[0] ?? "M")[0] ?? "M";
-    if (status === "R" || status === "C") files.push({ status, path: parts[2] ?? "", from: parts[1], adds: 0, dels: 0 });
-    else files.push({ status, path: parts[1] ?? "", adds: 0, dels: 0 });
-  }
-  return files;
+/** `-z` name-status records → the changed-file list (paths are the raw bytes, never quoted). */
+function filesFromNameStatus(records: readonly string[]): CommitFile[] {
+  return parseNameStatusZ(records).map((r) => ({
+    status: r.status,
+    path: r.path,
+    ...(r.from !== undefined ? { from: r.from } : {}),
+    adds: 0,
+    dels: 0,
+  }));
 }
 
 // Per-file line counts via --numstat instead of shipping the raw patch. The inline History
 // view only needs the file list + a "+adds −dels" stat; a single `git show -p` would
 // materialize the WHOLE patch in memory (arbitrarily large for a commit that regenerates a
-// lockfile or bundle) just to derive these numbers. --numstat emits the same rows in the
-// same order as --name-status (same flags, same diff), so zip it onto `files` BY INDEX — its
-// rename rows read `{old => new}`, which would not match the name-status target path. Binary
-// files report "-" for both counts, which Number() makes NaN → left at 0. Mutates `files`.
-function applyNumstat(files: CommitFile[], numstatOut: string): void {
-  const numstat = numstatOut.split("\n").map((l) => l.trim()).filter(Boolean);
-  for (let i = 0; i < files.length; i++) {
-    const cols = numstat[i]?.split("\t");
-    const a = Number(cols?.[0]);
-    const d = Number(cols?.[1]);
-    if (Number.isFinite(a)) files[i]!.adds = a;
-    if (Number.isFinite(d)) files[i]!.dels = d;
+// lockfile or bundle) just to derive these numbers. Joined onto `files` by record identity
+// (path, plus the source path for a rename/copy — see git-records.ts recordKey), not by row
+// position: the two commands emit the same rows for every commit shape we have checked, but a
+// join that depends on that stays correct if a shape we have not checked does not. Binary
+// files report "-" for both counts → left at 0. Mutates `files`.
+function applyNumstat(files: CommitFile[], records: readonly string[]): void {
+  const byKey = new Map(parseNumstatZ(records).map((r) => [recordKey(r), r] as const));
+  for (const f of files) {
+    const stat = byKey.get(recordKey(f));
+    if (!stat) continue;
+    f.adds = stat.added;
+    f.dels = stat.removed;
   }
 }
 
@@ -512,15 +510,19 @@ export async function readCommit(absPath: string, hash: string): Promise<CommitD
       // ordinary — verified empirically on all three), merges show the useful "what did this merge
       // bring in" list instead of a near-empty one, and the view agrees with readCommitFile, which
       // already diffs first-parent ↔ commit. Non-merge output is byte-identical to plain `show`.
-      const showFlags = ["-m", "--first-parent", "--no-color"];
-      // Header (first line) + name-status lines (the rest).
+      // `-z`: NUL-terminated fields, never quoted, so a path with a tab, a newline or a non-ASCII
+      // character (which the human format C-quotes under the default core.quotePath) comes back
+      // as itself. Decoded by src/read/git-records.ts, shared with the incoming preview.
+      const showFlags = ["-m", "--first-parent", "--no-color", "-z"];
+      // Header (the format line) + name-status records.
       const metaOut = await git.raw(["show", ...showFlags, "--name-status", `--format=${fmt}`, hash]);
-      const lines = metaOut.split("\n");
-      const header = parseCommitHeaderLine(lines[0] ?? "");
-      const files = parseNameStatusFiles(lines.slice(1));
+      const meta = splitShowZ(metaOut);
+      const header = parseCommitHeaderLine(meta.header);
+      const files = filesFromNameStatus(meta.records);
 
-      const numstatOut = await git.raw(["show", ...showFlags, "--numstat", "--format=", hash]);
-      applyNumstat(files, numstatOut);
+      // The same format on this call, so the output has the same header-then-records shape.
+      const numstatOut = await git.raw(["show", ...showFlags, "--numstat", `--format=${fmt}`, hash]);
+      applyNumstat(files, splitShowZ(numstatOut).records);
 
       // Cap the shipped list AFTER the zip (both lists are aligned full-length): the UI renders a
       // row per file, and a vendored-tree commit touching tens of thousands would bloat the payload

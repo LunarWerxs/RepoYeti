@@ -25,6 +25,7 @@ import { gitFor } from "../git.ts";
 import { readGate } from "../gitgate.ts";
 import type { CommitStat, LogEntry } from "./inspect.ts";
 import { readWorktreeStateHash } from "./status.ts";
+import { parseLogNumstatZ, parseNameStatusZ, parseNumstatZ, recordKey, splitZ } from "./git-records.ts";
 
 const US = "\x1f"; // field separator — see inspect.ts
 
@@ -36,7 +37,9 @@ export const MAX_INCOMING_FILES = 500;
 /** One file a pull would change, with its net line delta. */
 export interface IncomingFile {
   path: string;
-  /** A (added) / M (modified) / D (deleted), derived from the numstat + name-status pair. */
+  /** Rename/copy source path (only for R / C), decoded from git's two-path record. */
+  from?: string;
+  /** A (added) / M (modified) / D (deleted) / R (renamed) / C (copied), from the name-status pass. */
   status: string;
   addedLines: number;
   removedLines: number;
@@ -195,21 +198,6 @@ async function captureSnapshot(
   };
 }
 
-/** Parse one `--numstat` row: "<added>\t<removed>\t<path>" ("-" counts mean binary). */
-function parseNumstat(line: string): { path: string; added: number; removed: number; binary: boolean } | null {
-  const [addedRaw = "", removedRaw = "", ...rest] = line.split("\t");
-  if (rest.length === 0) return null;
-  const binary = addedRaw === "-" || removedRaw === "-";
-  return {
-    // A rename shows as "old => new" (or the brace form); keep git's own rendering rather than
-    // trying to re-derive a single path from it.
-    path: rest.join("\t"),
-    added: binary ? 0 : Number(addedRaw) || 0,
-    removed: binary ? 0 : Number(removedRaw) || 0,
-    binary,
-  };
-}
-
 type IncomingEarlyOut = { ok: false; result: IncomingResult };
 
 /** Resolve the upstream. No upstream (or a detached HEAD) is a normal state, not an error. */
@@ -277,34 +265,30 @@ async function readAheadBehind(
   }
 }
 
-/** Parse `log HEAD..@{u} --numstat` rows into ordered LogEntry rows, folding each commit's
- *  numstat lines into its own stat totals. Same field layout as readLog (subject last so an
- *  odd character can't shift a field). */
+/** Parse `log -z HEAD..@{u} --numstat` records into ordered LogEntry rows, folding each commit's
+ *  numstat rows into its own stat totals. Same field layout as readLog (subject last so an
+ *  odd character can't shift a field). The record decoding lives in git-records.ts. */
 function parseIncomingCommits(rawLog: string): LogEntry[] {
   const commits: LogEntry[] = [];
-  for (const line of rawLog.split("\n")) {
-    if (line.trim() === "") continue;
-    if (line.includes(US)) {
-      const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", subject = ""] =
-        line.split(US);
-      const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
-      commits.push({
-        hash, shortHash, subject, authorName, authorEmail,
-        date: Number(at) * 1000,
-        refs: refs.trim(),
-        parents,
-        isMerge: parents.length > 1,
-        stat: { filesChanged: 0, addedLines: 0, removedLines: 0 },
-      });
-      continue;
+  for (const { header, records } of parseLogNumstatZ(rawLog)) {
+    const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", subject = ""] =
+      header.split(US);
+    if (!hash) continue;
+    const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
+    const stat: CommitStat = { filesChanged: 0, addedLines: 0, removedLines: 0 };
+    for (const row of records) {
+      stat.filesChanged += 1;
+      stat.addedLines += row.added;
+      stat.removedLines += row.removed;
     }
-    const current = commits.at(-1);
-    if (!current?.stat) continue;
-    const row = parseNumstat(line);
-    if (!row) continue;
-    current.stat.filesChanged += 1;
-    current.stat.addedLines += row.added;
-    current.stat.removedLines += row.removed;
+    commits.push({
+      hash, shortHash, subject, authorName, authorEmail,
+      date: Number(at) * 1000,
+      refs: refs.trim(),
+      parents,
+      isMerge: parents.length > 1,
+      stat,
+    });
   }
   return commits;
 }
@@ -319,6 +303,7 @@ async function readIncomingCommits(
   try {
     rawLog = await git.raw([
       "log",
+      "-z", // NUL-terminated records: paths come back as their raw bytes (see git-records.ts)
       "--no-color",
       `--max-count=${MAX_INCOMING_COMMITS + 1}`, // +1 so we can detect truncation
       "--numstat",
@@ -334,24 +319,20 @@ async function readIncomingCommits(
   return { commits, commitsTruncated };
 }
 
-/** Status letters keyed by path, from a `--name-status` pass over the same range as the numstat
- *  pass below. Best-effort: a nicety layered onto the numstat totals, which are the substance. */
+/** Status letters keyed by record identity (git-records.ts recordKey), from a `-z --name-status`
+ *  pass over the same range as the numstat pass below. Best-effort: a nicety layered onto the
+ *  numstat totals, which are the substance. */
 async function readIncomingFileStatuses(git: ReturnType<typeof gitFor>, upstream: string): Promise<Map<string, string>> {
-  const statusByPath = new Map<string, string>();
+  const statusByKey = new Map<string, string>();
   try {
-    const rawStatus = await git.raw(["diff", "--name-status", "--no-color", `HEAD...${upstream}`]);
-    for (const l of rawStatus.split("\n")) {
-      const t = l.trim();
-      if (!t) continue;
-      const parts = t.split("\t");
-      const letter = (parts[0] ?? "M")[0] ?? "M";
-      const path = letter === "R" || letter === "C" ? (parts[2] ?? "") : (parts[1] ?? "");
-      if (path) statusByPath.set(path, letter);
+    const rawStatus = await git.raw(["diff", "-z", "--name-status", "--no-color", `HEAD...${upstream}`]);
+    for (const record of parseNameStatusZ(splitZ(rawStatus))) {
+      if (record.path) statusByKey.set(recordKey(record), record.status);
     }
   } catch {
     /* status letters are a nicety; the numstat below is the substance */
   }
-  return statusByPath;
+  return statusByKey;
 }
 
 /** The numstat pass itself. Mutates `stat` in place (even on a caught failure mid-loop, matching
@@ -359,22 +340,20 @@ async function readIncomingFileStatuses(git: ReturnType<typeof gitFor>, upstream
 async function readIncomingFiles(
   git: ReturnType<typeof gitFor>,
   upstream: string,
-  statusByPath: Map<string, string>,
+  statusByKey: Map<string, string>,
   stat: CommitStat,
 ): Promise<IncomingFile[]> {
   try {
-    const rawNum = await git.raw(["diff", "--numstat", "--no-color", `HEAD...${upstream}`]);
+    const rawNum = await git.raw(["diff", "-z", "--numstat", "--no-color", `HEAD...${upstream}`]);
     const all: IncomingFile[] = [];
-    for (const l of rawNum.split("\n")) {
-      if (l.trim() === "") continue;
-      const row = parseNumstat(l);
-      if (!row) continue;
+    for (const row of parseNumstatZ(splitZ(rawNum))) {
       stat.filesChanged += 1;
       stat.addedLines += row.added;
       stat.removedLines += row.removed;
       all.push({
         path: row.path,
-        status: statusByPath.get(row.path) ?? "M",
+        ...(row.from !== undefined ? { from: row.from } : {}),
+        status: statusByKey.get(recordKey(row)) ?? "M",
         addedLines: row.added,
         removedLines: row.removed,
         binary: row.binary,

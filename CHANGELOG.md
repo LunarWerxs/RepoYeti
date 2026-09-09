@@ -138,6 +138,24 @@ All notable changes to RepoYeti are documented here. The format is based on
   same runtime effects and the same clamping, and the documented partial-acceptance rule still
   holds (an unrecognised `changesStatDisplay` is refused after everything else has been applied),
   but the durable save and the notification now happen once, with one merged payload.
+- **Commit details and the incoming preview decode file names from git's NUL-delimited records.**
+  Both readers split the human-oriented `--name-status` and `--numstat` output by lines and tabs,
+  so a path containing a tab or a newline (legal on Unix) broke the split, and any path git quotes
+  under the default `core.quotePath` (every non-ASCII name) came back as its escaped spelling,
+  `"h\303\251llo.txt"` for `héllo.txt`, which names no file the viewer could open. Stats were also
+  zipped onto files by row position. Both now ask git for `-z` records, decode them through one
+  shared decoder, keep both sides of a rename, and join stats to files by identity. The incoming
+  file list gains `from` on a rename. Regression tests cover a non-ASCII name and a rename on every
+  platform, and tab and newline names where the filesystem allows them.
+- **Source-checkout updates are only advertised when they can actually be applied.** The shared
+  update engine proved that the remote commit was not an ancestor of the local one and called a
+  clean checkout applicable. That included diverged histories, which `git pull --ff-only` refuses,
+  and a local branch the remote does not have, where the check fell back to the remote's HEAD but
+  the apply still pulled the local branch name; both advertised an update that failed every cycle.
+  The check now fetches just the resolved branch (nothing local moves) and proves the fast-forward
+  before advertising; a diverged checkout is reported as such (`diverged`, with the reason), an
+  unverifiable fetch says so, and the apply pulls the branch the check resolved (`remoteBranch`).
+  Changed upstream in the shared kit and synced here.
 
 - **"Create and push tag" pushes through the repo's selected GitHub account, and a failed push can
   be retried.** The tag push carried the identity's SSH options but not the HTTPS credential an

@@ -402,7 +402,9 @@ export interface HistoryActivity {
 /** One file a pull would change. Mirrors src/read/incoming.ts. */
 export interface IncomingFile {
   path: string;
-  /** A / M / D, derived from the incoming diff. */
+  /** Rename/copy source path (only for R / C). */
+  from?: string;
+  /** A / M / D / R / C, derived from the incoming diff. */
   status: string;
   addedLines: number;
   removedLines: number;
