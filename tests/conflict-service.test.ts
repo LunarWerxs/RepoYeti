@@ -7,7 +7,7 @@
 // UNMERGED. "The AI resolved it" and "the merge is done" have to stay two different states, or
 // every downstream safety gate in the app (git's own commit refusal, src/auto-commit.ts's
 // hasConflict) is reasoning about a repo that lied to it.
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
@@ -17,6 +17,7 @@ import {
   listConflicts,
   readConflictFile,
 } from "../src/service/conflicts.ts";
+import * as files from "../src/service/files.ts";
 import { hasConflictMarkers } from "../src/ai/conflict-resolve.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
@@ -197,6 +198,42 @@ test("applying against a stale hash is refused rather than merged into unreviewe
   expect(applied.code).toBe("CONFLICT_STALE");
   // And nothing was written: the file still holds its markers.
   expect(hasConflictMarkers(readFileSync(join(dir, file), "utf8"))).toBe(true);
+});
+
+test("an edit landing AFTER validation but BEFORE the queued write is refused, not overwritten (audit item 1)", async () => {
+  // The 1.0 audit's reproduction, inverted into the guarantee. applyConflictResolutions reads and
+  // hash-checks the file, renders the replacement, and only then enters the per-repo op-queue. A
+  // desktop edit that lands in that gap used to be overwritten with the call returning OK — the
+  // stale-proposal check had passed, minutes earlier, against bytes that no longer existed. The
+  // writer now re-checks the hash inside its queue slot, at the point of no return.
+  //
+  // The gap is opened deterministically: the module-level writer is wrapped so the test can park
+  // the apply call at the moment it hands off to the writer, change the file underneath, then let
+  // the original writer run.
+  const { id, dir, file } = await conflictedRepo();
+  const read = await readConflictFile(id, file);
+  const originalWriter = files.writeFileContent;
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const spy = spyOn(files, "writeFileContent").mockImplementation(async (...args) => {
+    entered.resolve();
+    await release.promise;
+    return originalWriter(...args);
+  });
+  try {
+    const applying = applyConflictResolutions(id, file, read.hash!, [{ index: 1, content: "resolved" }]);
+    await entered.promise;
+    writeFileSync(join(dir, file), "NEWER DESKTOP EDIT\n", "utf8");
+    release.resolve();
+    const result = await applying;
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("CONFLICT_STALE");
+    // The newer edit is exactly what is on disk: nothing was written over it.
+    expect(readFileSync(join(dir, file), "utf8")).toBe("NEWER DESKTOP EDIT\n");
+  } finally {
+    release.resolve();
+    spy.mockRestore();
+  }
 });
 
 test("a resolution that still contains conflict markers is refused at the service layer too", async () => {

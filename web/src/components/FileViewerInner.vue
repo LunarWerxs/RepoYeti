@@ -167,6 +167,9 @@ interface MonacoViewerHandle {
   markClean: (alternativeVersionId?: number) => boolean;
 }
 const editorViewer = ref<MonacoViewerHandle | null>(null);
+// Hash of the text this viewer last loaded (or last wrote) — sent as the save's expectedHash so
+// the daemon can refuse a write that would silently clobber a concurrent edit elsewhere.
+const loadedHash = ref<string | null>(null);
 
 // Mirror dirty into the shared store so close / switch-file guards (file-viewer.ts) can prompt.
 watch(dirty, (v) => (editorDirty.value = v));
@@ -251,6 +254,7 @@ function resetViewerState(): void {
   patchMode.value = false;
   editing.value = false; // a new file/mode drops any in-progress edit
   dirty.value = false;
+  loadedHash.value = null;
 }
 
 /** Fetch this file's content for whichever tab/commit combination `target` names, writing the
@@ -281,6 +285,7 @@ async function fetchViewerContent(target: ViewerTarget, key: string, controller:
     patchMode.value = res.mode === "patch";
     binary.value = !!res.binary;
     truncated.value = !!res.truncated;
+    loadedHash.value = res.hash ?? null;
   } else {
     const res = await api.fileContent(repoId, path, undefined, controller.signal);
     if (controller.signal.aborted) return;
@@ -289,6 +294,7 @@ async function fetchViewerContent(target: ViewerTarget, key: string, controller:
     binary.value = !!res.binary;
     truncated.value = !!res.truncated;
     fromHead.value = res.ref === "head";
+    loadedHash.value = res.hash ?? null;
   }
 }
 
@@ -416,7 +422,7 @@ async function save(): Promise<void> {
   const nextValue = snapshot?.value ?? draft.value;
   saving.value = true;
   try {
-    await api.saveFile(repoId, path, nextValue);
+    const res = await api.saveFile(repoId, path, nextValue, loadedHash.value ?? undefined);
     // The viewer may have switched files/tabs (after its discard guard) while the request was in
     // flight. The old file was saved, but its response must not overwrite the newly-loaded view.
     const stillSameView =
@@ -433,6 +439,8 @@ async function save(): Promise<void> {
     // The Diff tab's working-tree side also feeds MonacoDiffViewer once editing ends.
     if (modeAtSave === "content") content.value = nextValue;
     else modified.value = nextValue;
+    // What actually reached disk is the new baseline for the NEXT save's compare-and-swap.
+    loadedHash.value = res.hash ?? null;
     // If typing continued during the network request, only the version actually written becomes
     // the clean baseline. Later keystrokes stay in Monaco and Save remains enabled.
     dirty.value =
@@ -441,7 +449,13 @@ async function save(): Promise<void> {
         : false;
     toast.success(t("fileViewer.saved"));
   } catch (e) {
-    toast.error(e instanceof ApiError ? e.message : t("fileViewer.saveFailed"));
+    if (e instanceof ApiError && e.code === "FILE_STALE") {
+      // Someone else wrote this file since we loaded it. Don't clobber their change and don't
+      // discard the owner's edit either — leave the editor dirty with the buffer exactly as typed.
+      toast.error(t("fileViewer.saveStale"));
+    } else {
+      toast.error(e instanceof ApiError ? e.message : t("fileViewer.saveFailed"));
+    }
   } finally {
     saving.value = false;
   }

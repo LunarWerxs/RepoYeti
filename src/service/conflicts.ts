@@ -14,16 +14,20 @@
  *     merge is done" stay two different states, which is the whole point.
  *   - Applying is guarded against a stale proposal: the request carries a hash of the file the
  *     proposal was made against, and a file that changed underneath is refused rather than
- *     merged against text nobody reviewed.
+ *     merged against text nobody reviewed. The check runs twice on purpose — once here, against
+ *     the parse the replacement is rendered from, and again INSIDE the file writer's op-queue
+ *     slot (writeFileContent's `expectedHash`), because the first check can be minutes stale by
+ *     the time the write reaches the front of the queue. The 1.0 audit reproduced exactly that:
+ *     a desktop edit landing between the validation and the queued write was overwritten, and
+ *     the call returned OK.
  */
-import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getRepo } from "../db.ts";
 import { gitFor } from "../git.ts";
 import { readChanges } from "../read/status.ts";
-import { readFileContent, writeFileContent } from "./files.ts";
+import { fileContentHash, readFileContent, writeFileContent } from "./files.ts";
 import { forceRefresh } from "./core.ts";
 import {
   MAX_CONFLICT_FILE_BYTES,
@@ -71,9 +75,10 @@ export interface ConflictFileResult {
   parsed?: ParsedConflictFile;
 }
 
-/** Content hash used as the apply call's staleness token. */
+/** Content hash used as the apply call's staleness token — the file viewer's own hash, so the
+ *  writer can re-verify it without knowing which feature produced it. */
 export function conflictFileHash(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex").slice(0, 32);
+  return fileContentHash(text);
 }
 
 /**
@@ -311,9 +316,19 @@ export async function applyConflictResolutions(
   const next = renderResolvedFile(current.parsed, map);
   // Reuse the viewer's writer: it owns the .git-path refusal, the symlink/directory checks, the
   // size cap and the atomic rename. A second implementation of those guards is a second place
-  // for them to be wrong.
-  const written = await writeFileContent(repoId, current.path ?? relPath, next);
-  if (!written.ok) return { ok: false, code: written.code, message: written.message };
+  // for them to be wrong. `expectedHash` makes it a compare-and-write: the bytes `next` was
+  // rendered from must still be the bytes on disk when the write reaches the front of the queue.
+  const written = await writeFileContent(repoId, current.path ?? relPath, next, { expectedHash });
+  if (!written.ok) {
+    if (written.code === "FILE_STALE") {
+      return {
+        ok: false,
+        code: "CONFLICT_STALE",
+        message: "this file changed since the resolution was generated — re-read it and try again",
+      };
+    }
+    return { ok: false, code: written.code, message: written.message };
+  }
 
   await forceRefresh(repoId); // the conflict badge + change list should update immediately
   return {

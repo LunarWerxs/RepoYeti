@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { writeFileSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import {
@@ -689,6 +689,38 @@ test("gitCommitGroups stages a deletion", async () => {
   // b.txt is gone from HEAD now
   const tracked = (await $`git -C ${dir} ls-files`.text()).trim().split("\n");
   expect(tracked).not.toContain("b.txt");
+});
+
+test("gitCommitGroups leaves the index of un-grouped files exactly as found, on success AND on failure", async () => {
+  // Audit item 2. `b.txt` is staged with an intermediate version and then edited again; that
+  // staged content lives only in the index. Neither a successful group nor a failed one may
+  // disturb it — the failed case used to be covered by a repository-wide reset before the loop
+  // even started, so the loss happened before any commit was attempted.
+  const dir = await repo();
+  writeFileSync(join(dir, "b.txt"), "b-staged\n");
+  await $`git -C ${dir} add b.txt`.quiet();
+  writeFileSync(join(dir, "b.txt"), "b-latest\n");
+  writeFileSync(join(dir, "a.txt"), "a1\n");
+  const stagedB = async () => await $`git -C ${dir} show :b.txt`.text();
+
+  // Failure: git refuses an empty commit message AFTER the group has been staged — the same
+  // shape as a rejecting pre-commit hook (staging done, commit refused), without depending on
+  // hook execution.
+  const failed = await gitCommitGroups(dir, ID, [{ message: "", paths: ["a.txt"] }]);
+  expect(failed.ok).toBe(false);
+  expect(await stagedB()).toBe("b-staged\n");
+  // The failed group's own file was never staged in the repository's index either.
+  expect((await $`git -C ${dir} diff --cached --name-only`.text()).trim()).toBe("b.txt");
+
+  // Success: same plan with a real message.
+  const res = await gitCommitGroups(dir, ID, [{ message: "feat: a", paths: ["a.txt"] }]);
+  expect(res.ok).toBe(true);
+  expect((await logSubjects(dir))[0]).toBe("feat: a");
+  expect(await stagedB()).toBe("b-staged\n");
+  expect(readFileSync(join(dir, "b.txt"), "utf8")).toBe("b-latest\n");
+  // a.txt is clean against the new HEAD (its real-index entry was brought up to the commit).
+  const status = (await $`git -C ${dir} status --porcelain`.text()).trim().split("\n");
+  expect(status).toEqual(["MM b.txt"]);
 });
 
 test("gitCommitGroups refuses a clean tree with NOTHING_TO_COMMIT", async () => {

@@ -48,6 +48,34 @@ All notable changes to RepoYeti are documented here. The format is based on
   prints the note. Covered by regression tests with an injected failing store, including the
   simulated restart.
 
+### Fixed
+
+- **A file save can no longer overwrite an edit that landed first.** The viewer's Edit mode saved
+  with no notion of which version it was editing, so two dashboards (or a phone and a desktop
+  editor) silently overwrote each other. The conflict resolver did check a content hash, but it
+  checked it BEFORE waiting for the per-repo operation queue; the 1.0 audit reproduced a desktop
+  edit landing in that gap being replaced, with the call returning OK. Reads of a working-tree
+  text file (`GET /file`, and the Diff tab's working side) now return a `hash`, the dashboard
+  echoes it as `expectedHash` on save, and the writer re-checks it inside its queue slot at the
+  point of no return, once more after writing the temp file, right before the atomic rename. A
+  mismatch answers `409 FILE_STALE` (the resolver reports `CONFLICT_STALE`) and the dashboard
+  says the file changed on disk and asks for a reload instead of replacing your buffer. Saves
+  without a hash remain unconditional for callers with no prior read. Residual: an editor outside
+  the daemon can still race the microseconds between the final check and the rename; nothing on a
+  plain filesystem closes that without a compare-and-swap primitive.
+- **Committing a selection of files no longer disturbs the staging of everything else.** Smart
+  Commit and commit-selected began with a repository-wide `git reset` (mixed, "not `--hard`, so
+  harmless") to make each commit contain exactly its group. It discarded every unrelated file's
+  staging state, and where a file had been staged and then edited again, the staged content
+  existed nowhere but the index and was gone for good; only the later working-tree edit survived
+  (1.0 audit, item 2, reproduced). Each group is now built in a scratch index seeded from HEAD,
+  the way `git commit -- <paths>` works internally, and only the committed paths' real-index
+  entries are brought up to the new commit afterwards. Unrelated staged content is untouched on
+  success and on failure. A partial commit is now explicitly refused while a merge, rebase,
+  cherry-pick or revert is in progress (new code `OPERATION_IN_PROGRESS`), as git itself refuses it: the
+  repository's unmerged entries used to make the commit fail by accident, and the scratch index
+  has none.
+
 ### Added
 
 - **Auto-commit skips and sync failures now leave a reviewable trail, with a panel to review it

@@ -4,7 +4,8 @@
  * touch a remote, so none take `netGate` — but they share the same dirty/detached-HEAD guards
  * and identity attribution as the sync actions in ./sync.ts.
  */
-import { existsSync, lstatSync, readdirSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathWithin } from "../paths.ts";
 import { gitFor, identityConfigArgs } from "../git.ts";
@@ -67,15 +68,36 @@ const subjectOf = (message: string): string => (message.split("\n")[0] ?? "").sl
  * Execute a multi-commit plan: stage each group's files in isolation and commit it,
  * attributed to the repo's identity. FILE-LEVEL only — `git add -A -- <paths>` stages the
  * whole-file change (modify / add / delete / rename) for exactly those paths, then a commit
- * captures just the staged set. Between groups the index returns to clean, so the next add
- * stages only the next group (the caller guarantees the groups are disjoint + complete).
+ * captures just the staged set. The caller guarantees the groups are disjoint (and, for Smart
+ * Commit, complete); a selected-files commit is the same primitive with one group.
  *
- * Safety: starts with a MIXED `git reset` (index → HEAD, working tree UNTOUCHED — never
- * `--hard`) so each commit contains exactly its group regardless of any pre-staged state.
+ * SELECTED-FILE SEMANTICS, stated explicitly: a group commits the WORKING-TREE version of each
+ * of its paths (a partially staged file in the group is committed whole), and nothing outside
+ * the group changes — not the working tree, and not the INDEX either. Every path the owner did
+ * not select keeps exactly the staging state it had, including an intermediate version that
+ * exists only in the index.
+ *
+ * That last clause is why each group is built in a SCRATCH INDEX (`GIT_INDEX_FILE`) seeded from
+ * HEAD, rather than in the repository's own index. The first implementation began with a
+ * repository-wide mixed `git reset` so that "each commit contains exactly its group", and that
+ * reset was described as harmless because it was not `--hard`. It was not harmless: it threw away
+ * the staging choices for every unrelated file, and where an unrelated file had been staged and
+ * then edited again, the staged intermediate content existed NOWHERE but the index and was gone
+ * for good — the working tree only ever held the newer edit (1.0 audit, item 2, reproduced).
+ * Git's own `git commit -- <paths>` does what is done here: commit from a HEAD-seeded temporary
+ * index, then bring only those paths' real-index entries up to the new commit.
+ *
+ * Partial commits are refused mid merge/rebase/cherry-pick/revert, and on unmerged entries, for
+ * the same reason git refuses them ("cannot do a partial commit during a merge"): a commit made
+ * from a scratch index while MERGE_HEAD exists would be recorded as the merge commit, with a tree
+ * that silently drops the other side. The repository's own index used to make `git commit` fail
+ * on the unmerged entries; the scratch index has none, so the guard is explicit now.
+ *
  * If a commit fails mid-sequence we STOP and report a partial result: the changes for the
- * remaining groups simply stay in the working tree (a normal, safe, recoverable state — never
- * a half-merge). The whole sequence must run inside ONE op-queue slot (the service wrapper
- * enqueues once and refreshes after).
+ * remaining groups simply stay in the working tree (a normal, safe, recoverable state — never a
+ * half-merge), and the real index was never touched for the failed group, so there is nothing to
+ * roll back. The whole sequence must run inside ONE op-queue slot (the service wrapper enqueues
+ * once and refreshes after).
  */
 export async function gitCommitGroups(
   absPath: string,
@@ -88,57 +110,78 @@ export async function gitCommitGroups(
     return { ok: false, code: "DETACHED_HEAD", message: "detached HEAD — resolve at your desk", committed: [], remaining: groups.length };
   if (pre.dirty === 0)
     return { ok: false, code: "NOTHING_TO_COMMIT", message: "nothing to commit", committed: [], remaining: groups.length };
-
-  const git = gitFor(absPath);
-  const committed: CommitGroupResult[] = [];
-  try {
-    // Normalise the index to HEAD so each group's commit contains exactly its own files.
-    // Mixed reset (the default) never touches the working tree — categorically not `--hard`.
-    await git.raw(["reset", "-q"]);
-  } catch {
-    // `git reset` fails on an UNBORN HEAD (a fresh repo with no commit yet) — there's nothing
-    // to reset to. That's fine: the index is the only state and the per-group add/commit below
-    // creates the first commit(s). Swallow and proceed (any real corruption surfaces per group).
+  if (pre.gitOperation || pre.conflicted) {
+    return {
+      ok: false,
+      code: "OPERATION_IN_PROGRESS",
+      message: "a merge, rebase, cherry-pick or revert is in progress — finish or abort it at your desk before committing a subset of files",
+      committed: [],
+      remaining: groups.length,
+    };
   }
 
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i]!;
-    const subject = subjectOf(g.message);
-    try {
-      // Stage in path-list chunks so a huge group can't overflow the OS command-line limit.
-      for (const chunk of chunkByBytes(g.paths)) {
-        await git.raw(["add", "-A", "--", ...chunk]);
-      }
-      // Skip a group that staged nothing (defensive — disjoint/complete validation should
-      // prevent it) rather than aborting the whole plan on a "nothing to commit". Use
-      // `--name-only` (non-empty = something staged) instead of `--quiet`: under
-      // GIT_OPTIONAL_LOCKS=0 the `--quiet`/`--exit-code` fast path can wrongly report "no
-      // diff" for a staged deletion (it skips the index refresh), which `--name-only` doesn't.
-      const stagedNames = (await git.raw(["diff", "--cached", "--name-only"])).trim();
-      if (!stagedNames) {
-        committed.push({ ok: true, code: "OK", subject, message: "skipped (no changes)" });
-        continue;
-      }
-      await git.raw([...identityConfigArgs(identity), "commit", "-m", g.message]);
-      committed.push({ ok: true, code: "OK", subject });
-    } catch (err) {
-      const r = classify(err);
-      committed.push({ ok: false, code: r.code, subject, message: r.message });
-      // Put the index back where the loop found it before bailing out. The `git add` above may
-      // well have succeeded and the `commit` failed, which would strand this group's files STAGED
-      // — the working tree is safe either way, but the index no longer matches the state the
-      // caller started from, and the next discard/commit reads that index to decide what it is
-      // looking at. Mixed reset only (never `--hard`), path-scoped to this group, and
-      // best-effort: a failure here must not mask the real error being returned.
+  const git = gitFor(absPath);
+  // The scratch index lives outside the repository (never under .git/, where a leftover would
+  // look like corruption to the next reader) and is removed whatever happens below.
+  const scratchDir = mkdtempSync(join(tmpdir(), "repoyeti-index-"));
+  const scratch = gitFor(absPath, 30_000, { GIT_INDEX_FILE: join(scratchDir, "index") });
+  const committed: CommitGroupResult[] = [];
+  try {
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i]!;
+      const subject = subjectOf(g.message);
       try {
-        for (const chunk of chunkByBytes(g.paths)) {
-          await git.raw(["reset", "-q", "--", ...chunk]);
+        // Seed the scratch index from HEAD so the commit below contains HEAD plus exactly this
+        // group. On an UNBORN HEAD (a fresh repo with no commit yet) there is nothing to read, so
+        // the seed is the empty tree and the group becomes the first commit — as it should.
+        try {
+          await scratch.raw(["read-tree", "HEAD"]);
+        } catch {
+          await scratch.raw(["read-tree", "--empty"]);
         }
-      } catch {
-        /* unborn HEAD, or nothing staged — the reported failure below is what matters */
+        // Stage in path-list chunks so a huge group can't overflow the OS command-line limit.
+        for (const chunk of chunkByBytes(g.paths)) {
+          await scratch.raw(["add", "-A", "--", ...chunk]);
+        }
+        // Skip a group that staged nothing (defensive — disjoint/complete validation should
+        // prevent it) rather than aborting the whole plan on a "nothing to commit". Use
+        // `--name-only` (non-empty = something staged) instead of `--quiet`: under
+        // GIT_OPTIONAL_LOCKS=0 the `--quiet`/`--exit-code` fast path can wrongly report "no
+        // diff" for a staged deletion (it skips the index refresh), which `--name-only` doesn't.
+        const stagedNames = (await scratch.raw(["diff", "--cached", "--name-only"])).trim();
+        if (!stagedNames) {
+          committed.push({ ok: true, code: "OK", subject, message: "skipped (no changes)" });
+          continue;
+        }
+        await scratch.raw([...identityConfigArgs(identity), "commit", "-m", g.message]);
+        committed.push({ ok: true, code: "OK", subject });
+      } catch (err) {
+        const r = classify(err);
+        committed.push({ ok: false, code: r.code, subject, message: r.message });
+        // Stop on the first failure; the remaining groups' changes stay safely in the tree, and
+        // the repository's index was never written for this group, so it is exactly as found.
+        return { ok: false, code: r.code, message: r.message, committed, remaining: groups.length - i - 1 };
       }
-      // Stop on the first failure; the remaining groups' changes stay safely in the tree.
-      return { ok: false, code: r.code, message: r.message, committed, remaining: groups.length - i - 1 };
+      // The commit exists; now make the REAL index agree with it for this group's paths and no
+      // others. Path-scoped mixed reset: each listed entry becomes HEAD's version (or is dropped,
+      // for a path the commit deleted). Without this, `git status` would show every committed
+      // file as staged-back-to-its-old-content AND modified, because the real index still held
+      // the pre-commit entry. Best-effort: the commit is already made, and a failure here must
+      // not turn a successful group into a reported failure.
+      for (const chunk of chunkByBytes(g.paths)) {
+        try {
+          await git.raw(["reset", "-q", "--", ...chunk]);
+        } catch {
+          /* nothing to align (a path git never knew) — status will simply re-read */
+        }
+      }
+    }
+  } finally {
+    // A directory this function created moments ago, holding one index file it wrote itself.
+    try {
+      rmSync(scratchDir, { recursive: true, force: true });
+    } catch {
+      /* temp cleanup */
     }
   }
   const made = committed.filter((c) => c.message !== "skipped (no changes)").length;

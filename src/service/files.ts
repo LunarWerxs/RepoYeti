@@ -4,6 +4,7 @@
  * request path is normalised and confined to the repo (no `../` escapes). Plus the runtime
  * settings for the patch-vs-models diff threshold (mirrored from the owner config at boot).
  */
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { pathWithin, normalizeRelPath } from "../paths.ts";
@@ -30,11 +31,26 @@ export interface FileContentResult {
   size?: number;
   /** Which revision the bytes came from — "head" means the working file was gone (deleted). */
   ref?: "work" | "head";
+  /** Staleness token for a later save: `fileContentHash(content)`. Present only for a working-tree
+   *  text read that was not truncated — the only view an edit may be made against. The client
+   *  echoes it as `expectedHash` and the writer refuses if the file no longer matches. */
+  hash?: string;
 }
 
 /** Cap how much we ship to the browser editor — big enough for real source, small
  *  enough that Monaco stays snappy and we never stream a multi-MB blob to a phone. */
 const MAX_FILE_BYTES = 2_000_000;
+
+/**
+ * The content hash a reader hands out and a writer checks: SHA-256 of the TEXT, truncated to 32
+ * hex chars. Computed over the decoded text rather than the raw bytes on purpose — the read path
+ * decodes with a lossy UTF-8 decoder, so the decoded form is the only one a client has ever seen,
+ * and it is what the client sends back. The conflict resolver's staleness token is this same
+ * function (service/conflicts.ts), so one file has one hash however it was opened.
+ */
+export function fileContentHash(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex").slice(0, 32);
+}
 
 /** A NUL byte in the head of the file is the cheap, git-style "this is binary" signal. */
 function looksBinary(bytes: Uint8Array): boolean {
@@ -665,7 +681,11 @@ export async function readFileContent(
   try {
     if (ref === "work") {
       const work = await readWorkText(repo.absPath, r.abs);
-      if (work) return { ok: true, code: "OK", path: r.clean, ref: "work", ...work };
+      if (work) {
+        // The hash only travels with a view an edit could legitimately be made against.
+        const hash = work.binary || work.truncated ? {} : { hash: fileContentHash(work.content) };
+        return { ok: true, code: "OK", path: r.clean, ref: "work", ...work, ...hash };
+      }
       // deleted from the working tree → fall through to the committed version
     }
     const head = await readFromHead(repo.absPath, r.clean);
@@ -678,12 +698,24 @@ export async function readFileContent(
 /** Result of writing an edited file back to the working tree (the viewer's Edit mode). */
 export interface WriteFileResult {
   ok: boolean;
-  code: "OK" | "NOT_FOUND" | "ERROR" | "TOO_LARGE" | "IS_BINARY" | "NOT_WRITABLE";
+  code: "OK" | "NOT_FOUND" | "ERROR" | "TOO_LARGE" | "IS_BINARY" | "NOT_WRITABLE" | "FILE_STALE";
   message?: string;
   /** Repo-relative path that was written (normalised to forward slashes). */
   path?: string;
   /** Byte size written. */
   size?: number;
+  /** `fileContentHash` of what was written — the token for the caller's NEXT save. */
+  hash?: string;
+}
+
+export interface WriteFileOptions {
+  /**
+   * Compare-and-write: the `hash` the caller received when it read the file. The write happens
+   * only if the file on disk still hashes to this, checked INSIDE the op-queue slot immediately
+   * before the replace; otherwise `FILE_STALE` and nothing is written. Omit for an unconditional
+   * overwrite (a fresh file, or a caller that has consciously decided to clobber).
+   */
+  expectedHash?: string;
 }
 
 /**
@@ -697,6 +729,7 @@ export async function writeFileContent(
   repoId: string,
   relPath: string,
   content: string,
+  options: WriteFileOptions = {},
 ): Promise<WriteFileResult> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
@@ -706,14 +739,30 @@ export async function writeFileContent(
   // write simply vanished. The queue slot covers the VALIDATION too, not just the rename — the
   // lstat/realpath checks below are the TOCTOU-sensitive part, so hoisting them inside the slot
   // is the point, not an accident. applyConflictResolutions (service/conflicts.ts) calls through
-  // here, so it inherits the serialization.
-  return enqueue(repoId, () => writeFileContentQueued(repo, relPath, content));
+  // here, so it inherits the serialization — and the `expectedHash` check, which is what makes
+  // its own pre-validation hold across the wait for the slot.
+  return enqueue(repoId, () => writeFileContentQueued(repo, relPath, content, options));
+}
+
+const STALE: WriteFileResult = {
+  ok: false,
+  code: "FILE_STALE",
+  message: "the file changed on disk after it was read: reload it and re-apply the edit",
+};
+
+/** True when the file at `abs` currently hashes to `expected`. A missing, binary or truncated
+ *  working file can never match: no client was handed a hash for such a view. */
+async function diskMatches(repoRoot: string, abs: string, expected: string): Promise<boolean> {
+  const now = await readWorkText(repoRoot, abs);
+  if (!now || now.binary || now.truncated) return false;
+  return fileContentHash(now.content) === expected;
 }
 
 async function writeFileContentQueued(
   repo: NonNullable<ReturnType<typeof getRepo>>,
   relPath: string,
   content: string,
+  options: WriteFileOptions,
 ): Promise<WriteFileResult> {
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
@@ -760,14 +809,39 @@ async function writeFileContentQueued(
     /* nothing at the leaf yet — a fresh write is fine */
   }
 
+  // Compare-and-write. The caller read the file, got its hash, and possibly waited a long time
+  // (a human editing on a phone) before saving — and this write may itself have waited in the
+  // op-queue behind a pull or a stash-pop that rewrote the very same file. Checking here, inside
+  // the slot, is what closes both windows: nothing that goes through the queue can change the file
+  // between this read and the rename below. The 1.0 audit reproduced the conflict resolver
+  // validating a file, waiting for the slot, and then overwriting an edit that landed in between —
+  // returning OK. Its validation now travels here as `expectedHash` and is re-checked at the point
+  // of no return.
+  if (options.expectedHash !== undefined && !(await diskMatches(repo.absPath, r.abs, options.expectedHash))) {
+    return STALE;
+  }
+
   // Atomic replace: write a sibling temp file, then rename over the target. rename() never
   // follows a symlink at the destination (closing the lstat→write TOCTOU window), and a crash
   // mid-write can't leave a half-written source file.
   const tmp = `${r.abs}.repoyeti-${crypto.randomUUID()}.tmp`;
   try {
     await Bun.write(tmp, content);
+    // Writing the temp file took real time. An editor OUTSIDE the daemon (a desktop IDE, a
+    // formatter, `git checkout` from a shell) does not go through the queue, so re-check right
+    // before the rename: the remaining race is now the microseconds between this read and the
+    // rename, not the whole write. That residue cannot be closed on a filesystem without a
+    // compare-and-swap primitive; it is documented rather than papered over.
+    if (options.expectedHash !== undefined && !(await diskMatches(repo.absPath, r.abs, options.expectedHash))) {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        /* best-effort cleanup of the temp file */
+      }
+      return STALE;
+    }
     renameSync(tmp, r.abs);
-    return { ok: true, code: "OK", path: r.clean, size };
+    return { ok: true, code: "OK", path: r.clean, size, hash: fileContentHash(content) };
   } catch (e) {
     try {
       unlinkSync(tmp);
@@ -901,6 +975,9 @@ export interface FileDiffResult {
   binary?: boolean;
   /** True when either side hit the size cap ("models"), or the patch did ("patch"). */
   truncated?: boolean;
+  /** Staleness token for a save made from the Diff tab: `fileContentHash(modified)`. Present in
+   *  "models" mode when the working file exists, is text, and was not truncated. */
+  hash?: string;
 }
 
 /**
@@ -1031,6 +1108,9 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
       readWorkText(repo.absPath, r.abs),
     ]);
     if (!head.ok && !work) return { ok: false, code: "NOT_FOUND", message: "file not found" };
+    // Same rule as readFileContent: the token only travels with a working-tree view an edit may
+    // be made against (the Diff tab's "modified" side is editable too).
+    const hash = work && !work.binary && !work.truncated ? { hash: fileContentHash(work.content) } : {};
     return {
       ok: true,
       code: "OK",
@@ -1040,6 +1120,7 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
       modified: work?.content ?? "",
       binary: (head.binary ?? false) || (work?.binary ?? false),
       truncated: (head.truncated ?? false) || (work?.truncated ?? false),
+      ...hash,
     };
   } catch (e) {
     return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };

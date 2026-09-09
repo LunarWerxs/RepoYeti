@@ -29,6 +29,7 @@ export function useRepoFeedback(): {
       NO_UPSTREAM: t("repo.err.noUpstream"),
       NO_REMOTE: t("repo.err.noRemote"),
       NOTHING_TO_COMMIT: t("repo.err.nothingToCommit"),
+      OPERATION_IN_PROGRESS: t("repo.err.operationInProgress"),
       SSH_AUTH_FAILED: t("repo.err.sshAuthFailed"),
       GH_ACCOUNT_NOT_AUTHORIZED: t("repo.err.ghAccountNotAuthorized"),
       SSH_PASSPHRASE_REQUIRED: t("repo.err.sshPassphraseRequired"),

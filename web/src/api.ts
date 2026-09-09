@@ -877,12 +877,15 @@ export const api = {
       signal,
     ),
 
-  /** Save edited text back to a working-tree file (viewer Edit mode). Throws on 4xx/5xx. */
-  saveFile: (id: string, path: string, content: string) =>
-    req<{ ok: boolean; code: string; message?: string; path?: string; size?: number }>(
+  /** Save edited text back to a working-tree file (viewer Edit mode). `expectedHash`, when given,
+   *  makes the write compare-and-swap: the daemon answers ApiError "FILE_STALE" (409) if the file
+   *  on disk no longer matches it instead of silently overwriting a concurrent edit. Omitting it
+   *  keeps the save unconditional (legacy behavior). Throws on 4xx/5xx. */
+  saveFile: (id: string, path: string, content: string, expectedHash?: string) =>
+    req<{ ok: boolean; code: string; message?: string; path?: string; size?: number; hash?: string }>(
       "PUT",
       `/api/repos/${id}/file?path=${encodeURIComponent(path)}`,
-      { content },
+      expectedHash === undefined ? { content } : { content, expectedHash },
     ),
 
   /** Move a changed file into another folder (drag-and-drop in the changes tree). Throws on 4xx/5xx. */

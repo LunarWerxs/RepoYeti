@@ -26,6 +26,9 @@ export type ApiErrorCode =
   | "NO_UPSTREAM"
   | "NO_REMOTE"
   | "NOTHING_TO_COMMIT"
+  /** A merge, rebase, cherry-pick or revert is in progress (or unmerged entries remain), so a
+   *  partial commit is refused the way git itself refuses `git commit -- <paths>` mid-merge. */
+  | "OPERATION_IN_PROGRESS"
   | "GH_ACCOUNT_NOT_AUTHORIZED"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
@@ -59,6 +62,10 @@ export type ApiErrorCode =
   | "NOT_CONFLICTED"
   /** The file changed after the resolution was generated — the proposal describes stale bytes. */
   | "CONFLICT_STALE"
+  // ── file viewer save (mirror src/service/files.ts writeFileContent) ──
+  /** The file on disk no longer matches the `expectedHash` the save was made against — another
+   *  save or an external editor got there first; the caller must reload before writing. */
+  | "FILE_STALE"
   // ── daemon lifecycle (mirror src/auto-update.ts requestRelaunch) ──
   /** Work is in flight on the daemon right now, so it will not restart out from under it. */
   | "BUSY"
@@ -172,6 +179,7 @@ const STATUS_BY_CODE: Partial<Record<ApiCode, ContentfulStatusCode>> = {
   NO_UPSTREAM: 409,
   NO_REMOTE: 409,
   NOTHING_TO_COMMIT: 409,
+  OPERATION_IN_PROGRESS: 409,
   EXISTS: 409,
   SUBMODULE_NOT_ACTIONABLE: 409,
   TEMP_PATH_REFUSED: 409,
@@ -186,6 +194,7 @@ const STATUS_BY_CODE: Partial<Record<ApiCode, ContentfulStatusCode>> = {
   PLAN_STALE: 409,
   NOT_CONFLICTED: 409,
   CONFLICT_STALE: 409,
+  FILE_STALE: 409,
   IDENTITY_POLICY_VIOLATION: 409,
   BUSY: 409,
   // 502 — an upstream (git remote / AI provider) failed.

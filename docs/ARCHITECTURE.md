@@ -904,19 +904,28 @@ wrapper enqueues once, never per commit, and refreshes *after* the slot releases
 documented same-key-nesting deadlock rule).
 
 ```
-preflight (readStatus): DETACHED_HEAD → fail; dirty === 0 → NOTHING_TO_COMMIT
-git reset -q                       # MIXED reset: index → HEAD. Working tree UNTOUCHED.
-                                   # (Safe; same family as discardFile's reset. NOT --hard.)
+preflight (readStatus): DETACHED_HEAD → fail; dirty === 0 → NOTHING_TO_COMMIT;
+                        merge/rebase/cherry-pick in progress, or unmerged entries → OPERATION_IN_PROGRESS
+scratch index: GIT_INDEX_FILE=<tmp>/index   # the repository's own index is never rewritten
 for (const c of commits) {
-  git add -A -- <c.paths>          # stage exactly this group: mods, new files, deletions,
-                                   #   and a rename's old+new path (we include `from`)
-  git -c user.* commit -m c.message
+  read-tree HEAD (or --empty on an unborn HEAD)   # seed the scratch index
+  git add -A -- <c.paths>          # stage exactly this group INTO THE SCRATCH INDEX: mods, new
+                                   #   files, deletions, and a rename's old+new path (`from`)
+  git -c user.* commit -m c.message                # commits from the scratch index
   → record { ok, code?, message?, subject }
   if a commit fails (e.g. a pre-commit hook rejects): STOP, return partial result.
+  git reset -q -- <c.paths>        # real index: only THESE entries follow the new HEAD
 }
 ```
-- After each commit the index returns to clean, so the next `add` stages only the next
-  group. Disjoint+complete validation upstream guarantees no overlap.
+- Selected-file semantics: a group commits the working-tree version of its paths, and nothing
+  outside the group changes, in the working tree OR in the index. The first implementation
+  started with a repository-wide mixed `git reset` (described as harmless because it was not
+  `--hard`); it discarded every unrelated file's staging state, and where a file had been staged
+  and then edited again, the staged intermediate existed nowhere but the index and was lost
+  (1.0 audit, item 2). The scratch index is git's own approach for `git commit -- <paths>`.
+- A partial commit is refused mid merge/rebase/cherry-pick/revert, as git refuses it: a commit
+  from a scratch index while `MERGE_HEAD` exists would be recorded as the merge commit with a tree
+  that drops the other side.
 - **Identity** is injected per commit exactly like `gitCommitAll` (`identityConfigArgs`),
   so global/repo config stays byte-identical (acceptance criterion #10).
 - **Partial failure is a SAFE state**, reported honestly: "committed K of N; the remaining

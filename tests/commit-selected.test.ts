@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { writeFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
@@ -70,6 +70,80 @@ test("POST /api/repos/:id/commit-selected commits only the chosen files; the res
     const status = await porcelain(dir);
     expect(status.some((l) => l.includes("c.txt"))).toBe(true);
     expect(status.some((l) => l.includes("a.txt"))).toBe(false);
+  } finally {
+    stopWatching();
+    rmrf(dir);
+  }
+});
+
+// ── the index outside the selection is not ours to touch (audit item 2) ──────────────
+test("commit-selected preserves an unrelated file's staged-only intermediate content", async () => {
+  // The 1.0 audit's reproduction, inverted into the guarantee. `unrelated.txt` is staged with one
+  // content and then edited again in the working tree, so the staged version exists NOWHERE but
+  // the index. Committing `wanted.txt` used to begin with a repository-wide mixed reset — "not
+  // --hard, so harmless" — which replaced that index entry with HEAD's and lost the intermediate
+  // for good; only the newer working-tree edit survived.
+  const dir = await seededRepo();
+  try {
+    writeFileSync(join(dir, "unrelated.txt"), "base\n");
+    await $`git -C ${dir} add -A`.quiet();
+    await $`git -C ${dir} commit -q -m base2`.quiet();
+    writeFileSync(join(dir, "unrelated.txt"), "STAGED INTERMEDIATE\n");
+    await $`git -C ${dir} add unrelated.txt`.quiet();
+    writeFileSync(join(dir, "unrelated.txt"), "LATEST WORKTREE\n");
+    writeFileSync(join(dir, "a.txt"), "wanted change\n");
+    const id = mustUpsertRepo(dir, "sel-index", "auto", false);
+
+    const res = await createApp(localCfg()).request(
+      `/api/repos/${id}/commit-selected`,
+      J({ message: "feat: only a", paths: ["a.txt"] }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+
+    // The commit holds exactly the selection…
+    expect((await $`git -C ${dir} show --name-only --format= HEAD`.text()).trim()).toBe("a.txt");
+    expect((await $`git -C ${dir} show HEAD:a.txt`.text()).trim()).toBe("wanted change");
+    // …the unrelated file's INDEX entry is byte-for-byte what the owner staged…
+    expect(await $`git -C ${dir} show :unrelated.txt`.text()).toBe("STAGED INTERMEDIATE\n");
+    // …its working tree is untouched, and status reads the same as before the commit for it
+    // (staged AND modified), while the committed file is clean.
+    expect(readFileSync(join(dir, "unrelated.txt"), "utf8")).toBe("LATEST WORKTREE\n");
+    const status = await porcelain(dir);
+    expect(status).toContain("MM unrelated.txt");
+    expect(status.some((l) => l.includes("a.txt"))).toBe(false);
+  } finally {
+    stopWatching();
+    rmrf(dir);
+  }
+});
+
+test("commit-selected refuses a partial commit while a merge is in progress (OPERATION_IN_PROGRESS, 409)", async () => {
+  // git itself refuses `git commit -- <paths>` mid-merge: a commit built from anything but the
+  // merged index would be recorded as THE merge commit with a tree that drops the other side. The
+  // repository's unmerged entries used to make the commit fail by accident; with the commit built
+  // in a scratch index the refusal has to be explicit.
+  const dir = await seededRepo();
+  try {
+    await $`git -C ${dir} checkout -q -b feature`.quiet();
+    writeFileSync(join(dir, "a.txt"), "theirs\n");
+    await $`git -C ${dir} commit -q -am theirs`.quiet();
+    await $`git -C ${dir} checkout -q main`.quiet();
+    writeFileSync(join(dir, "a.txt"), "ours\n");
+    await $`git -C ${dir} commit -q -am ours`.quiet();
+    await $`git -C ${dir} merge feature`.quiet().nothrow(); // conflicts: that IS the fixture
+    writeFileSync(join(dir, "other.txt"), "unrelated pending change\n"); // a valid selection
+    const id = mustUpsertRepo(dir, "sel-merge", "auto", false);
+
+    const res = await createApp(localCfg()).request(
+      `/api/repos/${id}/commit-selected`,
+      J({ message: "feat: other", paths: ["other.txt"] }),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("OPERATION_IN_PROGRESS");
+    // Nothing was committed and the merge is still in progress.
+    expect(await logSubjects(dir)).not.toContain("feat: other");
+    expect((await $`git -C ${dir} rev-parse -q --verify MERGE_HEAD`.quiet().nothrow()).exitCode).toBe(0);
   } finally {
     stopWatching();
     rmrf(dir);

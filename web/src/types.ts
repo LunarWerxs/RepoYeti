@@ -247,6 +247,8 @@ export interface FileContent {
   truncated?: boolean;
   size?: number;
   ref?: "work" | "head";
+  /** Hash of `content` — present when `ref === "work"` and the file is text and not truncated. */
+  hash?: string;
 }
 
 /** Both sides of a changed file for the viewer's Diff tab (mirrors src/service.ts). */
@@ -266,6 +268,8 @@ export interface FileDiff {
   patch?: string;
   binary?: boolean;
   truncated?: boolean;
+  /** Hash of `modified` — present in "models" mode when the working file exists and is text. */
+  hash?: string;
 }
 
 export type ActionName = "fetch" | "pull" | "push" | "refresh" | "commit";
@@ -554,6 +558,8 @@ export type ApiErrorCode =
   | "NO_UPSTREAM"
   | "NO_REMOTE"
   | "NOTHING_TO_COMMIT"
+  // A merge/rebase/cherry-pick/revert is in progress: a partial commit is refused (src/git-actions/commit.ts).
+  | "OPERATION_IN_PROGRESS"
   | "GH_ACCOUNT_NOT_AUTHORIZED"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
@@ -580,6 +586,7 @@ export type ApiErrorCode =
   | "PLAN_STALE"
   | "NOT_CONFLICTED"
   | "CONFLICT_STALE"
+  | "FILE_STALE"
   // Work is in flight on the daemon, so it refused to restart itself (src/auto-update.ts).
   | "BUSY"
   | "BAD_REQUEST"

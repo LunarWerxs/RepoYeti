@@ -250,6 +250,10 @@ async function getCommitFileRoute(c: Context<BlankEnv, "/api/repos/:id/commit/:h
 
 // Save an edited file back to the working tree (the viewer's Edit mode). Same /api/* auth
 // gate as every other mutation; the path is confined to the repo inside writeFileContent.
+// `expectedHash` (the `hash` GET /file or GET /diff returned) makes the save a compare-and-write:
+// a file that changed underneath answers 409 FILE_STALE and is left alone. Omitting it is an
+// unconditional overwrite, kept for callers that have no prior read (a scripted write of a new
+// file); the dashboard always sends it.
 async function putFileRoute(c: Context<BlankEnv, "/api/repos/:id/file">, cfg: Deps["cfg"]) {
   const id = c.req.param("id");
   if (!id) return c.json({ error: "missing repo id" }, 400);
@@ -260,10 +264,15 @@ async function putFileRoute(c: Context<BlankEnv, "/api/repos/:id/file">, cfg: De
   if (typeof b.content !== "string") {
     return c.json({ ok: false, code: "NO_CONTENT", message: "content (string) is required" }, 400);
   }
-  const result = await writeFileContent(id, path, b.content);
+  if (b.expectedHash !== undefined && (typeof b.expectedHash !== "string" || !/^[0-9a-f]{32}$/.test(b.expectedHash))) {
+    return jsonError(c, "BAD_REQUEST", "expectedHash must be the hash a previous read returned");
+  }
+  const result = await writeFileContent(id, path, b.content, {
+    ...(typeof b.expectedHash === "string" ? { expectedHash: b.expectedHash } : {}),
+  });
   if (!result.ok) {
     const status: ContentfulStatusCode =
-      result.code === "NOT_FOUND" ? 404 : result.code === "TOO_LARGE" ? 413 : 400;
+      result.code === "NOT_FOUND" ? 404 : result.code === "TOO_LARGE" ? 413 : result.code === "FILE_STALE" ? 409 : 400;
     return c.json(result, status);
   }
   await forceRefresh(id); // re-stat the repo so the change list + badges update right away

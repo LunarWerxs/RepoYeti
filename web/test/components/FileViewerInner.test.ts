@@ -1,11 +1,16 @@
 import { flushPromises, shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "@/api";
+import { toast } from "vue-sonner";
+import { api, ApiError } from "@/api";
 import FileViewerInner from "@/components/FileViewerInner.vue";
 import MarkdownPreview from "@/components/MarkdownPreview.vue";
 import { i18n } from "@/i18n";
 import { viewerMode } from "@/lib/file-viewer";
+
+vi.mock("vue-sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() },
+}));
 
 vi.mock("@/lib/file-icons", () => ({ fileVisual: () => "span" }));
 // FileViewerInner async-imports MonacoViewer/MonacoDiffViewer (defineAsyncComponent), and their
@@ -178,5 +183,113 @@ describe("FileViewerInner compact-diff escape hatch", () => {
     expect(setDiffPatchEnabled).toHaveBeenCalledWith(false);
     // …and the viewer asked the daemon again, which is the half that actually changes the screen.
     expect(diff).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── save() compare-and-swap: audit item 1 — no expectedHash meant two viewers could silently
+// overwrite each other. The daemon now takes a `hash` on read and an `expectedHash` on write; the
+// viewer's job is to remember what it last loaded/wrote and hand that back on every save.
+describe("FileViewerInner save staleness (expectedHash)", () => {
+  beforeEach(() => {
+    viewerMode.value = "content";
+    vi.spyOn(api, "editors").mockResolvedValue({
+      platform: "test",
+      defaultEditor: null,
+      effectiveDefault: "",
+      editors: [],
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Mounts in Content mode, waits for the load, then flips into edit mode. Returns `vm` so each
+   *  test can seed the dirty buffer and call `save()` in one synchronous stretch (see `armSave`). */
+  async function mountAndEdit(loadedHash: string) {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    vi.spyOn(api, "fileContent").mockResolvedValue({
+      ok: true,
+      code: "OK",
+      path: "notes.txt",
+      content: "hello",
+      ref: "work",
+      hash: loadedHash,
+    });
+    const wrapper = shallowMount(FileViewerInner, {
+      props: { target: { repoId: "repo-1", path: "notes.txt", status: "M" } },
+      global: { plugins: [pinia, i18n] },
+    });
+    await flushPromises();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const vm = wrapper.vm as any;
+    vm.startEdit();
+    await flushPromises();
+    return { wrapper, vm };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function armSave(vm: any, draftValue: string): void {
+    // shallowMount stubs MonacoViewer, and Vue rebinds the `ref="editorViewer"` template ref on
+    // every render it patches — including the one still queued from entering edit mode — so
+    // nulling it out only sticks for as long as nothing yields to that pending render. Set it
+    // (plus the dirty buffer save() reads) and call save() in the SAME synchronous stretch, with
+    // no `await` in between, so save()'s synchronous read of `editorViewer.value` still sees null
+    // and falls back to `draft`, exactly as it would if Monaco had failed to load.
+    vm.editorViewer = null;
+    vm.draft = draftValue;
+    vm.dirty = true;
+  }
+
+  it("sends the hash fileContent returned as save's 4th argument", async () => {
+    const saveFile = vi
+      .spyOn(api, "saveFile")
+      .mockResolvedValue({ ok: true, code: "OK", path: "notes.txt", size: 11, hash: "hash-2" });
+    const { vm } = await mountAndEdit("hash-1");
+
+    armSave(vm, "hello world");
+    await vm.save();
+    await flushPromises();
+
+    expect(saveFile).toHaveBeenCalledWith("repo-1", "notes.txt", "hello world", "hash-1");
+  });
+
+  it("shows the stale-file message on FILE_STALE and leaves the buffer untouched", async () => {
+    vi.spyOn(api, "saveFile").mockRejectedValue(
+      new ApiError(409, "stale on disk", { code: "FILE_STALE" }),
+    );
+    const { vm } = await mountAndEdit("hash-1");
+
+    armSave(vm, "hello world");
+    await vm.save();
+    await flushPromises();
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "This file changed on disk after you opened it. Reload it to see the current version, then re-apply your edit.",
+    );
+    // The generic failure toast must NOT also fire, and the loaded content/draft must survive —
+    // overwriting either would throw away the edit a stale-file save is meant to protect.
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(vm.content).toBe("hello");
+    expect(vm.draft).toBe("hello world");
+    expect(vm.dirty).toBe(true);
+    expect(vm.editing).toBe(true);
+  });
+
+  it("sends the new hash from a successful save on the next save", async () => {
+    const saveFile = vi
+      .spyOn(api, "saveFile")
+      .mockResolvedValueOnce({ ok: true, code: "OK", path: "notes.txt", size: 11, hash: "hash-2" });
+    const { vm } = await mountAndEdit("hash-1");
+
+    armSave(vm, "hello world");
+    await vm.save();
+    await flushPromises();
+    expect(saveFile).toHaveBeenNthCalledWith(1, "repo-1", "notes.txt", "hello world", "hash-1");
+
+    saveFile.mockResolvedValueOnce({ ok: true, code: "OK", path: "notes.txt", size: 16, hash: "hash-3" });
+    armSave(vm, "hello world again");
+    await vm.save();
+    await flushPromises();
+
+    expect(saveFile).toHaveBeenNthCalledWith(2, "repo-1", "notes.txt", "hello world again", "hash-2");
   });
 });

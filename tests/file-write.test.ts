@@ -5,7 +5,7 @@ import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
-import { writeFileContent } from "../src/service/index.ts";
+import { fileContentHash, readFileContent, readFileDiff, writeFileContent } from "../src/service/index.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { useSuiteTimeout } from "./helpers/timeouts.ts";
 
@@ -136,6 +136,104 @@ test("writeFileContent returns NOT_FOUND when the parent directory is missing", 
   const r = await writeFileContent(id, "a/b/c/new.ts", "hi");
   expect(r.ok).toBe(false);
   expect(r.code).toBe("NOT_FOUND");
+});
+
+// ── compare-and-write (audit item 1) ─────────────────────────────────────────────
+// Two viewers, or a phone and a desktop editor, used to overwrite each other silently: a save
+// carried no notion of which version it was editing. Reads now hand out a content hash and a save
+// that echoes it is refused when the file no longer matches — checked inside the op-queue slot.
+
+test("a read returns a hash; a save that echoes it succeeds and returns the next one", async () => {
+  const dir = plainRepo();
+  writeFileSync(join(dir, "note.txt"), "v1\n");
+  const id = mustUpsertRepo(dir, "write-cas-happy", "auto", false);
+
+  const read = await readFileContent(id, "note.txt");
+  expect(read.ok).toBe(true);
+  expect(read.hash).toBe(fileContentHash("v1\n"));
+
+  const w = await writeFileContent(id, "note.txt", "v2\n", { expectedHash: read.hash });
+  expect(w.ok).toBe(true);
+  expect(w.hash).toBe(fileContentHash("v2\n"));
+  expect(readFileSync(join(dir, "note.txt"), "utf8")).toBe("v2\n");
+  // The new hash is the token for the next save; the old one no longer is.
+  expect((await writeFileContent(id, "note.txt", "v3\n", { expectedHash: w.hash })).ok).toBe(true);
+});
+
+test("a save against a hash the file no longer matches is refused and writes nothing", async () => {
+  const dir = plainRepo();
+  writeFileSync(join(dir, "note.txt"), "v1\n");
+  const id = mustUpsertRepo(dir, "write-cas-stale", "auto", false);
+  const read = await readFileContent(id, "note.txt");
+
+  // Someone else — another viewer, a desktop editor — saves first.
+  writeFileSync(join(dir, "note.txt"), "someone else's v2\n");
+
+  const w = await writeFileContent(id, "note.txt", "my v2\n", { expectedHash: read.hash });
+  expect(w.ok).toBe(false);
+  expect(w.code).toBe("FILE_STALE");
+  expect(readFileSync(join(dir, "note.txt"), "utf8")).toBe("someone else's v2\n");
+  // No temp file left behind from the refused write.
+  expect(existsSync(join(dir, "note.txt.repoyeti.tmp"))).toBe(false);
+});
+
+test("a hash is never handed out for a view an edit could not be made against", async () => {
+  const dir = plainRepo();
+  writeFileSync(join(dir, "x.bin"), `a${String.fromCharCode(0)}b`);
+  writeFileSync(join(dir, "big.log"), "x".repeat(2_000_001));
+  const id = mustUpsertRepo(dir, "write-cas-nohash", "auto", false);
+  expect((await readFileContent(id, "x.bin")).hash).toBeUndefined(); // binary
+  expect((await readFileContent(id, "big.log")).hash).toBeUndefined(); // truncated
+  // And a save that claims a hash against such a file is stale by definition.
+  const w = await writeFileContent(id, "x.bin", "text now", { expectedHash: fileContentHash("") });
+  expect(w.code).toBe("FILE_STALE");
+});
+
+test("the Diff tab's working side carries the same hash, so an edit made there is protected too", async () => {
+  const dir = await gitRepo();
+  writeFileSync(join(dir, "a.txt"), "a0\n");
+  await $`git -C ${dir} add -A`.quiet();
+  await $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io commit -q -m a0`.quiet();
+  writeFileSync(join(dir, "a.txt"), "a1\n");
+  const id = mustUpsertRepo(dir, "write-cas-diff", "auto", false);
+  const diff = await readFileDiff(id, "a.txt");
+  expect(diff.mode).toBe("models");
+  expect(diff.hash).toBe(fileContentHash("a1\n"));
+  expect((await readFileContent(id, "a.txt")).hash).toBe(diff.hash);
+});
+
+test("PUT /api/repos/:id/file: expectedHash round-trips, a stale one is 409 FILE_STALE, a malformed one is 400", async () => {
+  const dir = await gitRepo();
+  writeFileSync(join(dir, "readme.md"), "# v1\n");
+  const id = mustUpsertRepo(dir, "write-cas-route", "auto", false);
+  const app = createApp(localCfg());
+  const put = (body: unknown) =>
+    app.request(`/api/repos/${id}/file?path=readme.md`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const got = (await (await app.request(`/api/repos/${id}/file?path=readme.md`)).json()) as { hash: string };
+  expect(got.hash).toBe(fileContentHash("# v1\n"));
+
+  const first = await put({ content: "# v2\n", expectedHash: got.hash });
+  expect(first.status).toBe(200);
+  const firstBody = (await first.json()) as { hash: string };
+  expect(firstBody.hash).toBe(fileContentHash("# v2\n"));
+
+  // A second client still holding the ORIGINAL hash loses, and is told so.
+  const stale = await put({ content: "# other v2\n", expectedHash: got.hash });
+  expect(stale.status).toBe(409);
+  expect(((await stale.json()) as { code: string }).code).toBe("FILE_STALE");
+  expect(readFileSync(join(dir, "readme.md"), "utf8")).toBe("# v2\n");
+
+  const malformed = await put({ content: "# v3\n", expectedHash: "not-a-hash" });
+  expect(malformed.status).toBe(400);
+
+  // No hash at all is still an unconditional overwrite (a caller with no prior read).
+  expect((await put({ content: "# v3\n" })).status).toBe(200);
+  expect(readFileSync(join(dir, "readme.md"), "utf8")).toBe("# v3\n");
 });
 
 test("PUT /api/repos/:id/file is refused over remote when remoteEditing is off", async () => {
