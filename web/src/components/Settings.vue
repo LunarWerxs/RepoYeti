@@ -23,6 +23,9 @@ const HotkeysSection = defineAsyncComponent(() => import("./settings/HotkeysSect
 const DiffTuningSection = defineAsyncComponent(() => import("./settings/DiffTuningSection.vue"));
 const AutoCommitSection = defineAsyncComponent(() => import("./settings/AutoCommitSection.vue"));
 const BackgroundSyncSection = defineAsyncComponent(() => import("./settings/BackgroundSyncSection.vue"));
+const AutomationHistorySection = defineAsyncComponent(
+  () => import("./settings/AutomationHistorySection.vue"),
+);
 const AgentSafetySection = defineAsyncComponent(() => import("./settings/AgentSafetySection.vue"));
 const IdentityFirewallSection = defineAsyncComponent(() => import("./settings/IdentityFirewallSection.vue"));
 const AiProvidersSection = defineAsyncComponent(() => import("./settings/AiProvidersSection.vue"));
@@ -168,6 +171,7 @@ watch(
       >
         <AutoCommitSection :open="open" />
         <BackgroundSyncSection />
+        <AutomationHistorySection :open="open" />
         <AiProvidersSection :open="open" />
       </div>
 

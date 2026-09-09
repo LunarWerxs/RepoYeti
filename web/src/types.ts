@@ -608,6 +608,7 @@ export type ApiErrorCode =
   | "PLAN_STALE"
   | "NOT_CONFLICTED"
   | "CONFLICT_STALE"
+  | "CONFLICT_MARKERS_PRESENT"
   | "FILE_STALE"
   // Work is in flight on the daemon, so it refused to restart itself (src/auto-update.ts).
   | "BUSY"
@@ -912,6 +913,18 @@ export interface ConflictApplyResponse {
   remaining: number;
 }
 
+/** Which side of a merge to keep whole. `ours` is the branch being merged into. */
+export type ConflictSide = "ours" | "theirs";
+
+export interface ConflictSideResponse {
+  ok: boolean;
+  path: string;
+  /** What the working tree holds afterwards. `deleted` is the delete/modify case: the side the
+   *  owner kept had no version of this path at all, so keeping it means the file goes away. */
+  result: "written" | "deleted";
+  status?: RepoStatus | null;
+}
+
 /** Per-group outcome of executing a plan, in order. */
 export interface CommitGroupResult {
   ok: boolean;
@@ -1105,6 +1118,78 @@ export interface AutoCommitIncident {
   reason: string;
   /** Ms the owner acknowledged it, or null while still unreviewed. */
   ackedAt: number | null;
+}
+
+// ── automation run history: mirrors src/db.ts AutomationRun / AutomationRunRepo ───
+// What the two unattended loops (auto-commit, sync-check) did while nobody was watching the
+// dashboard — the durable counterpart to the automation_run_* SSE broadcasts (src/automation-run.ts).
+// The incident ledger above answers "what is WRONG right now"; this answers "what HAPPENED",
+// including the rounds where nothing did. Owner-only, same as the rest of the Automation tab.
+
+/** Which scheduled loop a run belongs to. Both loops broadcast the same automation_run_* SSE event
+ *  family (src/automation-run.ts), so this is how a handler and the live state below tell them apart. */
+export type AutomationRunKind = "auto_commit" | "sync_check";
+
+/** Why a run started. `manual` covers the dashboard's "run now" and the CLI verbs. */
+export type AutomationRunTrigger = "timer" | "manual";
+
+/**
+ * How a run ended.
+ *   completed   - the round walked its whole list.
+ *   cancelled   - the owner stopped it; repos after the one in flight were never started.
+ *   failed      - the round body threw. `error` carries the message.
+ *   interrupted - the daemon went away mid-round. Written at the NEXT boot, never by the run.
+ */
+export type AutomationRunOutcome = "completed" | "cancelled" | "failed" | "interrupted";
+
+/** What one loop did to one repository in one round. */
+export type AutomationRepoOutcome = "committed" | "synced" | "blocked" | "error";
+
+export interface AutomationRun {
+  id: string;
+  kind: AutomationRunKind;
+  trigger: AutomationRunTrigger;
+  startedAt: number;
+  /**
+   * Null while the run is in flight - AND permanently null for an `interrupted` run, since the
+   * daemon went away without ever reporting an end. That makes `endedAt` unsafe as a stand-in for
+   * "is this run finished": a finished-but-interrupted run has no end time and never will. Read
+   * `outcome` (also null only while in flight) for that question instead.
+   */
+  endedAt: number | null;
+  /** Null while in flight. */
+  outcome: AutomationRunOutcome | null;
+  reposTotal: number;
+  reposDone: number;
+  reposBlocked: number;
+  error: string | null;
+}
+
+export interface AutomationRunRepo {
+  id: string;
+  runId: string;
+  repoId: string;
+  /** Name as of the run - a later rename must not blank the history (same reasoning as
+   *  AutoCommitIncident.repoName above). */
+  repoName: string;
+  at: number;
+  durationMs: number;
+  outcome: AutomationRepoOutcome;
+  /** Per-outcome facts (commits, pulled, pushed, note, reason). Parsed defensively on the daemon
+   *  side; a shape this build cannot read arrives as null rather than failing the whole list. */
+  detail: Record<string, unknown> | null;
+}
+
+/**
+ * Live "is a round of this loop running right now" state, keyed by kind. A run ROW cannot answer
+ * this on its own - an in-flight row looks identical to one whose daemon died until the next boot
+ * closes it (see `AutomationRun.endedAt` above) - so this is tracked separately from SSE events and
+ * refreshed from `GET /api/automation/runs`. Both loops can run concurrently, so this is always
+ * per-kind state, never a single global.
+ */
+export interface AutomationRoundState {
+  running: boolean;
+  cancelling: boolean;
 }
 
 // ── grouped operational errors: mirrors src/db.ts OperationalErrorView ────────────

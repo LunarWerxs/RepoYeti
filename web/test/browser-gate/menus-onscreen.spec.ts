@@ -38,6 +38,9 @@ test("every menu and popover the dashboard renders opens inside the window", asy
   expect(count, "the dashboard should render several menu/popover triggers").toBeGreaterThanOrEqual(3);
 
   const offscreen: string[] = [];
+  /** Triggers that opened but whose content could not be located, with why. A failure that just
+   *  says "measured 1" sends the next person hunting; this says which control went quiet. */
+  const skipped: string[] = [];
   let measured = 0;
   for (let i = 0; i < count; i++) {
     const trigger = triggers.nth(i);
@@ -50,11 +53,27 @@ test("every menu and popover the dashboard renders opens inside the window", asy
     // to admit it is open rather than for a fixed delay.
     await expect(trigger).toHaveAttribute("aria-expanded", "true", { timeout: 5_000 });
 
+    // Two ways to find what just opened, and the second one matters more than it looks.
+    //
+    // `aria-controls` is the precise link, but it is not universal: several triggers here open
+    // their content through a portal and never set it, so keying the sweep on it alone silently
+    // skipped two of the dashboard's three header menus and left this test measuring ONE thing
+    // while claiming to sweep everything. The fallback asks the browser for the visible menu,
+    // dialog or listbox that is now on screen, which is what the test is actually about, and it
+    // turns those silent skips into real measurements.
     const controls = await trigger.getAttribute("aria-controls");
     // An attribute selector rather than `#id`: this runs in Node, where CSS.escape does not
     // exist, and reka's generated ids are not guaranteed to be bare CSS identifiers.
-    const content = controls ? page.locator(`[id="${controls.replaceAll('"', '\\"')}"]`) : null;
-    if (content && (await content.count()) === 1) {
+    const byId = controls ? page.locator(`[id="${controls.replaceAll('"', '\\"')}"]`) : null;
+    let content: ReturnType<typeof page.locator> | null = null;
+    if (byId && (await byId.count()) === 1) content = byId;
+    else {
+      const byRole = page.locator('[role="menu"]:visible, [role="dialog"]:visible, [role="listbox"]:visible');
+      if ((await byRole.count()) === 1) content = byRole;
+      else skipped.push(`${label}: ${await byRole.count()} open menu/dialog/listbox elements, expected 1`);
+    }
+    const contentCount = content ? await content.count() : 0;
+    if (content && contentCount === 1) {
       measured++;
       await expect(content).toBeVisible();
       const box = await content.boundingBox();
@@ -90,5 +109,8 @@ test("every menu and popover the dashboard renders opens inside the window", asy
   expect(offscreen, offscreen.join("\n")).toEqual([]);
   // Without this the sweep is vacuous: a trigger with no `aria-controls` is skipped silently, so
   // a refactor that stopped setting it would leave a green test measuring nothing at all.
-  expect(measured, "the sweep must actually have measured some open content").toBeGreaterThanOrEqual(3);
+  expect(
+    measured,
+    `the sweep must actually have measured some open content; skipped: ${skipped.join(" | ")}`,
+  ).toBeGreaterThanOrEqual(3);
 });

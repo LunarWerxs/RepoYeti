@@ -136,6 +136,9 @@ export const RenameRepoSchema = z.object({
 /** Un-remove a path from the "Removed repos" list (Settings). */
 export const RestorePathSchema = z.object({ absPath: nonEmpty });
 
+/** Which scheduled loop POST /api/automation/cancel should stop. */
+export const AutomationCancelSchema = z.object({ kind: z.enum(["auto_commit", "sync_check"]) });
+
 // ── Identity Firewall (rules pinning a required identity to a path glob) ──────────
 const MAX_IDENTITY_RULES = 200;
 export const IdentityRulesSchema = z.object({
@@ -224,6 +227,9 @@ export const DeleteFileSchema = z.object({ path: nonEmpty, recursive: z.boolean(
 
 // ── stage one file's working-tree change into the index ──────────────────────────────
 export const StageSchema = z.object({ path: nonEmpty });
+
+/** Keep one side of a conflict whole (POST /api/repos/:id/conflict-side). */
+export const ConflictSideSchema = z.object({ path: nonEmpty, side: z.enum(["ours", "theirs"]) });
 
 // ── add one path to the repo's .gitignore (the changes-tree "Add to .gitignore" action) ──
 export const GitignoreAddSchema = z.object({ path: nonEmpty });

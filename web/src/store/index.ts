@@ -21,6 +21,7 @@ import { useGitOps } from "./git-ops";
 import { useSources } from "./sources";
 import { useIdentities } from "./identities";
 import { useAutoCommitIncidents } from "./incidents";
+import { useAutomationRuns } from "./automation-runs";
 import { useOperationalErrors } from "./errors";
 import {
   useSettings,
@@ -257,6 +258,8 @@ export const useStore = defineStore("repoyeti", () => {
     readConflict,
     resolveConflict,
     applyConflict,
+    chooseConflictSide,
+    stageResolvedConflict,
   } = useAi(busy, loadChanges, asResult, bumpHistoryRevision, applyActionStatus);
 
   const {
@@ -267,6 +270,18 @@ export const useStore = defineStore("repoyeti", () => {
     loadAutoCommitIncidents,
     ackAutoCommitIncident,
   } = useAutoCommitIncidents();
+
+  const {
+    runs: automationRuns,
+    runsReady: automationRunsReady,
+    runsLoading: automationRunsLoading,
+    activeRounds: automationActiveRounds,
+    liveRuns: automationLiveRuns,
+    loadAutomationRuns,
+    loadAutomationRunDetail,
+    cancelAutomationRound,
+    applyAutomationRunEvent,
+  } = useAutomationRuns();
 
   const {
     errors: operationalErrors,
@@ -801,6 +816,10 @@ export const useStore = defineStore("repoyeti", () => {
         "fetch_all_progress",
         "fetch_all_done",
         "fetch_all_cancelled",
+        "automation_run_started",
+        "automation_run_progress",
+        "automation_run_done",
+        "automation_run_cancelled",
         "update_available",
         "approval_pending",
         "approval_resolved",
@@ -847,6 +866,7 @@ export const useStore = defineStore("repoyeti", () => {
       runtime,
       editorsLoaded,
       applyFetchAllEvent,
+      applyAutomationRunEvent,
       scanning,
       scanFound,
       scanNew,
@@ -1047,12 +1067,22 @@ export const useStore = defineStore("repoyeti", () => {
     readConflict,
     resolveConflict,
     applyConflict,
+    chooseConflictSide,
+    stageResolvedConflict,
     autoCommitIncidents,
     autoCommitIncidentsUnacked,
     autoCommitIncidentsReady,
     autoCommitIncidentsLoading,
     loadAutoCommitIncidents,
     ackAutoCommitIncident,
+    automationRuns,
+    automationRunsReady,
+    automationRunsLoading,
+    automationActiveRounds,
+    automationLiveRuns,
+    loadAutomationRuns,
+    loadAutomationRunDetail,
+    cancelAutomationRound,
     operationalErrors,
     operationalErrorsReady,
     operationalErrorsLoading,
@@ -1293,6 +1323,9 @@ type SseEventCtx = Pick<
     /** The fetch-all job's counters live with the rest of its state in store/sources.ts; this is
      *  the one entry point the event table needs into them. */
     applyFetchAllEvent: (name: string, payload: unknown) => void;
+    /** Same idea as `applyFetchAllEvent`, for the automation_run_* SSE family (the two scheduled
+     *  loops' run history and live progress); state lives in store/automation-runs.ts. */
+    applyAutomationRunEvent: (name: string, payload: unknown) => void;
     scanning: Ref<boolean>;
     scanFound: Ref<number>;
     scanNew: Ref<number>;
@@ -1468,6 +1501,10 @@ function handleFetchAll(payload: unknown, eventName: string, ctx: SseEventCtx): 
   ctx.applyFetchAllEvent(eventName, payload);
 }
 
+function handleAutomationRun(payload: unknown, eventName: string, ctx: SseEventCtx): void {
+  ctx.applyAutomationRunEvent(eventName, payload);
+}
+
 function handleSettingsChanged(payload: unknown, ctx: SseEventCtx): void {
   ctx.runtime.applySettingsChanged(payload, {
     loadSyncStatus: ctx.loadSyncStatus,
@@ -1591,6 +1628,12 @@ function dispatchSseEvent(eventName: string, payload: any, ctx: SseEventCtx): vo
   // a terminal event (see store/sources.ts).
   if (eventName.startsWith("fetch_all_")) {
     handleFetchAll(payload, eventName, ctx);
+    return;
+  }
+  // All four automation_run_* events (both scheduled loops share this one family) go to one
+  // applier too, same reasoning as fetch_all_* above.
+  if (eventName.startsWith("automation_run_")) {
+    handleAutomationRun(payload, eventName, ctx);
     return;
   }
   const handler = SSE_EVENT_HANDLERS[eventName];

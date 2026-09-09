@@ -51,11 +51,13 @@ import {
   CommitMessageSchema,
   CommitPlanSchema,
   ConflictApplySchema,
+  ConflictSideSchema,
   ConflictResolveSchema,
   ShareCreateSchema,
   CollaborationInspectSchema,
   CollaborationJoinSchema,
   CollaborationCommitSyncSchema,
+  AutomationCancelSchema,
 } from "../schemas.ts";
 
 /** One curated entry per route, keyed by `"<METHOD> <hono-path>"` exactly as Hono registers it. */
@@ -239,6 +241,17 @@ export const META: Record<string, RouteMeta> = {
     body: ConflictApplySchema,
     tags: ["files"],
   },
+  "POST /api/repos/:id/conflict-side": {
+    summary:
+      "Keep one side of a conflict whole, including binary, oversized and delete/modify paths. Never stages.",
+    body: ConflictSideSchema,
+    tags: ["files"],
+  },
+  "POST /api/repos/:id/conflict-stage": {
+    summary: "Stage a hand-resolved path, refusing while it still contains conflict markers.",
+    body: StageSchema,
+    tags: ["files"],
+  },
   "GET /api/repos/:id/diff": {
     summary: "Both sides (HEAD + working) of a changed file.",
     tags: ["files"],
@@ -393,6 +406,39 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/auto-commit/incidents/:id/ack": {
     summary: "Mark one auto-commit incident reviewed.",
     tags: ["repos"],
+  },
+
+  // ── automation run history ───────────────────────────────────────────────────
+  "GET /api/automation/runs": {
+    summary: "Recent scheduled auto-commit and sync-check rounds, plus what is running right now.",
+    tags: ["repos"],
+    query: [
+      { name: "kind", description: "Narrow to one loop.", enum: ["auto_commit", "sync_check"] },
+      { name: "limit", description: "Max rows to return (default 50, capped at 300)." },
+    ],
+  },
+  "GET /api/automation/runs/:id": {
+    summary: "One automation round with a per-repository breakdown of what it did.",
+    tags: ["repos"],
+  },
+  "POST /api/automation/cancel": {
+    summary: "Stop an in-flight round after the repository it is on. Nothing already running is killed.",
+    tags: ["repos"],
+    body: AutomationCancelSchema,
+  },
+
+  // -- database health, snapshot and repair --------------------------------------
+  "GET /api/db/verify": {
+    summary: "Read-only database health: SQLite integrity, dangling keys, migration ledger, unparsable cache rows.",
+    tags: ["system"],
+  },
+  "POST /api/db/backup": {
+    summary: "Write a consistent SQLite snapshot beside the database. Never overwrites an existing one.",
+    tags: ["system"],
+  },
+  "POST /api/db/repair-status-cache": {
+    summary: "Clear cached repository statuses that no longer parse. Safe to repeat; the next refresh rewrites them.",
+    tags: ["system"],
   },
 };
 

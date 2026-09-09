@@ -14,16 +14,18 @@
 // advice, not a gate: the owner's key, the owner's repo, the owner's call.
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { AlertTriangle, GitMerge, Loader2, Sparkles, X } from "@lucide/vue";
+import { AlertTriangle, Check, FileEdit, GitMerge, Loader2, Sparkles, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { ApiError } from "../../api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { openFile } from "@/lib/file-viewer";
 import ConflictHunkCard from "./ConflictHunkCard.vue";
 import type {
   ConflictHunk,
   ConflictListEntry,
+  ConflictSide,
   ConflictUnsupported,
   HunkResolution,
   Repo,
@@ -142,6 +144,69 @@ async function resolve(file: ConflictListEntry): Promise<void> {
   }
 }
 
+// ── the manual path (1.0 audit, item 25) ───────────────────────────────────────────────────────
+//
+// Until this, an entry the AI resolver could not touch had no action at all: a binary asset, a
+// file past the read cap, a delete/modify pair. They were listed with a reason and then sat there,
+// so the owner had to leave the panel, find the same path in a terminal and remember the plumbing.
+//
+// Three verbs, in the order an owner uses them. OPEN is for the ordinary text case, where the
+// answer is to edit the markers by hand in the viewer that already exists. KEEP OURS / KEEP
+// THEIRS is the one that works on everything, because the daemon copies out of git's index
+// stages rather than reading the file. STAGE is the explicit finish, and it refuses while
+// markers remain, which is exactly the mistake a hand-resolution makes.
+
+/** Writing to the working tree over the tunnel is the owner's own setting; a guest never can. */
+const manualBlocked = computed(() => store.isGuest || (!store.canContinueLocal && !store.remoteEditing));
+
+/** The path a manual action is running against, so only its own row shows a spinner. */
+const manualBusy = ref<string | null>(null);
+
+/** Open the conflicted file in the viewer this app already has, at the working-tree version. */
+function openInViewer(file: ConflictListEntry): void {
+  openFile({ repoId: props.repo.id, path: file.path, status: "C" });
+}
+
+async function keepSide(file: ConflictListEntry, side: ConflictSide): Promise<void> {
+  manualBusy.value = file.path;
+  try {
+    const r = await store.chooseConflictSide(props.repo.id, file.path, side);
+    toast.success(
+      r.result === "deleted"
+        ? t("repo.resolve.manual.keptDeletion", { path: r.path })
+        : t("repo.resolve.manual.keptSide", { path: r.path }),
+      // Said out loud because it is the difference between this and finishing the merge, and it
+      // is the thing an owner assumes happened.
+      { description: t("repo.resolve.manual.notStagedYet") },
+    );
+    await refresh();
+  } catch (e) {
+    toast.error(t("repo.resolve.manual.keepFailed"), {
+      description: e instanceof ApiError ? e.message : String(e),
+    });
+  } finally {
+    manualBusy.value = null;
+  }
+}
+
+async function stageResolved(file: ConflictListEntry): Promise<void> {
+  manualBusy.value = file.path;
+  try {
+    await store.stageResolvedConflict(props.repo.id, file.path);
+    toast.success(t("repo.resolve.manual.staged", { path: file.path }));
+    await refresh();
+  } catch (e) {
+    // The marker refusal is the useful one, and it deserves its own words rather than the
+    // daemon's: "still contains conflict markers" is the answer, not an error.
+    const markers = e instanceof ApiError && e.code === "CONFLICT_MARKERS_PRESENT";
+    toast.error(markers ? t("repo.resolve.manual.stillHasMarkers") : t("repo.resolve.manual.stageFailed"), {
+      description: markers ? t("repo.resolve.manual.stillHasMarkersHint") : e instanceof ApiError ? e.message : String(e),
+    });
+  } finally {
+    manualBusy.value = null;
+  }
+}
+
 /** Regions the audit found nothing wrong with AND the model called high-confidence. */
 const cleanIndices = computed(() => {
   if (!active.value) return [];
@@ -249,6 +314,50 @@ async function apply(): Promise<void> {
           <Sparkles v-else :size="12" />
           {{ $t("repo.resolve.resolveButton") }}
         </Button>
+        <!-- The manual path. Present for EVERY entry, including the ones the AI cannot touch,
+             which before this had no action at all (1.0 audit, item 25). -->
+        <template v-if="!manualBlocked">
+          <Button
+            v-if="f.unsupported !== 'missing' && f.unsupported !== 'binary'"
+            variant="ghost"
+            size="sm"
+            :title="$t('repo.resolve.manual.openHint')"
+            :disabled="manualBusy !== null"
+            @click="openInViewer(f)"
+          >
+            <FileEdit :size="12" />
+            {{ $t("repo.resolve.manual.open") }}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            :title="$t('repo.resolve.manual.oursHint')"
+            :disabled="manualBusy !== null"
+            @click="keepSide(f, 'ours')"
+          >
+            <Loader2 v-if="manualBusy === f.path" :size="12" class="animate-spin" />
+            <span v-else>{{ $t("repo.resolve.manual.ours") }}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            :title="$t('repo.resolve.manual.theirsHint')"
+            :disabled="manualBusy !== null"
+            @click="keepSide(f, 'theirs')"
+          >
+            {{ $t("repo.resolve.manual.theirs") }}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            :title="$t('repo.resolve.manual.stageHint')"
+            :disabled="manualBusy !== null"
+            @click="stageResolved(f)"
+          >
+            <Check :size="12" />
+            {{ $t("repo.resolve.manual.stage") }}
+          </Button>
+        </template>
       </div>
     </div>
 

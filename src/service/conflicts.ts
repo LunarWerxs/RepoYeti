@@ -21,14 +21,17 @@
  *     a desktop edit landing between the validation and the queued write was overwritten, and
  *     the call returned OK.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getRepo } from "../db.ts";
+import { getRepo, type RepoStatus } from "../db.ts";
 import { gitFor } from "../git.ts";
+import { enqueue } from "../opqueue.ts";
+import { pathTouchesVcsMarker } from "../paths.ts";
 import { readChanges } from "../read/status.ts";
-import { fileContentHash, readFileContent, writeFileContent } from "./files.ts";
+import { fileContentHash, readFileContent, resolveRepoPath, writeFileContent } from "./files.ts";
 import { forceRefresh } from "./core.ts";
+import { stageFile } from "./actions.ts";
 import {
   MAX_CONFLICT_FILE_BYTES,
   MAX_CONFLICT_HUNKS,
@@ -338,4 +341,156 @@ export async function applyConflictResolutions(
     applied: map.size,
     remaining: current.parsed.hunks.length - map.size,
   };
+}
+
+// ── manual resolution: the path for everything the AI cannot touch (1.0 audit, item 25) ───────
+//
+// Every verb above needs the working file to be text, small enough to read, and carrying parsable
+// markers. A large share of real conflicts are none of those: a binary asset, a generated file
+// past the size cap, a delete/modify pair (git leaves the surviving side's file in the tree with
+// no markers in it, and nothing on disk can express "keep the deletion" - only the index knows
+// that side deleted the path). Those were listed with a reason and then left completely inert -
+// no button, nothing to click - so the owner had to leave the panel, find the same path in a
+// terminal, and remember the plumbing.
+//
+// The two verbs below are that missing floor, and they are deliberately the two GIT already
+// defines rather than a new merge engine: take one side whole, and stage the result once it is
+// right. Taking a side works for every conflict kind including the ones with no text at all,
+// because it copies out of the index's stages rather than parsing the file.
+
+/** Which side of the merge to keep whole. `ours` is the branch being merged INTO. */
+export type ConflictSide = "ours" | "theirs";
+
+export interface ChooseSideResult {
+  ok: boolean;
+  code: "OK" | "NOT_FOUND" | "NOT_CONFLICTED" | "ERROR";
+  message?: string;
+  path?: string;
+  /** What the working tree holds afterwards: that side's content, or nothing when it deleted it. */
+  result?: "written" | "deleted";
+  /** Post-action status for the initiating client (see ActionOutcome.status in service/core.ts). */
+  status?: RepoStatus | null;
+}
+
+/** Index stage numbers present for one unmerged path: 1 base, 2 ours, 3 theirs. */
+async function unmergedStages(absPath: string, relPath: string): Promise<Set<string>> {
+  const out = await gitFor(absPath).raw(["ls-files", "-u", "--", relPath]);
+  const stages = new Set<string>();
+  for (const line of out.split("\n")) {
+    // `<mode> <sha> <stage>\t<path>` - the stage is the last field before the tab.
+    const meta = line.split("\t")[0];
+    const stage = meta?.trim().split(/\s+/)[2];
+    if (stage) stages.add(stage);
+  }
+  return stages;
+}
+
+/**
+ * Keep one side of a conflict whole.
+ *
+ * WHY IT COPIES OUT OF THE INDEX rather than reading the file: the stages are the only
+ * representation of the two sides that exists for a binary file, a file past the read cap, or a
+ * delete/modify pair. `git checkout-index --stage=N` writes exactly those bytes and touches
+ * nothing else, so this one verb covers every conflict kind the panel can list.
+ *
+ * A side that has no stage DELETED the path, and keeping that side means the working file goes
+ * away. That is the delete/modify case, which previously had no action at all.
+ *
+ * DELIBERATELY DOES NOT STAGE, exactly like applyConflictResolutions above. The index stays
+ * unmerged until the owner stages on purpose, so `git commit` keeps refusing and auto-commit's
+ * safety gate keeps skipping the repo. "I picked a side" and "the merge is finished" stay two
+ * different states, and staging is the second, separate verb below.
+ */
+export async function chooseConflictSide(
+  repoId: string,
+  relPath: string,
+  side: ConflictSide,
+): Promise<ChooseSideResult> {
+  const repo = getRepo(repoId);
+  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  // Git-only: a Lore repo is centralized and never produces an unmerged index here.
+  if (repo.vcs !== "git") {
+    return { ok: false, code: "NOT_CONFLICTED", message: "only git repositories have merge conflicts" };
+  }
+  const r = resolveRepoPath(repo.absPath, relPath);
+  if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
+  if (pathTouchesVcsMarker(r.clean, ".git")) {
+    return { ok: false, code: "ERROR", message: "refusing to touch a .git directory" };
+  }
+
+  try {
+    const stages = await unmergedStages(repo.absPath, r.clean);
+    // No stages means the index is not unmerged for this path: it was resolved by someone else,
+    // or the panel is stale. Refuse rather than overwrite a file nobody is in a merge over.
+    if (stages.size === 0) {
+      return { ok: false, code: "NOT_CONFLICTED", message: "this path is not currently conflicted" };
+    }
+    const wanted = side === "ours" ? "2" : "3";
+    const absFile = join(repo.absPath, r.clean);
+
+    if (stages.has(wanted)) {
+      await enqueue(repoId, () =>
+        gitFor(repo.absPath).raw(["checkout-index", "-f", `--stage=${wanted}`, "--", r.clean]),
+      );
+      const refreshed = await forceRefresh(repoId);
+      return { ok: true, code: "OK", path: r.clean, result: "written", status: refreshed?.status ?? null };
+    }
+
+    // That side deleted the path. `resolveRepoPath` has already confined this inside the repo and
+    // the marker-directory check above rules out the one place a delete would be unrecoverable.
+    await enqueue(repoId, async () => {
+      if (existsSync(absFile)) rmSync(absFile, { force: true });
+    });
+    const refreshed = await forceRefresh(repoId);
+    return { ok: true, code: "OK", path: r.clean, result: "deleted", status: refreshed?.status ?? null };
+  } catch (e) {
+    return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export interface StageConflictResult {
+  ok: boolean;
+  code: "OK" | "NOT_FOUND" | "ERROR" | "STAGE_FAILED" | "SUBMODULE_NOT_ACTIONABLE" | "CONFLICT_MARKERS_PRESENT";
+  message?: string;
+  path?: string;
+  /** How many marker regions were still in the file when staging was refused. */
+  remaining?: number;
+  /** Post-action status for the initiating client (see ActionOutcome.status in service/core.ts). */
+  status?: RepoStatus | null;
+}
+
+/**
+ * Stage one path the owner says they have finished resolving, refusing if it still has markers.
+ *
+ * The marker check is the whole reason this is not just the ordinary per-file Stage. The manual
+ * path this feature adds ends with the owner editing the file in the viewer or an external
+ * editor, and the file writer has no idea it is looking at a merge - so nothing anywhere stopped
+ * `<<<<<<< HEAD` from being staged and then committed. That is a mistake git itself catches only
+ * if you happen to look, and it is exactly the mistake a hand-resolution makes.
+ *
+ * A path with no working file is fine and is NOT an error: it is the delete/modify case where the
+ * owner kept the deletion, and `git add` stages a removal for a tracked path.
+ */
+export async function stageResolvedConflict(repoId: string, relPath: string): Promise<StageConflictResult> {
+  const repo = getRepo(repoId);
+  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  const read = await readFileContent(repoId, relPath, "work");
+  // Only a readable text file can be checked, and only a readable text file can carry markers.
+  // A binary, an oversized or a missing file goes straight through: there is nothing to look for.
+  if (read.ok && read.ref === "work" && !read.binary && !read.truncated) {
+    const text = read.content ?? "";
+    if (hasConflictMarkers(text)) {
+      const parsed = parseConflictFile(text);
+      return {
+        ok: false,
+        code: "CONFLICT_MARKERS_PRESENT",
+        message: "this file still contains conflict markers - finish resolving it before staging",
+        path: read.path ?? relPath,
+        remaining: parsed?.hunks.length ?? 0,
+      };
+    }
+  }
+  const staged = await stageFile(repoId, relPath);
+  if (!staged.ok) return { ok: false, code: staged.code, message: staged.message, path: staged.path };
+  return { ok: true, code: "OK", path: staged.path, status: staged.status ?? null };
 }

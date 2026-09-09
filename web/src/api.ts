@@ -12,6 +12,9 @@ import type {
   AiSettings,
   ApprovalDetails,
   AutoCommitIncident,
+  AutomationRun,
+  AutomationRunKind,
+  AutomationRunRepo,
   BranchList,
   BuzzCommunity,
   BuzzConfig,
@@ -25,6 +28,8 @@ import type {
   CommitPlanResponse,
   CommitStyle,
   ConflictApplyResponse,
+  ConflictSide,
+  ConflictSideResponse,
   ConflictFileResponse,
   ConflictListEntry,
   ConflictResolveResponse,
@@ -617,6 +622,28 @@ export const api = {
     ack: (id: string) => req<{ ok: boolean }>("POST", `/api/auto-commit/incidents/${id}/ack`),
   },
 
+  // ── automation run history — src/http/routes/automation.ts ──────────────────────────
+  automation: {
+    /** Most-recent-first, optionally narrowed to one loop. `active` is what's happening RIGHT
+     *  NOW, which the run rows alone can't say (see AutomationRoundState). */
+    runs: (opts: { kind?: AutomationRunKind; limit?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (opts.kind) q.set("kind", opts.kind);
+      if (opts.limit) q.set("limit", String(opts.limit));
+      const qs = q.toString();
+      return req<{
+        runs: AutomationRun[];
+        active: { autoCommit: { running: boolean; cancelling: boolean }; syncCheck: { running: boolean; cancelling: boolean } };
+      }>("GET", `/api/automation/runs${qs ? `?${qs}` : ""}`);
+    },
+    /** One run's full detail. Throws ApiError (NOT_FOUND) if it's past the row cap. */
+    run: (id: string) => req<{ run: AutomationRun; repos: AutomationRunRepo[] }>("GET", `/api/automation/runs/${id}`),
+    /** Ask the in-flight round of one loop to stop starting new repositories; the one in flight
+     *  right now still finishes. `cancelled: false` means there was no round in flight. */
+    cancel: (kind: AutomationRunKind) =>
+      req<{ ok: boolean; kind: AutomationRunKind; cancelled: boolean }>("POST", "/api/automation/cancel", { kind }),
+  },
+
   // ── grouped operational errors — src/http/routes/errors.ts ──────────────────────────
   errors: {
     /** Every grouped error, most-recently-seen first. */
@@ -1004,5 +1031,18 @@ export const api = {
      *  accident. `hash` must match the file as it is right now. */
     apply: (repoId: string, path: string, hash: string, accepted: Array<{ index: number; content: string }>) =>
       req<ConflictApplyResponse>("POST", `/api/repos/${repoId}/conflict-apply`, { path, hash, accepted }),
+    /** Keep one side of a conflict whole. The only action that works on a binary, oversized or
+     *  delete/modify path, because it copies out of git's index stages rather than reading the
+     *  file. Like `apply` it never stages. */
+    side: (repoId: string, path: string, side: ConflictSide) =>
+      req<ConflictSideResponse>("POST", `/api/repos/${repoId}/conflict-side`, { path, side }),
+    /** Stage a path the owner says is resolved. Throws ApiError CONFLICT_MARKERS_PRESENT while
+     *  the file still contains markers, which is the mistake a hand-resolution makes. */
+    stage: (repoId: string, path: string) =>
+      req<{ ok: boolean; path: string; status?: RepoStatus | null }>(
+        "POST",
+        `/api/repos/${repoId}/conflict-stage`,
+        { path },
+      ),
   },
 };

@@ -32,7 +32,8 @@ import { broadcast } from "./bus.ts";
 import { backendFor } from "./vcs/index.ts";
 import { currentGitOperation } from "./git.ts";
 import { smartCommitRepo, pullRepo, pushRepo, planCommitInput } from "./service/index.ts";
-import { createRoundController } from "./round-controller.ts";
+import { createRoundController, type RoundRun } from "./round-controller.ts";
+import { withAutomationRun } from "./automation-run.ts";
 import {
   effectiveDefaultProvider,
   resolveApiKeyPool,
@@ -340,35 +341,75 @@ async function processRepo(
   };
 }
 
-async function tick(): Promise<{ done: AutoCommittedRepo[]; blocked: AutoCommitBlockedRepo[] }> {
+async function tick(run: RoundRun): Promise<{ done: AutoCommittedRepo[]; blocked: AutoCommitBlockedRepo[] }> {
   const repos = getWatchableRepos().filter((r) => r.autoCommit);
   const done: AutoCommittedRepo[] = [];
   const blocked: AutoCommitBlockedRepo[] = [];
-  // Sequential: each repo is already op-queue-bounded, and a gentle one-at-a-time pass keeps the
-  // AI + network load predictable regardless of how many repos opted in.
-  for (const r of repos) {
-    try {
-      const out = await processRepo(r);
-      if (out.done) {
-        done.push(out.done);
-        // A `note` on an otherwise-successful round means pull or push didn't fully complete
-        // (e.g. NON_FAST_FORWARD): worth a reviewable row, not just the moment's SSE broadcast.
-        if (out.done.note) {
-          recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: out.done.note });
+  return withAutomationRun(
+    { kind: "auto_commit", trigger: run.trigger, reposTotal: repos.length, cancelled: () => run.cancelled },
+    async (history) => {
+      // Sequential: each repo is already op-queue-bounded, and a gentle one-at-a-time pass keeps
+      // the AI + network load predictable regardless of how many repos opted in.
+      for (const r of repos) {
+        // The cancellation check is HERE, between repositories, and nowhere else. A round that is
+        // mid-commit or mid-push finishes that repository: this loop's whole safety story is that
+        // it never leaves a tree half-committed, and abandoning a push mid-transfer would be the
+        // first thing to break it. Stopping means starting no more repositories.
+        if (run.cancelled) break;
+        const startedAt = Date.now();
+        try {
+          const out = await processRepo(r);
+          if (out.done) {
+            done.push(out.done);
+            history.repo({
+              repoId: r.id,
+              repoName: r.name,
+              durationMs: Date.now() - startedAt,
+              outcome: "committed",
+              detail: {
+                commits: out.done.commits,
+                pulled: out.done.pulled,
+                pushed: out.done.pushed,
+                ...(out.done.note ? { note: out.done.note } : {}),
+                ...(out.done.degraded ? { degraded: true } : {}),
+              },
+            });
+            // A `note` on an otherwise-successful round means pull or push didn't fully complete
+            // (e.g. NON_FAST_FORWARD): worth a reviewable incident, not just the moment's SSE
+            // broadcast. The run row above records that it happened; the incident is the one that
+            // stays open until the owner acknowledges it.
+            if (out.done.note) {
+              recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: out.done.note });
+            }
+          }
+          if (out.blocked) {
+            blocked.push(out.blocked);
+            history.repo({
+              repoId: r.id,
+              repoName: r.name,
+              durationMs: Date.now() - startedAt,
+              outcome: "blocked",
+              detail: { reason: out.blocked.reason },
+            });
+            recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: out.blocked.reason });
+          }
+        } catch {
+          blocked.push({ id: r.id, name: r.name, reason: "ERROR" });
+          history.repo({
+            repoId: r.id,
+            repoName: r.name,
+            durationMs: Date.now() - startedAt,
+            outcome: "error",
+            detail: { reason: "ERROR" },
+          });
+          recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: "ERROR" });
         }
       }
-      if (out.blocked) {
-        blocked.push(out.blocked);
-        recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: out.blocked.reason });
-      }
-    } catch {
-      blocked.push({ id: r.id, name: r.name, reason: "ERROR" });
-      recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: "ERROR" });
-    }
-  }
-  if (done.length > 0) broadcast("repo_auto_committed", { repos: done });
-  if (blocked.length > 0) broadcast("repo_auto_commit_blocked", { repos: blocked });
-  return { done, blocked };
+      if (done.length > 0) broadcast("repo_auto_committed", { repos: done });
+      if (blocked.length > 0) broadcast("repo_auto_commit_blocked", { repos: blocked });
+      return { done, blocked };
+    },
+  );
 }
 
 /**
@@ -413,10 +454,30 @@ export function stopAutoCommit(): void {
   rounds.stop();
 }
 
-/** Enable/disable auto-commit (config at boot + PUT /api/settings). Starts/stops the timer live. */
+/**
+ * Enable/disable auto-commit (config at boot + PUT /api/settings). Starts/stops the timer live.
+ *
+ * Turning it OFF also asks an in-flight round to stop (1.0 audit, item 23). Disarming the timer
+ * alone used to leave an unattended pass walking every remaining repository, committing and
+ * pushing, after the owner had switched the feature off - which is the one moment they are most
+ * clearly saying "stop touching my repositories". The round controller's own contract is
+ * unchanged (setEnabled has never cancelled, and the timer rules depend on that); the cancel is
+ * an explicit second call here, and it is cooperative: the repository already in flight finishes.
+ */
 export function setAutoCommitEnabled(value: boolean): void {
   enabled = value;
   rounds.setEnabled(value);
+  if (!value) rounds.cancel();
+}
+
+/** Ask an in-flight auto-commit round to stop after the repository it is on. False when idle. */
+export function cancelAutoCommitRound(): boolean {
+  return rounds.cancel();
+}
+
+/** Whether a round is in flight, and whether it has been asked to stop. */
+export function autoCommitRoundState(): { running: boolean; cancelling: boolean } {
+  return { running: rounds.inFlight, cancelling: rounds.cancelling };
 }
 
 /** Set the timer mode ("interval" | "daily"). Re-times a running loop. */

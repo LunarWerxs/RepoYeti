@@ -11,6 +11,7 @@ import {
   StageSchema,
   GitignoreAddSchema,
   ConflictApplySchema,
+  ConflictSideSchema,
   CONFLICT_APPLY_BODY_LIMIT,
 } from "../../schemas.ts";
 import {
@@ -25,6 +26,8 @@ import {
   listConflicts,
   readConflictFile,
   applyConflictResolutions,
+  chooseConflictSide,
+  stageResolvedConflict,
   readFileContent,
   readImagePreview,
   readBinaryPreview,
@@ -374,6 +377,43 @@ async function postConflictApplyRoute(c: Context, cfg: Deps["cfg"]) {
   return c.json(result, status);
 }
 
+// Keep one side of a conflict whole (1.0 audit, item 25): the manual floor under the AI
+// resolver, and the only action that exists at all for a binary, oversized or delete/modify
+// conflict. Destructive (it overwrites the working file, or removes it when the chosen side
+// deleted it) → the same remote-editing gate as conflict-apply and file writes. Like
+// conflict-apply it does NOT stage; that is the next route, on purpose.
+async function postConflictSideRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const blocked = remoteEditingBlocked(c, cfg);
+  if (blocked) return blocked;
+  const p = await parseBody(c, ConflictSideSchema);
+  if (!p.ok) return p.res;
+  const result = await chooseConflictSide(id, p.data.path, p.data.side);
+  if (result.ok) return c.json(withGuestStatus(c, cfg, result));
+  const status: ContentfulStatusCode =
+    result.code === "NOT_FOUND" ? 404 : result.code === "NOT_CONFLICTED" ? 409 : 400;
+  return c.json(result, status);
+}
+
+// Stage a path the owner says they have finished resolving by hand, refusing while it still
+// carries conflict markers. Separate from the plain stage route below because that one is a
+// general-purpose `git add` with no idea it might be looking at a half-finished merge, and
+// staging `<<<<<<< HEAD` is the specific mistake a hand-resolution makes.
+//
+// Non-destructive (additive to the index), so no remote-editing gate, matching postStageRoute.
+async function postConflictStageRoute(c: Context, cfg: Deps["cfg"]) {
+  const id = requireId(c);
+  if (id instanceof Response) return id;
+  const p = await parseBody(c, StageSchema);
+  if (!p.ok) return p.res;
+  const result = await stageResolvedConflict(id, p.data.path);
+  if (result.ok) return c.json(withGuestStatus(c, cfg, result));
+  const status: ContentfulStatusCode =
+    result.code === "NOT_FOUND" ? 404 : result.code === "CONFLICT_MARKERS_PRESENT" ? 409 : 400;
+  return c.json(result, status);
+}
+
 // Stage one changed file's working-tree change into the index (the changes-tree per-file
 // "Stage" action, GitHub-Desktop-style). Non-destructive — no remote-editing gate needed
 // (unlike discard/write/move, it can't lose data), but still local-mutation so it goes
@@ -452,6 +492,8 @@ export function register(app: Hono, { cfg }: Deps): void {
     }),
     (c) => postConflictApplyRoute(c, cfg),
   );
+  app.post("/api/repos/:id/conflict-side", (c) => postConflictSideRoute(c, cfg));
+  app.post("/api/repos/:id/conflict-stage", (c) => postConflictStageRoute(c, cfg));
   app.post("/api/repos/:id/stage", (c) => postStageRoute(c, cfg));
   app.post("/api/repos/:id/gitignore", (c) => postGitignoreRoute(c, cfg));
   app.post("/api/repos/:id/move", (c) => postMoveRoute(c, cfg));

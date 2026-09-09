@@ -14,6 +14,8 @@ import type {
   ConflictFileResponse,
   ConflictListEntry,
   ConflictResolveResponse,
+  ConflictSide,
+  ConflictSideResponse,
   DiffDetail,
   RepoStatus,
   SmartCommitResult,
@@ -253,6 +255,33 @@ export function useAi(
     return r;
   }
 
+  /**
+   * Keep one side of a conflict whole (1.0 audit, item 25).
+   *
+   * The manual floor under the AI path, and the only action that exists at all for a binary,
+   * oversized or delete/modify conflict. Like applyConflict it does not stage: the index stays
+   * unmerged until the owner stages on purpose, so `git commit` keeps refusing and auto-commit
+   * keeps skipping the repo. Throws ApiError (NOT_CONFLICTED, REMOTE_FORBIDDEN) for the caller
+   * to toast.
+   */
+  async function chooseConflictSide(
+    repoId: string,
+    path: string,
+    side: ConflictSide,
+  ): Promise<ConflictSideResponse> {
+    const r = await api.conflicts.side(repoId, path, side);
+    await loadChanges(repoId);
+    return r;
+  }
+
+  /** Stage a path the owner has finished resolving by hand. Throws ApiError
+   *  CONFLICT_MARKERS_PRESENT while markers remain, which is the whole reason this is not the
+   *  ordinary per-file Stage. */
+  async function stageResolvedConflict(repoId: string, path: string): Promise<void> {
+    await api.conflicts.stage(repoId, path);
+    await loadChanges(repoId);
+  }
+
   /** Execute an (owner-edited) commit plan. Sets the commit busy state, reloads the changed-
    *  file tree afterward (it shrank), and returns the structured result for the UI to render. */
   async function smartCommit(
@@ -311,5 +340,7 @@ export function useAi(
     readConflict,
     resolveConflict,
     applyConflict,
+    chooseConflictSide,
+    stageResolvedConflict,
   };
 }

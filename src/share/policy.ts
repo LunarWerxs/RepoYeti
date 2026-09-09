@@ -240,6 +240,12 @@ export const OWNER_ONLY: readonly string[] = [
   "GET /api/repos/:id/conflict",
   "POST /api/repos/:id/conflict-resolve",
   "POST /api/repos/:id/conflict-apply",
+  // The manual fallback (1.0 audit, item 25) is owner-only for the same reason as conflict-apply:
+  // conflict-side overwrites or deletes a file in the owner's working tree, and conflict-stage
+  // finishes a merge. A guest can already see a scoped repo's changes; deciding how its merge
+  // resolves is the owner's call, and neither route can be scoped to a share.
+  "POST /api/repos/:id/conflict-side",
+  "POST /api/repos/:id/conflict-stage",
   // Pre-pull preview. Read-only in substance, but ?fetch=1 makes the daemon reach out to the
   // remote, and it reports the upstream ref name and every incoming path. Kept owner-only so
   // the guest surface stays exactly the size the owner sized it (see the tripwire in
@@ -311,6 +317,20 @@ export const OWNER_ONLY: readonly string[] = [
   // and acknowledging one is the owner dismissing their own review queue.
   "GET /api/auto-commit/incidents",
   "POST /api/auto-commit/incidents/:id/ack",
+  // automation run history — the record of what the unattended loops did across the owner's whole
+  // inventory, so a share's scope cannot cover it: a single run row names how many repositories
+  // exist and how many were touched, and the per-run detail names them. Cancelling a round is the
+  // owner steering their own daemon, and a guest reaching it could stop an unattended commit run
+  // for every repository at once.
+  "GET /api/automation/runs",
+  "GET /api/automation/runs/:id",
+  "POST /api/automation/cancel",
+  // database diagnosis, snapshot and repair - the health of the whole store, its file size and
+  // its schema are owner-plane by definition, and a scoped link must not be able to make the
+  // daemon write a snapshot of every repository the owner has.
+  "GET /api/db/verify",
+  "POST /api/db/backup",
+  "POST /api/db/repair-status-cache",
   // public probes — unauthenticated by design, never guest-gated
   "GET /api/health",
   "GET /api/openapi.json",

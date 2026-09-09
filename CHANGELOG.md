@@ -4,7 +4,7 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-09-08
 
 ### Changed
 
@@ -40,6 +40,49 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Added
 
+- **The unattended loops now keep a record of what they did, and can be stopped mid-round.** Auto
+  commit and the background sync check reported themselves only over the live event stream, which
+  reaches whoever happens to have the dashboard open at the moment the timer fires. For a feature
+  whose entire purpose is running while nobody is watching, that is close to nobody. The incident
+  ledger covered half of the gap and only half, deliberately: it is a list of open problems, one
+  row per repository and reason, acknowledged and then closed, so it can neither record a
+  successful commit nor say how long anything took without ruining the "needs attention" count it
+  exists to feed. Every round now also writes a run row saying when it ran, whether the timer or
+  the owner started it, how it ended and how long it took, with a child row per repository it
+  actually touched, capped at the newest 300 rounds. Repositories where nothing happened produce
+  no row, because a history that is mostly "nothing, 200 times" answers no question. A run whose
+  daemon was killed is marked interrupted at the next boot rather than sitting in flight forever,
+  and its end time stays empty rather than being invented. Settings, Automation now shows the live
+  round with a Stop, then the recent rounds, each expanding to the per repository breakdown. New
+  owner-only routes: `GET /api/automation/runs`, `GET /api/automation/runs/:id` and
+  `POST /api/automation/cancel`.
+- **Every conflict can now be resolved from the panel, including the ones AI cannot touch.** The
+  resolver offered exactly one action per file, and only for files it could parse: a text file,
+  small enough to read, carrying usable markers. A binary asset, a generated file past the size
+  cap and a delete or modify pair were listed with a reason and then completely inert, no button
+  of any kind, so finishing that merge meant leaving the panel, finding the same path in a
+  terminal and remembering the plumbing. Three actions now sit on every row. Open puts the file in
+  the viewer this app already has, for hand editing the markers. Keep ours and Keep theirs take
+  one side whole, and they work on everything, because the daemon copies out of the index rather
+  than reading the file: that is also the only thing that can express "keep the deletion" for a
+  path one side removed. Stage is the explicit finish, and it refuses while the file still
+  contains conflict markers, which is exactly the mistake a hand resolution makes and which
+  nothing anywhere caught before. Keeping a side deliberately does NOT stage, for the same reason
+  applying an AI resolution does not: "I picked a side" and "the merge is finished" stay two
+  different states, so `git commit` keeps refusing and the auto-commit safety gate keeps skipping
+  the repository until the owner says otherwise.
+- **The database can be checked, snapshotted and repaired without leaving the app.** There was no
+  way to ask whether the store was healthy, no way to take a copy of it that is actually
+  consistent, and no way to recover from the one kind of damage that is genuinely recoverable.
+  `GET /api/db/verify` runs SQLite's own integrity check, counts dangling references, reads the
+  new migration ledger and counts cached rows this build can no longer parse, and changes nothing
+  at all. `POST /api/db/backup` writes a real SQLite snapshot beside the database and refuses to
+  overwrite an earlier one: a plain file copy of a live database in write-ahead mode captures a
+  torn page set with the committed tail sitting in a sidecar file nobody copied, which is a backup
+  that looks fine until the day it is needed. `POST /api/db/repair-status-cache` is the only one
+  that changes stored data, and it is a separate call on purpose, made after reading the other
+  two, because a recovery tool that quietly repairs while it diagnoses is one nobody can safely
+  run twice.
 - **A browser gate now runs in CI and blocks a release.** Three things this project depends on were
   invisible to every test it had, because all three only exist once a real browser has laid out a
   page and stamped a request. The loopback guard's foreign-origin refusal was proven by fabricating
@@ -56,17 +99,44 @@ All notable changes to RepoYeti are documented here. The format is based on
   anywhere. Measured against a daemon with the fix removed: the foreign page's write succeeds and
   the gate goes red. The older `test:e2e` suite is unchanged and still the developer one.
 
-## [1.0.0] - 2026-09-08
-
-### Changed
-
-- **RepoYeti's new releases use PolyForm Noncommercial 1.0.0.** The source remains
-  available for use under the license's permitted purposes; commercial use outside
-  those permissions requires a separate license. Earlier MIT grants remain in
-  effect for earlier copies, and third-party licenses are preserved. Package
-  metadata, contributor guidance, and bundled license notices now state the new
-  terms. This marks the 1.0 version boundary; it does not certify that every issue
-  identified in the codebase audit has been resolved.
+- **Auto-commit skips and sync failures now leave a reviewable trail, with a panel to review it
+  in.** The scheduled auto-commit timer already refused to touch a conflicted or mid-operation
+  repo, and already told any dashboard connected at that exact moment via SSE, but nobody is
+  always connected to an unattended timer, and once that broadcast passed, the only record of the
+  skip was gone. A repo could sit un-synced for days with nothing to show for it beyond
+  "auto-commit is on and yet this tree never moves." Every skip (`CONFLICT`, `AI_UNAVAILABLE`,
+  `ERROR`, …) and every otherwise-successful round that still carries a sync note (e.g.
+  `NON_FAST_FORWARD`) is now persisted as one incident row per open (repo, reason) pair (repeat
+  ticks of the same unresolved problem bump that row instead of piling up new ones), capped at the
+  newest 500 across all repos. New routes: `GET /api/auto-commit/incidents` (optionally
+  `?unackedOnly=1`) and `POST /api/auto-commit/incidents/:id/ack`, surfaced in Settings →
+  Automation as an incident list under the auto-commit controls, with an unacked-count badge and
+  an Acknowledge button per row. Data shape adapted from Hermes Agent's `cron/incidents.py` (MIT).
+- **Grouped operational-error history, now with a Settings panel.** The dashboard has always
+  shown a repo's status right now (ahead/behind, dirty, conflicted) but nothing about what has
+  gone wrong operationally over time: a fetch that has failed against a rotated SSH key five times
+  in a row read identically to one that failed once, moments ago, on a flaky connection.
+  `runAction` (`src/service/core.ts`), the single funnel every mutating git action
+  (fetch/pull/push/commit/checkout/branch/stash/tag/remote) already goes through, now records
+  every failure, grouped by a fingerprint of (repo, operation, error code), adapted from
+  PostHog's issue-tracking grouping pattern (`products/error_tracking/`, MIT). Repeated failures
+  of the same kind bump an occurrence count and refresh the message rather than piling up as
+  separate rows. New owner-only routes: `GET /api/errors` (the grouped list),
+  `POST /api/errors/:fingerprint/mute`, and `DELETE /api/errors/:fingerprint` - none reachable by
+  a share-link guest, and the change events they emit are not in the guest SSE allowlist either.
+  Settings → Advanced now has an Operational errors panel listing every group with mute/unmute and
+  dismiss actions.
+- **AI providers can hold a rotation pool of keys, not just one.** Every provider (Groq, OpenAI,
+  Gemini, ...) held exactly one bring-your-own key, so an owner on a free tier who hit that
+  tier's rate limit blocked Smart Commit, commit-message drafting, conflict-resolve, and the
+  unattended auto-commit timer until the provider's own window reset, even though an owner
+  juggling several free accounts for the same provider had a second key sitting unused. A
+  provider's config can now carry additional pool keys (`PUT /api/ai/providers/:provider/keys`);
+  every generation/model-list call tries the pool in round-robin order and cools a key down only
+  on the outcome that is actually its fault (rate-limited or auth-rejected), so a spent free-tier
+  key no longer stalls the daemon while a working one sits idle in Settings.
+  `GET /api/ai/providers/:provider/keys` shows non-secret per-key health (a fingerprint and
+  cooldown state, never the key itself).
 
 ### Security
 
@@ -134,6 +204,23 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Fixed
 
+- **Switching an automation loop off now actually stops the round in flight.** Turning auto commit
+  or the background sync check off disarmed the next timer and did nothing else, so an unattended
+  pass already under way carried on committing and pushing through every remaining repository
+  after the owner had switched the feature off. That is the one moment they are most clearly
+  saying stop. Both toggles now also ask the running round to stop, which is cooperative and
+  narrow by design: the repository being committed, fetched or pulled right now is allowed to
+  finish, and only the ones after it are dropped. Killing a git process mid transfer is how a lock
+  file gets left behind in the repository the owner was least expecting to touch. The scheduling
+  rule that a cadence change must never abandon work halfway is unchanged.
+- **One damaged cached status no longer empties the whole repository list.** Each repository's
+  last known state is cached as a small blob, written by this daemon and read back by it, and it
+  was parsed with no guard at all. A single truncated row, from a disk that filled mid write or a
+  process that was killed, threw on the way out of the repository list and took every other
+  repository with it: a dashboard showing nothing whatsoever, over one repository's stale cache.
+  That row now reads as "not scanned yet", which is what it is, everything else lists normally,
+  and the count of such rows is reported by the new database check for an owner who wants to clear
+  them on purpose.
 - **The auto-commit and sync-check timers can no longer double up.** Both loops carried the same
   hand-rolled scheduling: a manual round checked the in-flight flag, but the timer's round set it
   without checking, so a timer that fired while a manual round was still waiting on the AI or the
@@ -267,6 +354,32 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Internal
 
+- **Database ownership is split by domain, behind the same public surface.** One module carried
+  the connection, the migration system and six unrelated data domains, so every feature that
+  touched storage edited the same 1,900 line hotspot. The connection, its migrations and the new
+  recovery tools now live in their own module, alongside the shared row types, the three leaf
+  repository reads, shares and collaboration, and the automation tables. Nothing outside changed:
+  every one of the eighty files that import the database by name still does, and not one call site
+  needed editing, because the original module stays as the facade and re-exports each domain. The
+  repository writes, identities and the operational error log deliberately did NOT move. They are
+  entangled by real transactions rather than by file position, and one of them deletes across five
+  tables in a single transaction, so splitting them would trade a tidier file listing for a
+  removal that can half apply.
+- **Every schema change now leaves a record of whether it worked.** A migration that failed for
+  any reason other than "already applied" printed one line to the console of a background process
+  and was otherwise invisible, so the daemon ran indefinitely with a column that does not exist
+  and threw about it from whichever request happened to touch it first, a long way from the cause.
+  It is still deliberately not fatal, and that posture is the point: a transient file lock at boot
+  should not turn into an app that will not start. It is simply no longer the only thing that
+  knows it is hurt. The daemon says so once, loudly, at boot, and the new database check lists
+  exactly which changes did not apply.
+- **The browser gate's menu sweep was measuring one menu while claiming to sweep them all.** It
+  located each opened menu through the trigger's `aria-controls` attribute and skipped, silently,
+  any trigger that does not set one. Two of the dashboard's three header menus render their
+  content through a portal and never set it, so the sweep was quietly checking a single control.
+  Its own guard against exactly this caught it. It now falls back to asking the browser which
+  menu, dialog or listbox is visible, which is what the test was always about, and it names the
+  triggers it could not measure when it fails.
 - **The Windows rebuild helper is `misc/rebuild_repoyeti.bat`.** `misc/Rebuild.bat` was renamed
   with its callers (the root `.gitignore` entry for the convenience wrapper and the tray adapter's
   guidance) so no reference dangles, and it keeps the window open on a failed build, because the
@@ -274,46 +387,6 @@ All notable changes to RepoYeti are documented here. The format is based on
   It is for source checkouts only: a compiled release embeds the dashboard and has nothing to
   rebuild, so it is deliberately not part of the tray bundle.
 
-### Added
-
-- **Auto-commit skips and sync failures now leave a reviewable trail, with a panel to review it
-  in.** The scheduled auto-commit timer already refused to touch a conflicted or mid-operation
-  repo, and already told any dashboard connected at that exact moment via SSE, but nobody is
-  always connected to an unattended timer, and once that broadcast passed, the only record of the
-  skip was gone. A repo could sit un-synced for days with nothing to show for it beyond
-  "auto-commit is on and yet this tree never moves." Every skip (`CONFLICT`, `AI_UNAVAILABLE`,
-  `ERROR`, …) and every otherwise-successful round that still carries a sync note (e.g.
-  `NON_FAST_FORWARD`) is now persisted as one incident row per open (repo, reason) pair (repeat
-  ticks of the same unresolved problem bump that row instead of piling up new ones), capped at the
-  newest 500 across all repos. New routes: `GET /api/auto-commit/incidents` (optionally
-  `?unackedOnly=1`) and `POST /api/auto-commit/incidents/:id/ack`, surfaced in Settings →
-  Automation as an incident list under the auto-commit controls, with an unacked-count badge and
-  an Acknowledge button per row. Data shape adapted from Hermes Agent's `cron/incidents.py` (MIT).
-- **Grouped operational-error history, now with a Settings panel.** The dashboard has always
-  shown a repo's status right now (ahead/behind, dirty, conflicted) but nothing about what has
-  gone wrong operationally over time: a fetch that has failed against a rotated SSH key five times
-  in a row read identically to one that failed once, moments ago, on a flaky connection.
-  `runAction` (`src/service/core.ts`), the single funnel every mutating git action
-  (fetch/pull/push/commit/checkout/branch/stash/tag/remote) already goes through, now records
-  every failure, grouped by a fingerprint of (repo, operation, error code), adapted from
-  PostHog's issue-tracking grouping pattern (`products/error_tracking/`, MIT). Repeated failures
-  of the same kind bump an occurrence count and refresh the message rather than piling up as
-  separate rows. New owner-only routes: `GET /api/errors` (the grouped list),
-  `POST /api/errors/:fingerprint/mute`, and `DELETE /api/errors/:fingerprint` - none reachable by
-  a share-link guest, and the change events they emit are not in the guest SSE allowlist either.
-  Settings → Advanced now has an Operational errors panel listing every group with mute/unmute and
-  dismiss actions.
-- **AI providers can hold a rotation pool of keys, not just one.** Every provider (Groq, OpenAI,
-  Gemini, ...) held exactly one bring-your-own key, so an owner on a free tier who hit that
-  tier's rate limit blocked Smart Commit, commit-message drafting, conflict-resolve, and the
-  unattended auto-commit timer until the provider's own window reset, even though an owner
-  juggling several free accounts for the same provider had a second key sitting unused. A
-  provider's config can now carry additional pool keys (`PUT /api/ai/providers/:provider/keys`);
-  every generation/model-list call tries the pool in round-robin order and cools a key down only
-  on the outcome that is actually its fault (rate-limited or auth-rejected), so a spent free-tier
-  key no longer stalls the daemon while a working one sits idle in Settings.
-  `GET /api/ai/providers/:provider/keys` shows non-secret per-key health (a fingerprint and
-  cooldown state, never the key itself).
 
 ## [0.21.5] - 2026-08-19
 

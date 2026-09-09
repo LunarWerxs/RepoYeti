@@ -62,6 +62,8 @@ export type ApiErrorCode =
   | "NOT_CONFLICTED"
   /** The file changed after the resolution was generated — the proposal describes stale bytes. */
   | "CONFLICT_STALE"
+  /** The owner asked to stage a hand-resolved path that still carries conflict markers. */
+  | "CONFLICT_MARKERS_PRESENT"
   // ── file viewer save (mirror src/service/files.ts writeFileContent) ──
   /** The file on disk no longer matches the `expectedHash` the save was made against — another
    *  save or an external editor got there first, so the caller must reload before writing.
@@ -195,6 +197,7 @@ const STATUS_BY_CODE: Partial<Record<ApiCode, ContentfulStatusCode>> = {
   PLAN_STALE: 409,
   NOT_CONFLICTED: 409,
   CONFLICT_STALE: 409,
+  CONFLICT_MARKERS_PRESENT: 409,
   FILE_STALE: 409,
   IDENTITY_POLICY_VIOLATION: 409,
   BUSY: 409,

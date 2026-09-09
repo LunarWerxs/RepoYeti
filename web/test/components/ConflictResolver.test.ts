@@ -13,6 +13,7 @@ import { nextTick } from "vue";
 import ConflictResolver from "@/components/conflicts/ConflictResolver.vue";
 import { i18n } from "@/i18n";
 import { useStore } from "@/store";
+import { ApiError } from "@/api";
 import type { AiSettings, ConflictHunk, ConflictResolveResponse, Repo } from "@/types";
 
 vi.mock("vue-sonner", () => ({
@@ -306,5 +307,131 @@ describe("ConflictResolver", () => {
     // and "Accept the clean ones" still only reaches the one region that came back usable.
     expect(w.text()).toContain("0 of 2 accepted");
     expect(w.findAll("button").filter((b) => b.text().trim() === "Accept")).toHaveLength(1);
+  });
+});
+
+/**
+ * The manual fallback (1.0 audit, item 25).
+ *
+ * The behaviour that matters: an entry the AI cannot touch is no longer inert, keeping a side is
+ * explicitly NOT the end of the merge, and staging a file that still has markers is refused with
+ * words that say what to do rather than an error code.
+ */
+describe("ConflictResolver: the manual path", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = undefined;
+    vi.restoreAllMocks();
+    vi.clearAllMocks(); // the module-level vue-sonner mock outlives restoreAllMocks
+  });
+
+  /** A local owner: manual actions are offered. */
+  function localOwner() {
+    const store = useStore();
+    store.aiSettings = aiSettings("gpt-4o-mini");
+    store.canContinueLocal = true;
+    return store;
+  }
+
+  it("offers keep-ours, keep-theirs and stage on an entry the AI cannot touch", async () => {
+    const store = localOwner();
+    vi.spyOn(store, "listConflicts").mockResolvedValue([
+      { path: "logo.png", kind: "both-added", hunks: 0, unsupported: "binary" },
+    ]);
+
+    const w = mountResolver();
+    await flushPromises();
+
+    const labels = w.findAll("button").map((b) => b.text().trim());
+    // Before item 25 this row had a label and nothing else.
+    expect(labels).toContain("Keep ours");
+    expect(labels).toContain("Keep theirs");
+    expect(labels).toContain("Stage");
+    // Still no AI button, and no "Open": there is no text to hand-edit in a binary file.
+    expect(labels).not.toContain("Resolve with AI");
+    expect(labels).not.toContain("Open");
+  });
+
+  it("says out loud that keeping a side has not finished the merge", async () => {
+    const store = localOwner();
+    vi.spyOn(store, "listConflicts").mockResolvedValue([{ path: FILE, hunks: 2 }]);
+    const chooseSide = vi
+      .spyOn(store, "chooseConflictSide")
+      .mockResolvedValue({ ok: true, path: FILE, result: "written" });
+
+    const w = mountResolver();
+    await flushPromises();
+    await w.findAll("button").find((b) => b.text().trim() === "Keep theirs")!.trigger("click");
+    await flushPromises();
+
+    expect(chooseSide).toHaveBeenCalledWith(REPO_ID, FILE, "theirs");
+    const { toast } = await import("vue-sonner");
+    expect(vi.mocked(toast.success).mock.calls[0]?.[1]).toMatchObject({
+      description: expect.stringContaining("Not staged yet"),
+    });
+  });
+
+  it("reports keeping a deletion differently from keeping content", async () => {
+    const store = localOwner();
+    vi.spyOn(store, "listConflicts").mockResolvedValue([
+      { path: "docs/old.md", kind: "deleted-by-us", hunks: 0, unsupported: "no-markers" },
+    ]);
+    vi.spyOn(store, "chooseConflictSide").mockResolvedValue({
+      ok: true,
+      path: "docs/old.md",
+      result: "deleted",
+    });
+
+    const w = mountResolver();
+    await flushPromises();
+    await w.findAll("button").find((b) => b.text().trim() === "Keep ours")!.trigger("click");
+    await flushPromises();
+
+    const { toast } = await import("vue-sonner");
+    // "Kept the deletion" is a different sentence from "kept one side", because for this class of
+    // conflict the file going away IS the resolution and looks like a bug otherwise.
+    expect(vi.mocked(toast.success).mock.calls[0]?.[0]).toContain("Kept the deletion");
+  });
+
+  it("refuses to stage a file that still has markers, and says what to do instead", async () => {
+    const store = localOwner();
+    vi.spyOn(store, "listConflicts").mockResolvedValue([{ path: FILE, hunks: 2 }]);
+    vi.spyOn(store, "stageResolvedConflict").mockRejectedValue(
+      new ApiError(409, "this file still contains conflict markers", {
+        code: "CONFLICT_MARKERS_PRESENT",
+      }),
+    );
+
+    const w = mountResolver();
+    await flushPromises();
+    await w.findAll("button").find((b) => b.text().trim() === "Stage")!.trigger("click");
+    await flushPromises();
+
+    const { toast } = await import("vue-sonner");
+    expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toContain("still has conflict markers");
+    expect(vi.mocked(toast.error).mock.calls[0]?.[1]).toMatchObject({
+      description: expect.stringContaining("keep one side whole"),
+    });
+  });
+
+  it("offers no manual action at all to a share-link guest", async () => {
+    const store = useStore();
+    store.aiSettings = aiSettings("gpt-4o-mini");
+    store.canContinueLocal = false;
+    store.remoteEditing = false;
+    vi.spyOn(store, "listConflicts").mockResolvedValue([{ path: FILE, hunks: 2 }]);
+
+    const w = mountResolver();
+    await flushPromises();
+
+    const labels = w.findAll("button").map((b) => b.text().trim());
+    // The daemon refuses these anyway; the UI must not offer a control that cannot work.
+    expect(labels).not.toContain("Keep ours");
+    expect(labels).not.toContain("Stage");
   });
 });
