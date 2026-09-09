@@ -16,7 +16,7 @@ import {
   OAuthCallbackUnavailableError,
 } from "../../auth.ts";
 import { rememberTokens, clearTokens, pullNow } from "../../connections-sync.ts";
-import { deleteSecret, API_TOKEN } from "../../secrets.ts";
+import { revokeApiToken } from "../../api-token.ts";
 import { effectiveGuest } from "../../auth.ts";
 import { clearGuestCookie } from "../../share/index.ts";
 import { getOAuthCallback, getOAuthCallbackStatus } from "../../runtime.ts";
@@ -84,9 +84,18 @@ export function register(app: Hono, { cfg }: Deps): void {
   // button a lie, so this awaits the revocation rather than firing it off: the response must not
   // claim the token is gone before it is. (Revocation is host-specific — the durable bytes live
   // in this app's keychain — so it belongs here in the adapter, not in the reusable auth.ts.)
+  //
+  // revokeApiToken (src/api-token.ts) ends live access first and then makes the revocation stick
+  // across a restart even when the keychain refuses the delete (a persisted tombstone). The key
+  // rotation below must happen regardless of how the durable steps went, so a non-durable outcome
+  // is logged rather than allowed to abort the sign-out.
   app.post("/api/auth/logout-all", async (c) => {
-    await Promise.allSettled([clearTokens(), deleteSecret(API_TOKEN)]);
-    delete cfg.apiToken;
+    const [, revoked] = await Promise.allSettled([clearTokens(), revokeApiToken(cfg)]);
+    if (revoked.status === "fulfilled" && revoked.value.warning) {
+      console.warn(`repoyeti: sign out everywhere — API token: ${revoked.value.warning}`);
+    } else if (revoked.status === "rejected") {
+      console.warn(`repoyeti: sign out everywhere — API token revocation threw: ${String(revoked.reason)}`);
+    }
     return handleLogoutAll(c);
   });
   // "Continue local for now" — grant a localhost-only bypass (refused over the tunnel).

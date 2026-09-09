@@ -130,6 +130,10 @@ const NEVER_SYNCED = [
   "cloudSync",
   "ai",
   "apiToken",
+  // The API token's revocation tombstone describes THIS machine's credential store (a delete it
+  // refused, retried at each boot here). On another machine it would suppress a token that was
+  // never revoked there.
+  "apiTokenRevoked",
   "buzz",
   // Keyed to THIS machine, and dangerous rather than merely useless if carried across.
   // `identityRules` pins a required identity per filesystem-path glob and HARD-BLOCKS a

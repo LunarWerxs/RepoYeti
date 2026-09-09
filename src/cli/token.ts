@@ -16,7 +16,9 @@ import { bold, dim, green, red } from "./format.ts";
 export async function runTokenVerb(sub: string): Promise<void> {
   try {
     if (sub === "new") {
-      const { token } = await post<{ ok: boolean; token: string }>("/api/auth/token");
+      const { token, store } = await post<{ ok: boolean; token: string; store?: "keychain" | "config" }>(
+        "/api/auth/token",
+      );
       console.log(`${green("✓")} API token minted (shown once — store it now):\n`);
       console.log(`  ${bold(token)}\n`);
       console.log(
@@ -24,11 +26,22 @@ export async function runTokenVerb(sub: string): Promise<void> {
           `  set REPOYETI_TOKEN=${token} for remote CLI/MCP, or send Authorization: Bearer ${token}`,
         ),
       );
+      // The daemon says where the durable copy went. "config" means the OS keychain refused the
+      // write, so the token sits in config.json (owner-only permissions) — the documented degraded
+      // mode, but the owner should know the file is now sensitive.
+      if (store === "config") {
+        console.log(
+          dim("  note: the OS keychain was unavailable; the token is stored in config.json (owner-only permissions)."),
+        );
+      }
       return;
     }
     if (sub === "revoke") {
-      await del<{ ok: boolean }>("/api/auth/token");
+      const r = await del<{ ok: boolean; durable?: boolean; keychainCleared?: boolean; warning?: string }>(
+        "/api/auth/token",
+      );
       console.log(`${green("✓")} API token revoked (Bearer auth disabled; OIDC-only).`);
+      if (r.warning) console.log(dim(`  note: ${r.warning}`));
       return;
     }
     // show / no sub

@@ -33,6 +33,20 @@ All notable changes to RepoYeti are documented here. The format is based on
   (`bun run dev`) or an explicit `REPOYETI_DEV_ORIGINS`. Non-browser clients send no `Origin` and
   are unaffected. The existing tests covered a cross-site origin and the daemon's own; the
   foreign-local-port case is now a regression test.
+- **Revoking the API token now survives a restart, and minting one reports where it really went.**
+  `DELETE /api/auth/token` and "sign out everywhere" cleared the in-memory token and answered `ok`,
+  but the keychain delete underneath was best-effort and its failure was swallowed: on a locked or
+  denied credential store the durable copy stayed put, and the next daemon boot hydrated the
+  revoked token straight back. Mint had the mirror-image gap: it ignored whether the keychain
+  accepted the new token, so it could print a token that died with the process while the old one
+  lived on. Neither route ever saved the config, so on a keychain-less host a mint was not
+  durable until some unrelated setting happened to be saved. Both routes now change live access
+  first, keep the credential store's answer instead of assuming it, and save the config: a refused
+  delete leaves a persisted `apiTokenRevoked` tombstone that stops hydration from loading that slot
+  and makes each boot retry the delete; a refused write falls back to the owner-only config file.
+  The responses say what happened (`durable`, `keychainCleared`, `store`), and `repoyeti token`
+  prints the note. Covered by regression tests with an injected failing store, including the
+  simulated restart.
 
 ### Added
 

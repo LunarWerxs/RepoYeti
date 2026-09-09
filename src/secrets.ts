@@ -28,12 +28,12 @@ const disabled = (): boolean => process.env.REPOYETI_NO_KEYCHAIN === "1";
  * box with no OS secret service (CI) can still exercise the full set/get/delete + legacy-rehome
  * logic — the OS path stays covered by the keychain-gated tests on a host that has one.
  */
-interface RawStore {
+export interface SecretStore {
   get(svc: string, name: string): Promise<string | null | undefined>;
   set(svc: string, name: string, value: string): Promise<void>;
   delete(svc: string, name: string): Promise<void>;
 }
-const osStore: RawStore = {
+const osStore: SecretStore = {
   get: (svc, name) => secrets.get({ service: svc, name }),
   set: async (svc, name, value) => {
     await secrets.set({ service: svc, name, value });
@@ -43,16 +43,41 @@ const osStore: RawStore = {
   },
 };
 const memMap = new Map<string, string>();
-const memStore: RawStore = {
+const memStore: SecretStore = {
   get: async (svc, name) => memMap.get(`${svc}\0${name}`) ?? null,
   set: async (svc, name, value) => void memMap.set(`${svc}\0${name}`, value),
   delete: async (svc, name) => void memMap.delete(`${svc}\0${name}`),
 };
-const store = (): RawStore => (process.env.REPOYETI_KEYCHAIN_MEMORY === "1" ? memStore : osStore);
+/** Test-only override of individual store operations (see setSecretStoreForTests). */
+let storeOverride: Partial<SecretStore> | null = null;
+const store = (): SecretStore => {
+  const base = process.env.REPOYETI_KEYCHAIN_MEMORY === "1" ? memStore : osStore;
+  return storeOverride ? { ...base, ...storeOverride } : base;
+};
 
 let warned = false;
 // null = untested yet, true/false = last observed availability.
 let available: boolean | null = null;
+
+/**
+ * TEST SEAM: make individual credential-store operations fail (or behave arbitrarily) on top of
+ * the active store, so the failure paths the callers must survive — a keychain that refuses a
+ * delete, a write that is denied — can be exercised without a broken OS credential service. The
+ * audit (item 5) traced exactly these paths: a swallowed delete failure let a revoked API token
+ * come back at the next boot, and a swallowed write failure reported a replacement that never
+ * persisted. Returns a restore function that also puts the availability flags back, because a
+ * failure recorded here flips this module into its plaintext-fallback posture for the rest of the
+ * process and the next test file must not inherit that.
+ */
+export function setSecretStoreForTests(override: Partial<SecretStore> | null): () => void {
+  const prev = { storeOverride, warned, available };
+  storeOverride = override;
+  return () => {
+    storeOverride = prev.storeOverride;
+    warned = prev.warned;
+    available = prev.available;
+  };
+}
 
 function warnOnce(op: string, e: unknown): void {
   available = false;
@@ -133,14 +158,27 @@ export async function setSecret(name: string, value: string): Promise<boolean> {
   }
 }
 
-/** Remove a secret. Best-effort: a failure is warned once and otherwise ignored. */
-export async function deleteSecret(name: string): Promise<void> {
-  if (disabled()) return;
+/**
+ * Remove a secret. Returns true when no durable copy remains in the credential store — the store
+ * confirmed the delete, or there is no store in play (REPOYETI_NO_KEYCHAIN, where secrets only
+ * ever lived in config.json). Returns false, with the one-time warning, when the store refused.
+ *
+ * The boolean is load-bearing for revocation, not decoration. This used to return void and swallow
+ * the failure, and every caller read that silence as success: "revoke API token" cleared the
+ * in-memory copy, answered `ok`, and the next daemon boot hydrated the same token straight back
+ * out of the keychain (audit item 5). A caller that cannot tell a refused delete from a completed
+ * one cannot promise durability; now it can, and src/api-token.ts records a tombstone when this
+ * says no.
+ */
+export async function deleteSecret(name: string): Promise<boolean> {
+  if (disabled()) return true;
   try {
     await store().delete(service(), name);
     available = true;
+    return true;
   } catch (e) {
     warnOnce("delete", e);
+    return false;
   }
 }
 

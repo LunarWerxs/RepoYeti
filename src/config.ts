@@ -536,6 +536,18 @@ export interface RepoYetiConfig {
    */
   apiToken?: string;
   /**
+   * Revocation tombstone for `apiToken`. Set by src/api-token.ts when the owner revoked the token
+   * but the credential store REFUSED to delete the durable copy (a locked or denied keychain).
+   * Without it a refused delete was silent, and the next boot's hydration loaded the revoked token
+   * straight back out of the keychain — "revoke" and "sign out everywhere" both returned `ok` on a
+   * credential that came back at restart (audit item 5). While this is set, hydration never reads
+   * the keychain slot; each boot retries the delete and clears the flag once the store confirms.
+   * A successful mint clears it too (the keychain then holds the NEW token). Not a secret, so it is
+   * written to config.json as-is — that is the whole point: the durable record has to live
+   * somewhere the failing store cannot veto.
+   */
+  apiTokenRevoked?: true;
+  /**
    * Agent Safety Rail (default ON): every MUTATING MCP tool call (git_commit, create_branch,
    * git_checkout, git_push, git_pull, git_fetch — the readOnly:false tools in src/mcp/tools.ts)
    * blocks pending a one-tap human approve/deny in the dashboard, over EITHER MCP transport
@@ -1097,12 +1109,26 @@ async function hydrateTunnelToken(cfg: RepoYetiConfig): Promise<boolean> {
 
 /**
  * Hydrate/migrate the optional API Bearer token (off by default). Mirrors the tunnel-token
- * hydration: a legacy plaintext token on disk gets moved into the keychain (then stripped),
- * else hydrate from it.
+ * hydration: a plaintext token on disk (legacy, or a mint that fell back to the config file
+ * because the keychain refused the write) gets moved into the keychain (then stripped), else
+ * hydrate from the keychain — UNLESS the revocation tombstone is set (see `apiTokenRevoked`), in
+ * which case the keychain slot is a revoked credential the store refused to delete: never load it,
+ * retry the delete, and drop the tombstone only once the store confirms. Returns true when the
+ * caller must re-save the config (a migration happened or the tombstone cleared).
  */
 async function hydrateApiToken(cfg: RepoYetiConfig): Promise<boolean> {
   if (cfg.apiToken) {
-    return await setSecret(API_TOKEN, cfg.apiToken);
+    const stored = await setSecret(API_TOKEN, cfg.apiToken);
+    // A plaintext token on disk is by definition the live one (mint wrote it there), so a
+    // successful migration also retires any tombstone left by an earlier failed revoke — the
+    // keychain slot now holds the current token, not the revoked one.
+    if (stored && cfg.apiTokenRevoked) delete cfg.apiTokenRevoked;
+    return stored;
+  }
+  if (cfg.apiTokenRevoked) {
+    if (!(await deleteSecret(API_TOKEN))) return false; // still refused: keep the tombstone, load nothing
+    delete cfg.apiTokenRevoked;
+    return true;
   }
   const t = await getSecret(API_TOKEN);
   if (t) cfg.apiToken = t;

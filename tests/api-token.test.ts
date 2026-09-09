@@ -167,10 +167,12 @@ test("mint returns a token, flips status configured=true, revoke flips it back",
   });
   expect(passes.status).not.toBe(401);
 
-  // Revoke: clears the token; status flips back to false.
+  // Revoke: clears the token; status flips back to false. With the in-memory store the delete is
+  // confirmed, so the response reports a clean, durable revocation (the failure shapes live in
+  // tests/api-token-durability.test.ts).
   const revoked = await app.request("/api/auth/token", { method: "DELETE", headers: auth });
   expect(revoked.status).toBe(200);
-  expect(await revoked.json()).toEqual({ ok: true });
+  expect(await revoked.json()).toEqual({ ok: true, durable: true, keychainCleared: true });
   expect(cfg.apiToken).toBeUndefined();
 
   const final = await app.request("/api/auth/token", { headers: auth });
