@@ -20,6 +20,11 @@ export interface UpdateStatus {
   canApply: boolean;
   checkedAt: number;
   reason: string | null;
+  /** Source checkouts only (updater-engine.mjs): the remote branch an apply would pull. */
+  remoteBranch?: string | null;
+  /** Source checkouts only: a newer remote commit exists but HEAD is not its ancestor, so a
+   *  fast-forward cannot apply it; `canApply` is false and `reason` explains. */
+  diverged?: boolean;
 }
 
 export interface UpdateApplyResult {
