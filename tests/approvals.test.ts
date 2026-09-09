@@ -26,6 +26,9 @@ import {
   autoApproveIsEnabled,
   APPROVAL_TIMEOUT_MIN_S,
   APPROVAL_TIMEOUT_MAX_S,
+  boundedArgs,
+  pendingRequest,
+  APPROVAL_ARG_VALUE_MAX,
 } from "../src/approvals.ts";
 import { contextFor } from "../src/mcp/core.ts";
 import { serviceBackend } from "../src/mcp/adapter-service.ts";
@@ -251,4 +254,63 @@ test("a read-only tool (repo_status) is never gated, even while the gate is on",
   const result = await tool.run({ repo: id });
   expect((result as { id: string }).id).toBe(id);
   expect(listPending().length).toBe(0);
+});
+
+// ── the full request behind an approval (audit item 13) ──────────────────────────────
+// The 80-character summary is what the card shows; approving on it alone is not informed
+// approval when the value that matters (a branch name, a commit message) differs past the prefix.
+// The entry now keeps the bounded, redacted request the tool will actually run with.
+
+test("boundedArgs keeps arguments whole up to the ceilings, hides secret-looking keys, and says when it clipped", () => {
+  const long = "x".repeat(APPROVAL_ARG_VALUE_MAX + 50);
+  const view = boundedArgs({
+    repo: "shown-separately",
+    message: "feat: the whole message, well past eighty characters, which the summary would have cut off",
+    branch: "release/2026-09-08-the-long-branch-name",
+    apiToken: "sekrit",
+    nested: { paths: ["a", "b"] },
+    huge: long,
+  });
+  expect(view.args.repo).toBeUndefined();
+  expect(view.args.message).toBe("feat: the whole message, well past eighty characters, which the summary would have cut off");
+  expect(view.args.branch).toBe("release/2026-09-08-the-long-branch-name");
+  expect(view.args.apiToken).toBe("[hidden]");
+  expect(view.hidden).toEqual(["apiToken"]);
+  expect(view.args.nested).toEqual({ paths: ["a", "b"] }); // small structured values stay structured
+  expect((view.args.huge as string).length).toBe(APPROVAL_ARG_VALUE_MAX);
+  expect(view.truncated).toBe(true);
+
+  const small = boundedArgs({ message: "fix: x" });
+  expect(small.truncated).toBe(false);
+  expect(small.hidden).toEqual([]);
+});
+
+test("boundedArgs stops adding arguments past the whole-request ceiling, in argument order", () => {
+  const args: Record<string, unknown> = {};
+  for (let i = 0; i < 20; i++) args[`k${i}`] = "y".repeat(APPROVAL_ARG_VALUE_MAX);
+  const view = boundedArgs(args);
+  expect(Object.keys(view.args).length).toBeLessThan(20);
+  expect(Object.keys(view.args)[0]).toBe("k0");
+  expect(view.truncated).toBe(true);
+});
+
+test("requestApproval stores the request; pendingRequest serves it until the call is settled", () => {
+  setApprovalGateEnabled(true);
+  const message = `chore: ${"detail ".repeat(40)}`.trim(); // ~290 chars: past the summary, under the ceiling
+  const { id } = requestApproval("git_commit", "my-repo", summarizeArgs({ message }), 5_000, {
+    repo: "my-repo",
+    message,
+    ghToken: "never-shown",
+  });
+  const full = pendingRequest(id);
+  expect(full).not.toBeNull();
+  expect(full!.argsSummary.length).toBeLessThan(90); // the summary is still the clipped one-liner
+  expect(full!.request.tool).toBe("git_commit");
+  expect(full!.request.args.message).toBe(message); // the whole value, not a prefix
+  expect(full!.request.args.ghToken).toBe("[hidden]");
+  expect(full!.request.hidden).toEqual(["ghToken"]);
+  // The list endpoint's shape is unchanged: no request blob rides along with every card.
+  expect((listPending()[0] as unknown as Record<string, unknown>).request).toBeUndefined();
+  approve(id);
+  expect(pendingRequest(id)).toBeNull();
 });

@@ -288,6 +288,7 @@ export const OWNER_ONLY: readonly string[] = [
   // agent surface + its safety rail
   "POST /api/mcp",
   "GET /api/approvals",
+  "GET /api/approvals/:id",
   "POST /api/approvals/:id/approve",
   "POST /api/approvals/:id/deny",
   // cloud settings sync

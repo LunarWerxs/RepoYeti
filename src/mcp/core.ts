@@ -48,7 +48,9 @@ export function contextFor(backend: McpBackend): McpServerContext {
     run: async (args) => {
       if (t.readOnly || !approvalGateEnabled()) return t.run(backend, args);
 
-      const { result } = requestApproval(t.name, repoArg(args), summarizeArgs(args));
+      // `args` is the exact object handed to `t.run` below once approved, so the stored request the
+      // owner inspects (GET /api/approvals/:id) is the request that executes.
+      const { result } = requestApproval(t.name, repoArg(args), summarizeArgs(args), undefined, args);
       const outcome = await result;
       if (outcome === "denied") throw new Error(`${t.name} was denied by owner`);
       if (outcome === "timeout") throw new Error(`${t.name} approval timed out`);

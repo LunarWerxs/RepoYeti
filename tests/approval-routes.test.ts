@@ -94,3 +94,35 @@ test("PUT /api/settings toggles mcpApprovalGate and clamps mcpApprovalTimeoutSec
   expect(body.mcpApprovalGate).toBe(false);
   expect(body.mcpApprovalTimeoutSecs).toBe(10); // clamped to the 10s floor
 });
+
+// ── GET /api/approvals/:id: the full request on demand (audit item 13) ───────────────
+test("GET /api/approvals/:id returns the full bounded request, and 404s once the call is settled", async () => {
+  const app = createApp(localCfg());
+  const message = `feat: ${"a long explanation ".repeat(12)}`.trim(); // well past the 80-char summary
+  const { id } = requestApproval("git_commit", "my-repo", `message: ${message.slice(0, 77)}...`, 5_000, {
+    repo: "my-repo",
+    message,
+    authorization: "Bearer nope",
+  });
+
+  const res = await app.request(`/api/approvals/${id}`);
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as {
+    id: string;
+    tool: string;
+    repo: string | null;
+    request: { tool: string; args: Record<string, unknown>; truncated: boolean; hidden: string[] };
+  };
+  expect(body.id).toBe(id);
+  expect(body.tool).toBe("git_commit");
+  expect(body.repo).toBe("my-repo");
+  expect(body.request.args.message).toBe(message);
+  expect(body.request.args.authorization).toBe("[hidden]");
+  expect(body.request.hidden).toEqual(["authorization"]);
+  expect(body.request.truncated).toBe(false);
+  expect(JSON.stringify(body)).not.toContain("Bearer nope");
+
+  expect((await app.request(`/api/approvals/${id}/approve`, { method: "POST" })).status).toBe(200);
+  expect((await app.request(`/api/approvals/${id}`)).status).toBe(404);
+  expect((await app.request("/api/approvals/never-existed")).status).toBe(404);
+});

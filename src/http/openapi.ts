@@ -374,6 +374,7 @@ export const META: Record<string, RouteMeta> = {
 
   // ── ⭐ Agent Safety Rail — pending MCP mutating-call approvals ──────────────────────
   "GET /api/approvals": { summary: "List MCP tool calls currently pending owner approve/deny.", tags: ["mcp"] },
+  "GET /api/approvals/:id": { summary: "One pending MCP call with its full request (arguments bounded, secret-looking fields hidden).", tags: ["mcp"] },
   "POST /api/approvals/:id/approve": { summary: "Approve a pending MCP mutating tool call.", tags: ["mcp"] },
   "POST /api/approvals/:id/deny": { summary: "Deny a pending MCP mutating tool call.", tags: ["mcp"] },
 

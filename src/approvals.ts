@@ -105,7 +105,9 @@ export interface PendingApproval {
    *  not a resolved identity (the MCP backend resolves the real repo later). */
   repo: string | null;
   /** Human-readable one-line summary of the arguments (e.g. `message: "fix: …"`). Never the full
-   *  raw args blob — keeps the SSE payload small and avoids echoing anything sensitive verbatim. */
+   *  raw args blob — keeps the SSE payload small and avoids echoing anything sensitive verbatim.
+   *  The complete (bounded, secret-redacted) request is served on demand by GET /api/approvals/:id
+   *  (see `pendingRequest`), so the owner can read exactly what they are approving. */
   argsSummary: string;
   requestedAt: number;
   /** When the soonest armed auto-resolution fires (0 when neither auto-deny nor auto-approve is on,
@@ -116,7 +118,25 @@ export interface PendingApproval {
   autoAction: "approve" | "deny" | null;
 }
 
+/**
+ * The full request behind a pending approval, as the owner may inspect it: the tool name and its
+ * arguments, bounded and with secret-looking fields hidden. This is the request that WILL run if
+ * approved (the entry is created from the same `args` object the tool is later invoked with), so
+ * reading it is informed approval; the 80-character `argsSummary` is not (1.0 audit, item 13).
+ */
+export interface ApprovalRequestView {
+  tool: string;
+  /** Arguments as supplied, minus `repo` (shown separately). Strings and serialised values are
+   *  clipped at APPROVAL_ARG_VALUE_MAX characters; secret-looking keys hold "[hidden]". */
+  args: Record<string, unknown>;
+  /** True when anything was clipped or dropped for size — the view is then a prefix, not the whole. */
+  truncated: boolean;
+  /** Keys whose values were replaced by "[hidden]" (named so the owner knows a field exists). */
+  hidden: string[];
+}
+
 interface PendingEntry extends PendingApproval {
+  request: ApprovalRequestView;
   resolve: (outcome: ApprovalOutcome) => void;
   denyTimer?: ReturnType<typeof setTimeout>;
   approveTimer?: ReturnType<typeof setTimeout>;
@@ -129,7 +149,15 @@ const pending = new Map<string, PendingEntry>();
 export function listPending(): PendingApproval[] {
   return [...pending.values()]
     .sort((a, b) => a.requestedAt - b.requestedAt)
-    .map(({ resolve: _resolve, denyTimer: _d, approveTimer: _a, ...rest }) => rest);
+    .map(({ resolve: _resolve, denyTimer: _d, approveTimer: _a, request: _r, ...rest }) => rest);
+}
+
+/** One pending approval with its full bounded request, or null when `id` is not pending. */
+export function pendingRequest(id: string): (PendingApproval & { request: ApprovalRequestView }) | null {
+  const entry = pending.get(id);
+  if (!entry) return null;
+  const { resolve: _resolve, denyTimer: _d, approveTimer: _a, ...rest } = entry;
+  return rest;
 }
 
 /** Best-effort single-line summary of a tool's arguments for display — never dumps the raw
@@ -145,6 +173,53 @@ export function summarizeArgs(args: Record<string, unknown>): string {
   return parts.join(", ") || "(no arguments)";
 }
 
+/** Per-value and whole-request ceilings for the stored request view. A commit message or a
+ *  branch name is far below both; the ceilings exist so an agent cannot park megabytes in the
+ *  daemon's memory (or the owner's phone) by asking for approval. */
+export const APPROVAL_ARG_VALUE_MAX = 4_096;
+export const APPROVAL_ARGS_TOTAL_MAX = 32_768;
+/** Argument names whose values are never stored or shown: the owner needs to know the field is
+ *  there, never its bytes. Matches the MCP tools' own vocabulary and the obvious variants. */
+const HIDDEN_ARG = /token|secret|password|passphrase|credential|authorization|api[-_]?key/i;
+
+/**
+ * Bound and redact a tool's arguments for storage and display. Deterministic and pure; exported
+ * for tests. `repo` is omitted (it is shown separately as the card's repo label).
+ */
+export function boundedArgs(args: Record<string, unknown>): Omit<ApprovalRequestView, "tool"> {
+  const out: Record<string, unknown> = {};
+  const hidden: string[] = [];
+  let truncated = false;
+  let total = 0;
+  for (const [key, value] of Object.entries(args)) {
+    if (key === "repo" || value === undefined) continue;
+    let stored: unknown;
+    if (HIDDEN_ARG.test(key)) {
+      stored = "[hidden]";
+      hidden.push(key);
+    } else if (typeof value === "string") {
+      stored = value.length > APPROVAL_ARG_VALUE_MAX ? value.slice(0, APPROVAL_ARG_VALUE_MAX) : value;
+      if (stored !== value) truncated = true;
+    } else {
+      const json = JSON.stringify(value) ?? "null";
+      if (json.length > APPROVAL_ARG_VALUE_MAX) {
+        stored = json.slice(0, APPROVAL_ARG_VALUE_MAX);
+        truncated = true;
+      } else {
+        stored = value;
+      }
+    }
+    const cost = key.length + (typeof stored === "string" ? stored.length : (JSON.stringify(stored) ?? "").length);
+    if (total + cost > APPROVAL_ARGS_TOTAL_MAX) {
+      truncated = true;
+      break; // keep what fits, in argument order; the flag says the rest was dropped
+    }
+    total += cost;
+    out[key] = stored;
+  }
+  return { args: out, truncated, hidden };
+}
+
 /**
  * Register a mutating call awaiting human approval, broadcast `approval_pending`, and return a
  * promise that settles once approve()/deny() is called for `id` or `timeoutMs` elapses (auto-deny).
@@ -155,9 +230,13 @@ export function requestApproval(
   repo: string | null,
   argsSummary: string,
   timeoutMs?: number,
+  /** The tool's full arguments, stored bounded + redacted for GET /api/approvals/:id. Optional
+   *  only for callers that have no arguments to show (tests); the MCP gate always passes them. */
+  args: Record<string, unknown> = {},
 ): { id: string; result: Promise<ApprovalOutcome> } {
   const id = randomUUID();
   const requestedAt = Date.now();
+  const request: ApprovalRequestView = { tool, ...boundedArgs(args) };
 
   // Two independent, optional auto-resolution timers:
   //  · auto-DENY   — armed when enabled (or when an explicit `timeoutMs` override is passed, which
@@ -195,6 +274,7 @@ export function requestApproval(
       requestedAt,
       expiresAt,
       autoAction,
+      request,
       resolve: resolveOutcome,
       denyTimer,
       approveTimer,
