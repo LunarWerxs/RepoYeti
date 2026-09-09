@@ -72,8 +72,28 @@ All notable changes to RepoYeti are documented here. The format is based on
   request timeout bounded the time, not the bytes. Success and error bodies are now read through a
   bounded stream reader (4 MB), cancelled at the limit and reported as a short error. The update
   check's metadata documents get the same treatment (1 MB).
+- **Dependency advisories cleared where the fix exists within the declared ranges.** Hono moves
+  from 4.13.2 to 4.13.5 (query parameters read past a URL fragment, unbounded `parseBody()`
+  nesting, and the `toSSG()` path issue; only the first has a plausible path into this daemon, and
+  it needs a literal fragment to reach the runtime). Dashboard tooling: Vitest 4.1.11 and the
+  in-range transitive updates for nanoid, PostCSS, browserslist, baseline-browser-mapping and
+  brace-expansion, plus the `fast-uri` override from 3.1.5 to 3.1.6. brace-expansion deliberately
+  keeps its two majors (see the note in `web/package.json`): flattening them broke the PWA
+  precache once before. Both `bun audit` runs are clean. Everything but Hono is build-time or
+  test-time tooling.
 
 ### Fixed
+
+- **The auto-commit and sync-check timers can no longer double up.** Both loops carried the same
+  hand-rolled scheduling: a manual round checked the in-flight flag, but the timer's round set it
+  without checking, so a timer that fired while a manual round was still waiting on the AI or the
+  network started a second full pass over every repository (planning, status scans, fetches,
+  baselines and incident rows all duplicated; the per-repo queue still serialised the actual git
+  mutations, which is why it never lost data), and whichever round finished first cleared the
+  shared flag under the other. One small controller now owns both loops: at most one round in
+  flight, at most one timer armed, exactly one re-arm when a round ends, and disable or re-enable
+  mid-round handled. Tested against a controlled clock, including the timer-fires-during-a-manual-
+  round case that used to go wrong.
 
 - **"Create and push tag" pushes through the repo's selected GitHub account, and a failed push can
   be retried.** The tag push carried the identity's SSH options but not the HTTPS credential an

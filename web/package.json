@@ -59,7 +59,7 @@
   "//dompurify": "Pinned exact, and repeated in overrides so monaco-editor's transitive copy resolves to the same one. Keep both lines equal and at or above 3.4.13: 3.4.12 and below leave a detached subtree executable after an IN_PLACE hook removal (GHSA-55q2-fjhq-7xh7), and this app sanitises README and commit-message markdown from arbitrary cloned repos, so that path takes untrusted input by design.",
   "overrides": {
     "dompurify": "3.4.13",
-    "fast-uri": "3.1.5"
+    "fast-uri": "3.1.6"
   },
   "patchedDependencies": {
     "@formkit/auto-animate@0.8.4": "patches/@formkit%2Fauto-animate@0.8.4.patch",
