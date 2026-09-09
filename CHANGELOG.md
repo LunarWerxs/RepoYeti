@@ -120,6 +120,16 @@ All notable changes to RepoYeti are documented here. The format is based on
   shows "Stopping…" until the daemon confirms; and on SSE reconnect the dashboard asks the new
   `GET /api/scan` whether a scan is still running, settling the spinner if not, and leaving it
   alone when the question itself fails (an unknown server-side job is never marked stopped).
+- **A repo removed while the dashboard was loading no longer comes back, and a status that arrives
+  before its repo is listed is no longer lost.** The dashboard fetches the repository list and opens
+  the event stream at the same time (and again on every reconnect), and the daemon has no event
+  cursor. An event that arrived while the list request was in flight was applied to the OLD list:
+  a removal filtered it and the late snapshot put the repo straight back; a status for a repo the
+  old list did not have was dropped, so the phone stayed stale until another matching event
+  happened by. Repo-scoped events are now held while a list snapshot is in flight and replayed, in
+  order, the moment it lands (on the failure path too), and a status older than the one already
+  installed is never applied, so a late frame cannot move a card backwards. Covered by store tests
+  with a deferred list request and a fake stream, including the reconnect resync.
 
 - **"Create and push tag" pushes through the repo's selected GitHub account, and a failed push can
   be retried.** The tag push carried the identity's SSH options but not the HTTPS credential an

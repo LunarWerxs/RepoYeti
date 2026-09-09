@@ -696,6 +696,43 @@ export const useStore = defineStore("repoyeti", () => {
    */
   let loadAllInFlight: Promise<void> | null = null;
 
+  // ── snapshot / event ordering (1.0 audit, item 7) ──────────────────────────────────────────
+  // loadAll() and the SSE stream start together (AppShell), the daemon has no event cursor, and
+  // loadAll() is also the reconnect resync. Between "list requested" and "list installed" a
+  // repo-scoped event has nothing correct to apply to: a `repo_removed` filtered the OLD list and
+  // the late snapshot put the repo straight back; a `repo_state_changed` for a repo the old list
+  // did not have was dropped by patchRepo. Simply connecting after the GET is no better (an event
+  // between the GET and the stream opening is lost), so the stream stays open and repo-scoped
+  // events that arrive while a snapshot is in flight are HELD and replayed, in order, the moment
+  // the snapshot lands (on the failure path too, against whatever list is current). A held
+  // status older than what the snapshot installed is not applied (see handleRepoStateChanged).
+  let snapshotPending = false;
+  const heldEvents: Array<{ name: string; payload: unknown }> = [];
+  let liveEventCtx: SseEventCtx | null = null;
+
+  function replayHeldEvents(): void {
+    const events = heldEvents.splice(0);
+    const ctx = liveEventCtx;
+    if (!ctx) return; // disconnected meanwhile: the next connect re-hydrates from scratch anyway
+    for (const { name, payload } of events) {
+      try {
+        dispatchSseEvent(name, payload, ctx);
+      } catch {
+        /* one malformed held frame must not stop the rest */
+      }
+    }
+  }
+
+  /** The SSE frame gate: hold repo-scoped events while a list snapshot is in flight, dispatch
+   *  everything else (and everything, once the snapshot is installed) immediately. */
+  function routeSseEvent(name: string, payload: unknown, ctx: SseEventCtx): void {
+    if (snapshotPending && REPO_SCOPED_EVENTS.has(name)) {
+      heldEvents.push({ name, payload });
+      return;
+    }
+    dispatchSseEvent(name, payload, ctx);
+  }
+
   async function loadAllOnce(): Promise<void> {
     loading.value = true;
     const guest = isGuest.value;
@@ -703,9 +740,15 @@ export const useStore = defineStore("repoyeti", () => {
       // The repository list is the only payload required to paint the dashboard. Previously it
       // shared one Promise.all with every optional integration, so a slow GitHub CLI/cloud-sync
       // probe held the entire app on skeleton rows. Paint as soon as this request succeeds.
-      const nextRepos = await api.listRepos();
-      repos.value = nextRepos;
-      pruneRepoCaches(new Set(nextRepos.map((repo) => repo.id)));
+      snapshotPending = true;
+      try {
+        const nextRepos = await api.listRepos();
+        repos.value = nextRepos;
+        pruneRepoCaches(new Set(nextRepos.map((repo) => repo.id)));
+      } finally {
+        snapshotPending = false;
+        replayHeldEvents();
+      }
       loading.value = false;
 
       // Yield through Vue's queued render before starting the non-critical hydration burst. The
@@ -952,6 +995,7 @@ export const useStore = defineStore("repoyeti", () => {
       bumpHistoryRevision,
       isHistoryRelevantStatusChange,
     };
+    liveEventCtx = eventCtx;
     stopEventWatches = [
       watch(
         status,
@@ -985,7 +1029,7 @@ export const useStore = defineStore("repoyeti", () => {
       watch(data, (raw) => {
         if (!raw || !event.value) return;
         try {
-          dispatchSseEvent(event.value, JSON.parse(raw), eventCtx);
+          routeSseEvent(event.value, JSON.parse(raw), eventCtx);
         } catch {
           /* ignore malformed frame */
         }
@@ -998,6 +1042,8 @@ export const useStore = defineStore("repoyeti", () => {
     closeEventSource?.();
     closeEventSource = null;
     connected.value = false;
+    liveEventCtx = null;
+    heldEvents.length = 0; // nothing to replay them into; the next connect re-hydrates
   }
 
   return {
@@ -1414,6 +1460,18 @@ type SseEventCtx = Pick<
 function handleRepoStateChanged(payload: any, ctx: SseEventCtx): void {
   const previousStatus = ctx.getRepoStatus(payload.id);
   const nextStatus = (payload.status as Repo["status"] | undefined) ?? null;
+  // Never move a card backwards. A frame held during a list snapshot (see routeSseEvent), or one
+  // that simply arrived late, can describe an OLDER read than the status already installed;
+  // `updatedAt` is the daemon's own read time, so an older one is stale by definition.
+  if (
+    nextStatus &&
+    previousStatus &&
+    typeof nextStatus.updatedAt === "number" &&
+    typeof previousStatus.updatedAt === "number" &&
+    nextStatus.updatedAt < previousStatus.updatedAt
+  ) {
+    return;
+  }
   ctx.patchRepo(payload.id, { status: nextStatus });
   if (ctx.isHistoryRelevantStatusChange(previousStatus, nextStatus)) {
     ctx.bumpHistoryRevision(payload.id);
@@ -1728,6 +1786,22 @@ const SSE_EVENT_HANDLERS: Record<string, (payload: any, ctx: SseEventCtx) => voi
   scan_started: handleScanStarted,
   scan_progress: handleScanProgress,
 };
+
+/** Events whose effect depends on which repos the list currently holds. These are the ones the
+ *  store holds back while a list snapshot is in flight (routeSseEvent); notifications, settings,
+ *  approvals, scans and daemon status are applied live regardless. */
+const REPO_SCOPED_EVENTS = new Set([
+  "repo_state_changed",
+  "repo_added",
+  "repo_removed",
+  "repo_renamed",
+  "repo_identity_changed",
+  "repo_account_changed",
+  "repo_hidden_changed",
+  "repo_pinned_changed",
+  "repo_starred_changed",
+  "repo_auto_commit_changed",
+]);
 
 /** Dispatch one parsed SSE frame to its handler by event name. `scan_done`/`scan_cancelled`
  *  share one handler (it tells them apart from the name it's given), so it's not in the table. */
