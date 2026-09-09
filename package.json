@@ -1,6 +1,6 @@
 {
   "name": "repoyeti",
-  "version": "0.21.5",
+  "version": "1.0.0",
   "description": "System-wide remote git manager — a background daemon with a mobile dashboard.",
   "type": "module",
   "license": "PolyForm-Noncommercial-1.0.0",
