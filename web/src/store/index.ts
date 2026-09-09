@@ -1,11 +1,10 @@
 import { defineStore } from "pinia";
 import { ref, reactive, computed, watch, type Ref, type ComputedRef } from "vue";
 import { useEventSource } from "@vueuse/core";
-import { api, ApiError, type AccessMode, type TunnelStatus, type RelayStatus } from "../api";
+import { api, ApiError } from "../api";
 import type {
   ActionName,
   ActionResult,
-  ChangesStatDisplay,
   PendingApproval,
   Repo,
   CollaborationSnapshot,
@@ -13,9 +12,10 @@ import type {
   UpdateStatus,
 } from "../types";
 import { useSelfUpdate } from "@/lib/useSelfUpdate";
-import { armSelfHeal, disarmSelfHeal, rememberRelayHome } from "@/lib/relay-home";
+import { armSelfHeal, disarmSelfHeal } from "@/lib/relay-home";
 import { dismissViewerForRepo } from "@/lib/file-viewer";
 import { useRepoActions, type StatusKey } from "./repo";
+import { useRuntimeStatus, type RuntimeStatusStore } from "./runtime-status";
 import { useAi } from "./ai";
 import { useGitOps } from "./git-ops";
 import { useSources } from "./sources";
@@ -88,113 +88,53 @@ export const useStore = defineStore("repoyeti", () => {
     );
   }
 
-  // Public cloudflared tunnel URL (null until one exists) + whether a tunnel is up.
-  // Surfaced in the connection panel so the owner can open RepoYeti on their phone.
-  const tunnelUrl = ref<string | null>(null);
-  const tunnelActive = ref(false);
-  // Redacted named-tunnel config (stable hostname + token-presence flags; never the token).
-  // From /api/status, kept live via the `settings_changed` SSE event. Drives the Settings
-  // "Stable address" editor.
-  const tunnelConfig = ref<TunnelStatus>({
-    hostname: null,
-    hasToken: false,
-    tokenFromEnv: false,
-    named: false,
-  });
-  // Redacted relay config (opt-in flag, base URL, public id; never the keypair) plus the permanent
-  // forwarding URL it yields and whether the daemon's address is actually registered there. Drives
-  // the Settings "Permanent link" row. Same sourcing as tunnelConfig: /api/status, then SSE.
-  const relayConfig = ref<RelayStatus>({
-    // Match the daemon's effective default before /api/status finishes loading. Starting this at
-    // false made the Settings panel briefly—and sometimes permanently—select the temporary
-    // Cloudflare address when it mounted during startup, even though the daemon was hosted-relay on.
-    enabled: true,
-    url: null,
-    id: null,
-    defaultUrl: "https://app.repoyeti.com",
-  });
-  const relayUrl = ref<string | null>(null);
-  const relayAnnounced = ref(false);
-  const relayError = ref<string | null>(null);
-  // Access mode + local/remote auth state (see /api/auth/status).
-  const mode = ref<AccessMode>("local");
-  // Version of the DAEMON this dashboard is talking to — not of the bundle it is running. With
-  // auto-update on, the phone is often the only place the owner can see what actually got
-  // installed, so Settings shows this rather than a build-time constant baked into the SPA.
-  // Empty until the first /api/status lands; the guest projection carries it too.
-  const serverVersion = ref("");
-
-  // Owner setting: show added/removed line + char counts per file and per repo. Sourced
-  // from /api/status and kept live via the `settings_changed` SSE event. Off by default.
-  const diffStatsEnabled = ref(false);
-  // Work-tree appearance. Daemon settings (not localStorage) so they follow the owner across
-  // devices like diffStatsEnabled does — the defaults here match config.ts's absent-key ones.
-  const changesStatDisplay = ref<ChangesStatDisplay>("numbers");
-  const changesCharsEnabled = ref(true);
-  // Owner setting: allow editing/saving files over the remote tunnel (local edits always on).
-  const remoteEditing = ref(true);
-  const remoteBrowse = ref(true);
-  // Owner setting: changed files larger than this (bytes, either side) open as a compact
-  // patch in the viewer's Diff tab instead of a side-by-side load. From /api/status, kept
-  // live via `settings_changed`; 512 KB until status loads.
-  const diffPatchBytes = ref(512 * 1024);
-  // Owner setting: whether large files may use the compact patch at all (false = always
-  // side-by-side). From /api/status, kept live via `settings_changed`; on until status loads.
-  const diffPatchEnabled = ref(true);
-  // Owner setting: run a periodic background fetch so the dashboard can warn when a repo falls
-  // behind its remote. From /api/status, kept live via `settings_changed`; off until status loads.
-  const syncCheckEnabled = ref(false);
-  // How often that background check runs, in seconds. From /api/status; 300 until status loads.
-  const syncIntervalSecs = ref(300);
-  // Owner setting: after the check, auto fast-forward repos that can safely take new commits.
-  // From /api/status, kept live via `settings_changed`; off until status loads (opt-in).
-  const keepInSync = ref(false);
-  // Owner settings: the auto-commit timer (opt-in globally here + per-repo on each card). From
-  // /api/status, kept live via `settings_changed`. Off + built-in defaults until status loads.
-  const autoCommit = ref(false);
-  const autoCommitMode = ref<"interval" | "daily">("interval");
-  const autoCommitIntervalSecs = ref(900);
-  const autoCommitAt = ref("18:00");
-  const autoCommitPull = ref(true);
-  const autoCommitPush = ref(true);
-  const autoCommitAiFallback = ref<"skip" | "basic">("skip");
-  // Owner setting: silently auto-update + restart the app on a schedule (opt-in). From /api/status,
-  // kept live via `settings_changed`; off until status loads.
-  const autoUpdate = ref(false);
-  // Owner setting: announce an available update (a bell entry + a prompt offering to install).
-  // ON by default — it only tells you; installing still takes a click, or the opt-in `autoUpdate`
-  // above. From /api/status, kept live via `settings_changed`.
-  const updateNotify = ref(true);
-  // Owner setting: sweep the whole machine for repos on every app start. From /api/status,
-  // kept live via `settings_changed`; off until status loads (opt-in) — see AppShell.vue's
-  // scheduleIdle(() => autoScan && startScan()) on mount.
-  const autoScan = ref(false);
-  // Owner setting: open the app UI in a chromeless Chromium app window instead of a browser
-  // tab. From /api/status, kept live via `settings_changed`; off until status loads. The
-  // desktop launcher/tray follows the same preference (read off runtime.json, not this).
-  const portableMode = ref(false);
-  // Owner setting: hide the system-tray notification-area icon. From /api/status, kept live via
-  // `settings_changed`; off until status loads. The daemon keeps running in the background either
-  // way — the desktop launcher/tray follows the same preference (read off runtime.json, not this).
-  const hideTrayIcon = ref(false);
-  // ⭐ Agent Safety Rail: whether mutating MCP tool calls are gated behind owner approve/deny.
-  // From /api/status, kept live via `settings_changed`; on until status loads (safe default).
-  const mcpApprovalGate = ref(true);
-  // Auto-deny timeout for a pending approval, in seconds. From /api/status; 120 until loaded.
-  const mcpApprovalTimeoutSecs = ref(120);
-  // Whether a pending approval auto-denies at its timeout (default ON) / auto-approves at its own
-  // timeout (default OFF). From /api/status, kept live via `settings_changed`.
-  const mcpAutoDeny = ref(true);
-  const mcpAutoApprove = ref(false);
-  const mcpAutoApproveTimeoutSecs = ref(120);
-  // Owner setting: default "Open with…" external editor id (null = auto-pick the first installed).
-  // From /api/status, kept live via `settings_changed`. The catalogue + availability come from a
-  // separate GET /api/editors (loaded lazily by the file viewer / Settings).
-  const defaultEditor = ref<string | null>(null);
-
-  // Min query length before the changed-files "search content" toggle greps. Server-owned
-  // (from /api/status) so the UI gate never drifts from the daemon's; 3 until status loads.
-  const contentSearchMin = ref(3);
+  // Every daemon-owned runtime field, and the one table that says how each is filled from
+  // GET /api/status (a snapshot: absent means "reset to the daemon's default") and from the
+  // `settings_changed` / `daemon_status` broadcasts (patches: absent means "leave it alone").
+  // Kept out of this file entirely so adding a setting is one table entry rather than four
+  // coordinated edits in four distant blocks. See store/runtime-status.ts.
+  const runtime = useRuntimeStatus();
+  const {
+    tunnelUrl,
+    tunnelActive,
+    tunnelConfig,
+    relayConfig,
+    relayUrl,
+    relayAnnounced,
+    relayError,
+    mode,
+    serverVersion,
+    diffStatsEnabled,
+    changesStatDisplay,
+    changesCharsEnabled,
+    remoteEditing,
+    remoteBrowse,
+    diffPatchBytes,
+    diffPatchEnabled,
+    syncCheckEnabled,
+    syncIntervalSecs,
+    keepInSync,
+    autoCommit,
+    autoCommitMode,
+    autoCommitIntervalSecs,
+    autoCommitAt,
+    autoCommitPull,
+    autoCommitPush,
+    autoCommitAiFallback,
+    autoUpdate,
+    updateNotify,
+    autoScan,
+    portableMode,
+    hideTrayIcon,
+    mcpApprovalGate,
+    mcpApprovalTimeoutSecs,
+    mcpAutoDeny,
+    mcpAutoApprove,
+    mcpAutoApproveTimeoutSecs,
+    defaultEditor,
+    contentSearchMin,
+    loreServersEnabled,
+  } = runtime;
 
   // Live scan lifecycle, driven entirely by the scan_* SSE events (see connect()) and by
   // sources.ts's startScan()/cancelScan().
@@ -414,7 +354,6 @@ export const useStore = defineStore("repoyeti", () => {
   const {
     roots,
     servers,
-    loreServersEnabled,
     buzzEnabled,
     buzzCommunities,
     fetchingAll,
@@ -444,6 +383,7 @@ export const useStore = defineStore("repoyeti", () => {
     resetRepoOrder,
   } = useSources(
     repos,
+    loreServersEnabled,
     scanning,
     scanFound,
     scanNew,
@@ -800,67 +740,11 @@ export const useStore = defineStore("repoyeti", () => {
     return request;
   }
 
-  type StatusResponse = Awaited<ReturnType<typeof api.status>>;
-
-  // Connection/tunnel/display half of loadStatus's fields — split out purely to keep loadStatus
-  // itself under the complexity gate; same assignments, same fallbacks, same order.
-  function applyConnectionStatus(s: StatusResponse): void {
-    serverVersion.value = s.version ?? "";
-    mode.value = s.mode;
-    tunnelActive.value = s.tunnelActive;
-    tunnelUrl.value = s.tunnelUrl;
-    if (s.tunnel) tunnelConfig.value = s.tunnel;
-    if (s.relay) relayConfig.value = s.relay;
-    relayUrl.value = s.relayUrl ?? null;
-    relayAnnounced.value = s.relayAnnounced === true;
-    relayError.value = s.relayError ?? null;
-    rememberRelayHome(s.relayUrl, s.relayAnnounced === true);
-    diffStatsEnabled.value = s.diffStats;
-    changesStatDisplay.value = s.changesStatDisplay ?? "numbers";
-    changesCharsEnabled.value = s.changesChars ?? true;
-    remoteEditing.value = s.remoteEditing;
-    remoteBrowse.value = s.remoteBrowse !== false;
-    diffPatchBytes.value = s.diffPatchBytes ?? 512 * 1024;
-    diffPatchEnabled.value = s.diffPatchEnabled ?? true;
-  }
-
-  // Sync/auto-commit/MCP-approval half of loadStatus's fields (see applyConnectionStatus above).
-  function applyAutoCommitStatus(s: StatusResponse): void {
-    syncCheckEnabled.value = s.syncCheck ?? false;
-    syncIntervalSecs.value = s.syncIntervalSecs ?? 300;
-    keepInSync.value = s.keepInSync ?? false;
-    autoCommit.value = s.autoCommit ?? false;
-    autoCommitMode.value = s.autoCommitMode ?? "interval";
-    autoCommitIntervalSecs.value = s.autoCommitIntervalSecs ?? 900;
-    autoCommitAt.value = s.autoCommitAt ?? "18:00";
-    autoCommitPull.value = s.autoCommitPull ?? true;
-    autoCommitPush.value = s.autoCommitPush ?? true;
-    autoCommitAiFallback.value = s.autoCommitAiFallback ?? "skip";
-    autoUpdate.value = s.autoUpdate ?? false;
-    updateNotify.value = s.updateNotify ?? true;
-    autoScan.value = s.autoScan ?? false;
-    loreServersEnabled.value = s.loreServersEnabled ?? true;
-    portableMode.value = s.portableMode ?? false;
-    hideTrayIcon.value = s.hideTrayIcon ?? false;
-    mcpApprovalGate.value = s.mcpApprovalGate ?? true;
-    mcpApprovalTimeoutSecs.value = s.mcpApprovalTimeoutSecs ?? 120;
-    mcpAutoDeny.value = s.mcpAutoDeny ?? true;
-    mcpAutoApprove.value = s.mcpAutoApprove ?? false;
-    mcpAutoApproveTimeoutSecs.value = s.mcpAutoApproveTimeoutSecs ?? 120;
-    defaultEditor.value = s.defaultEditor ?? null;
-    contentSearchMin.value = s.minContentSearch ?? 3;
-    // Dead AI keys the daemon found at boot — surface them now (deduped per session in
-    // notifyAiKeyInvalid), so a dashboard opened AFTER boot still sees them, not only one that
-    // was connected for the one-shot SSE broadcast.
-    for (const k of s.aiKeyInvalid ?? []) notifyAiKeyInvalid(k.label);
-  }
-
-  /** Fetch runtime status (access mode + the remote-access tunnel URL, if any). Best-effort. */
+  /** Fetch runtime status (access mode + the remote-access tunnel URL, if any). Best-effort.
+   *  Every field it installs, and what an absent one means, is in store/runtime-status.ts. */
   async function loadStatus(): Promise<void> {
     try {
-      const s = await api.status();
-      applyConnectionStatus(s);
-      applyAutoCommitStatus(s);
+      runtime.applySnapshot(await api.status(), { notifyAiKeyInvalid });
     } catch {
       /* status is optional — leave whatever we have */
     }
@@ -945,42 +829,7 @@ export const useStore = defineStore("repoyeti", () => {
       collaborationSnapshots,
       autoUpdateApplying,
       autoUpdateRestarting,
-      tunnelUrl,
-      tunnelActive,
-      tunnelConfig,
-      relayUrl,
-      relayAnnounced,
-      relayError,
-      relayConfig,
-      diffStatsEnabled,
-      changesStatDisplay,
-      changesCharsEnabled,
-      remoteEditing,
-      remoteBrowse,
-      diffPatchBytes,
-      diffPatchEnabled,
-      syncCheckEnabled,
-      syncIntervalSecs,
-      keepInSync,
-      autoCommit,
-      autoUpdate,
-      updateNotify,
-      autoCommitMode,
-      autoCommitIntervalSecs,
-      autoCommitAt,
-      autoCommitPull,
-      autoCommitPush,
-      autoCommitAiFallback,
-      autoScan,
-      loreServersEnabled,
-      portableMode,
-      hideTrayIcon,
-      mcpApprovalGate,
-      mcpApprovalTimeoutSecs,
-      mcpAutoDeny,
-      mcpAutoApprove,
-      mcpAutoApproveTimeoutSecs,
-      defaultEditor,
+      runtime,
       editorsLoaded,
       scanning,
       scanFound,
@@ -1406,42 +1255,10 @@ type SseEventCtx = Pick<
     collaborationSnapshots: Ref<CollaborationSnapshot[]>;
     autoUpdateApplying: Ref<boolean>;
     autoUpdateRestarting: Ref<boolean>;
-    tunnelUrl: Ref<string | null>;
-    tunnelActive: Ref<boolean>;
-    tunnelConfig: Ref<TunnelStatus>;
-    relayUrl: Ref<string | null>;
-    relayAnnounced: Ref<boolean>;
-    relayError: Ref<string | null>;
-    relayConfig: Ref<RelayStatus>;
-    diffStatsEnabled: Ref<boolean>;
-    changesStatDisplay: Ref<ChangesStatDisplay>;
-    changesCharsEnabled: Ref<boolean>;
-    remoteEditing: Ref<boolean>;
-    remoteBrowse: Ref<boolean>;
-    diffPatchBytes: Ref<number>;
-    diffPatchEnabled: Ref<boolean>;
-    syncCheckEnabled: Ref<boolean>;
-    syncIntervalSecs: Ref<number>;
-    keepInSync: Ref<boolean>;
-    autoCommit: Ref<boolean>;
-    autoUpdate: Ref<boolean>;
-    updateNotify: Ref<boolean>;
-    autoCommitMode: Ref<"interval" | "daily">;
-    autoCommitIntervalSecs: Ref<number>;
-    autoCommitAt: Ref<string>;
-    autoCommitPull: Ref<boolean>;
-    autoCommitPush: Ref<boolean>;
-    autoCommitAiFallback: Ref<"skip" | "basic">;
-    autoScan: Ref<boolean>;
-    loreServersEnabled: Ref<boolean>;
-    portableMode: Ref<boolean>;
-    hideTrayIcon: Ref<boolean>;
-    mcpApprovalGate: Ref<boolean>;
-    mcpApprovalTimeoutSecs: Ref<number>;
-    mcpAutoDeny: Ref<boolean>;
-    mcpAutoApprove: Ref<boolean>;
-    mcpAutoApproveTimeoutSecs: Ref<number>;
-    defaultEditor: Ref<string | null>;
+    /** The daemon-owned runtime fields and their one synchroniser (store/runtime-status.ts).
+     *  Handlers ask IT to apply a patch rather than each reaching into forty refs. */
+    runtime: RuntimeStatusStore;
+    /** Still here because handleSettingsChanged has to tell it whether a refresh is worth it. */
     editorsLoaded: Ref<boolean>;
     scanning: Ref<boolean>;
     scanFound: Ref<number>;
@@ -1604,99 +1421,22 @@ function handleAutoUpdateRestarting(_payload: any, ctx: SseEventCtx): void {
   ctx.autoUpdateRestarting.value = true;
 }
 
-function handleDaemonStatus(payload: any, ctx: SseEventCtx): void {
-  // daemon_status is a PATCH, not a snapshot. The relay announces after the tunnel comes
-  // up and emits only relay fields; treating an absent tunnelUrl as null erased the healthy
-  // quick-tunnel URL and left the UI spinning forever.
-  if (payload.tunnelUrl !== undefined) {
-    ctx.tunnelUrl.value = typeof payload.tunnelUrl === "string" ? payload.tunnelUrl : null;
-  }
-  if (typeof payload.tunnelActive === "boolean") ctx.tunnelActive.value = payload.tunnelActive;
-  // A tunnel that came up or went away re-announces (or invalidates) the permanent link,
-  // so the relay's registered state rides the same event rather than needing a poll.
-  if (payload.relayUrl !== undefined) ctx.relayUrl.value = (payload.relayUrl as string | null) ?? null;
-  if (typeof payload.relayAnnounced === "boolean") ctx.relayAnnounced.value = payload.relayAnnounced;
-  rememberRelayHome(ctx.relayUrl.value, ctx.relayAnnounced.value);
-  if (payload.relayError !== undefined) {
-    ctx.relayError.value = typeof payload.relayError === "string" ? payload.relayError : null;
-  }
-  if (payload.relay) ctx.relayConfig.value = payload.relay as RelayStatus;
+/**
+ * `daemon_status` and `settings_changed` are both PATCHES, and which fields each carries — plus
+ * what a value has to look like to be believed — lives in store/runtime-status.ts's one table.
+ * These used to be seven functions here, each re-stating a type check the snapshot path stated
+ * differently a hundred lines away.
+ */
+function handleDaemonStatus(payload: unknown, ctx: SseEventCtx): void {
+  ctx.runtime.applyDaemonStatus(payload);
 }
 
-function applyDiffSettings(payload: any, ctx: SseEventCtx): void {
-  if (typeof payload.diffStats === "boolean") ctx.diffStatsEnabled.value = payload.diffStats;
-  if (payload.changesStatDisplay === "numbers" || payload.changesStatDisplay === "bars") {
-    ctx.changesStatDisplay.value = payload.changesStatDisplay;
-  }
-  if (typeof payload.changesChars === "boolean") ctx.changesCharsEnabled.value = payload.changesChars;
-  if (typeof payload.remoteEditing === "boolean") ctx.remoteEditing.value = payload.remoteEditing;
-  if (typeof payload.remoteBrowse === "boolean") ctx.remoteBrowse.value = payload.remoteBrowse;
-  if (typeof payload.diffPatchBytes === "number") ctx.diffPatchBytes.value = payload.diffPatchBytes;
-  if (typeof payload.diffPatchEnabled === "boolean") ctx.diffPatchEnabled.value = payload.diffPatchEnabled;
-}
-
-function applySyncSettings(payload: any, ctx: SseEventCtx): void {
-  if (typeof payload.syncCheck === "boolean") ctx.syncCheckEnabled.value = payload.syncCheck;
-  if (typeof payload.syncIntervalSecs === "number") ctx.syncIntervalSecs.value = payload.syncIntervalSecs;
-  if (typeof payload.keepInSync === "boolean") ctx.keepInSync.value = payload.keepInSync;
-  // The daemon applied a pulled cloud-sync doc (possibly from another device) — re-fetch
-  // status and re-apply the synced appearance (loadSyncStatus applies it internally).
-  if (payload.cloudSync) void ctx.loadSyncStatus();
-}
-
-function applyAutoCommitSettings(payload: any, ctx: SseEventCtx): void {
-  if (typeof payload.autoCommit === "boolean") ctx.autoCommit.value = payload.autoCommit;
-  if (payload.autoCommitMode === "interval" || payload.autoCommitMode === "daily")
-    ctx.autoCommitMode.value = payload.autoCommitMode;
-  if (typeof payload.autoCommitIntervalSecs === "number")
-    ctx.autoCommitIntervalSecs.value = payload.autoCommitIntervalSecs;
-  if (typeof payload.autoCommitAt === "string") ctx.autoCommitAt.value = payload.autoCommitAt;
-  if (typeof payload.autoCommitPull === "boolean") ctx.autoCommitPull.value = payload.autoCommitPull;
-  if (typeof payload.autoCommitPush === "boolean") ctx.autoCommitPush.value = payload.autoCommitPush;
-  if (payload.autoCommitAiFallback === "skip" || payload.autoCommitAiFallback === "basic")
-    ctx.autoCommitAiFallback.value = payload.autoCommitAiFallback;
-}
-
-function applyUpdateSettings(payload: any, ctx: SseEventCtx): void {
-  if (typeof payload.autoUpdate === "boolean") ctx.autoUpdate.value = payload.autoUpdate;
-  if (typeof payload.updateNotify === "boolean") ctx.updateNotify.value = payload.updateNotify;
-}
-
-function applyMcpSettings(payload: any, ctx: SseEventCtx): void {
-  if (typeof payload.mcpApprovalGate === "boolean") ctx.mcpApprovalGate.value = payload.mcpApprovalGate;
-  if (typeof payload.mcpApprovalTimeoutSecs === "number")
-    ctx.mcpApprovalTimeoutSecs.value = payload.mcpApprovalTimeoutSecs;
-  if (typeof payload.mcpAutoDeny === "boolean") ctx.mcpAutoDeny.value = payload.mcpAutoDeny;
-  if (typeof payload.mcpAutoApprove === "boolean") ctx.mcpAutoApprove.value = payload.mcpAutoApprove;
-  if (typeof payload.mcpAutoApproveTimeoutSecs === "number")
-    ctx.mcpAutoApproveTimeoutSecs.value = payload.mcpAutoApproveTimeoutSecs;
-}
-
-function applyMiscSettings(payload: any, ctx: SseEventCtx): void {
-  if (typeof payload.autoScan === "boolean") ctx.autoScan.value = payload.autoScan;
-  if (typeof payload.loreServersEnabled === "boolean") ctx.loreServersEnabled.value = payload.loreServersEnabled;
-  if (typeof payload.portableMode === "boolean") ctx.portableMode.value = payload.portableMode;
-  if (typeof payload.hideTrayIcon === "boolean") ctx.hideTrayIcon.value = payload.hideTrayIcon;
-  // defaultEditor is broadcast as string|null (present only when it changed) — a null is
-  // a legitimate "cleared" value, so gate on the key existing, not on truthiness.
-  if (payload.defaultEditor !== undefined) {
-    ctx.defaultEditor.value = (payload.defaultEditor as string | null) ?? null;
-    // The stored pref just changed elsewhere (another tab/device) → the resolved
-    // effectiveEditor (drives the Open-with dropdown's "current default" check) is now
-    // stale. Re-fetch the catalogue, but only for a tab that already uses it.
-    if (ctx.editorsLoaded.value) void ctx.loadEditors(true);
-  }
-  if (payload.tunnel) ctx.tunnelConfig.value = payload.tunnel as TunnelStatus;
-  if (payload.relay) ctx.relayConfig.value = payload.relay as RelayStatus;
-}
-
-function handleSettingsChanged(payload: any, ctx: SseEventCtx): void {
-  applyDiffSettings(payload, ctx);
-  applySyncSettings(payload, ctx);
-  applyAutoCommitSettings(payload, ctx);
-  applyUpdateSettings(payload, ctx);
-  applyMcpSettings(payload, ctx);
-  applyMiscSettings(payload, ctx);
+function handleSettingsChanged(payload: unknown, ctx: SseEventCtx): void {
+  ctx.runtime.applySettingsChanged(payload, {
+    loadSyncStatus: ctx.loadSyncStatus,
+    loadEditors: ctx.loadEditors,
+    editorsLoaded: ctx.editorsLoaded,
+  });
 }
 
 function handleApprovalPending(payload: any, ctx: SseEventCtx): void {

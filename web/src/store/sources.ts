@@ -9,6 +9,9 @@ import type { BuzzCommunity, BuzzPreflight, FetchAllResult, LoreServer, Repo } f
  */
 export function useSources(
   repos: Ref<Repo[]>,
+  /** Owned by store/runtime-status.ts (it is a daemon setting like any other, synchronised from
+   *  /api/status and `settings_changed` there); borrowed here for the optimistic toggle below. */
+  loreServersEnabled: Ref<boolean>,
   scanning: Ref<boolean>,
   scanFound: Ref<number>,
   scanNew: Ref<number>,
@@ -21,10 +24,6 @@ export function useSources(
   const roots = ref<string[]>([]);
   // Registered Lore servers — lazily loaded when Settings / Add-repo opens.
   const servers = ref<LoreServer[]>([]);
-  // Owner setting: whether the Lore-servers settings section is expanded (collapsed by
-  // default for owners who don't use Lore). From /api/status, kept live via `settings_changed`;
-  // true until status loads so the section doesn't flash collapsed-then-open for existing users.
-  const loreServersEnabled = ref(true);
   // Experimental Buzz is opt-in and stays false until its owner-only config is loaded.
   const buzzEnabled = ref(false);
   const buzzCommunities = ref<BuzzCommunity[]>([]);
@@ -249,7 +248,6 @@ export function useSources(
   return {
     roots,
     servers,
-    loreServersEnabled,
     buzzEnabled,
     buzzCommunities,
     fetchingAll,

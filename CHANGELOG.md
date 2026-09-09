@@ -6,6 +6,23 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Every daemon-owned setting the dashboard mirrors now lives in one table.** Forty-odd runtime
+  fields were declared in the root store, defaulted again in one snapshot function, re-validated
+  again in six separate `settings_changed` handlers, and threaded through a forty-entry dependency
+  bundle so those handlers could reach them. Adding a setting meant four coordinated edits in four
+  distant blocks, and forgetting any of them failed silently: the field would update on a settings
+  change but not on a reconnect, or the reverse. `store/runtime-status.ts` now holds one row per
+  field saying where it comes from in `GET /api/status`, what an absent value there means, which
+  broadcasts patch it, and what a patched value has to look like to be believed. Leaving a field
+  out of the table is a build error. The two semantics the old code kept restating differently are
+  now stated once: a snapshot is authoritative, so an absent key resets the field to the daemon's
+  own default (which is what a share-link guest's deliberately narrow projection produces), while
+  `settings_changed` and `daemon_status` are patches, so an absent key changes nothing. The root
+  store lost 260 lines and the dashboard has 14 new tests, including one that fails by name if a
+  future table row points at a key the daemon does not send.
+
 ### Added
 
 - **A browser gate now runs in CI and blocks a release.** Three things this project depends on were
