@@ -159,7 +159,7 @@ export function normalizeActivityScale(value: string | undefined): ActivityScale
   return value === "daily" || value === "monthly" || value === "hourly" ? value : "hourly";
 }
 
-interface ActivityWindow {
+export interface ActivityWindow {
   scale: ActivityScale;
   bucketUnit: ActivityBucketUnit;
   starts: number[];
@@ -405,7 +405,7 @@ export function activityError(
   return { ...aggregateActivity([], until, false, scale), ok: false, code: "ERROR", message };
 }
 
-interface ParsedActivityCommit extends ActivityCommit {
+export interface ParsedActivityCommit extends ActivityCommit {
   hash: string;
 }
 
@@ -525,9 +525,23 @@ function loadCachedStats(
   return statsByHash;
 }
 
-/** Diff-tree the sampled misses in bounded chunks, folding freshly measured stats into
- *  `statsByHash` (mutated in place) and returning them for the cache write. */
-async function measureMissingStats(
+/**
+ * Diff-tree the sampled misses in bounded chunks, folding freshly measured stats into
+ * `statsByHash` (mutated in place) and returning them for the cache write.
+ *
+ * The chunks run ONE AT A TIME, on purpose. This whole enrichment happens inside the caller's
+ * single readGate slot, and the gate exists to bound concurrent git children on the machine (see
+ * gitgate.ts: on Windows one logical git command is routinely three processes). The first version
+ * fanned the chunks out with Promise.allSettled, so a cold Daily view launched four diff-tree
+ * children while holding one slot, an Hourly view up to fourteen, and every concurrent request
+ * multiplied that again (1.0 audit, item 16). Sequential keeps the slot honest: one child per
+ * slot, as the gate's contract says. The per-chunk failure tolerance is unchanged: a chunk that
+ * fails costs its own stats, not the response.
+ *
+ * Exported for the concurrency regression test only; production callers go through
+ * readGitActivity.
+ */
+export async function measureMissingStats(
   absPath: string,
   missingMetadata: ParsedActivityCommit[],
   window: ActivityWindow,
@@ -543,9 +557,10 @@ async function measureMissingStats(
   );
   const datesByHash = new Map(sampledMetadata.map((commit) => [commit.hash, commit.date] as const));
   const measured: ActivityStatCacheEntry[] = [];
-  const statResults = await Promise.allSettled(
-    statChunks.map((chunk) =>
-      gitRawWithInput(
+  for (const chunk of statChunks) {
+    let raw: string;
+    try {
+      raw = await gitRawWithInput(
         absPath,
         [
           "diff-tree",
@@ -558,12 +573,11 @@ async function measureMissingStats(
           `--pretty=format:${format}`,
         ],
         `${chunk.map((commit) => commit.hash).join("\n")}\n`,
-      ),
-    ),
-  );
-  for (const result of statResults) {
-    if (result.status !== "fulfilled") continue;
-    for (const commit of parseGitActivity(result.value)) {
+      );
+    } catch {
+      continue; // this chunk's stats stay unknown; the next chunk still runs
+    }
+    for (const commit of parseGitActivity(raw)) {
       const stat = commit.stat ?? { filesChanged: 0, addedLines: 0, removedLines: 0 };
       const date = datesByHash.get(commit.hash);
       statsByHash.set(commit.hash, stat);

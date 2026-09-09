@@ -3,12 +3,20 @@
  * local config/ref writes (remotes, branch create/delete, stash) with one network exception —
  * a tag push — which reuses the same identity + `netGate` seam as ./sync.ts.
  */
-import { gitFor, identityConfigArgs, NET_BLOCK_MS, PROGRESS_ARG } from "../git.ts";
+import {
+  credentialConfigArgs,
+  credentialEnv,
+  gitFor,
+  identityConfigArgs,
+  NET_BLOCK_MS,
+  PROGRESS_ARG,
+  type GitHubAuth,
+} from "../git.ts";
 import { readStatus } from "../read/status.ts";
 import { netGate } from "../gitgate.ts";
 import type { Identity } from "../db.ts";
 import { ok, fail, type ActionResult } from "../contract.ts";
-import { classify } from "./sync.ts";
+import { classify, classifyRemote } from "./sync.ts";
 
 // ── remotes (add / set-url / remove — local config only, no network) ────────────────
 
@@ -48,8 +56,9 @@ export async function gitRemoteRemove(absPath: string, name: string): Promise<Ac
 /**
  * Create a tag — "tag a release from your phone". Annotated (`-a -m`, identity-attributed) when a
  * message is given, else lightweight. Creating a tag is a local, safe ref write. When `push` is
- * set the tag is then pushed to origin (network → identity SSH key + `netGate`); a push failure is
- * reported but the LOCAL tag is kept (honest partial result, nothing lost). The caller validates
+ * set the tag is then pushed to origin through gitTagPush below (network → identity SSH key, the
+ * selected GitHub account's credential, `netGate`); a push failure is reported but the LOCAL tag is
+ * kept (honest partial result, nothing lost), and gitTagPush is the retry. The caller validates
  * that this is a git repo; the name is validated here with the shared ref-name check.
  */
 export async function gitTagCreate(
@@ -58,6 +67,7 @@ export async function gitTagCreate(
   name: string,
   message?: string,
   push = false,
+  auth: GitHubAuth | null = null,
 ): Promise<ActionResult> {
   if (!isValidBranchName(name)) return fail("INVALID_REF_NAME", "invalid tag name");
   try {
@@ -72,23 +82,61 @@ export async function gitTagCreate(
     return classify(err);
   }
   if (push) {
-    try {
-      // A remote op: the network idle budget + `--progress`, same pairing as sync.ts (see NET_BLOCK_MS).
-      await netGate.run(() =>
-        gitFor(absPath, NET_BLOCK_MS).raw([
-          ...identityConfigArgs(identity),
-          "push",
-          PROGRESS_ARG,
-          "origin",
-          name,
-        ]),
-      );
-    } catch (err) {
-      const c = classify(err);
-      return fail(c.code, `tag created locally, but push failed: ${c.message}`);
-    }
+    const pushed = await gitTagPush(absPath, identity, name, auth);
+    if (!pushed.ok) return fail(pushed.code, `tag created locally, but push failed: ${pushed.message}`);
   }
   return ok(push ? "tag created and pushed" : "tag created");
+}
+
+/**
+ * Push ONE existing local tag to origin. The network half of gitTagCreate, and the retry path for
+ * its "tag created locally, but push failed" outcome — re-running create would only report EXISTS.
+ *
+ * Same credential plumbing as an ordinary push (sync.ts gitPush): the identity's SSH key via
+ * `-c core.sshCommand`, and the repo's selected GitHub account's HTTPS credential injected per
+ * child (`credentialEnv` + `credentialConfigArgs`), never the machine's ambient login. Until this
+ * existed the tag push carried the SSH identity only, so a repo assigned to a non-active GitHub
+ * account pushed with whatever credential happened to be ambient, or failed (1.0 audit, item 9).
+ * Failures go through classifyRemote for the same NON_FAST_FORWARD / SSH / timeout codes a push
+ * gets, including the stale-lock cleanup after a killed child.
+ *
+ * `refs/tags/<name>` rather than the bare name: a branch and a tag sharing a name would make the
+ * bare form ambiguous, and git refuses it.
+ */
+export async function gitTagPush(
+  absPath: string,
+  identity: Identity | null,
+  name: string,
+  auth: GitHubAuth | null = null,
+): Promise<ActionResult> {
+  if (!isValidBranchName(name)) return fail("INVALID_REF_NAME", "invalid tag name");
+  // `-q --verify` exits 1 with NOTHING on stderr for a missing ref, and simple-git only fails a
+  // task on a non-zero exit WITH stderr (see gitStashPop), so the call resolves either way: the
+  // answer is in the output, not in a throw.
+  let resolved = "";
+  try {
+    resolved = (await gitFor(absPath).raw(["rev-parse", "-q", "--verify", `refs/tags/${name}`])).trim();
+  } catch {
+    /* treated as missing below */
+  }
+  if (!resolved) return fail("NOT_FOUND", `no local tag named ${name}`);
+  try {
+    // A remote op: the network idle budget + `--progress`, same pairing as sync.ts (see NET_BLOCK_MS).
+    const git = gitFor(absPath, NET_BLOCK_MS, credentialEnv(auth));
+    await netGate.run(() =>
+      git.raw([
+        ...identityConfigArgs(identity),
+        ...credentialConfigArgs(auth),
+        "push",
+        PROGRESS_ARG,
+        "origin",
+        `refs/tags/${name}`,
+      ]),
+    );
+    return ok("tag pushed");
+  } catch (err) {
+    return classifyRemote(absPath, identity, err);
+  }
 }
 
 // ── branches ──────────────────────────────────────────────────────────────────────

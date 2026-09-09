@@ -6,6 +6,7 @@
  * Failures map to a small set of stable codes the UI can render (mirrors the classify()
  * pattern in git-actions.ts).
  */
+import { readResponseTextLimited } from "../process-output.ts";
 import type { AiProviderId, CommitStyle } from "../config.ts";
 import {
   AI_ADAPTERS,
@@ -33,6 +34,13 @@ export class AiError extends Error {
     this.status = status;
   }
 }
+
+/**
+ * Ceiling on ANY provider response body (success or error). A commit message, a plan for a few
+ * hundred files, a conflict resolution and a model list all fit in well under a megabyte; four
+ * leaves room for verbose error pages without letting one endpoint dictate the daemon's heap.
+ */
+export const MAX_AI_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 /** Injectable fetch (defaults to the global). */
 export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
@@ -402,7 +410,17 @@ export async function requestJson(
   } catch {
     throw new AiError("AI_UNREACHABLE", "could not reach the AI provider (timeout or network error)");
   }
-  const text = await res.text();
+  // Bounded body read, success and error responses alike. `res.text()` would allocate whatever the
+  // configured endpoint sends; the timeout above bounds time, not bytes. A body past the ceiling is
+  // cancelled mid-stream and reported as a short AiError rather than kept.
+  const { text, truncated } = await readResponseTextLimited(res, MAX_AI_RESPONSE_BYTES);
+  if (truncated) {
+    throw new AiError(
+      "AI_ERROR",
+      `the AI provider's response exceeded ${MAX_AI_RESPONSE_BYTES} bytes and was discarded`,
+      res.status,
+    );
+  }
   let json: unknown = {};
   try {
     json = text ? JSON.parse(text) : {};

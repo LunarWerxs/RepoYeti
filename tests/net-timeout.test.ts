@@ -290,5 +290,7 @@ test("every remote git op passes --progress with the network idle budget", () =>
   // Nothing on a network path may fall back to gitFor()'s 30s local default.
   expect(sync).not.toMatch(/gitFor\(absPath, undefined/);
   expect(sync.match(/gitFor\(absPath, NET_BLOCK_MS/g)?.length).toBe(3); // fetch, pull, push
-  expect(refs).toContain("gitFor(absPath, NET_BLOCK_MS)"); // the one network op in refs.ts (tag push)
+  // The one network op in refs.ts: gitTagPush, shared by create-and-push and the retry route. It
+  // also injects the account credential env, so match the prefix rather than the exact call.
+  expect(refs.match(/gitFor\(absPath, NET_BLOCK_MS/g)?.length).toBe(1);
 });

@@ -13,6 +13,7 @@ import {
   gitRemoteSet,
   gitRemoteRemove,
   gitTagCreate,
+  gitTagPush,
   type ActionCode,
   type CommitGroupSpec,
   type CommitGroupResult,
@@ -92,14 +93,19 @@ export const setRemoteRepo = (id: string, name: string, url: string): Promise<Ac
 export const removeRemoteRepo = (id: string, name: string): Promise<ActionOutcome> =>
   runAction(id, "remote-remove", (_b, p) => gitRemoteRemove(p, name));
 
-// ── tag creation (git-only; the route guards on repo.vcs) ──────────────────────────
+// ── tag creation / push (git-only; the route guards on repo.vcs) ──────────────────
+// `syncAccount` follows `push`: only a push needs the repo's selected GitHub account resolved
+// (the same routing an ordinary push gets), and a local tag write must not read a token at all.
 export const createTagRepo = (
   id: string,
   name: string,
   message?: string,
   push = false,
 ): Promise<ActionOutcome> =>
-  runAction(id, "tag-create", (_b, p, idn) => gitTagCreate(p, idn, name, message, push));
+  runAction(id, "tag-create", (_b, p, idn, auth) => gitTagCreate(p, idn, name, message, push, auth), false, push);
+/** Push an EXISTING local tag — the retry for "tag created locally, but push failed". */
+export const pushTagRepo = (id: string, name: string): Promise<ActionOutcome> =>
+  runAction(id, "tag-push", (_b, p, idn, auth) => gitTagPush(p, idn, name, auth), false, true);
 
 // ── bulk fetch-all ────────────────────────────────────────────────────────────────
 export interface FetchAllResult {

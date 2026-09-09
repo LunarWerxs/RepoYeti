@@ -266,6 +266,7 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/repos/:id/stash/pop",
   "POST /api/repos/:id/stash/drop",
   "POST /api/repos/:id/tag",
+  "POST /api/repos/:id/tag/push",
   "POST /api/repos/:id/remote",
   "DELETE /api/repos/:id/remote",
   // editors — launches processes on the owner's desktop

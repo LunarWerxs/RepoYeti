@@ -48,3 +48,18 @@ export async function readTextStreamLimited(
   const result = await readBytesStreamLimited(stream, maxBytes, onLimit);
   return { text: result.bytes.toString("utf8"), truncated: result.truncated };
 }
+
+/**
+ * Read an HTTP response body as text with a hard byte ceiling, cancelling the body at the limit.
+ * `Response.text()` has no ceiling: a misconfigured or hostile endpoint can make the daemon
+ * allocate whatever it sends before a single byte is parsed, and a request timeout does not bound
+ * how many bytes arrive before it fires (1.0 audit, item 14). Callers treat `truncated` as a hard
+ * failure: a cut-off JSON document is never worth parsing.
+ */
+export async function readResponseTextLimited(
+  res: Response,
+  maxBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+  if (!res.body) return { text: "", truncated: false };
+  return readTextStreamLimited(res.body, maxBytes);
+}

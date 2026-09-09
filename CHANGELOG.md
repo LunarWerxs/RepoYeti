@@ -66,8 +66,28 @@ All notable changes to RepoYeti are documented here. The format is based on
   later updates and refusing a dashboard restart. Malformed metadata is refused. This is not a
   signature over the release: the trust established is "GitHub served this for LunarWerxs/RepoYeti
   under this tag", which is the trust the release workflow already rests on.
+- **AI provider responses now have a byte ceiling.** The shared provider HTTP reader read every
+  response body whole before parsing it or trimming an error message, so a misconfigured or
+  hostile configured endpoint could make the daemon allocate whatever it chose to send; the
+  request timeout bounded the time, not the bytes. Success and error bodies are now read through a
+  bounded stream reader (4 MB), cancelled at the limit and reported as a short error. The update
+  check's metadata documents get the same treatment (1 MB).
 
 ### Fixed
+
+- **"Create and push tag" pushes through the repo's selected GitHub account, and a failed push can
+  be retried.** The tag push carried the identity's SSH options but not the HTTPS credential an
+  ordinary push injects, so a repo assigned to a non-active GitHub account pushed with whatever
+  login was ambient, or failed; and because the local tag was (correctly) kept, running create
+  again only answered "already exists". The push now uses the same per-child credential injection
+  and error classification as `push`, the local tag write never resolves a token, and
+  `POST /api/repos/:id/tag/push` pushes an existing local tag on its own.
+- **A cold History view no longer launches several git processes per read slot.** The commit-stat
+  enrichment ran its diff-tree chunks in parallel inside one read-gate transaction: four children
+  for a Daily view, up to fourteen for Hourly, all charged to a single slot and multiplied by
+  concurrent requests, which is exactly the process burst the gate exists to prevent (measured at
+  20 to 40 git children on Windows in the incident that introduced the gate). The chunks now run
+  one at a time; a failing chunk still costs only its own statistics.
 
 - **A file save can no longer overwrite an edit that landed first.** The viewer's Edit mode saved
   with no notion of which version it was editing, so two dashboards (or a phone and a desktop

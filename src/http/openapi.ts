@@ -26,6 +26,7 @@ import {
   DiscardSchema,
   StageSchema,
   TagCreateSchema,
+  TagPushSchema,
   RemoteSetSchema,
   RemoteDeleteSchema,
   CloneSchema,
@@ -184,6 +185,7 @@ export const META: Record<string, RouteMeta> = {
   // ── tags ───────────────────────────────────────────────────────────────────────
   "GET /api/repos/:id/tags": { summary: "List a repo's tags.", tags: ["tags"] },
   "POST /api/repos/:id/tag": { summary: "Create a tag (annotated when a message is given; optional push).", body: TagCreateSchema, tags: ["tags"] },
+  "POST /api/repos/:id/tag/push": { summary: "Push an existing local tag to origin (the retry after a create whose push failed).", body: TagPushSchema, tags: ["tags"] },
 
   // ── remotes ─────────────────────────────────────────────────────────────────────
   "POST /api/repos/:id/remote": { summary: "Set/add a remote URL (defaults to origin).", body: RemoteSetSchema, tags: ["remotes"] },

@@ -238,6 +238,10 @@ export const TagCreateSchema = z.object({
   message: z.string().optional(),
   push: z.boolean().optional(),
 });
+/** Push an existing local tag (the retry after "tag created locally, but push failed"). */
+export const TagPushSchema = z.object({
+  name: nonEmpty,
+});
 
 // ── remote-access named tunnel (stable host + connector token) ────────────────────
 // Both fields follow the write-only-secret convention: undefined = leave unchanged · "" = clear ·

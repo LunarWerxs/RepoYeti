@@ -1,13 +1,14 @@
-import { test, expect } from "bun:test";
+import { test, expect, spyOn } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { gitRemoteSet, gitRemoteRemove, gitTagCreate } from "../src/git-actions.ts";
+import { gitRemoteSet, gitRemoteRemove, gitTagCreate, gitTagPush } from "../src/git-actions.ts";
+import * as ghAccount from "../src/gh-account.ts";
 import { readTags } from "../src/read/inspect.ts";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
-import { mkScratchDir } from "./helpers/scratch.ts";
+import { fileUrl, mkScratchDir } from "./helpers/scratch.ts";
 import { useSuiteTimeout } from "./helpers/timeouts.ts";
 
 // Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
@@ -111,6 +112,82 @@ test("gitTagCreate makes lightweight + annotated tags, rejects duplicates and ba
   expect((await gitTagCreate(dir, null, "v1.0.0")).code).toBe("EXISTS"); // duplicate
   expect((await gitTagCreate(dir, null, "bad tag")).code).toBe("INVALID_REF_NAME");
   expect((await readTags(dir)).tags.map((t) => t.name).sort()).toEqual(["v1.0.0", "v1.1.0"]);
+});
+
+/** A bare scratch remote wired up as `origin` over the file:// transport. */
+async function withOrigin(dir: string): Promise<string> {
+  const bare = mkScratchDir("gm-rt-origin-");
+  await $`git init -q --bare ${bare}`.quiet();
+  await $`git -C ${dir} remote add origin ${fileUrl(bare)}`.quiet();
+  return bare;
+}
+const remoteTags = async (bare: string): Promise<string[]> =>
+  (await $`git -C ${bare} tag`.text()).split("\n").map((s) => s.trim()).filter(Boolean);
+
+// ── tag push (audit item 9) ───────────────────────────────────────────────────────
+// "Create and push tag" used to push with the identity's SSH options only — never the repo's
+// selected GitHub account credential an ordinary push gets — and left no way to retry the push
+// half once the local tag existed (re-running create answers EXISTS).
+
+test("gitTagCreate with push publishes the tag; gitTagPush retries an existing tag and refuses a missing one", async () => {
+  const dir = await repo();
+  const bare = await withOrigin(dir);
+
+  const created = await gitTagCreate(dir, null, "v1.0.0", "one", true, null);
+  expect(created.ok).toBe(true);
+  expect(created.message).toBe("tag created and pushed");
+  expect(await remoteTags(bare)).toEqual(["v1.0.0"]);
+
+  // The retry path: a tag that exists locally but not (or no longer) remotely.
+  await $`git -C ${bare} tag -d v1.0.0`.quiet();
+  expect(await remoteTags(bare)).toEqual([]);
+  const pushed = await gitTagPush(dir, null, "v1.0.0", null);
+  expect(pushed.ok).toBe(true);
+  expect(await remoteTags(bare)).toEqual(["v1.0.0"]);
+
+  // Nothing to push is a clear answer, not a git error blob.
+  expect((await gitTagPush(dir, null, "v9.9.9", null)).code).toBe("NOT_FOUND");
+  expect((await gitTagPush(dir, null, "bad name", null)).code).toBe("INVALID_REF_NAME");
+});
+
+test("a create whose push half fails keeps the local tag and reports the partial result honestly", async () => {
+  const dir = await repo();
+  await $`git -C ${dir} remote add origin ${fileUrl(join(mkScratchDir("gm-rt-gone-"), "nope.git"))}`.quiet();
+  const r = await gitTagCreate(dir, null, "v2.0.0", undefined, true, null);
+  expect(r.ok).toBe(false);
+  expect(r.message).toContain("tag created locally, but push failed");
+  expect((await readTags(dir)).tags.map((t) => t.name)).toContain("v2.0.0");
+});
+
+test("the service resolves the repo's GitHub account for a tag PUSH and never for a local tag write", async () => {
+  // The same routing an ordinary push gets: runAction's syncAccount. accountAuthFor → authForRepo
+  // is the seam; here it is spied rather than exercised, because a real account needs `gh` state.
+  const auth = spyOn(ghAccount, "authForRepo").mockResolvedValue(null);
+  try {
+    const dir = await repo();
+    const bare = await withOrigin(dir);
+    const id = mustUpsertRepo(dir, "tag-account", "auto", false);
+    const app = createApp(localCfg());
+
+    expect((await app.request(`/api/repos/${id}/tag`, J("POST", { name: "v1" }))).status).toBe(201);
+    expect(auth).not.toHaveBeenCalled(); // a local ref write must not read a token
+
+    expect((await app.request(`/api/repos/${id}/tag`, J("POST", { name: "v2", push: true }))).status).toBe(201);
+    expect(auth).toHaveBeenCalledTimes(1);
+    expect(await remoteTags(bare)).toEqual(["v2"]);
+
+    // POST /tag/push: the retry route, also account-routed.
+    const retried = await app.request(`/api/repos/${id}/tag/push`, J("POST", { name: "v1" }));
+    expect(retried.status).toBe(200);
+    expect(auth).toHaveBeenCalledTimes(2);
+    expect((await remoteTags(bare)).sort()).toEqual(["v1", "v2"]);
+
+    const missing = await app.request(`/api/repos/${id}/tag/push`, J("POST", { name: "v404" }));
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).code).toBe("NOT_FOUND");
+  } finally {
+    auth.mockRestore();
+  }
 });
 
 test("POST /api/repos/:id/tag creates a tag (201) and validates the name", async () => {

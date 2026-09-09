@@ -11,6 +11,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { buildPingRequest, ensureInstallId, pingDisabled, recordPingResult } from "./app-ping.ts";
 import { VERSION, loadConfig } from "./config.ts";
+import { readResponseTextLimited } from "./process-output.ts";
 import type { UpdateApplyResult, UpdateStatus } from "./updater.ts";
 
 const SERVICE = "repoyeti";
@@ -71,6 +72,8 @@ const MAX_REDIRECTS = 5;
 /** Ceilings that no legitimate release approaches: the archives are ~100 MB, the manifest < 1 KB. */
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
+/** A releases/latest document is a few KB; one megabyte is absurd and therefore the ceiling. */
+const MAX_METADATA_BYTES = 1024 * 1024;
 export const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 export const MANIFEST_TIMEOUT_MS = 30_000;
 export const EXTRACT_TIMEOUT_MS = 5 * 60_000;
@@ -299,6 +302,13 @@ async function drainBounded(
  * could not be bound. Assets missing any field are dropped rather than failing the whole check,
  * so an unrelated malformed upload cannot block updates.
  */
+/** Bounded JSON read of a metadata response (item 14's ceiling applied to the update check). */
+async function readMetadata(response: Response): Promise<unknown> {
+  const { text, truncated } = await readResponseTextLimited(response, MAX_METADATA_BYTES);
+  if (truncated) throw new Error(`release metadata exceeded ${MAX_METADATA_BYTES} bytes`);
+  return JSON.parse(text) as unknown;
+}
+
 function parseRelease(raw: unknown): Release {
   const r = raw as { tag_name?: unknown; assets?: unknown } | null;
   if (!r || typeof r.tag_name !== "string" || !TAG_SHAPE.test(r.tag_name)) {
@@ -361,7 +371,7 @@ async function githubFallbackRelease(
       `release check returned HTTP ${primaryStatus} (GitHub fallback: HTTP ${fallback.status})`,
     );
   }
-  return parseRelease(await fallback.json());
+  return parseRelease(await readMetadata(fallback));
 }
 
 async function latestRelease(): Promise<Release> {
@@ -384,7 +394,7 @@ async function latestRelease(): Promise<Release> {
   // about whether Studio received the install-count row, and marking it reported would burn
   // this install's one-time `new=1` on a request Studio never saw.
   if (!disabled) recordPingResult(cfg, !!response?.ok);
-  if (response?.ok) return parseRelease(await response.json());
+  if (response?.ok) return parseRelease(await readMetadata(response));
   return await githubFallbackRelease(common, primaryError, response?.status);
 }
 

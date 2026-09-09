@@ -44,6 +44,7 @@ export {
   gitRemoteSet,
   gitRemoteRemove,
   gitTagCreate,
+  gitTagPush,
   isValidBranchName,
   gitCheckout,
   gitCreateBranch,
