@@ -33,6 +33,8 @@ import {
   syncStatus,
 } from "../src/connections-sync.ts";
 import { getSecret, CONNECTIONS_REFRESH_TOKEN } from "../src/secrets.ts";
+import { AUTO_COMMIT_INTERVAL_MIN_S } from "../src/auto-commit.ts";
+import { SYNC_INTERVAL_MAX_S } from "../src/remote-sync.ts";
 import type { RepoYetiConfig, OAuthConfig } from "../src/config.ts";
 
 // ── Temp REPOYETI_HOME + in-memory keychain so nothing real is touched ──────────────────
@@ -466,4 +468,54 @@ test("syncStatus reflects enabled/connected/version/appearance from cfg + module
   await rememberTokens({ refresh_token: "initial-refresh-token" }, OAUTH);
   s = syncStatus(cfg);
   expect(s.connected).toBe(true);
+});
+
+// ── every synced value goes through the settings codec (audit item 12) ───────────────
+// applyPrefs used to assign each allowlisted remote value through a plain cast. A stale, malformed
+// or tampered document could therefore persist values the settings API refuses.
+
+test("pullNow validates each synced pref like PUT /api/settings: wrong types and junk enums are ignored, numbers clamped, valid ones applied", async () => {
+  await rememberTokens({ refresh_token: "initial-refresh-token" }, OAUTH);
+  server.version = 1;
+  server.settings = {
+    prefs: {
+      diffStats: "yes", // wrong type → ignored
+      changesStatDisplay: "sparkles", // outside the enum → ignored
+      autoCommitMode: "hourly", // outside the enum → ignored
+      autoCommitIntervalSecs: 5, // below the floor → clamped, as the route clamps it
+      syncIntervalSecs: 999_999, // above the ceiling → clamped
+      remoteEditing: true, // valid → applied
+      defaultEditor: "not-an-editor", // unknown id → ignored
+      autoCommitAt: "9:05", // normalised, as the route normalises it
+    },
+  };
+  const cfg = baseCfg({ diffStats: false, changesStatDisplay: "numbers", autoCommitMode: "interval", remoteEditing: false });
+  await pullNow(cfg, OAUTH);
+  expect(cfg.diffStats).toBe(false);
+  expect(cfg.changesStatDisplay).toBe("numbers");
+  expect(cfg.autoCommitMode).toBe("interval");
+  expect(cfg.defaultEditor).toBeUndefined();
+  expect(cfg.autoCommitIntervalSecs).toBe(AUTO_COMMIT_INTERVAL_MIN_S);
+  expect(cfg.syncIntervalSecs).toBe(SYNC_INTERVAL_MAX_S);
+  expect(cfg.remoteEditing).toBe(true);
+  expect(cfg.autoCommitAt).toBe("09:05");
+});
+
+test("pullNow bounds the appearance blob: a nested or oversized document is not adopted", async () => {
+  await rememberTokens({ refresh_token: "initial-refresh-token" }, OAUTH);
+  server.version = 1;
+  server.settings = { prefs: {}, appearance: { theme: "light", nested: { deep: true } } };
+  const cfg = baseCfg({ cloudSync: { appearance: { theme: "dark" } } });
+  await pullNow(cfg, OAUTH);
+  expect(cfg.cloudSync?.appearance).toEqual({ theme: "dark" });
+
+  server.version = 2;
+  server.settings = { prefs: {}, appearance: { theme: "x".repeat(1_000) } };
+  await pullNow(cfg, OAUTH);
+  expect(cfg.cloudSync?.appearance).toEqual({ theme: "dark" });
+
+  server.version = 3;
+  server.settings = { prefs: {}, appearance: { theme: "light", compact: true } };
+  await pullNow(cfg, OAUTH);
+  expect(cfg.cloudSync?.appearance).toEqual({ theme: "light", compact: true });
 });

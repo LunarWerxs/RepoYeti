@@ -36,6 +36,13 @@ import {
 } from "./config.ts";
 import { getSecret, setSecret, deleteSecret, CONNECTIONS_REFRESH_TOKEN } from "./secrets.ts";
 import { broadcast } from "./bus.ts";
+import { z } from "zod";
+import { clampAutoCommitInterval, normalizeDailyAt } from "./auto-commit.ts";
+import { clampSyncInterval } from "./remote-sync.ts";
+import { clampAutoUpdateInterval } from "./auto-update.ts";
+import { clampApprovalTimeoutSecs } from "./approvals.ts";
+import { clampDiffPatchBytes } from "./service/files.ts";
+import { isKnownEditor } from "./service/editors.ts";
 
 /** App-tier document we store (namespaced by the store itself as (sub, clientId), so no inner key). */
 /**
@@ -315,19 +322,104 @@ function collectPrefs(cfg: RepoYetiConfig): Record<string, unknown> {
   return out;
 }
 
-/** Apply an allowlisted prefs blob onto the live config (persisted). Ignores any key not on the
- *  allowlist, so a doc written by a newer/older app version can never inject arbitrary config. */
-function applyPrefs(cfg: RepoYetiConfig, prefs: Record<string, unknown> | undefined): void {
-  if (!prefs || typeof prefs !== "object") return;
+type PrefKey = (typeof PREF_KEYS)[number];
+
+/**
+ * The portable-preference CODEC: one validator per synced key, applying the SAME normalisation
+ * PUT /api/settings does (its clamps, its closed enums, the editor catalogue). A synced document
+ * used to be assigned with a plain cast — "the store only ever holds values this allowlist
+ * wrote" — which is true of a healthy peer and false of a stale, malformed, differently-versioned
+ * or tampered one: a timer cadence of 1 second, a mode outside its enum or an editor id that is
+ * not an editor would have been persisted to config.json, values the normal API refuses
+ * (1.0 audit, item 12). `satisfies Record<PrefKey, …>` makes adding a pref key without a codec a
+ * build error, the same discipline `NEVER_SYNCED` already enforces for the allowlist itself.
+ */
+const bool = z.boolean();
+const finite = z.number().finite();
+const PREF_CODEC = {
+  diffStats: bool,
+  changesStatDisplay: z.enum(["numbers", "bars"]),
+  changesChars: bool,
+  remoteEditing: bool,
+  remoteBrowse: bool,
+  diffPatchBytes: finite.transform(clampDiffPatchBytes),
+  diffPatchEnabled: bool,
+  syncIntervalSecs: finite.transform(clampSyncInterval),
+  autoCommitMode: z.enum(["interval", "daily"]),
+  autoCommitIntervalSecs: finite.transform(clampAutoCommitInterval),
+  autoCommitAt: z.string().max(8).transform((s) => normalizeDailyAt(s)),
+  autoCommitPull: bool,
+  autoCommitAiFallback: z.enum(["skip", "basic"]),
+  autoScan: bool,
+  loreServersEnabled: bool,
+  updateNotify: bool,
+  autoUpdateIntervalSecs: finite.transform(clampAutoUpdateInterval),
+  portableMode: bool,
+  hideTrayIcon: bool,
+  // "" clears the preference, exactly as the settings route treats it; anything else must be an
+  // editor this build knows, or another machine's typo becomes this machine's broken "Open with".
+  defaultEditor: z.string().max(64).refine((id) => id === "" || isKnownEditor(id), "unknown editor id"),
+  mcpAutoDeny: bool,
+  mcpApprovalTimeoutSecs: finite.transform(clampApprovalTimeoutSecs),
+  mcpAutoApproveTimeoutSecs: finite.transform(clampApprovalTimeoutSecs),
+} satisfies Record<PrefKey, z.ZodTypeAny>;
+
+export interface AppliedPrefs {
+  applied: PrefKey[];
+  /** Keys present in the document whose values failed the codec. Names only, never values. */
+  rejected: PrefKey[];
+}
+
+/** Apply an allowlisted prefs blob onto the live config (the caller persists). Ignores any key not
+ *  on the allowlist, so a doc written by a newer/older app version can never inject arbitrary
+ *  config, and refuses any allowlisted value the codec rejects, so it cannot inject a value the
+ *  API would not accept either. */
+function applyPrefs(cfg: RepoYetiConfig, prefs: Record<string, unknown> | undefined): AppliedPrefs {
+  const applied: PrefKey[] = [];
+  const rejected: PrefKey[] = [];
+  if (!prefs || typeof prefs !== "object") return { applied, rejected };
   for (const k of PREF_KEYS) {
-    if (k in prefs) {
-      // Trusted-shape assignment: each key's type is fixed by RepoYetiConfig; the store only ever
-      // holds values this same allowlist wrote. TS can't verify a heterogeneous-union write like
-      // `cfg[k] = prefs[k]` is safe across a loop over `keyof RepoYetiConfig` even when `k`'s own
-      // type is known (microsoft/TypeScript#30581) — the boundary cast is the honest option here.
-      (cfg as unknown as Record<string, unknown>)[k] = prefs[k];
+    if (!(k in prefs)) continue;
+    const parsed = PREF_CODEC[k].safeParse(prefs[k]);
+    if (!parsed.success) {
+      rejected.push(k);
+      continue;
     }
+    if (k === "defaultEditor" && parsed.data === "") delete cfg.defaultEditor;
+    else (cfg as unknown as Record<string, unknown>)[k] = parsed.data;
+    applied.push(k);
   }
+  if (rejected.length > 0) {
+    // Names only: a rejected value may be anything at all, and this line lands in a log file.
+    console.warn(
+      `repoyeti: settings sync ignored ${rejected.length} value(s) that failed validation: ${rejected.join(", ")}`,
+    );
+  }
+  return { applied, rejected };
+}
+
+/** Bounds for the opaque appearance blob the dashboard syncs. It reads one key (`theme`) today;
+ *  the bound keeps a foreign or future document from parking arbitrary nested data in config.json
+ *  under the name of a theme. */
+const APPEARANCE_MAX_KEYS = 32;
+const APPEARANCE_MAX_STRING = 256;
+
+/** A flat object of small primitives, or null when the value is anything else (not adopted). */
+export function sanitizeAppearance(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const out: Record<string, unknown> = {};
+  let count = 0;
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (++count > APPEARANCE_MAX_KEYS || k.length > 64) return null;
+    const primitive =
+      v === null ||
+      typeof v === "boolean" ||
+      (typeof v === "number" && Number.isFinite(v)) ||
+      (typeof v === "string" && v.length <= APPEARANCE_MAX_STRING);
+    if (!primitive) return null;
+    out[k] = v;
+  }
+  return out;
 }
 
 function ensureBlock(cfg: RepoYetiConfig): CloudSyncConfig {
@@ -391,9 +483,8 @@ async function syncEngine(cfg: RepoYetiConfig, oauth: OAuthConfig): Promise<Sett
           ? (patch.prefs as Record<string, unknown>)
           : undefined;
       applyPrefs(cfg, prefs);
-      if (patch.appearance && typeof patch.appearance === "object") {
-        block.appearance = patch.appearance as Record<string, unknown>;
-      }
+      const appearance = sanitizeAppearance(patch.appearance);
+      if (appearance) block.appearance = appearance;
       saveConfig(cfg);
       broadcast("settings_changed", { cloudSync: true });
     },

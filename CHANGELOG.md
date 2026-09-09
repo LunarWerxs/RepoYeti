@@ -94,6 +94,24 @@ All notable changes to RepoYeti are documented here. The format is based on
   flight, at most one timer armed, exactly one re-arm when a round ends, and disable or re-enable
   mid-round handled. Tested against a controlled clock, including the timer-fires-during-a-manual-
   round case that used to go wrong.
+- **Settings synced from Connections are validated like settings set in the app.** The sync
+  applied each allowlisted remote value with a plain cast on the reasoning that the store only
+  ever holds what this same allowlist wrote. That holds for a healthy peer and not for a stale,
+  malformed, differently-versioned or tampered document: a one-second timer cadence, a mode outside
+  its enum or an editor id that is not an editor would have been persisted to `config.json`, values
+  `PUT /api/settings` refuses. Every synced key now goes through one codec that applies the same
+  clamps, closed enums and editor catalogue the settings route uses; a value that fails is ignored
+  and logged by key name only, never by value. The appearance blob is bounded to a flat object of
+  small primitives. Adding a synced key without a codec is now a build error, like adding a config
+  key without a sync decision already was.
+- **You can read the whole MCP request before approving it.** The approval card showed each
+  argument clipped to 80 characters while the tool ran with the full original arguments, so a
+  branch name or commit message that differed past the visible prefix could not be inspected
+  before approval. The daemon now keeps a bounded, secret-redacted copy of the exact request the
+  tool will run with (per-value and whole-request ceilings; token/secret/password-style fields
+  shown as hidden, by name) and serves it at `GET /api/approvals/:id`; the list and the live
+  events keep carrying only the short summary. The dashboard's expandable view of it follows in a
+  separate change.
 
 - **"Create and push tag" pushes through the repo's selected GitHub account, and a failed push can
   be retried.** The tag push carried the identity's SSH options but not the HTTPS credential an

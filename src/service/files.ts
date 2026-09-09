@@ -995,10 +995,15 @@ let _diffPatchBytes = DIFF_PATCH_BYTES_DEFAULT;
 export function getDiffPatchBytes(): number {
   return _diffPatchBytes;
 }
+/** The threshold's clamp on its own (pure), so the settings-sync codec normalises a synced value
+ *  exactly as the settings route does without touching runtime state. */
+export function clampDiffPatchBytes(bytes: number): number {
+  return Math.min(DIFF_PATCH_BYTES_MAX, Math.max(DIFF_PATCH_BYTES_MIN, Math.round(bytes)));
+}
 /** Set the threshold, clamped to the safe range. Returns the value actually stored so the
  *  caller can persist the clamped number (not the raw, possibly out-of-range, input). */
 export function setDiffPatchBytes(bytes: number): number {
-  _diffPatchBytes = Math.min(DIFF_PATCH_BYTES_MAX, Math.max(DIFF_PATCH_BYTES_MIN, Math.round(bytes)));
+  _diffPatchBytes = clampDiffPatchBytes(bytes);
   return _diffPatchBytes;
 }
 
