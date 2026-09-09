@@ -32,6 +32,7 @@ import { broadcast } from "./bus.ts";
 import { backendFor } from "./vcs/index.ts";
 import { currentGitOperation } from "./git.ts";
 import { smartCommitRepo, pullRepo, pushRepo, planCommitInput } from "./service/index.ts";
+import { createRoundController } from "./round-controller.ts";
 import {
   effectiveDefaultProvider,
   resolveApiKeyPool,
@@ -114,10 +115,8 @@ let dailyAt = AUTO_COMMIT_AT_DEFAULT;
 let pullFirst = true; // pull --ff-only before pushing
 let pushAfter = true; // push after committing
 let aiFallback: AutoCommitAiFallback = "skip"; // AI configured but failing → skip the repo
-let started = false; // true only after the daemon finishes booting (startAutoCommit)
-let timer: ReturnType<typeof setTimeout> | null = null;
-let ticking = false; // a round is in flight — don't let a reschedule double-arm the timer
 let cfgRef: RepoYetiConfig | null = null; // live config (for AI provider resolution)
+// started / timer / in-flight state lives in the round controller (see "scheduling" below).
 
 export function autoCommitEnabled(): boolean {
   return enabled;
@@ -385,52 +384,18 @@ export async function runAutoCommitNow(): Promise<{
   done: AutoCommittedRepo[];
   blocked: AutoCommitBlockedRepo[];
 }> {
-  if (ticking) return { done: [], blocked: [] };
-  ticking = true;
-  try {
-    return await tick();
-  } finally {
-    ticking = false;
-  }
+  return (await rounds.runNow()) ?? { done: [], blocked: [] };
 }
 
-// ── timer plumbing (mirrors remote-sync.ts) ─────────────────────────────────────────────────
+// ── scheduling ─────────────────────────────────────────────────────────────────────────────────
+// One in-flight round, one armed timer. The rules live in src/round-controller.ts, shared with
+// remote-sync.ts; this module only supplies the round and its cadence. (The hand-rolled plumbing
+// this replaced let a timer that fired during a manual round start a second concurrent pass —
+// 1.0 audit, item 10.)
 function nextDelayMs(): number {
   return mode === "daily" ? msUntilDailyAt(dailyAt, Date.now()) : intervalSecs * 1000;
 }
-function schedule(): void {
-  timer = setTimeout(() => void runTick(), nextDelayMs());
-}
-async function runTick(): Promise<void> {
-  timer = null;
-  ticking = true;
-  try {
-    await tick();
-  } catch {
-    /* a round failing is non-fatal — we just try again next window */
-  } finally {
-    ticking = false;
-  }
-  if (started && enabled && !timer) schedule();
-}
-/** Bring the timer in line with the current enabled/started state (idempotent). */
-function reconcile(): void {
-  if (!started) return;
-  if (enabled && !timer && !ticking) schedule();
-  else if (!enabled && timer) {
-    clearTimeout(timer);
-    timer = null;
-  }
-}
-/** Re-arm a running loop with the current mode/cadence. No-op when idle or mid-tick (runTick's
- *  tail reschedules with the fresh values). */
-function retime(): void {
-  if (started && enabled && !ticking) {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    schedule();
-  }
-}
+const rounds = createRoundController({ round: tick, delayMs: nextDelayMs });
 
 /** Give the module the live config object (for AI provider resolution). Called from app.ts. */
 export function setAutoCommitConfig(cfg: RepoYetiConfig): void {
@@ -440,42 +405,37 @@ export function setAutoCommitConfig(cfg: RepoYetiConfig): void {
 /** Begin the loop once the daemon has booted — called from src/cli/lifecycle.ts. No-op (beyond
  *  arming) when auto-commit is disabled in config. */
 export function startAutoCommit(): void {
-  started = true;
-  reconcile();
+  rounds.start();
 }
 
 /** Stop the loop (daemon shutdown). Safe to call when it was never started. */
 export function stopAutoCommit(): void {
-  started = false;
-  if (timer) {
-    clearTimeout(timer);
-    timer = null;
-  }
+  rounds.stop();
 }
 
 /** Enable/disable auto-commit (config at boot + PUT /api/settings). Starts/stops the timer live. */
 export function setAutoCommitEnabled(value: boolean): void {
   enabled = value;
-  reconcile();
+  rounds.setEnabled(value);
 }
 
 /** Set the timer mode ("interval" | "daily"). Re-times a running loop. */
 export function setAutoCommitMode(value: "interval" | "daily"): void {
   mode = value === "daily" ? "daily" : "interval";
-  retime();
+  rounds.retime();
 }
 
 /** Set the interval-mode cadence in seconds (clamped). Re-times a running loop. Returns clamped. */
 export function setAutoCommitIntervalSecs(secs: number): number {
   intervalSecs = clampAutoCommitInterval(secs);
-  retime();
+  rounds.retime();
   return intervalSecs;
 }
 
 /** Set the daily-mode fire time ("HH:MM"; normalised). Re-times a running loop. Returns normalised. */
 export function setAutoCommitAt(at: string): string {
   dailyAt = normalizeDailyAt(at);
-  retime();
+  rounds.retime();
   return dailyAt;
 }
 

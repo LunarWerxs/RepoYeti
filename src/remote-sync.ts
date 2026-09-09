@@ -25,6 +25,7 @@
 import { fetchAllRepos, pullRepo } from "./service/index.ts";
 import { getWatchableRepos } from "./db.ts";
 import { broadcast } from "./bus.ts";
+import { createRoundController } from "./round-controller.ts";
 import type { RepoStatus } from "./db.ts";
 
 /** Cadence bounds (seconds): fast enough to be useful, slow enough to be a courteous poll. */
@@ -46,9 +47,7 @@ let enabled = false;
 // Off by default — auto-pulling mutates the working copy, so it's strictly opt-in.
 let keepInSync = false;
 let intervalSecs = SYNC_INTERVAL_DEFAULT_S;
-let started = false; // true only after the daemon finishes booting (startRemoteSync)
-let timer: ReturnType<typeof setTimeout> | null = null;
-let ticking = false; // a fetch round is in flight — don't let a reschedule double-arm the timer
+// started / timer / in-flight state lives in the round controller (see "scheduling" below).
 /** repoId → behind count at the previous check, so we only warn on a FRESH fall-behind. */
 const lastBehind = new Map<string, number>();
 
@@ -188,63 +187,32 @@ async function tick(): Promise<void> {
  * second concurrent pass over every repo.
  */
 export async function runSyncCheckNow(): Promise<void> {
-  if (ticking) return;
-  ticking = true;
-  try {
-    await tick();
-  } finally {
-    ticking = false;
-  }
+  await rounds.runNow();
 }
 
-function schedule(): void {
-  timer = setTimeout(() => void runTick(), intervalSecs * 1000);
-}
-
-async function runTick(): Promise<void> {
-  timer = null;
-  ticking = true;
-  try {
-    await tick();
-  } catch {
-    /* a fetch round failing is non-fatal — we just try again next interval */
-  } finally {
-    ticking = false;
-  }
-  if (started && enabled && !timer) schedule();
-}
-
-/** Bring the timer in line with the current enabled/started state (idempotent). */
-function reconcile(): void {
-  if (!started) return;
-  if (enabled && !timer && !ticking) schedule();
-  else if (!enabled && timer) {
-    clearTimeout(timer);
-    timer = null;
-  }
-}
+// ── scheduling ─────────────────────────────────────────────────────────────────────────────────
+// One in-flight round, one armed timer. The rules live in src/round-controller.ts, shared with
+// auto-commit.ts; this module only supplies the round and its cadence. (The hand-rolled plumbing
+// this replaced let a timer that fired during a manual round start a second concurrent fetch
+// pass over every repo — 1.0 audit, item 10.)
+const rounds = createRoundController({ round: tick, delayMs: () => intervalSecs * 1000 });
 
 /** Begin the loop once the daemon has booted — called from src/index.ts after boot hydration.
  *  No-op (beyond arming) when the check is disabled in config. */
 export function startRemoteSync(): void {
-  started = true;
-  reconcile();
+  rounds.start();
 }
 
 /** Stop the loop (daemon shutdown). Safe to call when it was never started. */
 export function stopRemoteSync(): void {
-  started = false;
-  if (timer) {
-    clearTimeout(timer);
-    timer = null;
-  }
+  rounds.stop();
   lastBehind.clear();
 }
 
 /** Enable/disable the check (config at boot + PUT /api/settings). Starts/stops the timer live. */
 export function setSyncCheckEnabled(value: boolean): void {
   enabled = value;
-  reconcile();
+  rounds.setEnabled(value);
 }
 
 /** Enable/disable auto fast-forward ("keep in sync"). Takes effect on the next tick; no timer
@@ -256,12 +224,8 @@ export function setKeepInSync(value: boolean): void {
 /** Set the cadence in seconds (clamped). Re-times a running loop. Returns the clamped value. */
 export function setSyncIntervalSecs(secs: number): number {
   intervalSecs = clampSyncInterval(secs);
-  // Apply the new cadence to a running loop immediately; if a tick is in flight, runTick's tail
-  // reschedules with the updated interval, so we leave the rearm to it.
-  if (started && enabled && !ticking) {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    schedule();
-  }
+  // Apply the new cadence to a running, idle loop immediately; mid-round, the round's own tail
+  // re-arms with the updated interval.
+  rounds.retime();
   return intervalSecs;
 }
