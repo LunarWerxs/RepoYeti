@@ -357,6 +357,18 @@ export const useStore = defineStore("repoyeti", () => {
     buzzEnabled,
     buzzCommunities,
     fetchingAll,
+    fetchAllJobId,
+    fetchAllTotal,
+    fetchAllDone,
+    fetchAllOk,
+    fetchAllFailed,
+    fetchAllCurrent,
+    fetchAllCancelRequested,
+    fetchAllSummary,
+    startFetchAll,
+    cancelFetchAll,
+    reconcileFetchAll,
+    applyFetchAllEvent,
     loadRoots,
     addScanRoot,
     removeScanRoot,
@@ -373,7 +385,6 @@ export const useStore = defineStore("repoyeti", () => {
     addBuzzCommunity,
     removeBuzzCommunity,
     runBuzzPreflight,
-    fetchAll,
     cleanupMissingRepos,
     shutdown,
     logoutAll,
@@ -786,6 +797,10 @@ export const useStore = defineStore("repoyeti", () => {
         "scan_progress",
         "scan_done",
         "scan_cancelled",
+        "fetch_all_started",
+        "fetch_all_progress",
+        "fetch_all_done",
+        "fetch_all_cancelled",
         "update_available",
         "approval_pending",
         "approval_resolved",
@@ -831,6 +846,7 @@ export const useStore = defineStore("repoyeti", () => {
       autoUpdateRestarting,
       runtime,
       editorsLoaded,
+      applyFetchAllEvent,
       scanning,
       scanFound,
       scanNew,
@@ -863,6 +879,10 @@ export const useStore = defineStore("repoyeti", () => {
             // this client was offline is gone for good. Ask directly rather than trust the stale
             // `scanning` flag — reconcileScan no-ops unless it was left true.
             void reconcileScan();
+            // Same reasoning for the bulk fetch: a phone that backgrounded mid-sweep missed both
+            // the heartbeats and the terminal event, and unlike the scan the daemon can also tell
+            // it what the run actually did.
+            void reconcileFetchAll();
           }
           connected.value = isOpen;
           if (isOpen) hasConnectedOnce = true;
@@ -983,7 +1003,17 @@ export const useStore = defineStore("repoyeti", () => {
     addBuzzCommunity,
     removeBuzzCommunity,
     runBuzzPreflight,
-    fetchAll,
+    fetchAllJobId,
+    fetchAllTotal,
+    fetchAllDone,
+    fetchAllOk,
+    fetchAllFailed,
+    fetchAllCurrent,
+    fetchAllCancelRequested,
+    fetchAllSummary,
+    startFetchAll,
+    cancelFetchAll,
+    reconcileFetchAll,
     cleanupMissingRepos,
     shutdown,
     logoutAll,
@@ -1260,6 +1290,9 @@ type SseEventCtx = Pick<
     runtime: RuntimeStatusStore;
     /** Still here because handleSettingsChanged has to tell it whether a refresh is worth it. */
     editorsLoaded: Ref<boolean>;
+    /** The fetch-all job's counters live with the rest of its state in store/sources.ts; this is
+     *  the one entry point the event table needs into them. */
+    applyFetchAllEvent: (name: string, payload: unknown) => void;
     scanning: Ref<boolean>;
     scanFound: Ref<number>;
     scanNew: Ref<number>;
@@ -1431,6 +1464,10 @@ function handleDaemonStatus(payload: unknown, ctx: SseEventCtx): void {
   ctx.runtime.applyDaemonStatus(payload);
 }
 
+function handleFetchAll(payload: unknown, eventName: string, ctx: SseEventCtx): void {
+  ctx.applyFetchAllEvent(eventName, payload);
+}
+
 function handleSettingsChanged(payload: unknown, ctx: SseEventCtx): void {
   ctx.runtime.applySettingsChanged(payload, {
     loadSyncStatus: ctx.loadSyncStatus,
@@ -1548,6 +1585,12 @@ const REPO_SCOPED_EVENTS = new Set([
 function dispatchSseEvent(eventName: string, payload: any, ctx: SseEventCtx): void {
   if (eventName === "scan_done" || eventName === "scan_cancelled") {
     handleScanFinished(payload, eventName, ctx);
+    return;
+  }
+  // All four fetch_all_* events go to one applier, which needs the name to tell a heartbeat from
+  // a terminal event (see store/sources.ts).
+  if (eventName.startsWith("fetch_all_")) {
+    handleFetchAll(payload, eventName, ctx);
     return;
   }
   const handler = SSE_EVENT_HANDLERS[eventName];

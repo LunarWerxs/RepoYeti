@@ -126,7 +126,9 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/repos/create": { summary: "Create a new repository (git init) at a folder.", body: RootPathSchema, tags: ["repos"] },
   "POST /api/repos/clone": { summary: "Clone a remote git URL into a folder under a scan root.", body: CloneSchema, tags: ["repos"] },
   "POST /api/repos/reorder": { summary: "Persist a drag-to-reorder of the repo list.", body: ReorderSchema, tags: ["repos"] },
-  "POST /api/repos/fetch-all": { summary: "Fetch every repo that has a remote.", tags: ["repos"] },
+  "POST /api/repos/fetch-all": { summary: "Start a fetch of every repo that has a remote (fire-and-forget; progress over SSE).", tags: ["repos"] },
+  "POST /api/repos/fetch-all/cancel": { summary: "Stop the in-flight fetch-all after the repository it is on.", tags: ["repos"] },
+  "GET /api/repos/fetch-all": { summary: "Live counters for the fetch-all in flight, or the last one (reconnect reconciliation).", tags: ["repos"] },
   "POST /api/repos/:id/refresh": { summary: "Force a fresh status read of one repo.", tags: ["repos"] },
 
   // ── git actions ─────────────────────────────────────────────────────────────────

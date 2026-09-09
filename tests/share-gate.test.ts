@@ -528,6 +528,8 @@ test("a CONTROL guest is refused EVERY owner-only route", async () => {
     ["POST", "/api/repos/register"],
     ["POST", "/api/repos/clone"],
     ["POST", "/api/repos/fetch-all"],
+    ["POST", "/api/repos/fetch-all/cancel"],
+    ["GET", "/api/repos/fetch-all"],
     ["POST", "/api/portable-window"],
   ];
   for (const [method, path] of forbidden) {

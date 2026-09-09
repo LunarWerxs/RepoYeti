@@ -13,7 +13,10 @@ import {
   createRepo,
   cloneRepo,
   reorderRepos,
-  fetchAllRepos,
+  startFetchAllJob,
+  cancelFetchAll,
+  fetchAllState,
+  isFetchingAll,
   cleanupMissingRepos,
   restoreIgnoredPath,
 } from "../../service/index.ts";
@@ -73,8 +76,29 @@ export function register(app: Hono, { cfg }: Deps): void {
     return c.json({ ok: true });
   });
 
-  // Fetch every repo that has a remote (bounded by the network gate). Returns a summary.
-  app.post("/api/repos/fetch-all", async (c) => c.json(await fetchAllRepos()));
+  // ── fetch-all, as a job ───────────────────────────────────────────────────────
+  // Fire-and-forget, the same shape as POST /api/scan: the response only acknowledges that the
+  // pass started, and the counters + summary arrive over SSE (fetch_all_started →
+  // fetch_all_progress → fetch_all_done | fetch_all_cancelled). It used to await the whole sweep
+  // and return the summary inline, which on a large installation or a stalled credential helper
+  // was a lengthy opaque request with nothing to show and no way to stop it (1.0 audit item 24).
+  app.post("/api/repos/fetch-all", (c) => {
+    if (isFetchingAll()) return c.json({ ok: true, started: false, ...fetchAllState() });
+    // Errors surface over SSE, not in this response. The counters are already populated by the
+    // time this line runs: an async function body executes synchronously up to its first await,
+    // and the job installs its opening state before the first repository is touched. A client
+    // that misses them anyway is not stranded, because `fetch_all_started` carries the same.
+    void startFetchAllJob().catch(() => {});
+    return c.json({ ok: true, started: true, ...fetchAllState() });
+  });
+  // Stop the in-flight pass. The repository being fetched right now is allowed to finish; only
+  // the ones after it are dropped (see service/fetch-all.ts).
+  app.post("/api/repos/fetch-all/cancel", (c) => c.json({ ok: true, cancelled: cancelFetchAll() }));
+  // What the run is doing right now, or what the last one did. The lifecycle streams over SSE and
+  // the daemon has no event replay, so a phone that backgrounded mid-sweep has nothing to
+  // reconcile against without this — and unlike the scan's status route it answers with the
+  // counters too, so the phone can show the result it missed rather than only "not running".
+  app.get("/api/repos/fetch-all", (c) => c.json({ ok: true, ...fetchAllState() }));
 
   // Remove every repo entry (any source) whose local path no longer exists on disk.
   app.post("/api/repos/cleanup-missing", (c) => c.json({ ok: true, removed: cleanupMissingRepos() }));

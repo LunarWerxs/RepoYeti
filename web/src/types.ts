@@ -538,11 +538,31 @@ export interface TagList {
   tags: TagEntry[];
 }
 
-/** Summary of a bulk "fetch all" (mirrors src/service.ts FetchAllResult). */
+/** Summary of a bulk "fetch all" (mirrors src/service/fetch-all.ts FetchAllResult). */
 export interface FetchAllResult {
   total: number;
   ok: number;
   failed: Array<{ id: string; name: string; code: string }>;
+  /** In scope but never attempted, because the owner stopped the run. */
+  skipped: number;
+  /** The owner stopped it. */
+  cancelled: boolean;
+}
+
+/**
+ * The live counters for a fetch-all run, from GET /api/repos/fetch-all and from the terminal
+ * SSE event. The daemon keeps the LAST run after it ends, so a phone that backgrounded mid-sweep
+ * can show what happened rather than only learning that nothing is running now.
+ */
+export interface FetchAllJob extends FetchAllResult {
+  jobId: string;
+  /** How many repositories have been attempted so far. */
+  done: number;
+  /** The repository being fetched right now, or null once the run has ended. */
+  current: string | null;
+  running: boolean;
+  /** Set when the run ended by throwing rather than finishing, so the toast can say why. */
+  error?: string;
 }
 
 /**

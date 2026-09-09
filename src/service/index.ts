@@ -10,7 +10,9 @@
  * keep a single import surface (`./service/index.ts`):
  *   - core        → refresh/runAction/forceRefresh/reorder + ActionOutcome
  *   - watch       → live fs watching, coalesced refresh, refreshAllRepos, watcherHealth
- *   - actions     → mutating VCS actions, fetch-all, discardFile, smartCommitRepo
+ *   - actions     → mutating VCS actions, discardFile, smartCommitRepo
+ *   - fetch-all   → the bulk fetch, as a plain call (remote-sync) and as a cancellable job
+ *   - job         → the shared single-flight/cancel/progress lifecycle scan and fetch-all use
  *   - repo-mgmt   → discover/forget/register/clone/create
  *   - scan        → on-demand "Scan for projects" (cancellable rescan of all roots)
  *   - reads       → branches/log/commit/stashes/tags/changes/search + AI diff collectors
@@ -23,6 +25,8 @@
 export * from "./core.ts";
 export * from "./watch.ts";
 export * from "./actions.ts";
+export * from "./fetch-all.ts";
+export * from "./job.ts";
 export * from "./repo-mgmt.ts";
 export * from "./scan.ts";
 export * from "./reads.ts";

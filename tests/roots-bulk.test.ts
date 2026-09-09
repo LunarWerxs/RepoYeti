@@ -60,13 +60,21 @@ test("fetchAllRepos attempts only repos with a remote, and reports per-repo fail
   expect(r.failed.some((f) => f.id === idA) || r.ok >= 1).toBe(true);
 }, 60_000);
 
-test("POST /api/repos/fetch-all returns a well-formed summary", async () => {
-  const res = await createApp(localCfg()).request("/api/repos/fetch-all", { method: "POST" });
+// The route is fire-and-forget since the sweep became a cancellable job (1.0 audit item 24):
+// it acknowledges the start, and the summary arrives over SSE. The counters live on GET.
+test("POST /api/repos/fetch-all acknowledges the start, and GET answers with the run", async () => {
+  const app = createApp(localCfg());
+  const res = await app.request("/api/repos/fetch-all", { method: "POST" });
   expect(res.status).toBe(200);
   const j = await res.json();
-  expect(typeof j.total).toBe("number");
-  expect(typeof j.ok).toBe("number");
-  expect(Array.isArray(j.failed)).toBe(true);
+  expect(j.ok).toBe(true);
+  expect(typeof j.running).toBe("boolean");
+
+  const status = await app.request("/api/repos/fetch-all");
+  const s = await status.json();
+  expect(s.ok).toBe(true);
+  expect(typeof s.running).toBe("boolean");
+  expect(s.job === null || typeof s.job.total === "number").toBe(true);
 });
 
 // ── scan roots ───────────────────────────────────────────────────────────────

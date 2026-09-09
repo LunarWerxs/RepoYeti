@@ -1,6 +1,6 @@
 import { ref, type Ref } from "vue";
 import { api } from "../api";
-import type { BuzzCommunity, BuzzPreflight, FetchAllResult, LoreServer, Repo } from "../types";
+import type { BuzzCommunity, BuzzPreflight, FetchAllJob, LoreServer, Repo } from "../types";
 
 /**
  * Scan roots / registered Lore servers / bulk fetch / add-or-clone-repo / drag-reorder /
@@ -27,8 +27,24 @@ export function useSources(
   // Experimental Buzz is opt-in and stays false until its owner-only config is loaded.
   const buzzEnabled = ref(false);
   const buzzCommunities = ref<BuzzCommunity[]>([]);
-  // True while a bulk "fetch all" is running (drives the header button spinner).
+  // ── bulk "fetch all", as a job ────────────────────────────────────────────────
+  // It used to be one boolean around one long await: the phone saw a spinner, no idea how many
+  // repositories there were or which one was stalling, and no way to stop it (1.0 audit item 24).
+  // These mirror the scan's shape: optimistic locally, corrected by the fetch_all_* SSE events,
+  // and reconciled against GET /api/repos/fetch-all after a dropped connection.
   const fetchingAll = ref(false);
+  /** Which run the counters below belong to, so a late event for a previous one is ignorable. */
+  const fetchAllJobId = ref<string | null>(null);
+  const fetchAllTotal = ref(0);
+  const fetchAllDone = ref(0);
+  const fetchAllOk = ref(0);
+  const fetchAllFailed = ref(0);
+  /** The repository being fetched right now, for the "Fetching <name>…" line. */
+  const fetchAllCurrent = ref<string | null>(null);
+  /** The owner asked to stop and the daemon has not confirmed yet: the "Stopping…" state. */
+  const fetchAllCancelRequested = ref(false);
+  /** The last finished run, which is what the summary toast is built from. */
+  const fetchAllSummary = ref<FetchAllJob | null>(null);
 
   // ── scan roots / bulk fetch / sign-out-everywhere ────────────────────────────
   async function loadRoots(): Promise<void> {
@@ -168,14 +184,159 @@ export function useSources(
     return api.buzzPreflight(communityId);
   }
 
-  /** Fetch every repo with a remote. Returns a summary the caller toasts. */
-  async function fetchAll(): Promise<FetchAllResult> {
-    fetchingAll.value = true;
-    try {
-      return await api.fetchAll();
-    } finally {
-      fetchingAll.value = false;
+  /** Adopt a run's counters, whether they arrived over SSE or from the status route. */
+  function applyFetchAllJob(job: FetchAllJob): void {
+    fetchAllJobId.value = job.jobId;
+    fetchAllTotal.value = job.total;
+    fetchAllDone.value = job.done;
+    fetchAllOk.value = job.ok;
+    fetchAllFailed.value = job.failed.length;
+    fetchAllCurrent.value = job.current;
+    fetchingAll.value = job.running;
+    if (!job.running) {
+      fetchAllSummary.value = job;
+      fetchAllCancelRequested.value = false;
     }
+  }
+
+  /**
+   * Start a fetch of every repo with a remote. Optimistic like startScan: the running state flips
+   * on before the request returns so the header reacts on the first frame, and rolls back only if
+   * the START itself failed — a sweep that started and then failed reports over SSE.
+   */
+  async function startFetchAll(): Promise<void> {
+    fetchingAll.value = true;
+    fetchAllCancelRequested.value = false;
+    fetchAllSummary.value = null;
+    fetchAllCurrent.value = null;
+    fetchAllDone.value = 0;
+    fetchAllOk.value = 0;
+    fetchAllFailed.value = 0;
+    try {
+      const r = await api.startFetchAll();
+      if (r.job) applyFetchAllJob(r.job);
+      // `started: false` means one was already running; its own events drive the counters.
+      fetchingAll.value = r.running || r.started;
+    } catch (e) {
+      fetchingAll.value = false; // the request itself failed: it never entered the running state
+      throw e;
+    }
+  }
+
+  /**
+   * Stop the in-flight sweep. `fetchAllCancelRequested` flips on optimistically so the control can
+   * say "Stopping…" rather than looking inert while the request is in flight (or, worse, forever,
+   * if it never reaches the daemon); rolled back and rethrown if the request itself fails.
+   */
+  async function cancelFetchAll(): Promise<void> {
+    fetchAllCancelRequested.value = true;
+    try {
+      await api.cancelFetchAll();
+    } catch (e) {
+      fetchAllCancelRequested.value = false;
+      throw e;
+    }
+  }
+
+  /**
+   * Apply one `fetch_all_*` broadcast.
+   *
+   * Owned here, with the state it drives, so the root store's event table stays a dispatch table
+   * rather than becoming a second place these counters are written — which is exactly the drift
+   * the runtime-status table (store/runtime-status.ts) was extracted to stop.
+   *
+   * The progress heartbeat carries a failure COUNT and the terminal event carries the failure
+   * LIST; both are handled, and neither is trusted from a run we are not watching.
+   */
+  function applyFetchAllEvent(name: string, payload: unknown): void {
+    if (payload === null || typeof payload !== "object") return;
+    const p = payload as {
+      jobId?: string;
+      total?: number;
+      done?: number;
+      ok?: number;
+      failed?: unknown;
+      skipped?: number;
+      current?: string | null;
+      cancelled?: boolean;
+      error?: string;
+    };
+    if (name === "fetch_all_started") {
+      fetchAllJobId.value = p.jobId ?? null;
+      fetchAllTotal.value = p.total ?? 0;
+      fetchAllDone.value = 0;
+      fetchAllOk.value = 0;
+      fetchAllFailed.value = 0;
+      fetchAllCurrent.value = null;
+      fetchAllSummary.value = null;
+      fetchingAll.value = true;
+      return;
+    }
+    // A late event for a run this client is not watching must not rewrite the current one's
+    // counters. Only possible right after a reconnect, and exactly when it would mislead most.
+    if (fetchAllJobId.value && p.jobId && p.jobId !== fetchAllJobId.value) return;
+    if (name === "fetch_all_progress") {
+      fetchAllCurrent.value = p.current ?? null;
+      fetchAllDone.value = p.done ?? fetchAllDone.value;
+      fetchAllTotal.value = p.total ?? fetchAllTotal.value;
+      fetchAllOk.value = p.ok ?? fetchAllOk.value;
+      fetchAllFailed.value = typeof p.failed === "number" ? p.failed : fetchAllFailed.value;
+      fetchingAll.value = true;
+      return;
+    }
+    // Terminal: fetch_all_done or fetch_all_cancelled. Both end the run; `cancelled` says which.
+    const failed = (Array.isArray(p.failed) ? p.failed : []) as FetchAllJob["failed"];
+    const total = p.total ?? fetchAllTotal.value;
+    const skipped = p.skipped ?? 0;
+    fetchAllSummary.value = {
+      jobId: p.jobId ?? fetchAllJobId.value ?? "",
+      total,
+      ok: p.ok ?? fetchAllOk.value,
+      failed,
+      skipped,
+      cancelled: p.cancelled === true,
+      done: total - skipped,
+      current: null,
+      running: false,
+      ...(p.error ? { error: p.error } : {}),
+    };
+    fetchAllTotal.value = total;
+    fetchAllDone.value = total - skipped;
+    fetchAllOk.value = p.ok ?? fetchAllOk.value;
+    fetchAllFailed.value = failed.length;
+    fetchAllCurrent.value = null;
+    fetchAllCancelRequested.value = false;
+    fetchingAll.value = false;
+  }
+
+  /**
+   * Reconcile after an SSE (re)connect, the same rule as reconcileScan: only settle on an answer
+   * the daemon actually gave. A failed status check changes nothing, because guessing that an
+   * unknown server-side job has stopped is how a spinner lies in the other direction.
+   */
+  async function reconcileFetchAll(): Promise<void> {
+    let status: { running: boolean; job: FetchAllJob | null };
+    try {
+      status = await api.fetchAllStatus();
+    } catch {
+      return;
+    }
+    // A run IS in flight: adopt it, whether or not this client knew about it (another tab, or
+    // this one before it reloaded).
+    if (status.running && status.job) {
+      applyFetchAllJob(status.job);
+      return;
+    }
+    // Nothing running, and this client was not watching one: leave everything alone. The daemon
+    // keeps the LAST run after it ends, and adopting it here would pop a summary toast for a
+    // sweep that finished hours ago every time a phone reconnected.
+    if (!fetchingAll.value) return;
+    if (status.job) {
+      applyFetchAllJob(status.job);
+      return;
+    }
+    fetchingAll.value = false;
+    fetchAllCancelRequested.value = false;
   }
 
   /** Remove every repo entry whose local path no longer exists on disk. The victims drop from
@@ -250,7 +411,6 @@ export function useSources(
     servers,
     buzzEnabled,
     buzzCommunities,
-    fetchingAll,
     loadRoots,
     addScanRoot,
     removeScanRoot,
@@ -267,7 +427,19 @@ export function useSources(
     addBuzzCommunity,
     removeBuzzCommunity,
     runBuzzPreflight,
-    fetchAll,
+    fetchingAll,
+    fetchAllJobId,
+    fetchAllTotal,
+    fetchAllDone,
+    fetchAllOk,
+    fetchAllFailed,
+    fetchAllCurrent,
+    fetchAllCancelRequested,
+    fetchAllSummary,
+    startFetchAll,
+    cancelFetchAll,
+    reconcileFetchAll,
+    applyFetchAllEvent,
     cleanupMissingRepos,
     shutdown,
     logoutAll,

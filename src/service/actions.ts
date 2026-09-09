@@ -1,11 +1,11 @@
 /**
  * Mutating VCS actions, each funnelled through `runAction` (core.ts) so it goes behind the
- * per-repo op-queue and re-broadcasts status afterward. Plus the bulk fetch-all helper.
+ * per-repo op-queue and re-broadcasts status afterward. The bulk fetch-all lives next door in
+ * service/fetch-all.ts, which calls fetchRepo from here.
  */
 import { existsSync, lstatSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { getWatchableRepos } from "../db.ts";
 import { enqueue } from "../opqueue.ts";
 import { resolveRepoIdentity, enforceIdentityPolicy } from "../identity.ts";
 import { backendFor } from "../vcs/index.ts";
@@ -107,52 +107,9 @@ export const createTagRepo = (
 export const pushTagRepo = (id: string, name: string): Promise<ActionOutcome> =>
   runAction(id, "tag-push", (_b, p, idn, auth) => gitTagPush(p, idn, name, auth), false, true);
 
-// ── bulk fetch-all ────────────────────────────────────────────────────────────────
-export interface FetchAllResult {
-  /** Repos that had a remote and were attempted. */
-  total: number;
-  /** How many fetched cleanly. */
-  ok: number;
-  /** Per-repo failures (so the UI can name them). */
-  failed: Array<{ id: string; name: string; code: string }>;
-}
-
-/**
- * Fetch every repo that has a remote, serially. `netGate` bounds the fetch command itself, but
- * credential/account resolution happens before that gate and can run its own Git probes. An outer
- * pool of eight therefore still produced a large process burst every background sync round. One
- * worker makes the daemon-wide sweep low-impact; a user-initiated single-repo operation can still
- * use the other netGate slot between repositories.
- * Repos with no remote are skipped (not failures).
- */
-export async function fetchAllRepos(): Promise<FetchAllResult> {
-  const repos = getWatchableRepos().filter((r) => r.status?.remote);
-  const failedByIndex = new Array<FetchAllResult["failed"][number] | undefined>(repos.length);
-  let ok = 0;
-  let next = 0;
-  const workers = Math.min(1, repos.length);
-  await Promise.all(
-    Array.from({ length: workers }, async () => {
-      while (true) {
-        const index = next++;
-        if (index >= repos.length) return;
-        const repo = repos[index]!;
-        try {
-          const result = await fetchRepo(repo.id);
-          if (result.ok) ok++;
-          else failedByIndex[index] = { id: repo.id, name: repo.name, code: result.code };
-        } catch {
-          failedByIndex[index] = { id: repo.id, name: repo.name, code: "ERROR" };
-        }
-      }
-    }),
-  );
-  return {
-    total: repos.length,
-    ok,
-    failed: failedByIndex.filter((failure) => failure !== undefined),
-  };
-}
+// The bulk fetch-all moved to service/fetch-all.ts when it became a cancellable, progress-
+// reporting job (1.0 audit item 24). It still calls fetchRepo below, and the background
+// remote-sync round still calls it plainly.
 
 /** Result of discarding one file's working-tree changes (the changes-tree "Discard" action). */
 export interface DiscardResult {

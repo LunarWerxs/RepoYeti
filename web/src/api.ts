@@ -30,7 +30,7 @@ import type {
   ConflictResolveResponse,
   DetectedIdentity,
   DiffDetail,
-  FetchAllResult,
+  FetchAllJob,
   FileContent,
   FileDiff,
   HistoryActivity,
@@ -417,8 +417,18 @@ export const api = {
     req<{ ok: boolean; config: BuzzConfig }>("DELETE", `/api/buzz/communities/${id}`),
   buzzPreflight: (communityId?: string) =>
     req<BuzzPreflight>("POST", "/api/buzz/preflight", communityId ? { communityId } : {}),
-  /** Fetch every repo that has a remote; returns a per-repo summary. */
-  fetchAll: () => req<FetchAllResult>("POST", "/api/repos/fetch-all"),
+  /** Start a fetch of every repo that has a remote. Fire-and-forget: the counters and the
+   *  summary arrive over SSE (fetch_all_started → fetch_all_progress → fetch_all_done |
+   *  fetch_all_cancelled), exactly like the project scan. */
+  startFetchAll: () =>
+    req<{ ok: boolean; started: boolean; running: boolean; job: FetchAllJob | null }>(
+      "POST",
+      "/api/repos/fetch-all",
+    ),
+  /** Stop the in-flight sweep. The repository being fetched right now still finishes. */
+  cancelFetchAll: () => req<{ ok: boolean; cancelled: boolean }>("POST", "/api/repos/fetch-all/cancel"),
+  /** The run in flight, or the last one that finished. The reconnect-reconciliation read. */
+  fetchAllStatus: () => req<{ ok: boolean; running: boolean; job: FetchAllJob | null }>("GET", "/api/repos/fetch-all"),
   /** Remove every repo entry (any source) whose local path no longer exists on disk. */
   cleanupMissingRepos: () => req<{ ok: boolean; removed: number }>("POST", "/api/repos/cleanup-missing"),
   /** Cleanly stop the local daemon. */

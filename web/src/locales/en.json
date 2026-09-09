@@ -207,7 +207,13 @@
     "shutdownConfirm": "Confirm shutdown",
     "shutdownStarted": "RepoYeti is shutting down",
     "shutdownFailed": "Couldn't shut down",
-    "selectMultiple": "Select multiple"
+    "selectMultiple": "Select multiple",
+    "fetchAllProgress": "Fetching {name} ({done} of {total})",
+    "fetchAllProgressCounts": "Fetching {done} of {total}",
+    "fetchAllStop": "Stop",
+    "fetchAllStopping": "Stopping…",
+    "fetchAllStopFailed": "Couldn't stop the fetch",
+    "fetchAllStopped": "Stopped after {ok} of {total}"
   },
   "identity": {
     "action": {

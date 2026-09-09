@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { RefreshCw, Plus, Settings, Cloud, CloudOff, CircleUser, Check, DownloadCloud, FolderSearch, FolderX, ListChecks, Loader2, MoreVertical, Power, Bell, ArrowDownToLine, ArrowDownAZ, Download, Code } from "@lucide/vue";
 import type { SortMode } from "../store/repo";
 import type { BehindRepo } from "../store/settings";
@@ -97,7 +97,14 @@ function toastFetchError(e: unknown): void {
   else toast.error(t("header.fetchAllFailed"));
 }
 
-// Fetch every repo that has a remote, then toast a one-line summary.
+/**
+ * Start a fetch of every repo that has a remote.
+ *
+ * Fire-and-forget since the sweep became a job (1.0 audit item 24): this awaits only the
+ * acknowledgement, the counters arrive over SSE, and the summary is toasted by the watcher below
+ * when the run actually ends. That is also what makes the summary right for a run started in
+ * another tab, or one that was still going when this tab reloaded.
+ */
 async function fetchAll(): Promise<void> {
   if (store.fetchingAll) return;
   actionsOpen.value = false;
@@ -106,18 +113,52 @@ async function fetchAll(): Promise<void> {
     return;
   }
   try {
-    const r = await store.fetchAll();
-    if (r.total === 0) toast.message(t("header.fetchAllNone"));
-    else if (r.failed.length === 0) toast.success(t("header.fetchAllDone", { count: r.ok }, r.ok));
-    else {
-      const description = firstFetchFailureDescription(r.failed);
-      if (description) toast.warning(t("header.fetchAllPartial", { ok: r.ok, failed: r.failed.length }), { description });
-      else toast.warning(t("header.fetchAllPartial", { ok: r.ok, failed: r.failed.length }));
-    }
+    await store.startFetchAll();
   } catch (e) {
     toastFetchError(e);
   }
 }
+
+/** Stop the sweep after the repository it is on. The menu stays open: the owner just asked for
+ *  something and closing it under them would hide whether it worked. */
+async function stopFetchAll(): Promise<void> {
+  if (!store.fetchingAll || store.fetchAllCancelRequested) return;
+  try {
+    await store.cancelFetchAll();
+  } catch (e) {
+    const description = e instanceof Error ? e.message : "";
+    if (description) toast.error(t("header.fetchAllStopFailed"), { description });
+    else toast.error(t("header.fetchAllStopFailed"));
+  }
+}
+
+// The one place a finished sweep is reported, whoever started it and whatever ended it.
+watch(
+  () => store.fetchAllSummary,
+  (summary) => {
+    if (!summary) return;
+    if (summary.error) {
+      toast.error(t("header.fetchAllFailed"), { description: summary.error });
+      return;
+    }
+    if (summary.cancelled) {
+      toast.message(t("header.fetchAllStopped", { ok: summary.ok, total: summary.total }));
+      return;
+    }
+    if (summary.total === 0) {
+      toast.message(t("header.fetchAllNone"));
+      return;
+    }
+    if (summary.failed.length === 0) {
+      toast.success(t("header.fetchAllDone", { count: summary.ok }, summary.ok));
+      return;
+    }
+    const description = firstFetchFailureDescription(summary.failed);
+    const line = t("header.fetchAllPartial", { ok: summary.ok, failed: summary.failed.length });
+    if (description) toast.warning(line, { description });
+    else toast.warning(line);
+  },
+);
 
 // Remove every repo entry whose local path no longer exists on disk, then toast the count.
 const cleaningUpMissing = ref(false);
@@ -527,16 +568,48 @@ onBeforeUnmount(() => {
             @click.stop
           >
             <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{{ $t("header.actions") }}</div>
+            <!--
+              While a sweep is running this stops being a button and becomes a live line plus a
+              Stop. Before the sweep was a job it was one spinner around one long await: on a
+              large installation, or behind a stalled credential helper, the phone had no idea how
+              many repositories there were, which one it was on, or any way out (audit item 24).
+            -->
+            <div
+              v-if="!store.isGuest && store.fetchingAll"
+              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm [&_svg]:size-4 [&_svg]:shrink-0"
+            >
+              <Loader2 class="animate-spin" />
+              <span class="min-w-0 flex-1 truncate">
+                {{
+                  store.fetchAllCurrent
+                    ? $t("header.fetchAllProgress", {
+                        name: store.fetchAllCurrent,
+                        done: store.fetchAllDone,
+                        total: store.fetchAllTotal,
+                      })
+                    : $t("header.fetchAllProgressCounts", {
+                        done: store.fetchAllDone,
+                        total: store.fetchAllTotal,
+                      })
+                }}
+              </span>
+              <button
+                type="button"
+                :disabled="store.fetchAllCancelRequested"
+                class="shrink-0 rounded-sm px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                @click.stop="stopFetchAll"
+              >
+                {{ store.fetchAllCancelRequested ? $t("header.fetchAllStopping") : $t("header.fetchAllStop") }}
+              </button>
+            </div>
             <button
-              v-if="!store.isGuest"
+              v-else-if="!store.isGuest"
               type="button"
               role="menuitem"
-              :disabled="store.fetchingAll"
               class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
               @click="fetchAll"
             >
-              <Loader2 v-if="store.fetchingAll" class="animate-spin" />
-              <DownloadCloud v-else />
+              <DownloadCloud />
               <span>{{ $t("header.fetchAll") }}</span>
             </button>
             <button

@@ -182,6 +182,8 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/repos/clone",
   "POST /api/repos/reorder",
   "POST /api/repos/fetch-all",
+  "POST /api/repos/fetch-all/cancel",
+  "GET /api/repos/fetch-all",
   "POST /api/repos/cleanup-missing",
   "PATCH /api/repos/:id/name",
   "DELETE /api/repos/:id",

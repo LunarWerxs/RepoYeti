@@ -16,20 +16,16 @@ import { loadConfig } from "../config.ts";
 import { getRepo, getRepos, upsertRepo } from "../db.ts";
 import { discoverStream, machineScanRoots } from "../discovery.ts";
 import { coalescedRefresh, watchOne } from "./watch.ts";
-
-// The in-flight scan's abort controller, or null when idle. Guards single-flight + cancel.
-let active: AbortController | null = null;
+import { createJob } from "./job.ts";
 
 /** Whether a scan is currently running. */
 export function isScanning(): boolean {
-  return active !== null;
+  return scanJob.isRunning();
 }
 
 /** Abort the in-flight scan, if any. Returns whether a scan was actually running. */
 export function cancelScan(): boolean {
-  if (!active) return false;
-  active.abort();
-  return true;
+  return scanJob.cancel();
 }
 
 /** How often (in repos found) to emit a progress heartbeat, so a huge tree can't flood SSE. */
@@ -59,6 +55,10 @@ export interface ScanSummary {
   cancelled: boolean;
 }
 
+// Single-flight, cancellable, and the source of the scan_* lifecycle events. Shared with the
+// fetch-all job (service/job.ts) so the two cannot drift apart the way two hand-rolled copies do.
+const scanJob = createJob<ScanSummary>("scan");
+
 type ScanLimits = { maxDepth: number; maxRepos: number; budgetMs: number; concurrency: number };
 
 /**
@@ -67,18 +67,13 @@ type ScanLimits = { maxDepth: number; maxRepos: number; budgetMs: number; concur
  * A no-op returning a zeroed summary if a scan is already running (single-flight).
  */
 async function runScan(scope: string, roots: string[], limits: ScanLimits): Promise<ScanSummary> {
-  if (active) return { found: 0, added: 0, cancelled: false };
-  const controller = new AbortController();
-  active = controller;
-
   // Snapshot what we already knew, so we only announce/count genuinely-new repos (mirrors the
   // boot-discovery new-vs-known check in cli/lifecycle.ts).
   const knownIds = new Set(getRepos().map((r) => r.id));
   let found = 0;
   let added = 0;
 
-  broadcast("scan_started", { scope, roots: roots.length });
-  try {
+  const summary = await scanJob.start({ scope, roots: roots.length }, async (run) => {
     await discoverStream(
       roots,
       limits.maxDepth,
@@ -100,18 +95,16 @@ async function runScan(scope: string, roots: string[], limits: ScanLimits): Prom
             broadcast("repo_added", { repo });
           }
         }
-        if (found % PROGRESS_EVERY === 0) broadcast("scan_progress", { found, added });
+        if (found % PROGRESS_EVERY === 0) run.progress({ found, added });
       },
-      controller.signal,
+      run.signal,
       { budgetMs: limits.budgetMs, concurrency: limits.concurrency },
     );
-  } finally {
-    active = null;
-  }
-
-  const cancelled = controller.signal.aborted;
-  broadcast(cancelled ? "scan_cancelled" : "scan_done", { found, added, cancelled });
-  return { found, added, cancelled };
+    return { found, added, cancelled: run.cancelled };
+  });
+  // null = a scan was already in flight and this start was refused. The zeroed summary is the
+  // long-standing answer for that, and the route ignores the value anyway.
+  return summary ?? { found: 0, added: 0, cancelled: false };
 }
 
 /** Sweep the whole machine (home + every drive) for repositories. The dashboard's default scan. */

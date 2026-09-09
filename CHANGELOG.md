@@ -8,6 +8,21 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Changed
 
+- **"Fetch all" now says what it is doing and can be stopped.** It processed one repository at a
+  time and returned only after the whole set finished, so the phone got a spinner, no idea how
+  many repositories there were or which one it was on, and no way out. On a large installation, or
+  behind a credential helper waiting on something that will never arrive, that is a long opaque
+  action with the queue still marching. It is now a job like the project scan: the request only
+  acknowledges the start, the counters and the current repository stream over SSE, and a Stop in
+  the header ends it. Stopping means the sweep starts no further repositories; the one already
+  fetching is allowed to finish, because aborting git mid-transfer is how a lock file gets left
+  behind. It is still deliberately serial: progress reporting is the answer to "this is slow", not
+  more parallel network work. A phone that backgrounded mid-sweep asks the daemon what happened
+  when it comes back, and the daemon keeps the last run's counters so the answer is the summary it
+  missed rather than just "nothing is running". The scan and the fetch now share one job
+  lifecycle, which also gives both of them something they lacked: a run that ends by throwing
+  still emits a terminal event, so the spinner cannot run forever on a job that died.
+
 - **Every daemon-owned setting the dashboard mirrors now lives in one table.** Forty-odd runtime
   fields were declared in the root store, defaulted again in one snapshot function, re-validated
   again in six separate `settings_changed` handlers, and threaded through a forty-entry dependency
