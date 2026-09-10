@@ -153,6 +153,67 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun install --cwd web --frozen-lockfile
       - run: bun run build
+      # Windows code signing, BEFORE any packaging, so all three Windows assets carry the identical
+      # signed binary and the single-file archive assertions below still hold.
+      #
+      # Why it matters here specifically: a browser-downloaded unsigned .exe gets Mark-of-the-Web,
+      # so a first-time user meets "Windows protected your PC - Unknown publisher" and has to click
+      # through More info -> Run anyway. Explorer propagates MOTW to files extracted from the zips
+      # too, and the tray bundle's .ps1 files additionally trip execution policy. SHA256SUMS.txt
+      # does not help with any of that: Windows never reads it, and it only proves a file is what
+      # this same pipeline uploaded, never who published it. The updater's own integrity story is
+      # already strong (pinned URL, checksum-verified, version-verified before the swap), so signing
+      # buys nothing THERE - it buys the first download, which is the one that decides whether a
+      # stranger runs this at all.
+      #
+      # Gated on a repository VARIABLE, not a secret, so `if:` can read it: until
+      # RY_SIGN_WINDOWS is set to "true" in repo settings, this step is skipped and a release
+      # publishes exactly as it does today. A fork never has it, so forks keep building too.
+      #
+      # Required repo variables: RY_SIGN_WINDOWS, AZURE_SIGNING_ENDPOINT (e.g.
+      # https://eus.codesigning.azure.net), AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE.
+      # Required repo secrets: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (an App
+      # Registration granted the "Trusted Signing Certificate Profile Signer" role on the account).
+      # Federated (OIDC) credentials work too: drop the client secret, add `id-token: write` to this
+      # job's permissions, and run azure/login before this step.
+      - name: Sign the Windows binaries (Azure Trusted Signing)
+        if: runner.os == 'Windows' && vars.RY_SIGN_WINDOWS == 'true'
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          # An explicit list, not a folder sweep: dist/ must stay exactly one file (asserted below),
+          # and misc/ holds plenty that must not be touched. The tray scripts are signed as well -
+          # a signed launcher inside a bundle of unsigned .ps1 files still meets an execution-policy
+          # prompt, which reads to a user exactly like the warning signing was meant to remove.
+          files: |
+            ${{ github.workspace }}\dist\repoyeti.exe
+            ${{ github.workspace }}\misc\lunarwerx-tray.exe
+            ${{ github.workspace }}\misc\Create-Shortcut.ps1
+            ${{ github.workspace }}\misc\New-TrayShortcut.ps1
+            ${{ github.workspace }}\misc\Tray-Host.ps1
+            ${{ github.workspace }}\misc\RepoYeti-Tray.ps1
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      # Fail loudly rather than publish an unsigned release that everyone assumed was signed. The
+      # signing step above is a no-op when the variable is off; this proves it actually did something
+      # when it is on.
+      - name: Verify the signature landed
+        if: runner.os == 'Windows' && vars.RY_SIGN_WINDOWS == 'true'
+        shell: pwsh
+        run: |
+          foreach ($f in @("dist/repoyeti.exe", "misc/lunarwerx-tray.exe")) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $f
+            if ($sig.Status -ne "Valid") {
+              throw "$f is not validly signed after the signing step (status: $($sig.Status))"
+            }
+            Write-Host "signed: $f  ->  $($sig.SignerCertificate.Subject)"
+          }
       - name: Package Unix executable
         if: runner.os != 'Windows'
         shell: bash
