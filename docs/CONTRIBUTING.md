@@ -36,14 +36,21 @@ bun run build        # runs i18n:check, then vue-tsc type-check + production bui
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push / PR. For a fast local
-gate, enable the bundled pre-commit hook (it runs `i18n:check`, Biome lint, both typechecks and
-the kit-sync guard before each commit):
+gate, enable the bundled pre-commit hook (it runs `check:imports`, `i18n:check`, Biome lint, both
+typechecks and the kit-sync guard before each commit):
 
 ```sh
 git config core.hooksPath .githooks   # one-time, per clone
 ```
 
 Bypass a single commit with `git commit --no-verify`; disable with `git config --unset core.hooksPath`.
+
+`check:imports` runs first because it is the only gate that reads git's INDEX rather than your
+working tree. Everything else here compiles the files on disk, where a module you just wrote is
+present whether or not you ever `git add`ed it, so lint and both typechecks will happily pass on a
+commit that ships the imports without their target. That is not hypothetical: it put an unbuildable
+`main` in front of every source self-update for three days ([#24](https://github.com/LunarWerxs/RepoYeti/issues/24)).
+It is also the cheapest step, so a doomed commit is rejected before anything compiles.
 
 The subprocess test timeout lives in the test files, not on the command line. Nearly every test
 here shells out to git, and a subprocess test times the machine rather than its own assertions: a

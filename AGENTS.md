@@ -136,6 +136,16 @@ the `Unreleased` heading into the version with a date, add its comparison link a
 changelog, commit as `release: x.y.z`, then tag `vx.y.z` and push the tag. The tag is what builds
 and publishes the binaries.
 
+**The tag is not the last step.** CI builds the Windows assets UNSIGNED, and they are signed
+afterwards on the workstation through the Connections vault. A release published and left there
+hands every Windows visitor an "Unknown publisher" wall. The whole procedure, including the two
+repack traps that would silently break the auto-updater, is [docs/RELEASING.md](docs/RELEASING.md).
+Read it before you tag, not after.
+
+Version drift is a real failure here, not a tidiness point: the version lives in THREE files and
+`tests/version-consistency.test.ts` fails on all three OS legs if they disagree. Run the gates
+AFTER the bump. A green suite from before the bump proves nothing about the release.
+
 ## Style
 
 Comments explain **why**, especially why an obvious-looking simplification is wrong. Several files
