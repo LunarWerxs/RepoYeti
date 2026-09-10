@@ -166,6 +166,19 @@ jobs:
       # buys nothing THERE - it buys the first download, which is the one that decides whether a
       # stranger runs this at all.
       #
+      # ⛔ THIS STEP IS NOT THE PATH IN USE, AND IS OFF. Signing happens on the WORKSTATION, via
+      # the Connections vault's `sign_artifact` (Azure Artifact Signing account `lunawerxsigning`,
+      # profile `lunawerx-public-trust`), which reads the signing account and endpoint from Azure
+      # and leases the credential into SignTool value-blind. That is how v1.0.1's Windows assets
+      # were signed: build in CI, sign the downloaded assets locally, repack, regenerate
+      # SHA256SUMS.txt, re-upload. See docs/RELEASING.md.
+      #
+      # The reason it is not done here is deliberate: this step needs AZURE_CLIENT_SECRET as a
+      # GitHub Actions secret, and the standing rule is that a secret value never passes through an
+      # agent's context on its way there. There is a value-blind bridge for Cloudflare but none for
+      # GitHub Actions, so putting it in is a human's job. This step stays, correct and ready, for
+      # whenever that happens or a self-hosted Windows runner with the vault exists.
+      #
       # Gated on a repository VARIABLE, not a secret, so `if:` can read it: until
       # RY_SIGN_WINDOWS is set to "true" in repo settings, this step is skipped and a release
       # publishes exactly as it does today. A fork never has it, so forks keep building too.

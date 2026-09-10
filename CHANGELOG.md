@@ -6,6 +6,20 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [1.0.1] - 2026-09-09
 
+### Added
+
+- **The Windows downloads are code-signed.** `repoyeti.exe`, the tray launcher
+  `lunarwerx-tray.exe` and the tray PowerShell scripts now carry an Authenticode signature as
+  `CN=LUNARWERX LLC`, issued through Azure Trusted Signing and RFC-3161 timestamped so it stays
+  valid after the deliberately short-lived certificate expires. Until now the first thing a Windows
+  visitor met was "Windows protected your PC, Unknown publisher", because a browser-downloaded
+  executable carries Mark-of-the-Web and Windows has no idea who built it; the published
+  `SHA256SUMS.txt` never helped there, since Windows does not read it and a checksum only proves a
+  file is what the same pipeline uploaded, never who published it. The tray scripts are signed too:
+  a signed launcher in a bundle of unsigned `.ps1` files still meets an execution-policy prompt,
+  which to a user looks exactly like the warning signing was supposed to remove. None of this
+  changes the updater, whose integrity checks were already independent of it.
+
 ### Fixed
 
 - **A source self-update that fails to build now tells you why.** It reported the command instead

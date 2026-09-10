@@ -130,7 +130,7 @@ repoyeti start --tunnel
 
 > **Want a tray icon?** Take `repoyeti-windows-x64-with-tray.zip` instead, run `misc\Create-Shortcut.ps1` once, and launch from the shortcut it creates. The icon is drawn by a small separate launcher (`misc\lunarwerx-tray.exe`), so running `repoyeti.exe` on its own never produces one.
 
-> **First run / SmartScreen:** RepoYeti is source-available indie software and the binaries are not signed with a (paid) certificate, so Windows may show a blue **"Windows protected your PC"** screen. That is what an unsigned indie app looks like: click **More info → Run anyway**. Every release also publishes a `SHA256SUMS.txt`, and every line of the code is right here.
+> **Signed.** Starting with 1.0.1 the Windows executable, the tray launcher and the tray scripts are Authenticode-signed as **LUNARWERX LLC** through Azure Trusted Signing, and timestamped, so Windows names the publisher instead of warning about an unknown one. SmartScreen still rates new signing identities on reputation, so a very early download may show a prompt that now says who published it. Every release also publishes a `SHA256SUMS.txt`.
 
 > **`--tunnel` needs [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)** on `PATH`; it is not bundled, in a release or a clone. Check with `cloudflared --version`. If it is missing, RepoYeti says so and keeps serving locally. Sign-in over a tunnel returns through RepoYeti's registered callback at `app.repoyeti.com`; your dashboard and git traffic never pass through it. See [Remote access](docs/STABLE_ADDRESS.md).
 
@@ -297,11 +297,13 @@ By design. Force-push, `reset --hard` and rebase are not implemented at all - a 
 </details>
 
 <details>
-<summary><strong>Is it signed? Why does Windows warn me?</strong></summary>
+<summary><strong>Is it code-signed?</strong></summary>
 
 <br />
 
-The binaries are not code-signed yet, so Windows SmartScreen shows "Windows protected your PC" on first run: **More info → Run anyway**. Every release publishes `SHA256SUMS.txt`, and the automatic updater refuses any download whose SHA-256 does not match the checksum published alongside it, refuses a release with no checksum file at all, and verifies the new binary reports the expected version before swapping it in.
+Yes, from 1.0.1 onward. `repoyeti.exe`, the tray launcher `lunarwerx-tray.exe` and the tray PowerShell scripts are Authenticode-signed as `CN=LUNARWERX LLC` through Azure Trusted Signing and RFC-3161 timestamped, so the signature stays valid after the (deliberately short-lived) certificate expires. Right-click the exe, Properties, Digital Signatures to see it.
+
+Signing is about who published the file. Integrity is handled separately and was already in place: every release publishes `SHA256SUMS.txt`, and the automatic updater fetches that manifest first, refuses a release that has no verifiable checksum, stream-hashes the download and deletes it on mismatch, and makes the new binary report the expected version before swapping it in.
 
 </details>
 
