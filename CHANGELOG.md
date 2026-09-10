@@ -4,6 +4,34 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-09
+
+### Fixed
+
+- **A source self-update that fails to build now tells you why.** It reported the command instead
+  of the reason. The updater threw the first line of the failed step's stderr, and for a
+  `bun run <script>` failure the first line is the runner echoing the script it is about to run, so
+  the dashboard showed `$ node scripts/i18n-check.mjs && vue-tsc -b && vite build …` and dropped
+  the line that mattered a few rows further down. There was no second copy to fall back on: the
+  updater builds a full per-step transcript, but only returns it when the update succeeds, so on a
+  failure that one line was everything the user ever saw. It now keeps a bounded excerpt instead,
+  skipping echoed commands and blank lines, preferring the lines that actually name a failure, and
+  capping the result so it still reads as a notification. Reported in
+  [#24](https://github.com/LunarWerxs/RepoYeti/issues/24), where a broken `main` sent the rollback
+  path a message that named the build command and nothing else.
+
+### Internal
+
+- **A commit whose code imports a file you never staged is now refused before it is made.** Every
+  gate in this repo read the working tree, where a newly written file is present whether or not it
+  was ever `git add`ed, so lint, `vue-tsc` and the tests all passed on a commit that shipped the
+  imports without their target. That is exactly what reached `main` on 2026-08-27: nineteen
+  modules imported a sign-in-nudge helper and four `*-variants` files that were never committed,
+  CI went red, and every source install that tried to self-update pulled a tree it could not build
+  and rolled straight back. `bun run check:imports` resolves every relative and `@/`-aliased import
+  against git's index, which is the same view a fresh clone gets, and it now runs in `bun run check`
+  and in the pre-commit hook. Pointed at the offending commit it names all eighteen bad imports.
+
 ## [1.0.0] - 2026-09-08
 
 ### Changed
@@ -1935,6 +1963,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
 [#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
 [#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[1.0.1]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.5...v1.0.0
 [0.21.5]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.4...v0.21.5
 [0.21.4]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.3...v0.21.4

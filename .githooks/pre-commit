@@ -13,6 +13,15 @@ fi
 # Lint + typecheck mirror CI's `bun run check` / `typecheck`, caught locally before the push.
 # Both are skipped gracefully if bun isn't on PATH (e.g. a non-dev environment).
 if command -v bun >/dev/null 2>&1; then
+  # Tracked-imports first: it is the only gate below that looks at the INDEX rather than the working
+  # tree, so it is the only one that can see an import pointing at a file you never `git add`ed —
+  # the exact state that put an unbuildable main in front of every source self-update (issue #24).
+  # It is also the cheapest (no compile), so a commit that is going to be rejected is rejected fast.
+  echo "› tracked-imports…"
+  if ! bun run check:imports; then
+    echo "✗ an import points at an untracked file — 'git add' it, or 'git commit --no-verify' to bypass." >&2
+    exit 1
+  fi
   echo "› lint…"
   if ! bun run lint; then
     echo "✗ biome lint failed — fix the above, or 'git commit --no-verify' to bypass." >&2
