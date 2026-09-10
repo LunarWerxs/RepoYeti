@@ -238,7 +238,11 @@ If you use AI Smart Commit, AI commit messages or AI conflict resolution, the ch
 
 <br />
 
-Free to download, self-host and run for any purpose the [PolyForm Noncommercial License 1.0.0](LICENSE) permits - personal projects, research, education, and non-profit use. Commercial use outside those permissions needs a separate license from LunarWerx Studios. Nothing is time-limited or feature-gated. Your chosen AI provider may charge for Smart Commit usage.
+Free to download, self-host and run for any purpose the [PolyForm Noncommercial License 1.0.0](LICENSE) permits - personal projects, research, education, and non-profit use.
+
+Commercial use needs a licence: **US$79 per installation**, meaning per machine running the daemon (the phones and browsers you read it on are not counted). It is perpetual and includes 12 months of updates; after that your copy keeps working and new builds need a renewal. Volume pricing for a team is available, and purchasing is opening shortly - until the checkout is live, ask on [Discord](https://discord.gg/PsWpeNUzhk). Full terms: [repoyeti.com/pricing.md](https://repoyeti.com/pricing.md).
+
+Nothing is ever time-limited or feature-gated, in either case. Your chosen AI provider may charge for Smart Commit usage.
 
 </details>
 
@@ -315,7 +319,7 @@ Signing is about who published the file. Integrity is handled separately and was
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) © LunarWerx Studios, starting with RepoYeti 1.0.0. The source is available; commercial use outside the license's permissions requires a separate license. Earlier MIT grants remain in effect for earlier copies - see [licensing details](LICENSING.md).
+[PolyForm Noncommercial 1.0.0](LICENSE) © LunarWerx Studios, starting with RepoYeti 1.0.0. The source is available and free for noncommercial use; commercial use is **US$79 per installation** ([terms](https://repoyeti.com/pricing.md)). Earlier MIT grants remain in effect for earlier copies - see [licensing details](LICENSING.md).
 
 <div align="center">
 <br />
