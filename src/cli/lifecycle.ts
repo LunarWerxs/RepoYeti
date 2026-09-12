@@ -7,7 +7,7 @@
  */
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import qrcode from "qrcode-terminal";
 import { checkAiKeys } from "../ai-keycheck.ts";
 import { fireBootPing } from "../app-ping.ts";
@@ -19,6 +19,7 @@ import {
   accessMode,
   addRoot,
   authEnforced,
+  CONFIG_DIR,
   hydrateSecrets,
   loadConfig,
   type RepoYetiConfig,
@@ -58,6 +59,7 @@ import {
   stopWatching,
   watchOne,
 } from "../service/index.ts";
+import { materializeTrayToolkit, startTrayHostIfMissing } from "../tray-bootstrap.mjs";
 import { cleanupStaleUpdateArtifacts } from "../updater.ts";
 
 // ── commands ──────────────────────────────────────────────────────────────────
@@ -271,6 +273,42 @@ export async function start(rest: string[], options: { openUi?: boolean } = {}):
   // seamlessly instead of the daemon hopping to a port the tab can't reach.
   if (isRelaunch()) await waitForPortFree(port, 8000);
   server = await listen(app, port);
+
+  // Place + start the tray host now that we're serving. Every kit app's compiled single-file exe
+  // embedded the web assets and nothing else, so the download most people take could never show
+  // a tray icon, offer Quit, or get the auto-restart watchdog, and each README simply wrote that
+  // down as a limitation. Fixed 2026-09-11: see src/tray-bootstrap.mjs for the shared mechanism.
+  const embeddedTray = (
+    globalThis as { __REPOYETI_EMBEDDED_TRAY__?: Readonly<Record<string, string>> }
+  ).__REPOYETI_EMBEDDED_TRAY__ ?? null;
+  const compiled =
+    (globalThis as { __REPOYETI_RELEASE_BUILD__?: boolean }).__REPOYETI_RELEASE_BUILD__ === true;
+  const appRoot = compiled ? dirname(process.execPath) : resolve(import.meta.dir, "..", "..");
+  const tray = await materializeTrayToolkit({
+    appRoot,
+    compiled,
+    stateDir: CONFIG_DIR,
+    version: VERSION,
+    exePath: process.execPath,
+    configFile: "RepoYeti-Tray.json",
+    iconFile: "RepoYeti.ico",
+    embedded: embeddedTray,
+  });
+  if (tray.wrote.length) {
+    console.log(`[repoyeti] placed the tray toolkit in ${tray.dir} (${tray.wrote.join(", ")})`);
+  }
+  void startTrayHostIfMissing({
+    appRoot,
+    compiled,
+    configFile: "RepoYeti-Tray.json",
+    hideTray: () => liveCfg.hideTrayIcon === true,
+    toolkitDir: tray.dir,
+  })
+    .then((r) => {
+      if (r.start) console.log(`[repoyeti] started the tray host (${r.exe}) - nothing else had`);
+    })
+    .catch((e) => console.error("[repoyeti] tray host start failed:", e));
+
   // Where we ACTUALLY landed. `port` above is only the preference; these two diverge the moment
   // anything else holds it, and everything downstream (the runtime pointer, the tunnel, the
   // auto-update handoff) has to follow the bound one or it points at a port nobody is serving.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
 import { $ } from "bun";
 import pkg from "../package.json";
 
@@ -65,15 +65,46 @@ function writeReleaseEntrypoint(): string {
     `/${relative(webRoot, file).replaceAll("\\", "/")}`,
     `asset${index}`,
   ]);
+
+  // The tray toolkit (misc\lunarwerx-tray.exe plus its config/icon), embedded the same way as
+  // the web assets above so a compiled single-file exe can still place and start its own tray
+  // icon; see src/tray-bootstrap.mjs. Windows-only: the tray host is a Win32 program, so there
+  // is nothing to embed on another OS. A file missing on disk THROWS rather than shipping an
+  // exe that can never show its icon with no warning at all: that silent drop is the exact
+  // 2026-09-11 bug this embedding fixes.
+  const trayFiles = isWin
+    ? ["lunarwerx-tray.exe", "RepoYeti-Tray.json", "RepoYeti.ico"].map((name) => {
+        const path = join(ROOT, "misc", name);
+        if (!existsSync(path)) {
+          throw new Error(
+            `missing tray toolkit file: ${path}. A build without the tray toolkit ships an app ` +
+              "that can never show its icon; a silent drop is the bug being fixed.",
+          );
+        }
+        return path;
+      })
+    : [];
+  const trayImports = trayFiles.map(
+    (file, index) =>
+      `import tray${index} from ${JSON.stringify(importPath(entry, file))} with { type: "file" };`,
+  );
+  const traySection = trayFiles.length
+    ? `(globalThis as { __REPOYETI_EMBEDDED_TRAY__?: Readonly<Record<string, string>> })
+  .__REPOYETI_EMBEDDED_TRAY__ = Object.freeze({
+${trayFiles.map((file, index) => `  ${JSON.stringify(basename(file))}: tray${index},`).join("\n")}
+});
+`
+    : "";
+
   writeFileSync(
     entry,
-    `${imports.join("\n")}
+    `${[...imports, ...trayImports].join("\n")}
 
 (globalThis as { __REPOYETI_EMBEDDED_WEB__?: Readonly<Record<string, string>> })
   .__REPOYETI_EMBEDDED_WEB__ = Object.freeze({
 ${routes.map(([route, asset]) => `  ${JSON.stringify(route)}: ${asset},`).join("\n")}
 });
-(globalThis as { __REPOYETI_RELEASE_BUILD__?: boolean }).__REPOYETI_RELEASE_BUILD__ = true;
+${traySection}(globalThis as { __REPOYETI_RELEASE_BUILD__?: boolean }).__REPOYETI_RELEASE_BUILD__ = true;
 await import(${JSON.stringify(importPath(entry, join(ROOT, "src", "index.ts")))});
 `,
   );
