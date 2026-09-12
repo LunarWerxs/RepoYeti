@@ -128,7 +128,7 @@ To reach it from your phone, which opens a Cloudflare tunnel and prints a QR cod
 repoyeti start --tunnel
 ```
 
-> **Want a tray icon?** Take `repoyeti-windows-x64-with-tray.zip` instead, run `misc\Create-Shortcut.ps1` once, and launch from the shortcut it creates. The icon is drawn by a small separate launcher (`misc\lunarwerx-tray.exe`), so running `repoyeti.exe` on its own never produces one.
+> **The tray icon comes with both downloads.** The icon is drawn by a small separate launcher (`misc\lunarwerx-tray.exe`); the zip ships it beside the exe, and since 1.0.2 the single-file `repoyeti.exe` carries it inside the binary and writes it out beside its own state on first run, so either download gets you the icon, Quit and the auto-restart supervisor. (Before 1.0.2 the bare exe had none, and this line said so as though it were a decision.) `misc\Create-Shortcut.ps1` still makes a shortcut that launches through the tray host directly.
 
 > **Signed.** Starting with 1.0.1 the Windows executable, the tray launcher and the tray scripts are Authenticode-signed as **LUNARWERX LLC** through Azure Trusted Signing, and timestamped, so Windows names the publisher instead of warning about an unknown one. SmartScreen still rates new signing identities on reputation, so a very early download may show a prompt that now says who published it. Every release also publishes a `SHA256SUMS.txt`.
 
