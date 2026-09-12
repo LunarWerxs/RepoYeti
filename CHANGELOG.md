@@ -4,6 +4,30 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-09-12
+
+### Fixed
+
+- **The single-file `repoyeti.exe` ships its tray icon.** It embedded every Vite asset and nothing
+  from `misc\`, so `misc\lunarwerx-tray.exe` could not exist beside it and the download most people
+  take could never show a tray icon, never offer Quit and never get the auto-restart supervisor.
+  The README said so, as though 340 KB of Win32 binary were a reason rather than an omission. The
+  host, its config and its icon now ride inside the binary and are written out to
+  `<CONFIG_DIR>/tray/<version>` on first run, with the config's shipped `appRoot: ".."` (correct
+  only for the extracted zip) replaced by the absolute directory of the RUNNING exe and
+  `compiledExe` set to its real filename - so a renamed or relocated download still gets a working
+  watchdog. Version-scoped, because Windows cannot overwrite a running image.
+
+- **"Is the tray already running?" stopped answering for a DIFFERENT app.** The shared probe counted
+  processes by binary name, and every LunarWerx app runs the same `lunarwerx-tray.exe`, so whichever
+  app started first made every other one skip its own tray. It is scoped to this app's own config
+  filename now (the host carries it on its command line). The same probe also read a non-zero
+  PowerShell exit as "running", which is what an ABSENT process produces - so the answer was
+  backwards in exactly the case it exists to detect.
+
+  Both fixes live in the shared kit (`src/tray-bootstrap.mjs`), because AgentHydra, DevWebUI and
+  ReDesign shipped the identical hole.
+
 ## [1.0.1] - 2026-09-09
 
 ### Added
@@ -1977,6 +2001,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
 [#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
 [#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[1.0.2]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.5...v1.0.0
 [0.21.5]: https://github.com/LunarWerxs/RepoYeti/compare/v0.21.4...v0.21.5
