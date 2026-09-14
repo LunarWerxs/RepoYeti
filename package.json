@@ -59,19 +59,19 @@
     "check:changelog": "bun run scripts/check-changelog-links.ts"
   },
   "dependencies": {
-    "@cnct/connect": "^1.2.0",
-    "hono": "^4.13.2",
-    "jose": "^6.2.3",
+    "@cnct/connect": "^1.5.1",
+    "hono": "^4.13.7",
+    "jose": "^6.2.12",
     "qrcode-terminal": "^0.12.0",
-    "simple-git": "^3.27.0",
-    "zod": "^4.4.3"
+    "simple-git": "^3.36.0",
+    "zod": "^4.6.5"
   },
   "optionalDependencies": {
-    "@lore-vcs/sdk": "^0.8.4"
+    "@lore-vcs/sdk": "^0.9.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.1",
-    "@types/bun": "1.3.14",
+    "@biomejs/biome": "^2.5.13",
+    "@types/bun": "1.4.2",
     "typescript": "^6.0.3"
   },
   "trustedDependencies": [
