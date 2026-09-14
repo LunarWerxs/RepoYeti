@@ -130,7 +130,7 @@ export function register(app: Hono, { cfg }: Deps): void {
   };
 
   // OIDC dance (only meaningful when configured). oauthGuard guarantees cfg.oauth is present.
-  const oauthGuard = (h: (c: Context) => Promise<Response>) => (c: Context) =>
+  const oauthGuard = (h: (c: Context) => Promise<Response>) => async (c: Context) =>
     authEnforced(cfg) ? h(c) : c.text("Sign-in is not configured for this daemon.", 404);
   app.get("/oauth/login", oauthGuard((c) => handleLogin(c, cfg.oauth!, loginOpts)));
   app.get("/oauth/finish", oauthGuard((c) => handleComplete(c, cfg.oauth!, authOpts)));

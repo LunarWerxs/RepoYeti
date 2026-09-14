@@ -58,7 +58,7 @@ export function register(app: Hono, { cfg }: Deps): void {
   });
 
   // Manual "pull from another device now".
-  app.post("/api/settings/sync/pull", (c) => {
+  app.post("/api/settings/sync/pull", async (c) => {
     if (!authEnforced(cfg)) return c.text("Sign-in is not configured for this daemon.", 404);
     return guard(c, async () => {
       await pullNow(cfg, cfg.oauth!);
@@ -67,7 +67,7 @@ export function register(app: Hono, { cfg }: Deps): void {
   });
 
   // Manual "push my current settings now".
-  app.post("/api/settings/sync/push", (c) => {
+  app.post("/api/settings/sync/push", async (c) => {
     if (!authEnforced(cfg)) return c.text("Sign-in is not configured for this daemon.", 404);
     return guard(c, async () => {
       await pushNow(cfg, cfg.oauth!);
