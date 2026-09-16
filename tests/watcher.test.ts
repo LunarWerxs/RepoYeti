@@ -137,14 +137,17 @@ test("nested loose tag create, move, and delete each trigger the recursive watch
     let before = changes;
     await $`git -C ${dir} update-ref refs/tags/releases/2026/alpha ${oldOid}`.quiet();
     await waitFor(() => changes > before);
+    expect(changes).toBeGreaterThan(before); // the create reached onChange, not just the waitFor
 
     before = changes;
     await $`git -C ${dir} update-ref refs/tags/releases/2026/alpha ${newOid}`.quiet();
     await waitFor(() => changes > before);
+    expect(changes).toBeGreaterThan(before); // the move reached onChange
 
     before = changes;
     await $`git -C ${dir} update-ref -d refs/tags/releases/2026/alpha`.quiet();
     await waitFor(() => changes > before);
+    expect(changes).toBeGreaterThan(before); // the delete reached onChange
   } finally {
     watcher.close();
   }
@@ -165,14 +168,17 @@ test("packed-refs create, move, and delete each trigger the common-directory wat
     let before = changes;
     writeFileSync(packedRefs, `${header}${oldOid} refs/tags/packed-only\n`);
     await waitFor(() => changes > before);
+    expect(changes).toBeGreaterThan(before); // the create reached onChange, not just the waitFor
 
     before = changes;
     writeFileSync(packedRefs, `${header}${newOid} refs/tags/packed-only\n`);
     await waitFor(() => changes > before);
+    expect(changes).toBeGreaterThan(before); // the move reached onChange
 
     before = changes;
     writeFileSync(packedRefs, header);
     await waitFor(() => changes > before);
+    expect(changes).toBeGreaterThan(before); // the delete reached onChange
   } finally {
     watcher.close();
   }

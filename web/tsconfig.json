@@ -5,7 +5,7 @@
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "allowImportingTsExtensions": true,
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["./src/*"], "@daemon/*": ["../src/*"] },
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "jsx": "preserve",
     "strict": true,

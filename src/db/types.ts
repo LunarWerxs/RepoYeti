@@ -50,7 +50,9 @@ export interface RepoStatus {
    * Optional so a status literal can omit it; readStatus always sets it (null or a value).
    */
   diff?: DiffStat | null;
-  /** Has any unmerged/conflicted path (git status "U"/"AA"/"DD"). Git-only for now — optional
+  /**
+   *  arkitect-allow: no-bandaids - "Git-only for now" is the finished shape, not pending work: only git produces unmerged paths, so the Lore backend's status literals pass undefined and the field stays optional rather than being given a fake Lore meaning.
+   *  Has any unmerged/conflicted path (git status "U"/"AA"/"DD"). Git-only for now — optional
    *  so the Lore backend's status literals (vcs/lore.ts) can omit it (defaults falsy in the UI).
    *  Drives the Conflict Concierge triage card (state-driven, not event-driven). */
   conflicted?: boolean;
@@ -104,7 +106,9 @@ export interface RepoView {
    *  Null → resolve automatically from git config, remote ownership, or GitHub permissions. */
   syncAccountHost: string | null;
   syncAccountLogin: string | null;
-  /** Owner-hidden from the dashboard (e.g. a deprecated repo). Display-only. */
+  /**
+   *  arkitect-allow: no-bandaids - the "deprecated repo" below is the OWNER's own repo (they marked it deprecated and hid it from the dashboard): a display flag the UI reads, not an API or code path scheduled for removal.
+   *  Owner-hidden from the dashboard (e.g. a deprecated repo). Display-only. */
   hidden: boolean;
   /** Favorited into the "Pinned" section. Organisation flag — NOT source='pinned'. */
   pinned: boolean;

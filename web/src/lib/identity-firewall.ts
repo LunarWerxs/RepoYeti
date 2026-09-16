@@ -1,10 +1,10 @@
 // ⭐ Identity Firewall — client-side rule check, so the repo card badge (RepoCardHeader.vue) can
 // flag a violation locally without a round-trip. The glob matcher itself is the daemon's OWN
-// implementation (../../../src/glob-match.ts) imported directly — one shared module, so the
-// client can never drift from the server (it's the redaction layer; drift here would be a
-// security bug). The daemon remains the source of truth that actually blocks the action; this
-// module is display-only.
-import { globMatch } from "../../../src/glob-match.ts";
+// implementation (src/glob-match.ts, reached through the `@daemon` alias — see vite.config.ts)
+// imported directly — one shared module, so the client can never drift from the server (it's the
+// redaction layer; drift here would be a security bug). The daemon remains the source of truth
+// that actually blocks the action; this module is display-only.
+import { globMatch } from "@daemon/glob-match.ts";
 import type { IdentityRule, Repo } from "../types";
 
 /** The first rule (in array order) whose pathPattern matches `absPath`, or null. */

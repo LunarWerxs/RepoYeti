@@ -33,7 +33,7 @@ export function useAi(
   onHistoryChanged: (repoId: string) => void = () => {},
   applyActionStatus: (repoId: string, result: { status?: RepoStatus | null }) => void = () => {},
 ) {
-  // BYOK AI settings (redacted — never holds a key). `aiEnabled` gates the Generate button.
+  // BYOK AI settings (redacted — never holds a key). `aiUsable` gates the Generate button.
   // Style defaults to Conventional Commits; it's pickable from Settings → AI and from the
   // smart-commit plan header, and owners can still set it in ~/.repoyeti/config.json. The
   // daemon mirrors this default.
@@ -72,8 +72,6 @@ export function useAi(
   const aiConflictEnabled = computed(
     () => aiSettings.value.conflictEnabled !== false && aiUsable.value && remoteAiUsable.value === null,
   );
-  // Back-compat alias: `aiEnabled` historically meant "a usable provider is connected".
-  const aiEnabled = aiUsable;
 
   // ── BYOK AI ───────────────────────────────────────────────────────────────────
   async function loadAiCatalog(): Promise<void> {
@@ -313,7 +311,6 @@ export function useAi(
     aiSettings,
     aiCatalog,
     aiReady,
-    aiEnabled,
     aiUsable,
     aiCommitEnabled,
     aiConflictEnabled,

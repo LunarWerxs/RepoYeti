@@ -96,14 +96,18 @@ function dirOf(file: string): string {
 
 /**
  * The repo-relative base path a specifier points at, or null if it is not ours to check.
- * `@/` maps to `web/src/` (web/tsconfig.json `paths` + web/vite.config.ts `alias`); nothing outside
- * web/ declares an alias, so an `@/` import from the daemon tree would be a different bug entirely
- * and typecheck already owns it.
+ * `@/` maps to `web/src/` and `@daemon/` to the daemon's `src/` (both in web/tsconfig.json `paths` +
+ * web/vite.config.ts `alias`); nothing outside web/ declares an alias, so an aliased import from the
+ * daemon tree would be a different bug entirely and typecheck already owns it.
  */
 function basePathFor(file: string, specifier: string): string | null {
   const clean = specifier.split("?")[0]?.split("#")[0] ?? "";
   if (!clean) return null;
   if (clean.startsWith("@/")) return file.startsWith("web/") ? normalize(`web/src/${clean.slice(2)}`) : null;
+  // The dashboard's one crossing into the daemon tree (web/src/lib/identity-firewall.ts importing the
+  // daemon's glob matcher). It still has to resolve to a TRACKED file like any other import this repo
+  // owns — an alias is exactly the kind of specifier that silently stops being checked.
+  if (clean.startsWith("@daemon/")) return file.startsWith("web/") ? normalize(`src/${clean.slice(8)}`) : null;
   if (clean.startsWith("./") || clean.startsWith("../")) return normalize(`${dirOf(file)}/${clean}`);
   return null; // bare package, node: builtin, virtual module, absolute URL — not this check's business
 }

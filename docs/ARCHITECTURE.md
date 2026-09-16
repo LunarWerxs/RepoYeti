@@ -15,7 +15,7 @@
 > Every "locked" decision below survived all three.
 
 > **✅ Implementation status (built & verified).** Phases 1–5 are implemented in `src/` + `web/` and
-> verified at runtime (see [README.md](README.md)). Two deliberate deviations from the plan below:
+> verified at runtime (see [README.md](../README.md)). Two deliberate deviations from the plan below:
 > (1) **stage-all + commit from the phone is now IN v1** (the §3 "OUT" deferral is lifted: it's atomic
 > and can't create the half-merged state the guards prevent), and **register/create repo are built**;
 > (2) **PAT/HTTPS-token auth + OS-keychain (keytar)** stay deferred (SSH-key injection covers the common

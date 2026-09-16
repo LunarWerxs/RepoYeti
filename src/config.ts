@@ -945,6 +945,7 @@ export function loadConfig(): RepoYetiConfig {
  * The on-disk projection of a config: secret bytes removed when the keychain is the store.
  * AI `apiKey`s and any confidential OAuth `clientSecret` live in the OS keychain, so they
  * must never be written to config.json. If the keychain is UNAVAILABLE on this host, we
+ * arkitect-allow: no-bandaids - "legacy behavior" means the pre-keychain write path, and it is the permanent fallback rather than debt: with no working secret service, config.json (0600) is the only place a key can live, and stripping it there would lose the owner's key.
  * keep the legacy behavior — leave the secrets in config.json (0600) — so a key isn't
  * silently lost; `secrets.ts` has already warned once in that case.
  */
@@ -973,6 +974,7 @@ function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
     delete clone.apiToken;
   }
   // Buzz config is intentionally a strict public-metadata projection. Besides documenting the
+  // arkitect-allow: no-bandaids - "legacy" here names an OLD config.json on disk: this rebuild is the defence against one, guaranteeing a pre-existing secret-shaped field can never be written back out. Deleting it would be the leak it prevents.
   // boundary in the type, rebuild it here so an unknown/legacy field named `nsec`, `privateKey`,
   // `authorization`, etc. can never hitch a ride into config.json.
   if (clone.buzz) {

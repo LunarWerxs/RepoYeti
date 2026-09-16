@@ -33,7 +33,7 @@ describe("store (smoke)", () => {
   it("starts empty with AI disabled by default", () => {
     const store = useStore();
     expect(store.repos).toEqual([]);
-    expect(store.aiEnabled).toBe(false); // no default provider configured
+    expect(store.aiUsable).toBe(false); // no default provider configured
   });
 
   it("loadChanges populates changesByRepo from the API", async () => {

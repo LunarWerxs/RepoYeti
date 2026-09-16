@@ -460,10 +460,12 @@ test("updateAppearance pushes only when sync is enabled + connected", async () =
 // ── syncStatus() projection ────────────────────────────────────────────────────────────
 
 test("syncStatus reflects enabled/connected/version/appearance from cfg + module token state", async () => {
-  const cfg = baseCfg({ cloudSync: { enabled: true, version: 7, lastSyncedAt: "2026-01-01T00:00:00.000Z", appearance: { theme: "dark" } } });
+  // arkitect-allow: spec-drifting-date-fixture - a RECORD timestamp, never a comparison fixture: it is only echoed back verbatim (syncStatus copies it) or re-serialised (`new Date(...).toISOString()` in recordEngineStatus); nothing asks whether it is past or upcoming, so its distance from the wall clock never matters.
+  const lastSyncedAt = "2026-01-01T00:00:00.000Z";
+  const cfg = baseCfg({ cloudSync: { enabled: true, version: 7, lastSyncedAt, appearance: { theme: "dark" } } });
   expect(hasConnection()).toBe(false); // no tokens remembered in this test
   let s = syncStatus(cfg);
-  expect(s).toEqual({ enabled: true, connected: false, lastSyncedAt: "2026-01-01T00:00:00.000Z", version: 7, appearance: { theme: "dark" } });
+  expect(s).toEqual({ enabled: true, connected: false, lastSyncedAt, version: 7, appearance: { theme: "dark" } });
 
   await rememberTokens({ refresh_token: "initial-refresh-token" }, OAUTH);
   s = syncStatus(cfg);

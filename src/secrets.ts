@@ -125,6 +125,7 @@ export async function getSecret(name: string): Promise<string | null> {
     const v = await s.get(service(), name);
     available = true;
     if (v != null) return v;
+    // arkitect-allow: no-bandaids - "legacy" names an on-disk fact, not a planned deletion: keys saved before the GitMob rename still sit under that service name, and this read-then-rehome is the permanent path that keeps them without re-entry.
     // Legacy fallback: a secret left under the old "gitmob" service (default install only).
     if (!process.env.REPOYETI_KEYCHAIN_SERVICE) {
       const legacy = await s.get(LEGACY_SERVICE, name);

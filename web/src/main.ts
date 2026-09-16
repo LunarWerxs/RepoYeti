@@ -25,6 +25,7 @@ installImeCompositionGuard();
 // stale shell from the old SW's precache and 404 on the same chunk again — the second half
 // of the "Monaco fails even after a reload" bug (the first half was the non-atomic dist
 // swap, fixed by scripts/swap-dist.mjs).
+// arkitect-allow: side-effect-teardown - app-lifetime singleton, not a component side-effect: this is the boot entry, there is no scope to dispose it from, and the handler must outlive every component (it recovers a tab whose lazy chunks 404'd after a daemon update); removing it on unmount would be the bug.
 window.addEventListener("vite:preloadError", (event) => {
   const KEY = "repoyeti:last-chunk-reload";
   const now = Date.now();

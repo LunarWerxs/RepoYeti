@@ -105,7 +105,15 @@ function stripRemoteFontImport(): Plugin {
 
 export default defineConfig({
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    // `@/` is the web app's own source. `@daemon/` is the DAEMON's `src/` tree, which the dashboard
+    // reads in exactly one place: the identity-firewall mirror imports the daemon's own glob matcher
+    // (`@/lib/identity-firewall` → src/glob-match.ts) so the display-only badge and the gate that
+    // actually blocks an action can never disagree about what a rule matches. Naming the crossing
+    // here beats spelling it as a `../../../` climb that reads like a misplaced file.
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@daemon": fileURLToPath(new URL("../src", import.meta.url)),
+    },
   },
   plugins: [
     stripRemoteFontImport(), vue(),
@@ -137,7 +145,7 @@ export default defineConfig({
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         // NO precached shell, NO navigate fallback: navigations always hit the daemon, which
-        // serves index.html with no-cache. The old behavior (navigateFallback to a PRECACHED
+        // serves index.html with no-cache. Precaching it instead (navigateFallback to a PRECACHED
         // index.html) meant a tab that survived a rebuild kept reloading into the stale shell —
         // whose Monaco chunk names are excluded from the precache (below) and no longer exist
         // on disk — so even the vite:preloadError recovery reload 404'd until the new SW

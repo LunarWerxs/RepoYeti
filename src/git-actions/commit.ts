@@ -58,9 +58,8 @@ export async function gitCommitAll(
 }
 
 // ── smart commit: split the working tree into several scoped commits ─────────────────
-// CommitGroupSpec / CommitGroupResult / CommitGroupsResult now live in contract.ts (the backend
-// contract); they're imported + re-exported above so existing `from "./git-actions.ts"` callers
-// keep working.
+// CommitGroupSpec / CommitGroupResult / CommitGroupsResult live in contract.ts (the backend
+// contract) and every caller imports them from there; this module only consumes them.
 
 const subjectOf = (message: string): string => (message.split("\n")[0] ?? "").slice(0, 120);
 

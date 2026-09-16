@@ -17,16 +17,9 @@
  * This file re-exports the complete public surface so existing
  * `from "./git-actions.ts"` / `from "./git-actions/index.ts"` imports keep working.
  */
-// The result envelope + code now live in contract.ts (the contract layer) so the VCS
-// abstraction can depend on them without importing this git module. Re-exported here for
-// back-compat — service.ts and the vcs backends still import them from git-actions.ts.
-export type {
-  ActionResult,
-  ActionCode,
-  CommitGroupSpec,
-  CommitGroupResult,
-  CommitGroupsResult,
-} from "../contract.ts";
+// The result envelope + code live in contract.ts (the contract layer) so the VCS abstraction can
+// depend on them without importing this git module, and every importer names contract.ts directly —
+// keeping a second path to them here only invited a caller to take the git dependency for a type.
 
 export { gitFetch, gitPullFfOnly, gitPush, gitClone } from "./sync.ts";
 export { gitCommitAll, gitCommitGroups, gitDiscardFile, gitDeleteFile, gitStageFile } from "./commit.ts";

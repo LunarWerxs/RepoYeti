@@ -27,6 +27,7 @@ export interface RepoStatus {
   fetchedAt: number | null;
   /** Aggregate line/char delta — present only when the diff-stats setting is on. */
   diff?: DiffStat | null;
+  // arkitect-allow: no-bandaids - "Git-only for now" is the finished shape: only git reports unmerged paths (mirrors RepoStatus in src/db/types.ts), so the field stays optional and falsy for Lore repos.
   /** Has any unmerged/conflicted path. Git-only for now (optional; falsy for Lore repos). */
   conflicted?: boolean;
   /** Which mid-git-operation marker is present ("MERGE_HEAD" | "rebase-merge" | "rebase-apply" |
@@ -74,6 +75,7 @@ export interface Repo {
    *  Null → use the machine's currently-active account. */
   syncAccountHost: string | null;
   syncAccountLogin: string | null;
+  // arkitect-allow: no-bandaids - the "deprecated repo" here is the OWNER's own repo (they marked it deprecated and hid it): a display flag the UI reads, not an API or code path scheduled for removal.
   /** Owner-hidden from the dashboard (e.g. a deprecated repo). Display-only. */
   hidden: boolean;
   /** Favorited into the "Pinned" section. Organisation flag — NOT `source: "pinned"`. */

@@ -123,6 +123,7 @@ export const PATCH_CAP = 1_000_000;
 // both backends implement, without either backend's impl owning them.
 
 /** One proposed commit to execute: a message + the exact paths to stage for it. Paths are
+ *  arkitect-allow: no-bandaids - "old path" is git's own name for the from-side of a rename (simple-git's `renamed[].from`): gitCommitGroups must be handed both sides or the commit records a delete with no matching add.
  *  already expanded by the caller to include a rename's old path (see service.smartCommitRepo). */
 export interface CommitGroupSpec {
   message: string;

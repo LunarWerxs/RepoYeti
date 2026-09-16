@@ -9,16 +9,8 @@ import { randomUUID } from "node:crypto";
 import { enqueue } from "../opqueue.ts";
 import { resolveRepoIdentity, enforceIdentityPolicy } from "../identity.ts";
 import { backendFor } from "../vcs/index.ts";
-import {
-  gitRemoteSet,
-  gitRemoteRemove,
-  gitTagCreate,
-  gitTagPush,
-  type ActionCode,
-  type CommitGroupSpec,
-  type CommitGroupResult,
-} from "../git-actions.ts";
-import type { ActionResult } from "../contract.ts";
+import { gitRemoteSet, gitRemoteRemove, gitTagCreate, gitTagPush } from "../git-actions.ts";
+import type { ActionCode, ActionResult, CommitGroupSpec, CommitGroupResult } from "../contract.ts";
 import type { RepoStatus } from "../db.ts";
 import { runAction, refreshRepo, accountAuthFor, type ActionOutcome } from "./core.ts";
 import { guardRepo } from "./guards.ts";
@@ -477,6 +469,7 @@ export interface SmartCommitOutcome {
 // ── shared path validation for the two staging entry points (smart-commit + commit-selected) ──
 // Build a validation context from a fresh `readChanges`, then resolve each submitted path list
 // against it: normalize slashes, reject paths no longer pending (PLAN_STALE), auto-add each
+// arkitect-allow: no-bandaids - "old path" is git's term for a rename's from-side, not a compat shim: both sides must be staged or the commit records a delete with no matching add.
 // rename's old path so the deletion lands with the addition, and enforce a duplicate policy. The
 // `seen` set is threaded across calls (smart-commit accumulates it across groups) so the same file
 // can't be assigned twice. Extracted so the two callers' rename/stale semantics can't drift apart.
@@ -514,6 +507,7 @@ function resolveStagedPaths(
     ctx.seen.add(p);
     paths.push(p);
     const from = ctx.renameFrom.get(p);
+    // arkitect-allow: no-bandaids - "old path" is git's term for a rename's from-side (the map is built from simple-git's `renamed[].from`), and staging both is what makes the rename land as a rename.
     if (from) paths.push(from); // stage the rename's old path with the new one
   }
   return { ok: true, paths };
@@ -527,6 +521,7 @@ function resolveStagedPaths(
  * Validation (against fresh `readChanges`):
  *  - every submitted path must currently be changed (a vanished/stale path → PLAN_STALE);
  *  - no path may appear in two groups (→ PLAN_PATHS_INVALID).
+ * arkitect-allow: no-bandaids - "old path" is git's term for a rename's from-side, not a compat shim: the group must receive both sides or the commit records a delete with no matching add.
  * A rename's old path is auto-added to its group so the deletion lands with the addition.
  * Leaving some changed files unassigned is allowed — they simply stay in the working tree.
  */
@@ -594,6 +589,7 @@ export async function smartCommitRepo(
 /**
  * Commit ONLY a selected subset of changed files in one ordinary commit — file-level staging for a
  * normal commit (Smart Commit already stages per-group internally; this exposes it for a single
+ * arkitect-allow: no-bandaids - "old path" is git's term for a rename's from-side, not a compat shim: this entry point stages both sides so the deletion lands with the addition.
  * commit). Stage exactly `paths` (a rename's old path auto-added so the deletion lands with the
  * addition), commit with `message`, and leave every other pending change in the working tree. Runs
  * in one op-queue slot so nothing interleaves; refreshes status afterward. A reuse of the same

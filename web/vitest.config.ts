@@ -11,7 +11,12 @@ import vue from "@vitejs/plugin-vue";
 export default defineConfig({
   plugins: [vue()],
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    // Mirrors vite.config.ts: `@` is the app's own src, `@daemon` is the daemon's src tree (one
+    // crossing: the identity-firewall mirror importing the daemon's glob matcher).
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@daemon": fileURLToPath(new URL("../src", import.meta.url)),
+    },
   },
   test: {
     environment: "happy-dom",

@@ -400,6 +400,7 @@ export const SmartCommitSchema = z.object({
 });
 
 // ── per-file (selected) staging for a single ordinary commit ──────────────────────
+// arkitect-allow: no-bandaids - "old path" is git's own name for a rename's from-side, not a leftover code path: the service must receive both sides or the commit records a delete with no matching add.
 // Stage + commit ONLY these paths (a rename's old path is auto-added in the service); any other
 // pending change stays in the working tree. `message` is optional here so NO_MESSAGE stays a
 // domain check in the handler (mirrors CommitSchema).

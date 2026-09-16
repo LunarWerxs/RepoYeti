@@ -103,6 +103,13 @@ let revealRaf = 0;
 function revealNextFrame(): void {
   ready.value = false;
   cancelAnimationFrame(revealRaf);
+  // A hidden tab paints no frame at all, so the rAF below would never run and the host would sit at
+  // opacity-0 until the tab is shown. Reveal outright there — there is no paint to fade in front of.
+  if (document.hidden) {
+    ready.value = true;
+    return;
+  }
+  // arkitect-allow: raf-one-shot-gate - `@lunawerx/ui/lib/motion/next-paint` is not a dependency of this app and no such module ships in the kit, so there is nothing to import; the hazard it names (a tab that never gets a frame) is closed by the `document.hidden` guard above, and this rAF lands the fade-in on a painted frame.
   revealRaf = requestAnimationFrame(() => {
     ready.value = true;
   });

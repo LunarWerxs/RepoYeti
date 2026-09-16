@@ -133,6 +133,7 @@ export interface AuthStatus {
   ownerPicture: string | null;
   /** An owner has been claimed (required before remote can be enabled). */
   ownerClaimed: boolean;
+  // arkitect-allow: no-bandaids - "Continue local for now" is the shipped button label (SignIn.vue), not a pending change; this field reports whether a loopback request would be offered that bypass.
   /** This request is loopback → the "Continue local for now" option is offered. */
   canContinueLocal: boolean;
   /** A live local bypass is in effect (local request only). */
@@ -309,6 +310,7 @@ export const api = {
   logout: () => req<{ ok: boolean }>("POST", "/api/auth/logout"),
   /** Sign out on every device — rotates the daemon's signing key so all session cookies die. */
   logoutAll: () => req<{ ok: boolean }>("POST", "/api/auth/logout-all"),
+  // arkitect-allow: no-bandaids - "Continue local for now" is the shipped button label (SignIn.vue): this client method is named after the control that calls it, and the localhost-only bypass it grants is the finished feature.
   /** Grant the localhost-only "Continue local for now" bypass (rejected over the tunnel). */
   continueLocal: () => req<{ ok: boolean }>("POST", "/api/auth/continue-local"),
   /** The signed-in Connections identity (email/sub). Throws ApiError when signed out. */
@@ -924,6 +926,7 @@ export const api = {
   /** Save edited text back to a working-tree file (viewer Edit mode). `expectedHash`, when given,
    *  makes the write compare-and-swap: the daemon answers ApiError "FILE_STALE" (409) if the file
    *  on disk no longer matches it instead of silently overwriting a concurrent edit. Omitting it
+   *  arkitect-allow: no-bandaids - "legacy behavior" names the optional-hash shape of this API, which is permanent: callers that predate `expectedHash` (and the viewer's own first save) must still get an unconditional write, so refusing it is what would break them.
    *  keeps the save unconditional (legacy behavior). Throws on 4xx/5xx. */
   saveFile: (id: string, path: string, content: string, expectedHash?: string) =>
     req<{ ok: boolean; code: string; message?: string; path?: string; size?: number; hash?: string }>(

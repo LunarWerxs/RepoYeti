@@ -82,6 +82,7 @@ function onSettings(mode: "toggle" | "open", tab?: string): void {
 }
 
 // The login gate shows only in remote mode, when there's no owner session and no local
+// arkitect-allow: no-bandaids - "Continue local for now" is the shipped button label on the sign-in screen; this names the state that button puts the app in, not an unfinished code path.
 // bypass. Local mode (and the "Continue local for now" bypass) skip straight to the app.
 const needsSignIn = computed(
   () => store.authReady && store.mode === "remote" && !store.authenticated && !store.localBypass,

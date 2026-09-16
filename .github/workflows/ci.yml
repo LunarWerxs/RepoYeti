@@ -78,11 +78,12 @@ jobs:
         run: bun audit || true
       - run: bun run test # Vitest: pure-lib units + component render + store smoke (no server needed)
       - run: bun run build # vue-tsc type-check + production bundle (re-runs i18n:check)
-      # The Playwright DEVELOPER suite (test:e2e) is still intentionally NOT in CI — it needs a
+      # The Playwright DEVELOPER suite (web/test/e2e) is still intentionally NOT in CI — it needs a
       # live daemon with the owner's real repositories plus a Vite dev server, so it can only run
       # on a developer machine: start the daemon + `bun run dev`, then `bunx playwright install
-      # chromium && bun run test:e2e`. The RELEASE gate (test:gate) has no such requirement and
-      # runs in the `browser` job below.
+      # chromium && bunx playwright test` in web/. It has no npm-script alias for exactly that
+      # reason (nothing here could reach one); the RELEASE gate (test:gate) has no such requirement
+      # and runs in the `browser` job below.
 
   # ── the browser gate ────────────────────────────────────────────────────────────────
   # Three facts about this app that no unit test can establish, because all three only exist once

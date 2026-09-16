@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Shown only in remote mode with no owner session. The button navigates to the daemon's
+// arkitect-allow: no-bandaids - "Continue local for now" is this file's own button text (see the button below), so the comment quotes the shipped label; the loopback-only bypass it grants is the finished feature.
 // /oauth/login (the PKCE dance). When the request is local, we also offer "Continue local
 // for now" — a loopback-only bypass so the owner is never locked out at their own desk.
 import { ref } from "vue";

@@ -101,6 +101,7 @@ test("matchIdentityRule: first-match-wins, no-rule passthrough on an empty/undef
   expect(matchIdentityRule("D:/Work/foo", [])).toBeNull();
   const rules: IdentityRule[] = [
     { pathPattern: "D:/Work/**", requiredIdentityId: "id-work" },
+    // arkitect-allow: cloudfront-behavior-order - this is matchIdentityRule's rule list, not a CloudFront CacheBehaviors array: its ARRAY ORDER is the contract under test (first match wins, asserted on the next line), and the wildcard is first on purpose so it shadows the exact path — moving the exact entry up would invert the assertion this test exists to pin.
     { pathPattern: "D:/Work/foo", requiredIdentityId: "id-foo-specific" }, // shadowed — first wins
   ];
   expect(matchIdentityRule("D:/Work/foo", rules)?.requiredIdentityId).toBe("id-work");

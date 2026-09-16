@@ -16,6 +16,7 @@ export function isPreviewableMarkdown(path: string): boolean {
 }
 
 /** Render repository-authored Markdown without giving its raw HTML an execution surface. Images
+ * arkitect-allow: no-bandaids - "omitted for now" states the policy rather than pending work: a rendered <img> is a request the viewer's browser makes to a third party, and relative paths have no authenticated repo asset URL, so images stay out of rendered Markdown by design.
  * are omitted for now: relative paths do not map to an authenticated repo asset URL, and remote
  * images would create an unexpected tracking request from every viewer. */
 export function renderMarkdown(source: string): string {

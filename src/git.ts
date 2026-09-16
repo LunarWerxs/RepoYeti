@@ -357,6 +357,7 @@ async function gitDirFor(absPath: string): Promise<string | null> {
     return rememberGitDir(absPath, { sig, base });
   } catch {
     // No ordinary marker. Bare repositories and callers rooted below a checkout are rare but were
+    // arkitect-allow: no-bandaids - "the old implementation" here is the `git rev-parse --git-dir` fallback just below, which IS the implementation for a bare repo (it has no .git marker file to read); preserving it is what keeps `repoyeti add-root` working on those trees.
     // supported by the old implementation, so preserve that behavior without charging every
     // normal status refresh for it.
   }

@@ -23,6 +23,7 @@ import { getOAuthCallback, getOAuthCallbackStatus } from "../../runtime.ts";
 
 export function register(app: Hono, { cfg }: Deps): void {
   // Public: lets the PWA decide whether to show the "Sign in with Connections" screen,
+  // arkitect-allow: no-bandaids - "Continue local for now" is the literal label of the button the sign-in screen renders (web/src/components/SignIn.vue): the wording belongs to the UI copy, not to an unfinished code path here.
   // and whether to offer the "Continue local for now" escape hatch (loopback only).
   app.get("/api/auth/status", (c) => {
     const enforced = authEnforced(cfg);
@@ -98,6 +99,7 @@ export function register(app: Hono, { cfg }: Deps): void {
     }
     return handleLogoutAll(c);
   });
+  // arkitect-allow: no-bandaids - "Continue local for now" is the shipped button label (web/src/components/SignIn.vue): the route is named after the control that calls it, and the bypass it grants is the finished feature, not a placeholder.
   // "Continue local for now" — grant a localhost-only bypass (refused over the tunnel).
   app.post("/api/auth/continue-local", (c) => handleContinueLocal(c));
 

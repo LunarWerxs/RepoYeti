@@ -229,6 +229,7 @@ export async function authForCloneUrl(url: string): Promise<GitHubAuth | null> {
  * The per-operation credential for a repo, or null to leave the operation exactly as it was.
  *
  * Deliberately best-effort at every step: no gh, no matching account, or no retrievable token all
+ * arkitect-allow: no-bandaids - "run it the old way" means returning null so git falls back to the machine's own credential helper: that fallback is the product behaviour (an owner who never configured a RepoYeti account must keep syncing), not a stub awaiting a real implementation.
  * mean "run it the old way" rather than "fail". A repo that used to sync fine under the machine's
  * ambient credential helper must keep syncing fine.
  */

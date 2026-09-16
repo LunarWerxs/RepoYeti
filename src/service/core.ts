@@ -13,7 +13,7 @@ import { backendFor } from "../vcs/index.ts";
 import { authForRepo } from "../gh-account.ts";
 import type { GitHubAuth } from "../git.ts";
 import type { VcsBackend } from "../vcs/types.ts";
-import type { ActionResult } from "../git-actions.ts";
+import type { ActionResult } from "../contract.ts";
 import type { Identity, RepoStatus, RepoView } from "../db.ts";
 
 /** Per-repo last-status signature (sans timestamp) so a no-op read doesn't emit. */

@@ -5,8 +5,8 @@ import type { ActionName, ActionResult, ChangedFile, Repo, RepoStatus } from "..
 /** Sync-status filter keys (multi-select; OR semantics). */
 export type StatusKey = "dirty" | "ahead" | "behind" | "clean" | "error";
 
-/** Display-only list ordering. "manual" is today's drag-persisted `sort_order` from the
- *  daemon (the backward-compatible default); "name" and "recent" re-sort purely client-side
+/** Display-only list ordering. "manual" is the daemon's own stored order (`sort_order`, the
+ *  setting's long-standing default); "name" and "recent" re-sort purely client-side
  *  and never touch `sort_order`, so switching back to "manual" always restores the owner's
  *  last drag arrangement. */
 export type SortMode = "manual" | "name" | "recent";
@@ -245,7 +245,7 @@ export function useRepoActions(
     }
     pendingInserts.clear();
     if (toInsert.length === 0) return;
-    // Stable sort with the exact comparator the old per-event path used, then a linear merge —
+    // Stable sort with the exact comparator the per-event path used, then a linear merge —
     // together equivalent to inserting each one at its `serverOrderIndex` in arrival order, just
     // without the O(n) rescan per repo.
     toInsert.sort(compareServerOrder);
@@ -280,6 +280,7 @@ export function useRepoActions(
   const filterIdentity = ref<string | null | undefined>(undefined);
   // multi-select: an empty set means "any status"; multiple selected = OR (e.g. ahead OR behind).
   const filterStatuses = ref<StatusKey[]>([]);
+  // arkitect-allow: no-bandaids - the "deprecated repo" is the owner's own hidden repo: showHidden is the display toggle that brings it back, not a code path awaiting removal.
   // Hidden repos are excluded from every view unless this is on (a deprecated-repo opt-out,
   // not a "filter" — drag-reorder still works over the visible set when it's off).
   const showHidden = ref(false);

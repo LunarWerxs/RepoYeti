@@ -432,6 +432,7 @@ export async function readWorktreeStateHash(
   return worktreeStateHash(files, `${staged}\0${unmerged}`);
 }
 
+// arkitect-allow: no-bandaids - "old path" is git's own name for the from-side of a rename (simple-git's `renamed[].from`), not a leftover code path: the executor stages both sides so the deletion lands with the addition.
 /** Map from a renamed file's NEW path to its OLD path. simple-git surfaces renames in a separate
  *  `renamed: [{from,to}]` list; this lets each file entry look up its own source path. */
 function buildRenameMap(renamed: { from: string; to: string }[] | undefined): Map<string, string> {

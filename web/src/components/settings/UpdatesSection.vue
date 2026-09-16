@@ -28,8 +28,8 @@ const updateAvailable = computed(() => store.updateStatus?.updateAvailable === t
 // A MANUAL "Update" installs the new build but does not relaunch the daemon (only the opt-in
 // scheduled apply does, see src/auto-update.ts) — and the status it returns already reports the
 // NEW version with updateAvailable false. Left at that, the row would drop the badge and read
-// "up to date" while the version still answering is the old one. Comparing the two keeps it
-// honest until the restart lands.
+// "up to date" while the version still answering is the old one. Comparing the two keeps the row
+// honest for the whole window between a manual install and the daemon relaunch that finishes it.
 const restartPending = computed(() => {
   const installed = store.updateStatus?.currentVersion;
   return !!installed && !!version.value && installed !== version.value;

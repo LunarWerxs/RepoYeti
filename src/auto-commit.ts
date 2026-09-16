@@ -24,8 +24,10 @@
  * Timer shape mirrors
  * remote-sync.ts: a self-rescheduling setTimeout (never setInterval) so a slow round can't stack.
  * Wired in src/cli/lifecycle.ts (startAutoCommit after boot; stopAutoCommit on shutdown) and
- * primed + toggled live from src/http/app.ts + PUT /api/settings. Git-only for now (a Lore repo
- * is centralized and simply never opted in here).
+ * primed + toggled live from src/http/app.ts + PUT /api/settings.
+ * The sweep deliberately covers git only: a Lore repo is one centralized store with no per-machine
+ * working tree for a timer to sweep, so it never opts in here (the timer only touches repos whose
+ * auto_commit flag is set).
  */
 import { getWatchableRepos, getRepo, recordAutoCommitIncident, type RepoStatus, type RepoView } from "./db.ts";
 import { broadcast } from "./bus.ts";
