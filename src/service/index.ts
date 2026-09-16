@@ -1,8 +1,3 @@
-// arkitect-allow: barrel-fanout-inventory - declared inline because the inventory file this check reads
-// is not part of this repository (its path resolves to nothing in the finding). The fan-out is what the
-// layer IS: the HTTP routes, the watcher, auto-commit, remote-sync and the CLI all import exactly one
-// surface, `service/index.ts`, instead of each reaching into 13 modules — the header below lists every
-// module's job. Splitting it would hand every one of those callers 13 specifiers and a private ordering.
 /**
  * Orchestration layer between the HTTP routes / watcher and the git plumbing.
  *

@@ -4,6 +4,7 @@
 // getMonaco here is what pulls monaco-editor into this component's own chunk.
 import { onMounted, onBeforeUnmount, ref, useTemplateRef, watch } from "vue";
 import { getMonaco, monacoThemeFor, type EditorTheme } from "@/lib/monaco-setup";
+import { onNextPaint } from "@/lib/motion/next-paint";
 import type { LineChange } from "@/lib/line-diff";
 
 // Derive Monaco's types from getMonaco's return — no direct monaco-editor type import,
@@ -99,19 +100,17 @@ function applyGutter(): void {
 // so opening the panel doesn't pop the content in abruptly. While hidden the host is
 // transparent, revealing the matching bg-card behind it.
 const ready = ref(false);
-let revealRaf = 0;
+let cancelReveal: (() => void) | null = null;
 function revealNextFrame(): void {
   ready.value = false;
-  cancelAnimationFrame(revealRaf);
-  // A hidden tab paints no frame at all, so the rAF below would never run and the host would sit at
-  // opacity-0 until the tab is shown. Reveal outright there — there is no paint to fade in front of.
-  if (document.hidden) {
+  cancelReveal?.();
+  // A tab that paints no frame (hidden, occluded, or a headless capture, where `document.hidden`
+  // is still false) would never run a bare rAF, leaving the host stuck at opacity-0 forever.
+  // onNextPaint races the frame against a timer, so a visible tab still fades in on a real paint
+  // and a tab that never paints reveals anyway.
+  cancelReveal = onNextPaint(() => {
     ready.value = true;
-    return;
-  }
-  // arkitect-allow: raf-one-shot-gate - `@lunawerx/ui/lib/motion/next-paint` is not a dependency of this app and no such module ships in the kit, so there is nothing to import; the hazard it names (a tab that never gets a frame) is closed by the `document.hidden` guard above, and this rAF lands the fade-in on a painted frame.
-  revealRaf = requestAnimationFrame(() => {
-    ready.value = true;
+    cancelReveal = null;
   });
 }
 
@@ -224,7 +223,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(revealRaf);
+  cancelReveal?.();
   editor?.dispose();
   model?.dispose();
   editor = null;

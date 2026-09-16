@@ -45,8 +45,13 @@ vendor/cloudflared/
 # misc\Create-Shortcut.ps1 (the scripts + icon under misc/ are committed).
 /RepoYeti.lnk
 
-# Architect (connections-arkitect) — local audit profile + run archives, not tracked
-.arkitect/
+# Architect (connections-arkitect): the run archives are measurement, not source - but the
+# PROFILE and its policy files are this repository's own declarations and have to travel
+# with a clone, or the next scan anywhere else reports findings this repo has already
+# answered. Same shape MonkeyWerx uses.
+.arkitect/*
+!.arkitect/arkitect.config.json
+!.arkitect/policies/
 
 # Claude Code local config (dev tooling, not part of the project)
 .claude/
@@ -57,9 +62,12 @@ vendor/cloudflared/
 # nested here for convenience. Never commit it into this repo.
 /site/
 
-# compiled single-file binaries (built with `bun --compile`, per-platform)
-repoyeti
-repoyeti.exe
+# compiled single-file binaries (built with `bun --compile`, per-platform).
+# ANCHORED: a bare `repoyeti` matches ANY path segment with that name, so it silently
+# swallowed `.arkitect/policies/repoyeti/` - a directory that has to travel with a clone.
+# The binaries are built at the repository root, so that is where the rule belongs.
+/repoyeti
+/repoyeti.exe
 *.exe
 # ...except the tray host, which is a SHIPPED launcher component, not a build output. The shortcut
 # runs it, so a clone without it has no way to start the app at all. Its source is vendored beside

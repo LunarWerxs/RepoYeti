@@ -1,0 +1,8 @@
+{
+  "$note": "Architect profile for RepoYeti. Run from the Connections checkout: ARCHITECT_NO_SELF_UPDATE=1 bun <Connections>/packages/connections-arkitect/bin/arkitect.mjs --root . --corpus <Connections>/.arkitect/your-checks --all. This repository is scanned as a FOREIGN root, so every check that declares a `homeBound` config key has that key emptied before the check runs (see packages/connections-arkitect/src/core/foreign-scan.mjs) unless THIS file supplies it - which is why `barrel-fanout-inventory` needs an explicit `policyPath` here rather than falling back to its own default. `.arkitect/` is gitignored in this repo (see .gitignore): this profile is local, not part of the checkout.",
+  "checks": {
+    "barrel-fanout-inventory": {
+      "policyPath": ".arkitect/policies/repoyeti/barrel-fanout-inventory.json"
+    }
+  }
+}
