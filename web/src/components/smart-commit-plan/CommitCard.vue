@@ -149,7 +149,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
     </div>
 
     <!-- optional body -->
-    <div class="mt-2 pl-6">
+    <div class="mt-2 ps-6">
       <button
         v-if="!group.showBody"
         type="button"
@@ -168,7 +168,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
     </div>
 
     <!-- files: tap a chip to preview its diff; the ⋯ menu moves it to another commit -->
-    <div class="mt-2 flex flex-wrap gap-1.5 pl-6">
+    <div class="mt-2 flex flex-wrap gap-1.5 ps-6">
       <div
         v-for="f in group.files"
         :key="f"
@@ -190,7 +190,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
           <DropdownMenuTrigger as-child>
             <button
               type="button"
-              class="flex shrink-0 items-center border-l border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              class="flex shrink-0 items-center border-s border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
               :title="tooltipsEnabled ? $t('repo.smartCommit.fileMenu') : undefined"
               :aria-label="$t('repo.smartCommit.fileMenu')"
             >
@@ -219,7 +219,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
 
     <!-- inline diff of the expanded file (single-open across the whole editor) -->
     <ExpandTransition :open="!!(openDiff && group.files.includes(openDiff))">
-      <div v-if="openDiff && group.files.includes(openDiff)" class="mt-2 pl-6">
+      <div v-if="openDiff && group.files.includes(openDiff)" class="mt-2 ps-6">
         <SmartCommitFileDiff
           :key="openDiff"
           :repo-id="repoId"
@@ -231,7 +231,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
 
     <!-- combined per-commit review: every file's diff stacked (companion to the
          single-file zoom above). Only meaningful with more than one file. -->
-    <div v-if="group.files.length > 1" class="mt-2 pl-6">
+    <div v-if="group.files.length > 1" class="mt-2 ps-6">
       <button
         type="button"
         class="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"

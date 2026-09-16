@@ -24,7 +24,7 @@ defineEmits<{ toggle: [] }>();
     :is="collapsible ? 'button' : 'div'"
     :type="collapsible ? 'button' : undefined"
     :aria-expanded="collapsible ? !collapsed : undefined"
-    class="mb-2 flex w-full items-center gap-1.5 rounded-sm px-0.5 py-0.5 text-left text-[12px] font-semibold tracking-wide text-muted-foreground uppercase outline-none"
+    class="mb-2 flex w-full items-center gap-1.5 rounded-sm px-0.5 py-0.5 text-start text-[12px] font-semibold tracking-wide text-muted-foreground uppercase outline-none"
     :class="
       collapsible
         ? 'cursor-pointer transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30'

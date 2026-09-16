@@ -462,7 +462,7 @@ watch(
             <Copy v-else />
             {{ copied ? $t("share.copied") : $t("share.copy") }}
           </Button>
-          <Button variant="ghost" size="sm" class="ml-auto" @click="minted = null">{{ $t("common.close") }}</Button>
+          <Button variant="ghost" size="sm" class="ms-auto" @click="minted = null">{{ $t("common.close") }}</Button>
         </div>
       </div>
 
@@ -591,7 +591,7 @@ watch(
         <div class="flex items-center gap-1.5">
           <Pencil :size="13" class="shrink-0 text-info" />
           <span class="text-[12.5px] font-medium text-foreground">{{ $t("share.editTitle", { label: editing.label }) }}</span>
-          <Button variant="ghost" size="sm" class="ml-auto" @click="cancelEdit">{{ $t("common.cancel") }}</Button>
+          <Button variant="ghost" size="sm" class="ms-auto" @click="cancelEdit">{{ $t("common.cancel") }}</Button>
         </div>
 
         <label class="flex items-center justify-between gap-3">
@@ -645,7 +645,7 @@ watch(
             v-for="r in store.repos"
             :key="r.id"
             type="button"
-            class="flex items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-accent/50"
+            class="flex items-center gap-2 rounded px-2 py-1 text-start transition-colors hover:bg-accent/50"
             @click="toggleEditPick(r.id)"
           >
             <span
@@ -679,7 +679,7 @@ watch(
         <div class="flex items-center gap-1.5">
           <span class="text-[12.5px] font-medium text-foreground">{{ $t("share.newTitle") }}</span>
           <InfoHint :text="$t('share.newHint')" />
-          <Button variant="ghost" size="sm" class="ml-auto" @click="closeForm">
+          <Button variant="ghost" size="sm" class="ms-auto" @click="closeForm">
             {{ $t("common.cancel") }}
           </Button>
         </div>
@@ -697,7 +697,7 @@ watch(
             v-for="p in (['view', 'control'] as SharePerm[])"
             :key="p"
             type="button"
-            class="flex-1 rounded-lg border px-2.5 py-2 text-left transition-colors"
+            class="flex-1 rounded-lg border px-2.5 py-2 text-start transition-colors"
             :class="perm === p ? 'border-primary/60 bg-primary/10' : 'border-border/60 hover:bg-muted/40'"
             @click="perm = p"
           >
@@ -751,7 +751,7 @@ watch(
             v-for="r in store.repos"
             :key="r.id"
             type="button"
-            class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/40"
+            class="flex w-full items-center gap-2 px-2.5 py-1.5 text-start transition-colors hover:bg-muted/40"
             @click="togglePick(r.id)"
           >
             <span

@@ -290,7 +290,7 @@ async function copyExistingShare(): Promise<void> {
                  hover-only affordance would be invisible. -->
             <div class="group relative min-w-0 flex-1">
               <code
-                class="mono block min-w-0 truncate rounded-md border border-border bg-secondary/40 py-2 pr-9 pl-2.5 text-[12px]"
+                class="mono block min-w-0 truncate rounded-md border border-border bg-secondary/40 py-2 pe-9 ps-2.5 text-[12px]"
               >{{ remoteUrl }}</code>
               <Tooltip>
                 <TooltipTrigger as-child>
@@ -370,7 +370,7 @@ async function copyExistingShare(): Promise<void> {
             class="group relative min-w-0"
           >
             <code
-              class="mono block min-w-0 truncate rounded-md border border-border bg-background/45 py-2 pr-9 pl-2.5 text-[11.5px]"
+              class="mono block min-w-0 truncate rounded-md border border-border bg-background/45 py-2 pe-9 ps-2.5 text-[11.5px]"
             >{{ primaryShare.url }}</code>
             <Button
               variant="ghost"

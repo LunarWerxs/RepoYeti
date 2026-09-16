@@ -314,7 +314,7 @@ const detectedReason = computed(() => {
                the remote-presence cloud, so incoming-from-remote shares a colour language:
                blue = comes from the remote, green = goes to it, amber = uncommitted here. -->
           <span :class="statusChip('info')" :aria-label="$t('repo.badge.behindLabel', { count: st.behind })">
-            <ArrowDown :size="12" /><span class="ml-0.5">{{ st.behind }}</span>
+            <ArrowDown :size="12" /><span class="ms-0.5">{{ st.behind }}</span>
           </span>
         </TooltipTrigger>
         <TooltipContent>
@@ -324,7 +324,7 @@ const detectedReason = computed(() => {
       <Tooltip v-if="st && st.ahead > 0">
         <TooltipTrigger as-child>
           <span :class="statusChip('success')" :aria-label="$t('repo.badge.aheadLabel', { count: st.ahead })">
-            <ArrowUp :size="12" /><span class="ml-0.5">{{ st.ahead }}</span
+            <ArrowUp :size="12" /><span class="ms-0.5">{{ st.ahead }}</span
             ><span :class="statusWord">&nbsp;{{ $t("repo.badge.ahead") }}</span>
           </span>
         </TooltipTrigger>
@@ -337,7 +337,7 @@ const detectedReason = computed(() => {
       <Tooltip v-if="st && st.dirty > 0">
         <TooltipTrigger as-child>
           <span :class="statusChip('warning')" :aria-label="$t('repo.badge.changedLabel', { count: st.dirty })">
-            <Pencil :size="12" /><span class="ml-0.5">{{ st.dirty }}</span
+            <Pencil :size="12" /><span class="ms-0.5">{{ st.dirty }}</span
             ><span :class="statusWord">&nbsp;{{ $t("repo.badge.filesChanged") }}</span>
           </span>
         </TooltipTrigger>
@@ -426,7 +426,7 @@ const detectedReason = computed(() => {
             <Check
               v-if="repo.syncAccountLogin === a.login && (repo.syncAccountHost || 'github.com') === a.host"
               :size="15"
-              class="ml-1 shrink-0 text-primary"
+              class="ms-1 shrink-0 text-primary"
             />
           </DropdownMenuItem>
           <!-- only divides if there's an identity block below it to divide from -->
@@ -456,7 +456,7 @@ const detectedReason = computed(() => {
               <div class="truncate text-[13px]">{{ i.displayName }}</div>
               <div class="mono truncate text-[11px] text-muted-foreground">{{ i.gitEmail }}</div>
             </div>
-            <Check v-if="repo.identityId === i.id" :size="15" class="ml-1 shrink-0 text-primary" />
+            <Check v-if="repo.identityId === i.id" :size="15" class="ms-1 shrink-0 text-primary" />
           </DropdownMenuItem>
         </template>
       </DropdownMenuContent>

@@ -433,9 +433,9 @@ onBeforeUnmount(() => {
           <div class="tree-row-cv group/dir relative">
       <button
         type="button"
-        class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+        class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-3 text-start text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
         :class="dragOverPath === n.path && 'bg-primary/15 ring-1 ring-primary/40'"
-        :style="{ paddingLeft: (depth ?? 0) * 14 + 8 + 'px' }"
+        :style="{ paddingInlineStart: (depth ?? 0) * 14 + 8 + 'px' }"
         :title="n.path"
         :aria-expanded="isOpen(n.path)"
         tabindex="-1"
@@ -538,9 +538,9 @@ onBeforeUnmount(() => {
         <button
           type="button"
           :draggable="!isGuest"
-          class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-3 text-left text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+          class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-3 text-start text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
           :class="[isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30', draggingPath === n.path && 'opacity-40']"
-          :style="{ paddingLeft: (depth ?? 0) * 14 + 8 + 'px' }"
+          :style="{ paddingInlineStart: (depth ?? 0) * 14 + 8 + 'px' }"
           :title="rowTitle(n)"
           tabindex="-1"
           data-tree-row
@@ -560,7 +560,7 @@ onBeforeUnmount(() => {
             class="truncate"
             :class="n.status === 'D' ? 'text-muted-foreground line-through' : n.staged ? 'text-[#cfe9d9]' : 'text-[#cfcfd8]'"
           >
-            {{ n.name }}<span v-if="flat && rowDir(n.path)" class="ml-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
+            {{ n.name }}<span v-if="flat && rowDir(n.path)" class="ms-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
           </span>
           <!-- right side: per-file diff stats (when enabled), a reserved slot for the (overlaid)
                action buttons, then the git-status letter last — GitHub-Desktop-style, actions to
@@ -568,7 +568,7 @@ onBeforeUnmount(() => {
                (fixed width) so hover/selection never shifts the diff-stat or status letter — the
                real buttons are absolutely-positioned siblings anchored to the row's right edge,
                on top of this slot (see below), matching the checkbox's reserve-space convention. -->
-          <span class="mono ml-auto flex shrink-0 items-center gap-1.5">
+          <span class="mono ms-auto flex shrink-0 items-center gap-1.5">
             <!-- conflict state, ahead of the numbers: during a merge this is the only thing on the
                  row that matters, and "still conflicted" vs "already resolved" is the one question
                  the owner is scanning the list to answer. -->
@@ -602,7 +602,7 @@ onBeforeUnmount(() => {
                  daemon never invents a letter for it, so nothing downstream that keys off `status`
                  has to learn a new code. The green tint is what marks it. -->
             <span
-              class="pl-1 text-[11px] font-bold"
+              class="ps-1 text-[11px] font-bold"
               :style="{ color: n.resolved ? RESOLVED_COLOR : statusColor(n.status) }"
               :title="statusLabel(n)"
               >{{ n.status }}</span

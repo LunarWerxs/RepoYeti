@@ -149,7 +149,7 @@ onBeforeUnmount(() => {
     v-else
     class="safe-bottom relative min-h-dvh transition-[padding] duration-300 ease-in-out"
     :style="{
-      paddingRight: appShiftPx ? `${appShiftPx}px` : undefined,
+      paddingInlineEnd: appShiftPx ? `${appShiftPx}px` : undefined,
     }"
   >
     <!-- Above the header, so a guest sees whose machine this is before anything else. Renders

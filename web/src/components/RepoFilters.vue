@@ -63,7 +63,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
     <Input
       v-model="store.filterQuery"
       :placeholder="$t('filters.searchPlaceholder')"
-      class="h-11 border-transparent bg-secondary/25 pl-8 pr-10 hover:bg-secondary/40 focus-visible:border-ring/40 focus-visible:bg-secondary/40 focus-visible:ring-1 dark:bg-secondary/25 sm:h-9"
+      class="h-11 border-transparent bg-secondary/25 ps-8 pe-10 hover:bg-secondary/40 focus-visible:border-ring/40 focus-visible:bg-secondary/40 focus-visible:ring-1 dark:bg-secondary/25 sm:h-9"
     />
 
     <Popover v-model:open="open">
@@ -108,11 +108,11 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
                 <DropdownMenuLabel>{{ $t("filters.filterByIdentity") }}</DropdownMenuLabel>
                 <DropdownMenuItem @select="store.filterIdentity = undefined">
                   {{ $t("filters.anyIdentity") }}
-                  <Check v-if="store.filterIdentity === undefined" :size="15" class="ml-auto text-primary" />
+                  <Check v-if="store.filterIdentity === undefined" :size="15" class="ms-auto text-primary" />
                 </DropdownMenuItem>
                 <DropdownMenuItem @select="store.filterIdentity = null">
                   {{ $t("filters.noIdentity") }}
-                  <Check v-if="store.filterIdentity === null" :size="15" class="ml-auto text-primary" />
+                  <Check v-if="store.filterIdentity === null" :size="15" class="ms-auto text-primary" />
                 </DropdownMenuItem>
                 <template v-if="store.identities.length">
                   <DropdownMenuSeparator />
@@ -122,7 +122,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
                     @select="store.filterIdentity = i.id"
                   >
                     <span class="truncate">{{ i.displayName }}</span>
-                    <Check v-if="store.filterIdentity === i.id" :size="15" class="ml-auto shrink-0 text-primary" />
+                    <Check v-if="store.filterIdentity === i.id" :size="15" class="ms-auto shrink-0 text-primary" />
                   </DropdownMenuItem>
                 </template>
               </DropdownMenuContent>
@@ -176,7 +176,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
             <EyeOff :size="14" />
             <span class="whitespace-nowrap">{{ $t("filters.showHiddenShort") }}</span>
             <Switch
-              class="ml-auto"
+              class="ms-auto"
               :model-value="store.showHidden"
               :aria-label="$t('filters.showHidden')"
               @update:model-value="(v: boolean) => (store.showHidden = v)"

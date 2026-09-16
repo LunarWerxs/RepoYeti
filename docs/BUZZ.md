@@ -19,7 +19,7 @@ The integration has two distinct layers:
 2. **Buzz collaboration (later):** optionally publish RepoYeti commit/diff/status events to a
    selected Buzz channel.
 
-## Phase 1 — Advanced Buzz Git support
+## Phase 1 - Advanced Buzz Git support
 
 The Advanced settings section groups Lore and Buzz in one Experimental servers card:
 
@@ -67,7 +67,7 @@ authentication to the Lore CLI. RepoYeti must not:
 If authentication is missing, fail closed with an actionable preflight message. Never fall back
 to an interactive prompt in the daemon.
 
-## Phase 2 — Optional one-way collaboration
+## Phase 2 - Optional one-way collaboration
 
 After Git compatibility is proven, the Advanced section may allow a repository to be linked to a
 Buzz channel. The first collaboration feature should be outbound only:
@@ -86,14 +86,14 @@ replay/idempotency, approval, and prompt-injection threat model.
 
 ## Implemented seams
 
-- `src/config.ts` — non-secret `BuzzConfig` and saved-community metadata.
-- `src/buzz.ts` — discovery, preflight, and eventual outbound collaboration adapter.
-- `src/http/routes/buzz.ts` and `src/http/openapi.ts` — owner-only diagnostics/configuration API.
-- `web/src/components/settings/ExperimentalServersSection.vue` — shared Lore/Buzz Advanced card.
-- `web/src/components/settings/BuzzIntegrationSection.vue` — expandable Buzz controls.
-- `web/src/components/Settings.vue` — lazy-load the experimental-server card.
-- `web/src/api.ts`, store/types, and `web/src/locales/en.json` — UI contract and copy.
-- `web/src/components/AddRepo.vue` — optional Buzz clone entry point.
+- `src/config.ts` - non-secret `BuzzConfig` and saved-community metadata.
+- `src/buzz.ts` - discovery, preflight, and eventual outbound collaboration adapter.
+- `src/http/routes/buzz.ts` and `src/http/openapi.ts` - owner-only diagnostics/configuration API.
+- `web/src/components/settings/ExperimentalServersSection.vue` - shared Lore/Buzz Advanced card.
+- `web/src/components/settings/BuzzIntegrationSection.vue` - expandable Buzz controls.
+- `web/src/components/Settings.vue` - lazy-load the experimental-server card.
+- `web/src/api.ts`, store/types, and `web/src/locales/en.json` - UI contract and copy.
+- `web/src/components/AddRepo.vue` - optional Buzz clone entry point.
 - Focused daemon and component tests; live relay coverage remains opt-in behind an environment
   flag so normal CI never needs Buzz infrastructure or a Nostr key.
 

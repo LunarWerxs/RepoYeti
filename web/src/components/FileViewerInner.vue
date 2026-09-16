@@ -617,17 +617,17 @@ onBeforeUnmount(() => {
                 <DropdownMenuItem v-if="!binaryPreview" @select.prevent="wordWrap = !wordWrap">
                   <WrapText :size="14" />
                   {{ $t("fileViewer.wordWrap") }}
-                  <Check v-if="wordWrap" :size="14" class="ml-auto text-primary" />
+                  <Check v-if="wordWrap" :size="14" class="ms-auto text-primary" />
                 </DropdownMenuItem>
                 <DropdownMenuItem v-if="viewerMode === 'content'" @select.prevent="dirtyDiffGutter = !dirtyDiffGutter">
                   <Highlighter :size="14" />
                   {{ $t("fileViewer.dirtyGutter") }}
-                  <Check v-if="dirtyDiffGutter" :size="14" class="ml-auto text-primary" />
+                  <Check v-if="dirtyDiffGutter" :size="14" class="ms-auto text-primary" />
                 </DropdownMenuItem>
                 <DropdownMenuItem v-if="diffEditable" @select.prevent="wordLevelDiff = !wordLevelDiff">
                   <WholeWord :size="14" />
                   {{ $t("fileViewer.wordDiff") }}
-                  <Check v-if="wordLevelDiff" :size="14" class="ml-auto text-primary" />
+                  <Check v-if="wordLevelDiff" :size="14" class="ms-auto text-primary" />
                 </DropdownMenuItem>
                 <DropdownMenuItem v-if="diffEditable" @select="diffSplitView = !diffSplitView">
                   <component :is="diffSplitView ? AlignJustify : Columns2" :size="14" />
@@ -642,7 +642,7 @@ onBeforeUnmount(() => {
                 >
                   <Columns2 :size="14" />
                   {{ $t("settings.diffPatchAlways") }}
-                  <Check v-if="alwaysSideBySide" :size="14" class="ml-auto text-primary" />
+                  <Check v-if="alwaysSideBySide" :size="14" class="ms-auto text-primary" />
                 </DropdownMenuItem>
                 <template v-if="store.canContinueLocal && !store.isGuest">
                   <DropdownMenuSeparator v-if="!binaryPreview" />
@@ -650,9 +650,9 @@ onBeforeUnmount(() => {
                     <ExternalLink :size="14" />
                     {{ $t("fileViewer.openWith") }}
                   </DropdownMenuItem>
-                  <DropdownMenuItem v-for="e in openableEditors" :key="e.id" class="pl-7" @select="openWith(e.id)">
+                  <DropdownMenuItem v-for="e in openableEditors" :key="e.id" class="ps-7" @select="openWith(e.id)">
                     <span class="truncate">{{ e.label }}</span>
-                    <Check v-if="e.id === store.effectiveEditor" :size="14" class="ml-auto text-primary" />
+                    <Check v-if="e.id === store.effectiveEditor" :size="14" class="ms-auto text-primary" />
                   </DropdownMenuItem>
                 </template>
               </DropdownMenuContent>

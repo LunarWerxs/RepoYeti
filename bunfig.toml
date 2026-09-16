@@ -25,3 +25,11 @@ pathIgnorePatterns = ["web/**"]
 # coverage gate lives in scripts/check-coverage.ts, which runs the suite with coverage and enforces
 # an OVERALL line-coverage floor (MIN_TEXT_LINE_COVERAGE / MIN_LCOV_LINE_COVERAGE). Run it via
 # `bun run check:coverage`; CI runs that script in place of a bare `bun test` (see .github/workflows/ci.yml).
+
+# Supply-chain posture: a published version is not installable until it has been public for 3 days
+# (259200s), so a compromised or yanked release is normally caught upstream before it can resolve
+# here. A frozen install against a complete lockfile is untouched; only a re-resolution (bun add,
+# bun update, an incomplete lock) re-checks ages - lower it for that one command if a pin is young,
+# and put it back before committing. Odin's bumper bumps under this same cooldown.
+[install]
+minimumReleaseAge = 259200

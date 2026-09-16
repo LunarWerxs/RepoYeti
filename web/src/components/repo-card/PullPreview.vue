@@ -155,7 +155,7 @@ function pullFromMenu(): void {
       <Button
         :variant="variant"
         size="sm"
-        class="-ml-px rounded-l-none border-l border-l-black/15 px-1 dark:border-l-white/20"
+        class="-ms-px rounded-s-none border-s border-s-black/15 px-1 dark:border-s-white/20"
         :disabled="disabled"
         :aria-label="$t('repo.preview.menuLabel')"
         :title="$t('repo.preview.menuLabel')"
@@ -304,7 +304,7 @@ function pullFromMenu(): void {
                 class="mono shrink-0 text-[10.5px]"
               >
                 <span v-if="c.stat.addedLines" class="text-success">+{{ c.stat.addedLines }}</span>
-                <span v-if="c.stat.removedLines" class="ml-1 text-destructive">−{{ c.stat.removedLines }}</span>
+                <span v-if="c.stat.removedLines" class="ms-1 text-destructive">−{{ c.stat.removedLines }}</span>
               </span>
               <span class="shrink-0 text-[10.5px] whitespace-nowrap text-muted-foreground">{{ fromNow(c.date) }}</span>
             </div>
@@ -318,9 +318,9 @@ function pullFromMenu(): void {
         <div class="min-w-0">
           <div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             {{ $t("repo.preview.filesHeading", { count: result!.stat.filesChanged }, result!.stat.filesChanged) }}
-            <span class="mono ml-auto normal-case">
+            <span class="mono ms-auto normal-case">
               <span v-if="result!.stat.addedLines" class="text-success">+{{ result!.stat.addedLines }}</span>
-              <span v-if="result!.stat.removedLines" class="ml-1 text-destructive">−{{ result!.stat.removedLines }}</span>
+              <span v-if="result!.stat.removedLines" class="ms-1 text-destructive">−{{ result!.stat.removedLines }}</span>
             </span>
           </div>
           <div class="scroll-slim max-h-56 overflow-y-auto rounded-md border border-border p-1">

@@ -113,7 +113,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-else :class="cn('flex', rowClass(row.kind))">
               <span class="w-5 shrink-0 select-none text-center text-muted-foreground/50">{{ sign(row.kind) }}</span>
-              <span class="whitespace-pre pr-3">{{ row.text }}</span>
+              <span class="whitespace-pre pe-3">{{ row.text }}</span>
             </div>
           </template>
         </div>

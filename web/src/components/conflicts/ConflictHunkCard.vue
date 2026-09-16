@@ -198,7 +198,7 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
         </span>
         <button
           type="button"
-          class="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          class="ms-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
           @click="editing = !editing"
         >
           <Pencil :size="11" />

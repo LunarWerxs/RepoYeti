@@ -131,7 +131,7 @@ async function confirmDelete(): Promise<void> {
               >
                 <button
                   type="button"
-                  class="mono flex min-w-0 flex-1 items-center gap-1.5 text-left text-[12.5px] outline-none"
+                  class="mono flex min-w-0 flex-1 items-center gap-1.5 text-start text-[12.5px] outline-none"
                   @click="switchTo(b.name)"
                 >
                   <GitBranch :size="13" class="shrink-0 opacity-70" />

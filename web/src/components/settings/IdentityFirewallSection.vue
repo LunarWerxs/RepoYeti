@@ -132,7 +132,7 @@ async function save(): Promise<void> {
           <Plus />
           {{ $t("identity.firewall.add") }}
         </Button>
-        <Button size="sm" class="ml-auto" :disabled="saving" @click="save">
+        <Button size="sm" class="ms-auto" :disabled="saving" @click="save">
           <Save />
           {{ $t("identity.firewall.save") }}
         </Button>

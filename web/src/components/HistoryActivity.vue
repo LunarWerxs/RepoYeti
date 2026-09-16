@@ -677,7 +677,7 @@ onBeforeUnmount(() => {
             <i class="block size-1.5 animate-pulse rounded-full bg-info" aria-hidden="true" />
           </span>
           <div
-            class="ml-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
+            class="ms-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
             role="tablist"
             :aria-label="$t('repo.history.activityScaleLabel')"
             data-testid="history-activity-scale"
@@ -710,7 +710,7 @@ onBeforeUnmount(() => {
       <div class="flex min-h-5 items-center gap-2 px-0.5 text-[9px] leading-none">
         <span class="font-medium text-muted-foreground">{{ chartTitle }}</span>
         <div
-          class="ml-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
+          class="ms-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
           role="tablist"
           :aria-label="$t('repo.history.activityScaleLabel')"
           data-testid="history-activity-scale"
@@ -745,7 +745,7 @@ onBeforeUnmount(() => {
       <div class="flex min-h-5 items-center gap-2 px-0.5 text-[9px] leading-none">
         <span class="font-medium text-destructive/80">{{ chartTitle }}</span>
         <div
-          class="ml-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
+          class="ms-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
           role="tablist"
           :aria-label="$t('repo.history.activityScaleLabel')"
           data-testid="history-activity-scale"
@@ -842,7 +842,7 @@ onBeforeUnmount(() => {
       >
         <span
           key="authors-label"
-          class="mr-0.5 shrink-0 text-muted-foreground/65"
+          class="me-0.5 shrink-0 text-muted-foreground/65"
         >
           {{ $t("repo.history.activityTopAuthors") }}
         </span>
@@ -850,7 +850,7 @@ onBeforeUnmount(() => {
           v-for="author in shownAuthors"
           :key="`${author.email}\u0000${author.name}`"
           type="button"
-          class="inline-flex min-w-0 shrink items-center gap-1 rounded-full border py-0.5 pl-0.5 pr-1.5 outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring/45"
+          class="inline-flex min-w-0 shrink items-center gap-1 rounded-full border py-0.5 ps-0.5 pe-1.5 outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring/45"
           :class="isAuthorSelected(author)
             ? 'border-info/45 bg-info/14 text-info ring-1 ring-inset ring-info/15'
             : 'border-border/50 bg-secondary/45 text-muted-foreground hover:border-info/30 hover:bg-info/8 hover:text-foreground'"
@@ -925,7 +925,7 @@ onBeforeUnmount(() => {
             <span class="sr-only">{{ $t("repo.history.activityLoading") }}</span>
           </span>
           <div
-            class="ml-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
+            class="ms-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
             role="tablist"
             :aria-label="$t('repo.history.activityScaleLabel')"
             data-testid="history-activity-scale"

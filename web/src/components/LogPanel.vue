@@ -924,7 +924,7 @@ watch(historyActivityScale, () => {
     >
       <History :size="14" />
       <span>{{ $t("repo.history.title") }}</span>
-      <ChevronDown :size="14" :class="cn('ml-auto transition-transform', showHistory && 'rotate-180')" />
+      <ChevronDown :size="14" :class="cn('ms-auto transition-transform', showHistory && 'rotate-180')" />
     </button>
 
     <!-- Section body animates open/closed with the same grid-rows trick as the per-commit
@@ -961,7 +961,7 @@ watch(historyActivityScale, () => {
         <!-- How History looks, in History's own toolbar. These four used to be reachable only from
              Settings → Appearance, where a switch about this panel is invisible from this panel. -->
         <ViewOptions
-          class="ml-auto"
+          class="ms-auto"
           :label="$t('repo.history.viewOptions')"
           :tooltips="tooltipsEnabled"
           :rows="viewOptionRows"
@@ -1033,7 +1033,7 @@ watch(historyActivityScale, () => {
         <div v-if="!compact" class="flex items-stretch border-b border-border/40 pb-1">
           <span :style="{ width: `${visibleGutterW}px` }" class="shrink-0" aria-hidden="true" />
           <div
-            class="grid min-w-0 flex-1 items-center pr-1 text-[10.5px] font-medium tracking-wide uppercase text-muted-foreground/70"
+            class="grid min-w-0 flex-1 items-center pe-1 text-[10.5px] font-medium tracking-wide uppercase text-muted-foreground/70"
             :style="{ gridTemplateColumns: COLS }"
           >
             <span class="truncate">{{ $t("repo.history.colDescription") }}</span>
@@ -1111,14 +1111,14 @@ watch(historyActivityScale, () => {
                     stroke-dasharray="2 1.5"
                   />
                 </svg>
-                <div class="flex min-w-0 flex-1 items-center gap-2 py-1 pr-1">
+                <div class="flex min-w-0 flex-1 items-center gap-2 py-1 pe-1">
                   <FileEdit :size="13" class="shrink-0 text-warning" />
                   <span class="truncate text-[12.5px] font-medium text-foreground">
                     {{ $t("repo.history.uncommitted", { count: dirtyCount }) }}
                   </span>
                   <ChevronDown
                     :size="13"
-                    :class="cn('ml-auto shrink-0 text-muted-foreground transition-transform', wtOpen && 'rotate-180')"
+                    :class="cn('ms-auto shrink-0 text-muted-foreground transition-transform', wtOpen && 'rotate-180')"
                   />
                 </div>
               </div>
@@ -1128,8 +1128,8 @@ watch(historyActivityScale, () => {
                 <div v-if="wtOpen" class="expand-grid">
                   <div class="min-h-0 overflow-hidden">
                     <div
-                      class="mb-1 border-l-2 border-warning/40 py-1 pl-2 text-[11px]"
-                      :style="{ marginLeft: `${visibleGutterW}px` }"
+                      class="mb-1 border-s-2 border-warning/40 py-1 ps-2 text-[11px]"
+                      :style="{ marginInlineStart: `${visibleGutterW}px` }"
                     >
                       <div v-if="!wtFiles.length" class="text-muted-foreground">{{ $t("repo.history.noUncommitted") }}</div>
                       <template v-else>
@@ -1138,14 +1138,14 @@ watch(historyActivityScale, () => {
                             <ContextMenuTrigger as-child>
                               <button
                                 type="button"
-                                class="flex w-full items-center gap-2 border-b border-border px-2 py-1 text-left transition-colors last:border-b-0 hover:bg-accent/40"
+                                class="flex w-full items-center gap-2 border-b border-border px-2 py-1 text-start transition-colors last:border-b-0 hover:bg-accent/40"
                                 :class="isViewing(props.repoId, f.path) && 'bg-accent/60'"
                                 :title="f.path"
                                 @click.stop="openWorktreeFile(f)"
                               >
                                 <span class="mono shrink-0 text-[11px] font-bold" :style="{ color: statusColor(f.status) }">{{ f.status }}</span>
                                 <span class="mono min-w-0 flex-1 truncate text-[11.5px]">
-                                  <span class="text-foreground">{{ splitPath(f.path).name }}</span><span v-if="splitPath(f.path).dir" class="ml-1.5 text-muted-foreground/55">{{ splitPath(f.path).dir.replace(/\/+$/, "") }}</span>
+                                  <span class="text-foreground">{{ splitPath(f.path).name }}</span><span v-if="splitPath(f.path).dir" class="ms-1.5 text-muted-foreground/55">{{ splitPath(f.path).dir.replace(/\/+$/, "") }}</span>
                                 </span>
                                 <span v-if="f.stat?.addedLines" class="mono shrink-0 text-[10.5px] text-success">+{{ f.stat.addedLines }}</span>
                                 <span v-if="f.stat?.removedLines" class="mono shrink-0 text-[10.5px] text-destructive">−{{ f.stat.removedLines }}</span>
@@ -1244,12 +1244,12 @@ watch(historyActivityScale, () => {
                 <!-- WIDE: aligned columns (same COLS template as the header above) -->
                 <div
                   v-if="!compact"
-                  class="grid min-w-0 flex-1 items-center py-1 pr-1"
+                  class="grid min-w-0 flex-1 items-center py-1 pe-1"
                   :style="{ gridTemplateColumns: COLS }"
                 >
                   <button
                     type="button"
-                    class="flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    class="flex min-w-0 items-center gap-1.5 rounded-sm text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     :data-history-disclosure="item.commit!.hash"
                     :aria-expanded="expandedCommit === item.commit!.hash"
                     :aria-controls="`history-detail-${item.commit!.hash}`"
@@ -1334,7 +1334,7 @@ watch(historyActivityScale, () => {
                 <button
                   v-else
                   type="button"
-                  class="flex min-w-0 flex-1 flex-col justify-center rounded-sm py-1 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  class="flex min-w-0 flex-1 flex-col justify-center rounded-sm py-1 pe-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                   :data-history-disclosure="item.commit!.hash"
                   :aria-expanded="expandedCommit === item.commit!.hash"
                   :aria-controls="`history-detail-${item.commit!.hash}`"
@@ -1439,9 +1439,9 @@ watch(historyActivityScale, () => {
                 >
                   <div class="min-h-0 overflow-hidden">
                     <div
-                      class="mb-1 mt-0.5 rounded-md border-l-2 py-1.5 pl-2.5 pr-2"
+                      class="mb-1 mt-0.5 rounded-md border-s-2 py-1.5 ps-2.5 pe-2"
                       :style="{
-                        marginLeft: `${visibleGutterW}px`,
+                        marginInlineStart: `${visibleGutterW}px`,
                         borderColor: showHistoryGraph ? laneColor(item.row.node.color) : 'var(--border)',
                       }"
                     >
@@ -1466,7 +1466,7 @@ watch(historyActivityScale, () => {
                       <TooltipContent>{{ $t("repo.history.copyHash") }}</TooltipContent>
                     </Tooltip>
                     <template v-if="!selectedAuthor && expandedDetail.parents.length">
-                      <span class="ml-1 text-muted-foreground/70">{{ $t("repo.history.parents") }}:</span>
+                      <span class="ms-1 text-muted-foreground/70">{{ $t("repo.history.parents") }}:</span>
                       <button
                         v-for="p in expandedDetail.parents"
                         :key="p"
@@ -1478,7 +1478,7 @@ watch(historyActivityScale, () => {
                         <CornerDownRight :size="9" />{{ p.slice(0, 8) }}
                       </button>
                     </template>
-                    <span v-else class="ml-1 text-muted-foreground/70">{{ $t("repo.history.root") }}</span>
+                    <span v-else class="ms-1 text-muted-foreground/70">{{ $t("repo.history.root") }}</span>
                   </div>
                   <div class="mb-1.5 text-[11px] text-muted-foreground">
                     <div>
@@ -1537,14 +1537,14 @@ watch(historyActivityScale, () => {
                       <ContextMenuTrigger as-child>
                         <button
                           type="button"
-                          class="flex w-full items-center gap-2 border-b border-border px-2 py-1 text-left transition-colors last:border-b-0 hover:bg-accent/40"
+                          class="flex w-full items-center gap-2 border-b border-border px-2 py-1 text-start transition-colors last:border-b-0 hover:bg-accent/40"
                           :class="isViewing(props.repoId, f.path, item.commit!.hash) && 'bg-accent/60'"
                           :title="f.from ? `${f.from} → ${f.path}` : f.path"
                           @click.stop="openCommitFile(f)"
                         >
                           <span class="mono shrink-0 text-[11px] font-bold" :style="{ color: statusColor(f.status) }">{{ f.status }}</span>
                           <span class="mono min-w-0 flex-1 truncate text-[11.5px]">
-                            <span class="text-foreground">{{ splitPath(f.path).name }}</span><span v-if="splitPath(f.path).dir" class="ml-1.5 text-muted-foreground/55">{{ splitPath(f.path).dir.replace(/\/+$/, "") }}</span>
+                            <span class="text-foreground">{{ splitPath(f.path).name }}</span><span v-if="splitPath(f.path).dir" class="ms-1.5 text-muted-foreground/55">{{ splitPath(f.path).dir.replace(/\/+$/, "") }}</span>
                           </span>
                           <span v-if="f.adds" class="mono shrink-0 text-[10.5px] text-success">+{{ f.adds }}</span>
                           <span v-if="f.dels" class="mono shrink-0 text-[10.5px] text-destructive">−{{ f.dels }}</span>

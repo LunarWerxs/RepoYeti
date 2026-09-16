@@ -103,7 +103,7 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
             <TooltipTrigger as-child>
               <button
                 type="button"
-                class="-ml-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                class="-ms-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 :aria-label="$t('scan.back')"
                 @click="back"
               >
@@ -222,7 +222,7 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
               <TooltipTrigger as-child>
                 <button
                   type="button"
-                  class="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                  class="ms-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
                   :disabled="removing.includes(repo.id)"
                   :aria-label="$t('scan.discard')"
                   @click="discard(repo)"

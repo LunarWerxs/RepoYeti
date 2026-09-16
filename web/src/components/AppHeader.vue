@@ -444,7 +444,7 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   role="menuitem"
-                  class="flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-2 text-left outline-hidden transition-colors hover:bg-accent focus:bg-accent"
+                  class="flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-2 text-start outline-hidden transition-colors hover:bg-accent focus:bg-accent"
                   @click="onNotifClick(n)"
                 >
                   <span class="text-[13px] font-medium text-foreground">{{ n.title }}</span>
@@ -478,7 +478,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 role="menuitem"
-                class="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground outline-hidden transition-colors hover:bg-accent focus:bg-accent"
+                class="flex w-full items-center rounded-sm px-2 py-1.5 text-start text-sm text-muted-foreground outline-hidden transition-colors hover:bg-accent focus:bg-accent"
                 @click="store.clearNotifications()"
               >
                 {{ $t("header.notificationsClear") }}
@@ -523,7 +523,7 @@ onBeforeUnmount(() => {
               role="menuitemradio"
               :aria-checked="a.active"
               :disabled="a.active || !!store.switchingAccount"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
               @click="switchAccount(a.login, a.host)"
             >
               <Loader2 v-if="store.switchingAccount === a.login" class="animate-spin" />
@@ -536,7 +536,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               role="menuitem"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
               @click="manageAccounts"
             >
               <Settings />
@@ -576,7 +576,7 @@ onBeforeUnmount(() => {
             -->
             <div
               v-if="!store.isGuest && store.fetchingAll"
-              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm [&_svg]:size-4 [&_svg]:shrink-0"
+              class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm [&_svg]:size-4 [&_svg]:shrink-0"
             >
               <Loader2 class="animate-spin" />
               <span class="min-w-0 flex-1 truncate">
@@ -606,7 +606,7 @@ onBeforeUnmount(() => {
               v-else-if="!store.isGuest"
               type="button"
               role="menuitem"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
               @click="fetchAll"
             >
               <DownloadCloud />
@@ -617,7 +617,7 @@ onBeforeUnmount(() => {
               type="button"
               role="menuitem"
               :disabled="store.updateChecking || store.updateApplying"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
               @click="updateApp"
             >
               <Loader2 v-if="store.updateChecking || store.updateApplying" class="animate-spin" />
@@ -628,7 +628,7 @@ onBeforeUnmount(() => {
               v-if="!store.isGuest"
               type="button"
               role="menuitem"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
               @click="openScan"
             >
               <FolderSearch />
@@ -640,7 +640,7 @@ onBeforeUnmount(() => {
               v-if="!store.isGuest"
               type="button"
               role="menuitem"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
               @click="beginSelectMultiple"
             >
               <ListChecks />
@@ -655,7 +655,7 @@ onBeforeUnmount(() => {
               type="button"
               role="menuitemradio"
               :aria-checked="store.sortMode === opt.mode"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
               @click="setSort(opt.mode)"
             >
               <Check v-if="store.sortMode === opt.mode" class="text-primary" />
@@ -671,7 +671,7 @@ onBeforeUnmount(() => {
               type="button"
               role="menuitem"
               :disabled="resettingOrder"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
               @click="resetOrder"
             >
               <Loader2 v-if="resettingOrder" class="animate-spin" />
@@ -685,7 +685,7 @@ onBeforeUnmount(() => {
               role="menuitem"
               :disabled="cleaningUpMissing"
               :title="$t('header.cleanupMissingTooltip')"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0"
               @click="cleanupMissing"
             >
               <Loader2 v-if="cleaningUpMissing" class="animate-spin" />
@@ -695,7 +695,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               role="menuitem"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
               @click="reload"
             >
               <RefreshCw />
@@ -705,7 +705,7 @@ onBeforeUnmount(() => {
               v-if="!store.isGuest"
               type="button"
               role="menuitem"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
               @click="openSettings"
             >
               <Settings />
@@ -718,7 +718,7 @@ onBeforeUnmount(() => {
               :href="SOURCE_URL"
               target="_blank"
               rel="noopener noreferrer"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
               @click="actionsOpen = false"
             >
               <Code />
@@ -730,7 +730,7 @@ onBeforeUnmount(() => {
               type="button"
               role="menuitem"
               :disabled="shuttingDown"
-              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-destructive outline-hidden transition-colors hover:bg-destructive/10 focus:bg-destructive/10 disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-destructive/20 dark:focus:bg-destructive/20 [&_svg]:size-4 [&_svg]:shrink-0"
+              class="relative flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm text-destructive outline-hidden transition-colors hover:bg-destructive/10 focus:bg-destructive/10 disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-destructive/20 dark:focus:bg-destructive/20 [&_svg]:size-4 [&_svg]:shrink-0"
               @click="openShutdownConfirm"
             >
               <Power />
@@ -743,13 +743,13 @@ onBeforeUnmount(() => {
         <Button
           v-if="!store.isGuest"
           size="sm"
-          class="group/add ml-1 h-8 gap-0 overflow-hidden transition-all"
+          class="group/add ms-1 h-8 gap-0 overflow-hidden transition-all"
           :aria-label="$t('header.addRepository')"
           @click="$emit('add')"
         >
           <Plus class="size-4 shrink-0" />
           <span
-            class="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 ease-out group-hover/add:ml-1.5 group-hover/add:max-w-32 group-hover/add:opacity-100 group-focus-visible/add:ml-1.5 group-focus-visible/add:max-w-32 group-focus-visible/add:opacity-100"
+            class="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 ease-out group-hover/add:ms-1.5 group-hover/add:max-w-32 group-hover/add:opacity-100 group-focus-visible/add:ms-1.5 group-focus-visible/add:max-w-32 group-focus-visible/add:opacity-100"
           >{{ $t("header.addRepository") }}</span>
         </Button>
       </div>

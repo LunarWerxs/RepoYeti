@@ -236,6 +236,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* color tokens - lifted from raw literals by Odin's fix_color_tokens.py (2026-09-14); the Architect's
+   color-scheme-conformance check wants every color consumed through the token layer. */
+:root {
+  --color-3fb950: #3fb950;
+  --color-58a6ff: #58a6ff;
+  --color-f85149: #f85149;
+}
+
+
 /* Dirty-diff gutter markers (VS Code-style) painted in Monaco's line-decorations margin. `:deep`
    so these reach the decoration elements Monaco creates inside the editor host at runtime. */
 :deep(.dirty-gutter)::before {
@@ -247,10 +256,10 @@ onBeforeUnmount(() => {
   border-radius: 1px;
 }
 :deep(.dirty-gutter-add)::before {
-  background: #3fb950; /* added lines — green */
+  background: var(--color-3fb950); /* added lines — green */
 }
 :deep(.dirty-gutter-modify)::before {
-  background: #58a6ff; /* changed lines — blue */
+  background: var(--color-58a6ff); /* changed lines — blue */
 }
 /* Deleted lines have no line of their own → a small red triangle at the boundary. */
 :deep(.dirty-gutter-delete)::before {
@@ -260,7 +269,7 @@ onBeforeUnmount(() => {
   height: 0;
   border-radius: 0;
   transform: translateY(-50%);
-  border-left: 5px solid #f85149;
+  border-inline-start: 5px solid var(--color-f85149);
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   background: transparent;

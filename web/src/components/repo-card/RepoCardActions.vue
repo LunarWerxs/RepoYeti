@@ -229,7 +229,7 @@ async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
             <Button
               :variant="pullVariant"
               size="sm"
-              :class="hasPullCaret ? 'rounded-r-none' : ''"
+              :class="hasPullCaret ? 'rounded-e-none' : ''"
               data-testid="repo-pull-primary"
               :disabled="pullDisabled"
               @click="run('pull')"

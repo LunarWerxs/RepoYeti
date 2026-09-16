@@ -86,7 +86,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
           <DropdownMenuTrigger as-child>
             <button
               type="button"
-              class="flex shrink-0 items-center border-l border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              class="flex shrink-0 items-center border-s border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
               :title="tooltipsEnabled ? $t('repo.smartCommit.fileMenu') : undefined"
               :aria-label="$t('repo.smartCommit.fileMenu')"
             >

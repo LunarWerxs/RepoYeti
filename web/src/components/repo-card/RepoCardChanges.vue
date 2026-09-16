@@ -659,7 +659,7 @@ async function onCopyPath(path: string): Promise<void> {
   <!-- path (location) + remote-presence cloud, kept on one line -->
   <div class="flex items-center gap-2">
     <div
-      class="mono min-w-0 flex-1 truncate text-left text-[11.5px] text-muted-foreground"
+      class="mono min-w-0 flex-1 truncate text-start text-[11.5px] text-muted-foreground"
       dir="rtl"
       :title="repo.absPath"
     >
@@ -759,10 +759,10 @@ async function onCopyPath(path: string): Promise<void> {
             type="text"
             :placeholder="$t('repo.files.searchPlaceholder')"
             :aria-label="$t('repo.files.searchPlaceholder')"
-            class="h-6 w-full rounded bg-transparent pr-8 pl-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
+            class="h-6 w-full rounded bg-transparent pe-8 ps-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
           />
           <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">
-            <Loader2 v-if="fileSearchLoading" :size="13" class="mr-1 animate-spin text-muted-foreground" />
+            <Loader2 v-if="fileSearchLoading" :size="13" class="me-1 animate-spin text-muted-foreground" />
             <Tooltip v-else-if="fileQuery">
               <TooltipTrigger as-child>
                 <button
@@ -870,7 +870,7 @@ async function onCopyPath(path: string): Promise<void> {
           type="text"
           :placeholder="$t('repo.changes.searchPlaceholder')"
           :aria-label="$t('repo.changes.searchPlaceholder')"
-          class="h-6 w-full rounded bg-transparent pr-20 pl-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
+          class="h-6 w-full rounded bg-transparent pe-20 ps-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
         />
         <!-- right cluster: clear (only with a query) + the "search inside files" toggle -->
         <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">

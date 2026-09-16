@@ -8,7 +8,7 @@ RepoYeti's zero-config remote access uses a Cloudflare **quick tunnel**, which i
 random `*.trycloudflare.com` hostname every time it starts. Share links embed whatever the address
 was when they were minted, so restarting the daemon silently kills every link already sent. The
 person you sent it to gets a DNS failure that reads as *"your link is wrong"* rather than *"the
-address moved"* — and you only find out when they tell you.
+address moved"* - and you only find out when they tell you.
 
 The relay gives each daemon one URL that never changes and forwards to wherever it currently lives.
 It also provides RepoYeti's registered OAuth callback for rotating Quick Tunnels. That callback is
@@ -17,8 +17,8 @@ a narrow return route, not a dashboard proxy.
 ## What it is not
 
 **Not a tunnel, and not a proxy.** Dashboard and Git traffic still goes directly from the visitor
-to the daemon's own tunnel. The stable-address path stores one row per daemon—an id, a public key,
-and the current origin—and answers with a redirect.
+to the daemon's own tunnel. The stable-address path stores one row per daemon - an id, a public key,
+and the current origin - and answers with a redirect.
 
 This distinction is the whole design. Proxying everyone's traffic would make whoever runs this
 Worker the custodian of other people's source code, which is the opposite of what RepoYeti promises
@@ -56,7 +56,7 @@ Trust on first use, then signatures.
 - The **first** `/announce` for an id registers its Ed25519 public key.
 - Every **later** announce must carry a signature verifiable against the stored key.
 
-Without this, anyone could repoint someone else's link at their own server — turning a convenience
+Without this, anyone could repoint someone else's link at their own server - turning a convenience
 feature into a phishing kit. Ids are 128-bit random, so squatting an unused id is not a practical
 attack. Announces also carry a timestamp and are rejected outside a five-minute window, so a
 captured one cannot be replayed later.
@@ -65,20 +65,20 @@ The Worker can observe the short-lived OAuth authorization code while forwarding
 that code to a verifier held only in daemon memory, so the Worker cannot exchange it for tokens.
 Both callback errors and redirects use `Cache-Control: no-store`.
 
-Covered by `tests/relay-worker.test.ts`, which runs the real Worker against a fake KV — including
+Covered by `tests/relay-worker.test.ts`, which runs the real Worker against a fake KV - including
 the case where an attacker signs correctly with their *own* key and offers a replacement public key.
 
 ## Deployed instance
 
-`https://app.repoyeti.com` — LunarWerx account, free tier. Served by a Worker route on its proxied
+`https://app.repoyeti.com` - LunarWerx account, free tier. Served by a Worker route on its proxied
 DNS record in the `repoyeti.com` zone. The Worker-managed custom domain
 `https://go.repoyeti.com` remains an alias for links issued by older RepoYeti versions. The Worker
 (named `repoyeti`) also answers on its free
-`repoyeti.lunawerx.workers.dev` hostname—same Worker and KV.
+`repoyeti.lunawerx.workers.dev` hostname - same Worker and KV.
 
 Self-hosting on your own domain? Change the `routes` entry in `wrangler.toml` to your hostname
-(the zone must be on your account) and `wrangler deploy` — Cloudflare provisions the DNS record and
-cert. A bare `workers.dev` hostname works too (`workers_dev = true`, no custom domain) — it's
+(the zone must be on your account) and `wrangler deploy` - Cloudflare provisions the DNS record and
+cert. A bare `workers.dev` hostname works too (`workers_dev = true`, no custom domain) - it's
 already stable, which is the only property this service requires.
 
 **If you own a domain, you do not need the relay for routing.** Put the daemon on a NAMED TUNNEL
@@ -89,7 +89,7 @@ Cloudflare address; named tunnels complete OAuth directly.
 
 ## Deploy
 
-You need a Cloudflare account. No domain required — `workers.dev` is enough. The free tier (100k requests/day)
+You need a Cloudflare account. No domain required - `workers.dev` is enough. The free tier (100k requests/day)
 is far more than this needs: one write per daemon restart, one read per link opened.
 
 ```sh
@@ -122,7 +122,7 @@ Equivalently, in `~/.repoyeti/config.json`:
 }
 ```
 
-Leave `identity` alone — the daemon mints its own keypair on first announce and writes it there.
+Leave `identity` alone - the daemon mints its own keypair on first announce and writes it there.
 Deleting it registers a NEW id next time, which breaks every link already handed out; turning the
 relay off in Settings deliberately keeps it for that reason.
 
@@ -152,5 +152,5 @@ unknown capability declarations are terminal and do not consume the transient re
 
 This fixes **addresses changing**. It does not fix `trycloudflare.com` being DNS-blocked on some
 school and corporate networks, because the forward still lands there. For a link that resolves
-everywhere, use a named tunnel on your own domain — RepoYeti supports that directly, and then you
+everywhere, use a named tunnel on your own domain - RepoYeti supports that directly, and then you
 do not need the relay at all.

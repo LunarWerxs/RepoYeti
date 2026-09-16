@@ -55,7 +55,7 @@ function onMobileOpenChange(open: boolean): void {
     >
       <aside
         v-if="isDesktopViewer && fileViewer.open"
-        class="fixed inset-y-0 right-0 z-40 flex border-l border-border bg-card shadow-2xl shadow-black/40"
+        class="fixed inset-y-0 right-0 z-40 flex border-s border-border bg-card shadow-2xl shadow-black/40"
         :style="{ width: `${viewerWidth}px` }"
       >
         <!-- resize grip (left edge) -->

@@ -44,7 +44,7 @@ const showGlyphs = computed(() => showLines.value && showChars.value);
       <span v-if="stat!.removedLines" class="text-destructive">−{{ fmtCount(stat!.removedLines) }}</span>
     </template>
     <template v-if="showChars">
-      <Type v-if="showGlyphs" :size="9" class="ml-0.5 shrink-0 text-muted-foreground/50" />
+      <Type v-if="showGlyphs" :size="9" class="ms-0.5 shrink-0 text-muted-foreground/50" />
       <span v-if="stat!.addedChars" class="text-success/70">+{{ fmtCount(stat!.addedChars) }}</span>
       <span v-if="stat!.removedChars" class="text-destructive/70">−{{ fmtCount(stat!.removedChars) }}</span>
     </template>

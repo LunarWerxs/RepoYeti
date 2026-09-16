@@ -85,8 +85,8 @@ function toggle(path: string): void {
       <button
         v-if="n.type === 'dir'"
         type="button"
-        class="commit-tree-row group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-        :style="{ paddingLeft: (depth ?? 0) * 14 + 6 + 'px' }"
+        class="commit-tree-row group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-2 text-start text-[12px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+        :style="{ paddingInlineStart: (depth ?? 0) * 14 + 6 + 'px' }"
         :title="n.path"
         :aria-expanded="isOpen(n.path)"
         @click.stop="toggle(n.path)"
@@ -104,8 +104,8 @@ function toggle(path: string): void {
         <ContextMenuTrigger as-child>
           <button
             type="button"
-            class="commit-tree-row group flex h-[24px] w-full items-center gap-1.5 rounded-md pr-2 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-            :style="{ paddingLeft: (depth ?? 0) * 14 + 6 + 'px' }"
+            class="commit-tree-row group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-2 text-start outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+            :style="{ paddingInlineStart: (depth ?? 0) * 14 + 6 + 'px' }"
             :title="n.from ? `${n.from} → ${n.path}` : n.path"
             @click.stop="emit('open', n)"
           >
@@ -117,7 +117,7 @@ function toggle(path: string): void {
             >{{ n.name }}</span>
             <span v-if="n.stat?.addedLines" class="mono shrink-0 text-[10.5px] text-success">+{{ n.stat.addedLines }}</span>
             <span v-if="n.stat?.removedLines" class="mono shrink-0 text-[10.5px] text-destructive">−{{ n.stat.removedLines }}</span>
-            <span class="mono shrink-0 pl-1 text-[11px] font-bold" :style="{ color: statusColor(n.status ?? 'M') }">{{ n.status }}</span>
+            <span class="mono shrink-0 ps-1 text-[11px] font-bold" :style="{ color: statusColor(n.status ?? 'M') }">{{ n.status }}</span>
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent>

@@ -64,7 +64,7 @@ const combined = computed<CombinedRow[]>(() => {
         <Users :size="14" class="text-info" />
         {{ $t("collaboration.livePeers", { n: peers.length }) }}
       </span>
-      <div class="ml-auto flex items-center gap-1">
+      <div class="ms-auto flex items-center gap-1">
         <Button
           v-for="choice in (['mine', 'theirs', 'combined'] as const)"
           :key="choice"

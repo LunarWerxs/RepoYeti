@@ -447,7 +447,7 @@ async function execute(sync: boolean): Promise<void> {
               <Button
                 variant="ghost"
                 size="sm"
-                class="mr-5 h-7 gap-1.5 px-2 font-normal text-muted-foreground hover:text-foreground"
+                class="me-5 h-7 gap-1.5 px-2 font-normal text-muted-foreground hover:text-foreground"
                 :disabled="loading || committing"
                 :aria-label="$t('settings.aiStyle')"
                 :title="$t('settings.aiStyle')"
@@ -580,7 +580,7 @@ async function execute(sync: boolean): Promise<void> {
           <div class="flex">
             <Button
               size="sm"
-              :class="cn(hasRemote && 'rounded-r-none')"
+              :class="cn(hasRemote && 'rounded-e-none')"
               :disabled="!canCommit"
               @click="execute(primarySync)"
             >
@@ -593,7 +593,7 @@ async function execute(sync: boolean): Promise<void> {
               <DropdownMenuTrigger as-child>
                 <Button
                   size="sm"
-                  class="rounded-l-none border-l border-l-black/15 px-1.5 dark:border-l-white/20"
+                  class="rounded-s-none border-s border-s-black/15 px-1.5 dark:border-s-white/20"
                   :disabled="!canCommit"
                   :aria-label="$t('repo.commit.menuLabel')"
                 >

@@ -394,7 +394,7 @@ async function onDiffDetail(detail: string): Promise<void> {
           @update:open="(o) => { if (!o) rowFor(p.id).confirmRemove = false }"
         >
           <CollapsibleTrigger
-            class="group flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-secondary/40"
+            class="group flex w-full items-center justify-between gap-2 px-3 py-2.5 text-start transition-colors hover:bg-secondary/40"
           >
             <div class="flex min-w-0 items-center gap-2">
               <span class="truncate text-[13px] font-semibold">{{ p.label }}</span>
@@ -444,7 +444,7 @@ async function onDiffDetail(detail: string): Promise<void> {
                   :href="`https://${p.url}`"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="mono ml-auto text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                  class="mono ms-auto text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
                 >{{ p.url }}</a>
               </div>
 
@@ -652,7 +652,7 @@ async function onDiffDetail(detail: string): Promise<void> {
                     <span
                       v-for="entry in poolSnapshot(p.id)!.entries"
                       :key="entry.id"
-                      class="inline-flex items-center gap-1 rounded-full border border-border/70 py-0.5 pl-2 pr-1 text-[10.5px] mono text-muted-foreground"
+                      class="inline-flex items-center gap-1 rounded-full border border-border/70 py-0.5 ps-2 pe-1 text-[10.5px] mono text-muted-foreground"
                     >
                       {{ entry.id }}
                       <Badge :variant="keyStatusVariant(entry.status)" class="px-1.5 py-0 text-[9.5px]">
@@ -692,7 +692,7 @@ async function onDiffDetail(detail: string): Promise<void> {
                       </Button>
                       <Button
                         size="sm"
-                        class="ml-auto"
+                        class="ms-auto"
                         :disabled="poolSaving[p.id]"
                         @click="savePoolRows(p.id)"
                       >
@@ -716,7 +716,7 @@ async function onDiffDetail(detail: string): Promise<void> {
                     {{ $t("settings.btnSetDefault") }}
                   </Button>
 
-                  <div class="ml-auto flex items-center gap-2">
+                  <div class="ms-auto flex items-center gap-2">
                     <template v-if="rowFor(p.id).confirmRemove">
                       <Button variant="destructive" size="sm" @click="remove(p.id)">
                         <Check />

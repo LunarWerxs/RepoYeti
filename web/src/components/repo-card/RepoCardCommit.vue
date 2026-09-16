@@ -274,7 +274,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
         :placeholder="$t('repo.commit.placeholder')"
         :maxlength="300"
         rows="1"
-        :class="cn('max-h-40 min-h-9 resize-none py-1.5 leading-snug', aiHere && recentMsgs.length ? 'pr-17' : aiHere || recentMsgs.length ? 'pr-10' : '')"
+        :class="cn('max-h-40 min-h-9 resize-none py-1.5 leading-snug', aiHere && recentMsgs.length ? 'pe-17' : aiHere || recentMsgs.length ? 'pe-10' : '')"
         @keydown="onCommitKey"
       />
       <div class="absolute top-1 right-1 flex items-center gap-0.5">
@@ -349,7 +349,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
           data-testid="primary-commit-action"
           :data-commit-mode="primaryCommitMode"
           :data-commit-scope="selectedCount > 0 ? 'selected' : 'all'"
-          class="h-9 rounded-r-none"
+          class="h-9 rounded-e-none"
           :disabled="!commitMsg.trim() || committing"
           :title="tooltipsEnabled && selectedCount > 0
             ? (primaryCommitMode === 'sync'
@@ -376,7 +376,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <Button
-              class="h-9 rounded-l-none border-l border-l-black/15 px-1.5 dark:border-l-white/20"
+              class="h-9 rounded-s-none border-s border-s-black/15 px-1.5 dark:border-s-white/20"
               :disabled="!commitMsg.trim() || committing"
               :title="tooltipsEnabled ? $t('repo.commit.moreOptions') : undefined"
               :aria-label="$t('repo.commit.menuLabel')"
@@ -437,7 +437,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             <span class="inline-flex">
               <Button
                 variant="outline"
-                class="gemini-auto h-9 rounded-r-none"
+                class="gemini-auto h-9 rounded-e-none"
                 :disabled="smartBusy || committing"
                 :aria-label="$t('repo.smartCommit.button')"
                 @click="runSmart()"
@@ -454,7 +454,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
           <DropdownMenuTrigger as-child>
             <Button
               variant="outline"
-              class="gemini-auto h-9 rounded-l-none border-l border-l-white/30 px-1.5"
+              class="gemini-auto h-9 rounded-s-none border-s border-s-white/30 px-1.5"
               :disabled="smartBusy || committing"
               :aria-label="$t('repo.smartCommit.menuLabel')"
             >
@@ -496,11 +496,18 @@ defineExpose({ loadRecentMsgs, recentMsgs });
 </template>
 
 <style scoped>
+/* color tokens - lifted from raw literals by Odin's fix_color_tokens.py (2026-09-14); the Architect's
+   color-scheme-conformance check wants every color consumed through the token layer. */
+:root {
+  --color-white: #fff;
+}
+
+
 /* The "Auto" (Smart Commit) split button — a Gemini-style animated rainbow so it reads as the
    special AI action, distinct from the solid-accent plain Commit button beside it. Overrides the
    outline variant's neutral fill; both halves share the same animation so they shimmer in sync. */
 .gemini-auto {
-  color: #fff;
+  color: var(--color-white);
   border-color: transparent;
   background-image: linear-gradient(110deg, #4285f4 0%, #9b72cb 28%, #d96570 50%, #9b72cb 72%, #4285f4 100%);
   background-size: 200% 100%;

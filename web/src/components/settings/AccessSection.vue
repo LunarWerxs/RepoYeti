@@ -281,7 +281,7 @@ watch(
               v-for="choice in (['hosted', 'cloudflare', 'custom'] as AddressChoice[])"
               :key="choice"
               type="button"
-              class="rounded-lg border p-2.5 text-left transition-colors"
+              class="rounded-lg border p-2.5 text-start transition-colors"
               :class="
                 addressChoice === choice
                   ? 'border-primary/60 bg-primary/10'

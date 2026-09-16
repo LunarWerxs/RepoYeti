@@ -52,7 +52,7 @@ const html = computed(() => renderMarkdown(props.source));
 }
 .markdown-preview :deep(ul),
 .markdown-preview :deep(ol) {
-  padding-left: 1.7em;
+  padding-inline-start: 1.7em;
 }
 .markdown-preview :deep(ul) {
   list-style: disc;
@@ -66,8 +66,8 @@ const html = computed(() => renderMarkdown(props.source));
   text-underline-offset: 2px;
 }
 .markdown-preview :deep(blockquote) {
-  border-left: 3px solid var(--border);
-  padding-left: 1em;
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 1em;
   color: var(--muted-foreground);
 }
 .markdown-preview :deep(pre) {
@@ -98,7 +98,7 @@ const html = computed(() => renderMarkdown(props.source));
 .markdown-preview :deep(td) {
   border: 1px solid var(--border);
   padding: 0.45em 0.7em;
-  text-align: left;
+  text-align: start;
 }
 .markdown-preview :deep(th) {
   background: var(--secondary);
