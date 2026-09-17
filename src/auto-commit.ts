@@ -35,7 +35,7 @@ import { backendFor } from "./vcs/index.ts";
 import { currentGitOperation } from "./git.ts";
 import { smartCommitRepo, pullRepo, pushRepo, planCommitInput } from "./service/index.ts";
 import { createRoundController, type RoundRun } from "./round-controller.ts";
-import { withAutomationRun } from "./automation-run.ts";
+import { withAutomationRun, type AutomationRunTracker } from "./automation-run.ts";
 import {
   effectiveDefaultProvider,
   resolveApiKeyPool,
@@ -343,13 +343,88 @@ async function processRepo(
   };
 }
 
+/** Record a repo the round actually committed (and possibly pulled/pushed) for. */
+function recordCommitted(
+  r: RepoView,
+  committed: AutoCommittedRepo,
+  history: AutomationRunTracker,
+  startedAt: number,
+): void {
+  history.repo({
+    repoId: r.id,
+    repoName: r.name,
+    durationMs: Date.now() - startedAt,
+    outcome: "committed",
+    detail: {
+      commits: committed.commits,
+      pulled: committed.pulled,
+      pushed: committed.pushed,
+      ...(committed.note ? { note: committed.note } : {}),
+      ...(committed.degraded ? { degraded: true } : {}),
+    },
+  });
+  // A `note` on an otherwise-successful round means pull or push didn't fully complete
+  // (e.g. NON_FAST_FORWARD): worth a reviewable incident, not just the moment's SSE
+  // broadcast. The run row above records that it happened; the incident is the one that
+  // stays open until the owner acknowledges it.
+  if (committed.note) {
+    recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: committed.note });
+  }
+}
+
+/** Record a repo this round skipped, and persist the skip as an incident. */
+function recordBlocked(
+  r: RepoView,
+  blocked: AutoCommitBlockedRepo,
+  history: AutomationRunTracker,
+  startedAt: number,
+): void {
+  history.repo({
+    repoId: r.id,
+    repoName: r.name,
+    durationMs: Date.now() - startedAt,
+    outcome: "blocked",
+    detail: { reason: blocked.reason },
+  });
+  recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: blocked.reason });
+}
+
+/**
+ * Run one repo's whole slice of a round — process it, record it, and persist any incident it
+ * warrants. A throw is confined to this call so one repository erroring cannot abort the pass over
+ * the rest; it surfaces as a blocked repo with reason "ERROR", the same shape as a handled failure.
+ */
+async function runRepoAndRecord(
+  r: RepoView,
+  history: AutomationRunTracker,
+): Promise<{ done?: AutoCommittedRepo; blocked?: AutoCommitBlockedRepo }> {
+  const startedAt = Date.now();
+  try {
+    const out = await processRepo(r);
+    if (out.done) recordCommitted(r, out.done, history, startedAt);
+    if (out.blocked) recordBlocked(r, out.blocked, history, startedAt);
+    return out;
+  } catch {
+    const blocked: AutoCommitBlockedRepo = { id: r.id, name: r.name, reason: "ERROR" };
+    history.repo({
+      repoId: r.id,
+      repoName: r.name,
+      durationMs: Date.now() - startedAt,
+      outcome: "error",
+      detail: { reason: "ERROR" },
+    });
+    recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: "ERROR" });
+    return { blocked };
+  }
+}
+
 async function tick(run: RoundRun): Promise<{ done: AutoCommittedRepo[]; blocked: AutoCommitBlockedRepo[] }> {
   const repos = getWatchableRepos().filter((r) => r.autoCommit);
-  const done: AutoCommittedRepo[] = [];
-  const blocked: AutoCommitBlockedRepo[] = [];
   return withAutomationRun(
     { kind: "auto_commit", trigger: run.trigger, reposTotal: repos.length, cancelled: () => run.cancelled },
     async (history) => {
+      const done: AutoCommittedRepo[] = [];
+      const blocked: AutoCommitBlockedRepo[] = [];
       // Sequential: each repo is already op-queue-bounded, and a gentle one-at-a-time pass keeps
       // the AI + network load predictable regardless of how many repos opted in.
       for (const r of repos) {
@@ -358,54 +433,9 @@ async function tick(run: RoundRun): Promise<{ done: AutoCommittedRepo[]; blocked
         // it never leaves a tree half-committed, and abandoning a push mid-transfer would be the
         // first thing to break it. Stopping means starting no more repositories.
         if (run.cancelled) break;
-        const startedAt = Date.now();
-        try {
-          const out = await processRepo(r);
-          if (out.done) {
-            done.push(out.done);
-            history.repo({
-              repoId: r.id,
-              repoName: r.name,
-              durationMs: Date.now() - startedAt,
-              outcome: "committed",
-              detail: {
-                commits: out.done.commits,
-                pulled: out.done.pulled,
-                pushed: out.done.pushed,
-                ...(out.done.note ? { note: out.done.note } : {}),
-                ...(out.done.degraded ? { degraded: true } : {}),
-              },
-            });
-            // A `note` on an otherwise-successful round means pull or push didn't fully complete
-            // (e.g. NON_FAST_FORWARD): worth a reviewable incident, not just the moment's SSE
-            // broadcast. The run row above records that it happened; the incident is the one that
-            // stays open until the owner acknowledges it.
-            if (out.done.note) {
-              recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: out.done.note });
-            }
-          }
-          if (out.blocked) {
-            blocked.push(out.blocked);
-            history.repo({
-              repoId: r.id,
-              repoName: r.name,
-              durationMs: Date.now() - startedAt,
-              outcome: "blocked",
-              detail: { reason: out.blocked.reason },
-            });
-            recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: out.blocked.reason });
-          }
-        } catch {
-          blocked.push({ id: r.id, name: r.name, reason: "ERROR" });
-          history.repo({
-            repoId: r.id,
-            repoName: r.name,
-            durationMs: Date.now() - startedAt,
-            outcome: "error",
-            detail: { reason: "ERROR" },
-          });
-          recordAutoCommitIncident({ repoId: r.id, repoName: r.name, reason: "ERROR" });
-        }
+        const out = await runRepoAndRecord(r, history);
+        if (out.done) done.push(out.done);
+        if (out.blocked) blocked.push(out.blocked);
       }
       if (done.length > 0) broadcast("repo_auto_committed", { repos: done });
       if (blocked.length > 0) broadcast("repo_auto_commit_blocked", { repos: blocked });

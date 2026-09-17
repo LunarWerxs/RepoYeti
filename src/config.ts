@@ -1018,54 +1018,73 @@ export function saveConfig(cfg: RepoYetiConfig): void {
   }
 }
 
+/**
+ * Purge every credential an explicitly-unauthenticated provider might still carry. A loopback
+ * endpoint explicitly connected without auth must stay keyless across restarts: clear a stale
+ * credential left by an older/keyed configuration instead of silently re-hydrating it and sending
+ * an Authorization header the owner no longer expects. Returns whether anything was cleared.
+ */
+async function clearUnauthenticatedProvider(id: string, p: AiProviderCfg): Promise<boolean> {
+  let cleared = false;
+  if (p.apiKey) {
+    delete p.apiKey;
+    cleared = true;
+  }
+  if (p.apiKeys?.length) {
+    delete p.apiKeys;
+    cleared = true;
+  }
+  await deleteSecret(aiKeyName(id));
+  await deleteSecret(aiKeyPoolName(id));
+  return cleared;
+}
+
+/**
+ * The primary key of one provider, in whichever direction it needs to move: a legacy plaintext key
+ * on disk goes into the keychain (then it gets stripped), and no key in memory means hydrating one
+ * from the keychain. Returns whether a plaintext→keychain migration happened.
+ */
+async function hydratePrimaryKey(id: string, p: AiProviderCfg): Promise<boolean> {
+  if (p.apiKey) return await setSecret(aiKeyName(id), p.apiKey);
+  const k = await getSecret(aiKeyName(id));
+  if (k) p.apiKey = k;
+  return false;
+}
+
+/**
+ * The rotation-pool extras of one provider. They travel as ONE JSON-array secret rather than N
+ * separate keychain entries - adding/removing a pool member from Settings is then a single keychain
+ * write either way, same shape as the primary key's own plaintext-migrates-to-keychain path.
+ * Returns whether a plaintext→keychain migration happened.
+ */
+async function hydrateKeyPool(id: string, p: AiProviderCfg): Promise<boolean> {
+  if (p.apiKeys?.length) return await setSecret(aiKeyPoolName(id), JSON.stringify(p.apiKeys));
+  const raw = await getSecret(aiKeyPoolName(id));
+  if (!raw) return false;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
+      p.apiKeys = parsed;
+    }
+  } catch {
+    /* corrupt pool secret - treat as no extra keys rather than throwing at boot */
+  }
+  return false;
+}
+
 /** Hydrate/migrate AI provider API keys. Returns whether anything was migrated. */
 async function hydrateAiProviderSecrets(cfg: RepoYetiConfig): Promise<boolean> {
+  const providers = cfg.ai?.providers;
+  if (!providers) return false;
   let migrated = false;
-  if (!cfg.ai?.providers) return migrated;
-  for (const [id, p] of Object.entries(cfg.ai.providers)) {
+  for (const [id, p] of Object.entries(providers)) {
     if (!p) continue;
     if (id === "compatible" && p.noAuth === true) {
-      // A loopback endpoint explicitly connected without auth must stay keyless across restarts.
-      // Clear a stale credential left by an older/keyed configuration instead of silently
-      // re-hydrating it and sending an Authorization header the owner no longer expects.
-      if (p.apiKey) {
-        delete p.apiKey;
-        migrated = true;
-      }
-      if (p.apiKeys?.length) {
-        delete p.apiKeys;
-        migrated = true;
-      }
-      await deleteSecret(aiKeyName(id));
-      await deleteSecret(aiKeyPoolName(id));
+      migrated = (await clearUnauthenticatedProvider(id, p)) || migrated;
       continue;
     }
-    if (p.apiKey) {
-      // Legacy plaintext key on disk → move it into the keychain (then it gets stripped).
-      if (await setSecret(aiKeyName(id), p.apiKey)) migrated = true;
-    } else {
-      // No key in memory → hydrate from the keychain if one is stored.
-      const k = await getSecret(aiKeyName(id));
-      if (k) p.apiKey = k;
-    }
-    // Rotation-pool extras travel as ONE JSON-array secret rather than N separate keychain
-    // entries - adding/removing a pool member from Settings is then a single keychain write
-    // either way, same shape as the primary key's own plaintext-migrates-to-keychain path.
-    if (p.apiKeys?.length) {
-      if (await setSecret(aiKeyPoolName(id), JSON.stringify(p.apiKeys))) migrated = true;
-    } else {
-      const raw = await getSecret(aiKeyPoolName(id));
-      if (raw) {
-        try {
-          const parsed: unknown = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
-            p.apiKeys = parsed;
-          }
-        } catch {
-          /* corrupt pool secret - treat as no extra keys rather than throwing at boot */
-        }
-      }
-    }
+    migrated = (await hydratePrimaryKey(id, p)) || migrated;
+    migrated = (await hydrateKeyPool(id, p)) || migrated;
   }
   return migrated;
 }

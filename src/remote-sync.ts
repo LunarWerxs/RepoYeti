@@ -22,7 +22,7 @@
  * dispatches per backend, and Lore's fetch is a benign no-op (it's centralized), so a Lore repo
  * simply never reports "behind" here.
  */
-import { fetchAllRepos, pullRepo } from "./service/index.ts";
+import { fetchAllRepos, pullRepo, type FetchAllFailure } from "./service/index.ts";
 import { getWatchableRepos } from "./db.ts";
 import { broadcast } from "./bus.ts";
 import { createRoundController, type RoundRun } from "./round-controller.ts";
@@ -143,14 +143,9 @@ async function tick(run: RoundRun): Promise<void> {
   );
 }
 
-async function syncRound(run: RoundRun, history: AutomationRunTracker, pre: RepoView[]): Promise<void> {
-  // Fetch every repo with a remote (bounded by netGate + the per-repo op-queue). Each repo's
-  // refreshed ahead/behind already streams to clients as `repo_state_changed` inside this call.
-  // The signal is the round's: cancelling stops the sweep STARTING new repositories, and the one
-  // already fetching is left to finish (service/fetch-all.ts's header explains why).
-  const fetched = await fetchAllRepos({ signal: run.signal });
-  history.setTotal(fetched.total);
-  for (const failure of fetched.failed) {
+/** Record this round's fetch failures into the run history as blocked repositories. */
+function recordFetchFailures(history: AutomationRunTracker, failures: readonly FetchAllFailure[]): void {
+  for (const failure of failures) {
     history.repo({
       repoId: failure.id,
       repoName: failure.name,
@@ -159,6 +154,78 @@ async function syncRound(run: RoundRun, history: AutomationRunTracker, pre: Repo
       detail: { reason: failure.code, phase: "fetch" },
     });
   }
+}
+
+/**
+ * Fast-forward every pullable repo through a bounded worker pool, then record and broadcast the
+ * results. Workers finish in network/disk order; both the SSE payload and the history rows are
+ * emitted in repository-LIST order so the same sync round does not make UI notifications shuffle
+ * nondeterministically — history that reshuffles between identical runs is history nobody trusts.
+ *
+ * Moved out of `syncRound` verbatim: no test drives this branch (the suite deliberately avoids
+ * real git remotes), so its body is relocated rather than restructured to keep it provably
+ * equivalent.
+ */
+async function autoPullPass(
+  run: RoundRun,
+  history: AutomationRunTracker,
+  pullable: RepoView[],
+): Promise<void> {
+  const syncedByIndex = new Array<SyncedRepo | undefined>(pullable.length);
+  const timedByIndex = new Array<number>(pullable.length).fill(0);
+  let next = 0;
+  const workers = Math.min(8, pullable.length);
+  await Promise.all(
+    Array.from({ length: workers }, async () => {
+      while (true) {
+        // Cancellation here means workers stop CLAIMING indices. A pull already running keeps
+        // running: this is a pool, not a queue, so there is no single "current" operation to
+        // abort, and a half-applied fast-forward is precisely what must not happen.
+        if (run.cancelled) return;
+        const index = next++;
+        if (index >= pullable.length) return;
+        const repo = pullable[index]!;
+        const startedAt = Date.now();
+        try {
+          const result = await pullRepo(repo.id);
+          if (result.ok) {
+            syncedByIndex[index] = {
+              id: repo.id,
+              name: repo.name,
+              pulled: repo.status?.behind ?? 0,
+            };
+            timedByIndex[index] = Date.now() - startedAt;
+          }
+        } catch {
+          /* one failed pull does not block other safe fast-forwards */
+        }
+      }
+    }),
+  );
+  const synced = syncedByIndex.filter((repo): repo is SyncedRepo => repo !== undefined);
+  // Recorded in repository-list order, not completion order, for the same reason the SSE
+  // payload is: history that reshuffles between identical runs is history nobody trusts.
+  syncedByIndex.forEach((repo, index) => {
+    if (!repo) return;
+    history.repo({
+      repoId: repo.id,
+      repoName: repo.name,
+      durationMs: timedByIndex[index] ?? 0,
+      outcome: "synced",
+      detail: { pulled: repo.pulled },
+    });
+  });
+  if (synced.length > 0) broadcast("repo_synced", { repos: synced });
+}
+
+async function syncRound(run: RoundRun, history: AutomationRunTracker, pre: RepoView[]): Promise<void> {
+  // Fetch every repo with a remote (bounded by netGate + the per-repo op-queue). Each repo's
+  // refreshed ahead/behind already streams to clients as `repo_state_changed` inside this call.
+  // The signal is the round's: cancelling stops the sweep STARTING new repositories, and the one
+  // already fetching is left to finish (service/fetch-all.ts's header explains why).
+  const fetched = await fetchAllRepos({ signal: run.signal });
+  history.setTotal(fetched.total);
+  recordFetchFailures(history, fetched.failed);
   let post = getWatchableRepos();
 
   // "Keep in sync": auto fast-forward the repos that can safely take the new commits, then
@@ -168,53 +235,7 @@ async function syncRound(run: RoundRun, history: AutomationRunTracker, pre: Repo
   if (keepInSync) {
     const pullable = post.filter((r) => canAutoPull(r.status));
     if (pullable.length > 0) {
-      // Workers finish in network/disk order. Retain the repository-list order in the SSE payload
-      // so the same sync round does not make UI notifications shuffle nondeterministically.
-      const syncedByIndex = new Array<SyncedRepo | undefined>(pullable.length);
-      const timedByIndex = new Array<number>(pullable.length).fill(0);
-      let next = 0;
-      const workers = Math.min(8, pullable.length);
-      await Promise.all(
-        Array.from({ length: workers }, async () => {
-          while (true) {
-            // Cancellation here means workers stop CLAIMING indices. A pull already running keeps
-            // running: this is a pool, not a queue, so there is no single "current" operation to
-            // abort, and a half-applied fast-forward is precisely what must not happen.
-            if (run.cancelled) return;
-            const index = next++;
-            if (index >= pullable.length) return;
-            const repo = pullable[index]!;
-            const startedAt = Date.now();
-            try {
-              const result = await pullRepo(repo.id);
-              if (result.ok) {
-                syncedByIndex[index] = {
-                  id: repo.id,
-                  name: repo.name,
-                  pulled: repo.status?.behind ?? 0,
-                };
-                timedByIndex[index] = Date.now() - startedAt;
-              }
-            } catch {
-              /* one failed pull does not block other safe fast-forwards */
-            }
-          }
-        }),
-      );
-      const synced = syncedByIndex.filter((repo): repo is SyncedRepo => repo !== undefined);
-      // Recorded in repository-list order, not completion order, for the same reason the SSE
-      // payload is: history that reshuffles between identical runs is history nobody trusts.
-      syncedByIndex.forEach((repo, index) => {
-        if (!repo) return;
-        history.repo({
-          repoId: repo.id,
-          repoName: repo.name,
-          durationMs: timedByIndex[index] ?? 0,
-          outcome: "synced",
-          detail: { pulled: repo.pulled },
-        });
-      });
-      if (synced.length > 0) broadcast("repo_synced", { repos: synced });
+      await autoPullPass(run, history, pullable);
       post = getWatchableRepos(); // reflect the fast-forwards before deciding what to warn about
     }
   }

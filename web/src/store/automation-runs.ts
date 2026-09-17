@@ -6,7 +6,6 @@ import type {
   AutomationRunKind,
   AutomationRunOutcome,
   AutomationRunRepo,
-  AutomationRunTrigger,
 } from "../types";
 
 /** The in-flight progress of one loop's current round, kept live by `applyAutomationRunEvent`
@@ -18,6 +17,98 @@ interface LiveAutomationRun {
   total: number;
   current: string | null;
 }
+
+/** The two fields every `automation_run_*` branch needs before it can decide anything, plus the
+ *  narrowed payload itself. Null when the event is not one of ours at all. */
+interface RunEventRef {
+  kind: AutomationRunKind;
+  runId: string;
+  fields: Record<string, unknown>;
+}
+
+/**
+ * Narrow an unknown SSE payload into a `RunEventRef`, or null when it isn't an automation run
+ * event. Never trusts a field: `kind` must be one of the two known loops and `runId` a string,
+ * because both are used as state keys below.
+ */
+function asRunEvent(payload: unknown): RunEventRef | null {
+  if (payload === null || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  const kind: AutomationRunKind | null = p.kind === "auto_commit" || p.kind === "sync_check" ? p.kind : null;
+  if (!kind) return null;
+  const runId = typeof p.runId === "string" ? p.runId : null;
+  if (!runId) return null;
+  return { kind, runId, fields: p };
+}
+
+const numOr = (v: unknown, fallback: number): number => (typeof v === "number" ? v : fallback);
+const strOr = (v: unknown, fallback: string | null): string | null => (typeof v === "string" ? v : fallback);
+
+/** The live run a `_started` event defines: payload counters start at whatever the daemon sent. */
+function startedLiveRun(p: Record<string, unknown>, runId: string): LiveAutomationRun {
+  return { runId, done: 0, blocked: 0, total: numOr(p.total, 0), current: null };
+}
+
+/** A `_progress` event merged over the live run: a field the payload omits keeps its held value. */
+function progressedLiveRun(p: Record<string, unknown>, live: LiveAutomationRun): LiveAutomationRun {
+  return {
+    runId: live.runId,
+    done: numOr(p.done, live.done),
+    blocked: numOr(p.blocked, live.blocked),
+    total: numOr(p.total, live.total),
+    current: strOr(p.current, live.current),
+  };
+}
+
+const AUTOMATION_OUTCOMES: readonly AutomationRunOutcome[] = ["completed", "cancelled", "failed", "interrupted"];
+
+/** An explicitly valid `outcome` wins; otherwise a `_cancelled` event means cancelled and anything
+ *  else terminal is reported as completed. */
+function terminalOutcome(p: Record<string, unknown>, eventName: string): AutomationRunOutcome {
+  const raw = p.outcome;
+  if (typeof raw === "string" && (AUTOMATION_OUTCOMES as readonly string[]).includes(raw)) {
+    return raw as AutomationRunOutcome;
+  }
+  return eventName === "automation_run_cancelled" ? "cancelled" : "completed";
+}
+
+/** The history row a terminal event synthesizes, so an open list updates without a refetch. */
+function synthesizedTerminalRun(
+  p: Record<string, unknown>,
+  kind: AutomationRunKind,
+  runId: string,
+  eventName: string,
+): AutomationRun {
+  const durationMs = numOr(p.durationMs, 0);
+  const endedAt = Date.now();
+  return {
+    id: runId,
+    kind,
+    trigger: p.trigger === "manual" ? "manual" : "timer",
+    startedAt: endedAt - durationMs,
+    endedAt,
+    outcome: terminalOutcome(p, eventName),
+    reposTotal: numOr(p.total, 0),
+    reposDone: numOr(p.done, 0),
+    reposBlocked: numOr(p.blocked, 0),
+    error: strOr(p.error, null),
+  };
+}
+
+/** REPLACE, don't blindly prepend: a list loaded while this very round was in flight already
+ *  holds a row for it, and keeping its daemon-recorded start time over the one back-computed
+ *  from `durationMs` is the whole point of settling in place rather than adding a second row. */
+function settleRunRow(current: AutomationRun[], synthesized: AutomationRun): AutomationRun[] {
+  const existing = current.findIndex((run) => run.id === synthesized.id);
+  if (existing < 0) return [synthesized, ...current];
+  const next = current.slice();
+  next[existing] = { ...synthesized, startedAt: current[existing]!.startedAt };
+  return next;
+}
+
+const isProgressEvent = (name: string): boolean => name === "automation_run_progress";
+const isTerminalEvent = (name: string): boolean =>
+  name === "automation_run_done" || name === "automation_run_cancelled";
 
 /**
  * Automation run history + live round state (src/http/routes/automation.ts, src/automation-run.ts).
@@ -128,21 +219,12 @@ export function useAutomationRuns() {
    *     a terminal event sets it back to false.
    */
   function applyAutomationRunEvent(eventName: string, payload: unknown): void {
-    if (payload === null || typeof payload !== "object") return;
-    const p = payload as Record<string, unknown>;
-    const kind: AutomationRunKind | null = p.kind === "auto_commit" || p.kind === "sync_check" ? p.kind : null;
-    if (!kind) return;
-    const runId = typeof p.runId === "string" ? p.runId : null;
-    if (!runId) return;
+    const ev = asRunEvent(payload);
+    if (!ev) return;
+    const { kind, runId, fields } = ev;
 
     if (eventName === "automation_run_started") {
-      liveRuns.value[kind] = {
-        runId,
-        done: 0,
-        blocked: 0,
-        total: typeof p.total === "number" ? p.total : 0,
-        current: null,
-      };
+      liveRuns.value[kind] = startedLiveRun(fields, runId);
       activeRounds.value[kind] = { ...activeRounds.value[kind], running: true };
       return;
     }
@@ -150,58 +232,18 @@ export function useAutomationRuns() {
     const live = liveRuns.value[kind];
     if (!live || live.runId !== runId) return; // straggler from a run this kind is no longer watching
 
-    if (eventName === "automation_run_progress") {
-      liveRuns.value[kind] = {
-        runId,
-        done: typeof p.done === "number" ? p.done : live.done,
-        blocked: typeof p.blocked === "number" ? p.blocked : live.blocked,
-        total: typeof p.total === "number" ? p.total : live.total,
-        current: typeof p.current === "string" ? p.current : live.current,
-      };
+    if (isProgressEvent(eventName)) {
+      liveRuns.value[kind] = progressedLiveRun(fields, live);
       return;
     }
-
-    if (eventName !== "automation_run_done" && eventName !== "automation_run_cancelled") return;
+    if (!isTerminalEvent(eventName)) return;
 
     // Terminal: clear the live run and any optimistic "cancelling" flag for this kind.
     liveRuns.value[kind] = null;
     activeRounds.value[kind] = { running: false, cancelling: false };
 
     if (!runsReady.value) return; // nobody has loaded the history list — nothing to prepend into
-    const trigger: AutomationRunTrigger = p.trigger === "manual" ? "manual" : "timer";
-    const validOutcomes: AutomationRunOutcome[] = ["completed", "cancelled", "failed", "interrupted"];
-    const outcome: AutomationRunOutcome =
-      typeof p.outcome === "string" && (validOutcomes as string[]).includes(p.outcome)
-        ? (p.outcome as AutomationRunOutcome)
-        : eventName === "automation_run_cancelled"
-          ? "cancelled"
-          : "completed";
-    const durationMs = typeof p.durationMs === "number" ? p.durationMs : 0;
-    const endedAt = Date.now();
-    const synthesized: AutomationRun = {
-      id: runId,
-      kind,
-      trigger,
-      startedAt: endedAt - durationMs,
-      endedAt,
-      outcome,
-      reposTotal: typeof p.total === "number" ? p.total : 0,
-      reposDone: typeof p.done === "number" ? p.done : 0,
-      reposBlocked: typeof p.blocked === "number" ? p.blocked : 0,
-      error: typeof p.error === "string" ? p.error : null,
-    };
-    // REPLACE, don't blindly prepend. A list loaded while this very round was in flight already
-    // holds its row with a null outcome, and prepending would show the same run twice, once
-    // "running" forever.
-    const existing = runs.value.findIndex((run) => run.id === runId);
-    if (existing >= 0) {
-      const next = runs.value.slice();
-      // Keep the started time the daemon actually recorded over the one derived from durationMs.
-      next[existing] = { ...synthesized, startedAt: runs.value[existing]!.startedAt };
-      runs.value = next;
-    } else {
-      runs.value = [synthesized, ...runs.value];
-    }
+    runs.value = settleRunRow(runs.value, synthesizedTerminalRun(fields, kind, runId, eventName));
   }
 
   return {
