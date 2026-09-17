@@ -121,7 +121,7 @@ binary into a public release without knowing what changed in it.
   can see: a page on another loopback port cannot drive a write, a dashboard that loses its event
   stream converges when it returns, and every menu opens inside the window. It runs in CI and gates
   the release. The older `web/test/e2e` suite is the developer one and still needs your live daemon
-  plus `bun run dev`; it has no npm-script alias (no gate could reach one — it can only run against
+  plus `bun run dev`; it has no npm-script alias (no gate could reach one; it can only run against
   your own machine), so run it as `bunx playwright test` from `web/`.
 - A local red may belong to another agent editing this tree - check `git status --short` and file mtimes first (global CLAUDE.md, localci section).
 
