@@ -3,6 +3,10 @@
   "checks": {
     "barrel-fanout-inventory": {
       "policyPath": ".arkitect/policies/repoyeti/barrel-fanout-inventory.json"
+    },
+    "cloudfront-behavior-order": {
+      "$reason": "A key-name collision, not a CDN misconfiguration. This repository has no CloudFront, no CDK and no `aws-cdk-lib` anywhere (grep: zero hits for CfnDistribution or aws-cdk-lib in src/, tests/ or scripts/). `pathPattern` is RepoYeti's OWN field on an identity rule - see src/schemas.ts and src/identity.ts - and the one finding is in tests/identity-firewall.test.ts, where a wildcard rule is deliberately placed ABOVE an exact path to pin `matchIdentityRule`'s documented first-match-wins semantics. Reordering that array would invert the assertion the test exists to make. The check's engine matches any `pathPattern: \"...\"` string in any source file and its `roots` default (services/infra) is a foreign layout that the runner re-resolves onto this repo's own source roots, so narrowing roots cannot separate the two meanings either. RE-ENABLE THIS the moment `aws-cdk-lib` appears in package.json: then the collision becomes a real ambiguity worth reading.",
+      "enabled": false
     }
   }
 }
