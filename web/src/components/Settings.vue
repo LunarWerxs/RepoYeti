@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { Settings as SettingsIcon } from "@lucide/vue";
 import { useStore } from "../store";
 import type { PushPanelSide } from "@/shell/usePushPanel";
-import SettingsPanel from "@/shell/SettingsPanel.vue";
+import Sidebar from "@/shell/Sidebar.vue";
 import SettingsTabs from "@/shell/SettingsTabs.vue";
 
 // Settings is part of the always-loaded shell, but its sections are not. Keep each panel behind a
@@ -104,7 +104,7 @@ watch(
 </script>
 
 <template>
-  <SettingsPanel
+  <Sidebar
     v-model:open="open"
     :side="props.side"
     :right-offset-px="props.rightOffsetPx"
@@ -117,7 +117,7 @@ watch(
 
     <div class="flex flex-col gap-4">
       <!-- Pinned, not scrolled away with the content (the artifact in issue #20's screenshot).
-           SettingsPanel's body is deliberately pulled up UNDERNEATH its glassy title bar
+           Sidebar's body is deliberately pulled up UNDERNEATH its glassy title bar
            (-mt-12/pt-15 in shell/Sidebar.vue) so rows shimmer through it as they scroll. That
            reads as intended for rows of settings; for the tab row it read as a bug — it slid up
            behind "Settings", then past it into the panel's clipped top edge, leaving two labels
@@ -194,5 +194,5 @@ watch(
         <ExperimentalServersSection :open="open" />
       </div>
     </div>
-  </SettingsPanel>
+  </Sidebar>
 </template>
