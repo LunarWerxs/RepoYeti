@@ -25,7 +25,7 @@ const ownerCfg = (): RepoYetiConfig => ({
   maxRepos: 200,
   mode: "local",
   oauth: {
-    issuer: "https://accounts.connections.icu",
+    issuer: "https://accounts.connectionsapi.com",
     clientId: "test-client",
     redirectUri: "https://app.example.com/oauth/callback",
     ownerEmail: "owner@example.com",

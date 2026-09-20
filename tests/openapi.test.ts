@@ -10,7 +10,7 @@ const enforcedCfg = (): RepoYetiConfig => ({
   ...localCfg(),
   mode: "remote",
   oauth: {
-    issuer: "https://accounts.connections.icu",
+    issuer: "https://accounts.connectionsapi.com",
     clientId: "cid",
     redirectUri: "https://repoyeti-auth.example.workers.dev/cb",
     ownerSub: "owner-1",

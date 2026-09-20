@@ -203,6 +203,6 @@ export const API_TOKEN = "api/token";
 export const RELAY_PRIVATE_KEY = "relay/privateKey";
 /** The owner's Connections OAuth **refresh token** — obtained at "Sign in with Connections" and
  *  retained so the daemon (the BFF) can mint fresh access tokens to call the settings-sync store
- *  (studio.connections.icu/v1/app-data) server-to-server, without the browser ever holding a token.
+ *  (studio.connectionsapi.com/v1/app-data) server-to-server, without the browser ever holding a token.
  *  Sensitive → keychain-only, NEVER written to config.json. See src/connections-sync.ts. */
 export const CONNECTIONS_REFRESH_TOKEN = "connections/refreshToken";

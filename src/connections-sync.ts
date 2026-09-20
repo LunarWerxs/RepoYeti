@@ -4,7 +4,7 @@
  * RepoYeti is a single-user local daemon, so the daemon IS the BFF: it holds the owner's
  * Connections `refresh_token` server-side (OS keychain), mints fresh
  * access tokens as needed, and calls the settings-sync store
- * (`studio.connections.icu/v1/app-data/{clientId}`).
+ * (`studio.connectionsapi.com/v1/app-data/{clientId}`).
  *
  * Since 2026-07-08 the token machinery is the OFFICIAL SDK — @cnct/connect (which also ships the
  * settings-sync store, formerly the separate @cnct/locker package) — instead of a hand-rolled
@@ -43,6 +43,22 @@ import { clampAutoUpdateInterval } from "./auto-update.ts";
 import { clampApprovalTimeoutSecs } from "./approvals.ts";
 import { clampDiffPatchBytes } from "./service/files.ts";
 import { isKnownEditor } from "./service/editors.ts";
+
+/**
+ * Where the locker lives, passed explicitly rather than left to the SDK.
+ *
+ * `@cnct/connect@1.5.1` hardcodes `https://studio.connections.icu` as its locker default, and
+ * that zone was suspended by its registry on 2026-09-18 (NXDOMAIN, the whole zone). 1.5.1 is
+ * still the newest version on npm, so there is no SDK release to upgrade to: every consumer has
+ * to name the host itself until one ships. Pointing `oauth.issuer` at the new host is not
+ * enough - the issuer covers sign-in, the locker is a separate base URL, which is how settings
+ * sync kept failing while sign-in looked fine.
+ *
+ * Deliberately NOT an `OAuthConfig` field: `issuer` is configurable because a self-hosted IdP is
+ * a supported deployment, and the locker is not a thing this daemon lets you self-host. When the
+ * SDK ships a fixed default, delete this and the factory that uses it.
+ */
+const LOCKER_BASE_URL = "https://studio.connectionsapi.com";
 
 /** App-tier document we store (namespaced by the store itself as (sub, clientId), so no inner key). */
 /**
@@ -463,10 +479,11 @@ async function syncEngine(cfg: RepoYetiConfig, oauth: OAuthConfig): Promise<Sett
   const key = `${oauth.issuer.replace(/\/+$/, "")}|${oauth.clientId}`;
   if (settingsSync && settingsSyncKey === key) return settingsSync;
   settingsSync?.stop();
-  const { createSettingsSync } = await import("@cnct/connect");
+  const { createSettingsSync, createLocker } = await import("@cnct/connect");
   const connectClient = await connectFor(oauth);
   settingsSyncKey = key;
-  settingsSync = createSettingsSync(connectClient.locker(), {
+  const locker = connectClient.locker((o) => createLocker({ ...o, baseUrl: LOCKER_BASE_URL }));
+  settingsSync = createSettingsSync(locker, {
     // Preserve the existing { prefs, appearance } document used by real accounts.
     keys: ["prefs", "appearance"],
     read: () => {

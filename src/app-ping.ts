@@ -30,7 +30,7 @@ import { release as osRelease } from "node:os";
 import { type RepoYetiConfig, VERSION, loadConfig, saveConfig } from "./config.ts";
 
 /** Studio's app-ping proxy: relays GitHub's releases/latest JSON for LunarWerxs/RepoYeti verbatim. */
-export const APP_PING_URL = "https://studio.connections.icu/v1/app/repoyeti/latest";
+export const APP_PING_URL = "https://studio.connectionsapi.com/v1/app/repoyeti/latest";
 
 /** At most one real boot-ping network hit per this interval. */
 export const PING_INTERVAL_MS = 24 * 60 * 60 * 1000;

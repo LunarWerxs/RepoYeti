@@ -1,7 +1,7 @@
 /**
  * Route tests for src/http/routes/sync.ts — the "/api/settings/sync" HTTP surface fronting
  * src/connections-sync.ts. Uses a temp REPOYETI_HOME + in-memory keychain (tests/api-token.test.ts
- * pattern) and a mocked global fetch for the OIDC + studio.connections.icu calls — never the real
+ * pattern) and a mocked global fetch for the OIDC + studio.connectionsapi.com calls — never the real
  * Connections service.
  *
  * Covers:
@@ -44,12 +44,12 @@ afterAll(() => {
   rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
-const ISSUER = "https://accounts.connections.icu";
+const ISSUER = "https://accounts.connectionsapi.com";
 const CLIENT_ID = "test-sync-routes-client";
 const OAUTH: OAuthConfig = { issuer: ISSUER, clientId: CLIENT_ID, redirectUri: "https://example.com/cb" };
 const DISCOVERY_URL = `${ISSUER}/.well-known/openid-configuration`;
 const TOKEN_ENDPOINT = `${ISSUER}/oauth/token`;
-const STORE_BASE = "https://studio.connections.icu";
+const STORE_BASE = "https://studio.connectionsapi.com";
 const DOC_URL = `${STORE_BASE}/v1/app-data/${encodeURIComponent(CLIENT_ID)}`;
 
 /** No OIDC at all — authEnforced() is false, so the daemon is local-open (bare test config). */

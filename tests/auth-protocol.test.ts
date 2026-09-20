@@ -125,7 +125,7 @@ function makeSessionCookie(payload: object): string {
 }
 
 const OWNER_OAUTH: OAuthConfig = {
-  issuer: "https://accounts.connections.icu",
+  issuer: "https://accounts.connectionsapi.com",
   clientId: "test-client",
   redirectUri: "https://example.com/cb",
   ownerSub: "owner-sub-123",
@@ -306,7 +306,7 @@ test("[2a] a valid signed state whose nonce is NOT in txs yields 400 (expired li
 });
 
 test("[2b] a valid signed state whose nonce IS in txs reaches the real token exchange", async () => {
-  // This test used to point at the LIVE production IdP (https://accounts.connections.icu) and
+  // This test used to point at the LIVE production IdP (https://accounts.connectionsapi.com) and
   // assert only `status !== 400`. That passed whether the network was up, down, or answering
   // nonsense — every outcome funnels into handleComplete's catch — so it could not distinguish
   // "the nonce check passed" from "everything failed for some unrelated reason", which is the

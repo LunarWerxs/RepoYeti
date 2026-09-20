@@ -38,7 +38,7 @@ import { useSuiteTimeout } from "./helpers/timeouts.ts";
 useSuiteTimeout();
 
 const OWNER_OAUTH: OAuthConfig = {
-  issuer: "https://accounts.connections.icu",
+  issuer: "https://accounts.connectionsapi.com",
   clientId: "test-client",
   redirectUri: "https://example.com/cb",
   ownerSub: "owner-sub-123",

@@ -13,7 +13,7 @@ const base: RepoYetiConfig = { roots: [], port: 7171, maxDepth: 6, maxRepos: 200
 const withOAuth: RepoYetiConfig = {
   ...base,
   oauth: {
-    issuer: "https://accounts.connections.icu",
+    issuer: "https://accounts.connectionsapi.com",
     clientId: "cid",
     redirectUri: "https://repoyeti-auth.example.workers.dev/cb",
     ownerSub: "owner-1",

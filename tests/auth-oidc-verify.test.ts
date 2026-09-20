@@ -46,7 +46,7 @@ afterAll(() => {
 });
 
 // ── Constants matching the test OAuthConfig ───────────────────────────────────
-const ISSUER = "https://accounts.connections.icu";
+const ISSUER = "https://accounts.connectionsapi.com";
 const CLIENT_ID = "test-client-oidc";
 const OWNER_SUB = "owner-sub-oidc-456";
 const OWNER_EMAIL = "owner-oidc@example.com";

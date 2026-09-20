@@ -39,7 +39,7 @@ const CONFIG_PATH = join(CONFIG_DIR, "config.json");
  * daemon is local-only (127.0.0.1) with no auth. See docs/ARCHITECTURE.md §7/§13.
  */
 export interface OAuthConfig {
-  /** IdP issuer origin, e.g. https://accounts.connections.icu */
+  /** IdP issuer origin, e.g. https://accounts.connectionsapi.com */
   issuer: string;
   /** Public OAuth app client id (registered in the IdP). */
   clientId: string;
@@ -321,7 +321,7 @@ export interface AppPingConfig {
  * Optional "Sync my settings with Connections" (settings-sync data locker). Off by default and
  * purely additive: when the owner opts in AND is signed in with Connections, the daemon (the BFF)
  * pushes a small allowlisted subset of portable settings (theme/accent + operational toggles) to
- * `studio.connections.icu/v1/app-data/{clientId}` and pulls them on every machine the same account
+ * `studio.connectionsapi.com/v1/app-data/{clientId}` and pulls them on every machine the same account
  * signs into. The refresh token that authorizes those calls lives in the OS keychain (see
  * secrets.ts CONNECTIONS_REFRESH_TOKEN), NEVER here; this block holds only non-secret sync state.
  * See src/connections-sync.ts.
@@ -725,7 +725,7 @@ export function redactAi(cfg: RepoYetiConfig): RedactedAiConfig {
  * `redirectUri` is therefore protocol data, not a configuration-presence marker.
  */
 const CONNECTIONS_OAUTH: OAuthConfig = {
-  issuer: "https://accounts.connections.icu",
+  issuer: "https://accounts.connectionsapi.com",
   clientId: "a790090c23b353c15ed973fd5fe20563",
   redirectUri: "https://app.repoyeti.com/oauth/callback",
   scopes: "openid profile email photo",

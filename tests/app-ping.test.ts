@@ -61,7 +61,7 @@ test("pingDisabled skips test/CI/dev runs", () => {
 
 test("a disabled ping is a bare URL with no query and no headers", () => {
   const req = buildPingRequest(cfg(), { REPOYETI_NO_PING: "1" });
-  expect(req.url).toBe("https://studio.connections.icu/v1/app/repoyeti/latest");
+  expect(req.url).toBe("https://studio.connectionsapi.com/v1/app/repoyeti/latest");
   expect(req.headers).toEqual({});
 });
 

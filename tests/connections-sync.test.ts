@@ -2,7 +2,7 @@
  * Tests for src/connections-sync.ts — the daemon-side BFF for "Sync my settings with Connections".
  *
  * Zero prior coverage for this surface, so this file exercises the whole lifecycle against a
- * MOCKED fetch (token endpoint + the locker's studio.connections.icu calls; the @cnct/connect
+ * MOCKED fetch (token endpoint + the locker's studio.connectionsapi.com calls; the @cnct/connect
  * SDK uses fixed endpoint paths, so OIDC discovery is never fetched) — NEVER the real
  * Connections service. Uses a temp REPOYETI_HOME + an in-memory keychain
  * (REPOYETI_KEYCHAIN_MEMORY, following tests/api-token.test.ts) so nothing real is touched.
@@ -61,7 +61,7 @@ afterAll(() => {
 });
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────────────
-const ISSUER = "https://accounts.connections.icu";
+const ISSUER = "https://accounts.connectionsapi.com";
 const CLIENT_ID = "test-sync-client";
 const OAUTH: OAuthConfig = {
   issuer: ISSUER,
@@ -71,7 +71,7 @@ const OAUTH: OAuthConfig = {
 
 const DISCOVERY_URL = `${ISSUER}/.well-known/openid-configuration`;
 const TOKEN_ENDPOINT = `${ISSUER}/oauth/token`;
-const STORE_BASE = "https://studio.connections.icu";
+const STORE_BASE = "https://studio.connectionsapi.com";
 const DOC_URL = `${STORE_BASE}/v1/app-data/${encodeURIComponent(CLIENT_ID)}`;
 
 function baseCfg(extra?: Partial<RepoYetiConfig>): RepoYetiConfig {

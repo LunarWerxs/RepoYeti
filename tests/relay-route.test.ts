@@ -164,7 +164,7 @@ test("a direct Quick Tunnel still publishes the stable OAuth callback route once
   const cfg = base({
     relay: { enabled: false },
     oauth: {
-      issuer: "https://accounts.connections.icu",
+      issuer: "https://accounts.connectionsapi.com",
       clientId: "public-client",
       redirectUri: "https://app.repoyeti.com/oauth/callback",
     },
@@ -192,7 +192,7 @@ test("a failed Quick Tunnel callback announce leaves remote login unavailable", 
   const cfg = base({
     relay: { enabled: false },
     oauth: {
-      issuer: "https://accounts.connections.icu",
+      issuer: "https://accounts.connectionsapi.com",
       clientId: "public-client",
       redirectUri: "https://app.repoyeti.com/oauth/callback",
     },
@@ -212,7 +212,7 @@ test("missing, malformed, or unknown Worker capabilities stop Quick Tunnel OAuth
   const cfg = base({
     relay: { enabled: false },
     oauth: {
-      issuer: "https://accounts.connections.icu",
+      issuer: "https://accounts.connectionsapi.com",
       clientId: "public-client",
       redirectUri: "https://app.repoyeti.com/oauth/callback",
     },
@@ -241,7 +241,7 @@ test("an old Worker can keep the stable address live while Quick Tunnel OAuth st
     mode: "remote",
     relay: { enabled: true, url: "https://app.repoyeti.com", identity },
     oauth: {
-      issuer: "https://accounts.connections.icu",
+      issuer: "https://accounts.connectionsapi.com",
       clientId: "public-client",
       redirectUri: "https://app.repoyeti.com/oauth/callback",
     },
@@ -268,7 +268,7 @@ test("a transient Quick Tunnel callback failure retries without a daemon restart
   const cfg = base({
     relay: { enabled: false },
     oauth: {
-      issuer: "https://accounts.connections.icu",
+      issuer: "https://accounts.connectionsapi.com",
       clientId: "public-client",
       redirectUri: "https://app.repoyeti.com/oauth/callback",
     },
@@ -301,7 +301,7 @@ test("a replaced Quick Tunnel cancels the previous origin's pending callback ret
   const cfg = base({
     relay: { enabled: false },
     oauth: {
-      issuer: "https://accounts.connections.icu",
+      issuer: "https://accounts.connectionsapi.com",
       clientId: "public-client",
       redirectUri: "https://app.repoyeti.com/oauth/callback",
     },
