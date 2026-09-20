@@ -480,7 +480,8 @@ export interface RepoYetiConfig {
    * Auto-scan the whole machine on every app start. Absent/false = OFF (opt-in) — a fresh
    * install never sweeps the filesystem unasked. Purely a stored flag: the WEB client reads
    * it at boot and decides whether to fire `POST /api/scan`; the daemon itself takes no
-   * action on it. See AppShell.vue's `autoScanOnStart`.
+   * action on it. See `web/src/AppShell.vue`'s `onMounted`, which reads `store.autoScan`
+   * once loadAll has hydrated it and then calls `store.startScan()`.
    */
   autoScan?: boolean;
   /**
