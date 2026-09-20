@@ -40,6 +40,31 @@ async function runSuite(args: string[]): Promise<{ out: string; exitCode: number
   return { out, exitCode };
 }
 
+/**
+ * Re-print the failing tests AFTER the suite dump, so a red run is diagnosable.
+ *
+ * `runSuite` streams the whole suite (thousands of lines) into one CI step, and
+ * GitHub TRUNCATES a step's log. On 2026-09-20 a macos-latest run failed with
+ * "✗ tests failed — see above" and the log ended mid-sentence several hundred
+ * lines earlier: the `(fail)` lines were in the part that got cut, so the only
+ * way to learn which test broke was to reproduce it locally. "See above" is a
+ * promise the log cannot keep.
+ *
+ * The summary goes LAST and stays small, which is the part truncation spares.
+ */
+function reportFailures(out: string): void {
+  const failures = out
+    .split(/\r?\n/)
+    .filter((line) => line.includes("(fail)"))
+    .map((line) => line.trim());
+  if (failures.length === 0) {
+    console.error("  (no (fail) lines in the output - the suite likely crashed or timed out)");
+    return;
+  }
+  console.error(`\n─── ${failures.length} failing test(s) ───`);
+  for (const line of failures) console.error(`  ${line}`);
+}
+
 const baseArgs = ["bun", "test", "tests", "--coverage", "--timeout", "20000"];
 
 /** One shard's report as `file → (line → hit count)`. */
@@ -178,7 +203,8 @@ if (import.meta.main) {
         `--coverage-dir=${coverageDir}`,
       ]);
       if (result.exitCode !== 0) {
-        console.error(`✗ coverage shard ${shard}/2 failed — see above`);
+        console.error(`✗ coverage shard ${shard}/2 failed`);
+        reportFailures(result.out);
         rmSync(coverageRoot, { recursive: true, force: true });
         process.exit(result.exitCode || 1);
       }
@@ -203,7 +229,8 @@ if (import.meta.main) {
       `--coverage-dir=${coverageDir}`,
     ]);
     if (exitCode !== 0) {
-      console.error("✗ tests failed — see above");
+      console.error("✗ tests failed");
+      reportFailures(out);
       process.exit(exitCode || 1);
     }
     // Coverage table footer: " All files | <% funcs> | <% lines> | ..."
