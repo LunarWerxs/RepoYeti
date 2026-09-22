@@ -231,12 +231,16 @@ if (import.meta.main) {
     if (exitCode !== 0) {
       console.error("✗ tests failed");
       reportFailures(out);
+      // process.exit() does not unwind, so the `finally` below never runs: without this the temp
+      // dir survives every red run, exactly as the Linux branch's explicit rmSync avoids.
+      rmSync(coverageDir, { recursive: true, force: true });
       process.exit(exitCode || 1);
     }
     // Coverage table footer: " All files | <% funcs> | <% lines> | ..."
     const match = out.match(/All files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
     if (!match) {
       console.error("✗ could not parse the coverage summary (no 'All files' row)");
+      rmSync(coverageDir, { recursive: true, force: true });
       process.exit(1);
     }
     lineCoverage = parseFloat(match[2]!);

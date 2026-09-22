@@ -76,7 +76,10 @@ jobs:
       - name: Dependency advisories (advisory only, never fails the run)
         shell: bash
         run: bun audit || true
-      - run: bun run test # Vitest: pure-lib units + component render + store smoke (no server needed)
+      # Vitest: pure-lib units + component render + store smoke (no server needed), with the dashboard
+      # coverage floor from web/vitest.config.ts. The daemon has had a floor since 1.0 (check:coverage);
+      # the dashboard had none, so deleting a component's tests stayed green.
+      - run: bun run test:coverage
       - run: bun run build # vue-tsc type-check + production bundle (re-runs i18n:check)
       # The Playwright DEVELOPER suite (web/test/e2e) is still intentionally NOT in CI — it needs a
       # live daemon with the owner's real repositories plus a Vite dev server, so it can only run
@@ -127,6 +130,12 @@ jobs:
       - run: bunx playwright install --with-deps chromium
         working-directory: web
       - run: bun run --cwd web test:gate
+        env:
+          # Keep web/.playwright/browser-gate alive so upload-artifact below can actually read the
+          # gate's daemon.log and gate.json. global-setup.ts's teardown rm's that directory right
+          # after the test step unless REPOYETI_GATE_KEEP=1, so without this the artifact silently
+          # held only test-results and the daemon's own failure reason was lost from every red run.
+          REPOYETI_GATE_KEEP: "1"
       # The gate's own daemon log and any Playwright trace, so a red run is diagnosable without
       # reproducing it locally. Only on failure; a green run has nothing worth keeping.
       - if: failure()

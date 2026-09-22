@@ -15,6 +15,8 @@
     "typecheck": "vue-tsc -b",
     "i18n:check": "node scripts/i18n-check.mjs",
     "test": "vitest run",
+    "//test:coverage": "The same suite with the coverage floor from vitest.config.ts. CI and the release gate run THIS, not `test`, so a change that strips a component's tests fails the build rather than passing it.",
+    "test:coverage": "vitest run --coverage",
     "//test:gate": "The RELEASE browser gate: three facts no unit test can establish (exact-origin refusal, SSE reconnect hydration, menus landing on screen). Unlike test:e2e it needs NOTHING running — its global setup boots an isolated daemon on an ephemeral port with a throwaway state dir. It does need `bun run build` first (the daemon serves dist) and a browser binary (`bunx playwright install chromium`).",
     "test:gate": "playwright test -c playwright.gate.config.ts"
   },
@@ -44,6 +46,7 @@
     "@tailwindcss/vite": "^4.3.1",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vitest/coverage-v8": "4.1.11",
     "@vue/compiler-sfc": "^3.5.39",
     "@vue/test-utils": "^2.4.11",
     "happy-dom": "^20.10.6",

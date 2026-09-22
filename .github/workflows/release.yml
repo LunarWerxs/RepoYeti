@@ -17,8 +17,13 @@ on:
   # on a branch builds and smoke-tests without publishing anything.
   workflow_dispatch:
 
+# Read-only by default, not `contents: write`. A workflow-level write token was inherited by
+# preflight, browser and build, none of which push anything — yet all of them run `bun install`
+# (bun executes dependency lifecycle scripts) and third-party actions from the tagged tree, so a
+# compromised transitive dependency or action held write access to repository contents. The publish
+# job below needs write and already sets its own block; ci.yml runs the identical installs read-only.
 permissions:
-  contents: write
+  contents: read
 
 # One release run per ref. GitHub fired TWO identical runs for the v0.21.4 tag push, two seconds
 # apart, same SHA. Nothing here is idempotent past the build: both would have reached `gh release
@@ -97,7 +102,7 @@ jobs:
       # publish under a floor that push-time CI would have refused.
       - run: bun run check:coverage
       - if: runner.os == 'Linux'
-        run: bun run --cwd web test
+        run: bun run --cwd web test:coverage
 
   # The browser gate, same job as CI's (see .github/workflows/ci.yml for what it covers and why).
   # It is here as well as there because tagging is the moment nobody is watching: the three things
@@ -119,6 +124,11 @@ jobs:
       - run: bunx playwright install --with-deps chromium
         working-directory: web
       - run: bun run --cwd web test:gate
+        env:
+          # Same reason as ci.yml: global-setup.ts's teardown deletes web/.playwright/browser-gate
+          # (the daemon.log the artifact below uploads) unless this is set, so a red release-gate run
+          # uploaded no daemon log at all.
+          REPOYETI_GATE_KEEP: "1"
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

@@ -24,5 +24,19 @@ export default defineConfig({
     setupFiles: ["./test/setup.ts"],
     include: ["test/**/*.{test,spec}.ts"],
     exclude: ["test/e2e/**", "test/browser-gate/**", "node_modules/**"],
+    // `bun run test:coverage` (CI and the release gate). The daemon has had a line floor since 1.0;
+    // the dashboard had none, so a PR could delete a component's every test and stay green (1.0
+    // audit, delivery P2). Thresholds are a FLOOR set just under the measured baseline: they stop a
+    // slide, they are not a target. Raise them when coverage rises; never lower one to pass a PR.
+    // Excluded: the vendored kit (tested upstream in lunarwerx-ui), locale data, and the entry file.
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,vue}"],
+      // file-icons.ts is an icon lookup table the v8 remapper cannot parse; it has no logic to cover.
+      exclude: ["src/components/ui/**", "src/locales/**", "src/**/*.d.ts", "src/main.ts", "src/lib/file-icons.ts"],
+      reporter: ["text-summary"],
+      // Measured 2026-09-22 at 627 tests: statements 57.6, branches 54.6, functions 47.5, lines 59.0.
+      thresholds: { statements: 56.5, branches: 53.5, functions: 46.5, lines: 58 },
+    },
   },
 });
