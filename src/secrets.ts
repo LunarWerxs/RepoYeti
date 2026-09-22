@@ -79,6 +79,21 @@ export function setSecretStoreForTests(override: Partial<SecretStore> | null): (
   };
 }
 
+/**
+ * Record a successful keychain op, WITHOUT undoing a failure seen earlier this process.
+ *
+ * Every success used to set `available = true`, which made the flag "whatever the last op did".
+ * keychainConfirmed() reads that flag to decide whether saveConfig may strip secrets out of
+ * config.json, so one boot where provider A's key stored and provider B's was refused (Windows
+ * Credential Manager rejects a blob over its size limit) and then any later success confirmed the
+ * keychain again: the next save deleted B's plaintext key from disk while B existed in no store at
+ * all, and it was gone at the next start. A failure now holds for the process: plaintext is kept,
+ * ACL-protected, until a restart proves the keychain again.
+ */
+function markSucceeded(): void {
+  if (available === null) available = true;
+}
+
 function warnOnce(op: string, e: unknown): void {
   available = false;
   if (warned) return;
@@ -106,8 +121,9 @@ export function keychainAvailable(): boolean {
  * never runs a keychain op, so on a host whose keychain is actually broken it would strip legacy
  * plaintext secrets it had never migrated anywhere, losing them for good. Requiring a confirmed
  * success means "untested" falls to the safe side: keep the plaintext (and ACL-protect it) until a
- * real daemon boot has proven the keychain and migrated the secrets. Every successful get/set/delete
- * sets available = true, so the normal daemon path (hydrateSecrets runs first) is unaffected. */
+ * real daemon boot has proven the keychain and migrated the secrets. The first successful get/set/delete
+ * sets available = true, so the normal daemon path (hydrateSecrets runs first) is unaffected; a
+ * failure earlier in the same process is never undone by a later success (see markSucceeded). */
 export function keychainConfirmed(): boolean {
   return !disabled() && available === true;
 }
@@ -123,7 +139,7 @@ export async function getSecret(name: string): Promise<string | null> {
   try {
     const s = store();
     const v = await s.get(service(), name);
-    available = true;
+    markSucceeded();
     if (v != null) return v;
     // arkitect-allow: no-bandaids - "legacy" names an on-disk fact, not a planned deletion: keys saved before the GitMob rename still sit under that service name, and this read-then-rehome is the permanent path that keeps them without re-entry.
     // Legacy fallback: a secret left under the old "gitmob" service (default install only).
@@ -151,7 +167,7 @@ export async function setSecret(name: string, value: string): Promise<boolean> {
   if (disabled()) return false;
   try {
     await store().set(service(), name, value);
-    available = true;
+    markSucceeded();
     return true;
   } catch (e) {
     warnOnce("set", e);
@@ -175,7 +191,7 @@ export async function deleteSecret(name: string): Promise<boolean> {
   if (disabled()) return true;
   try {
     await store().delete(service(), name);
-    available = true;
+    markSucceeded();
     return true;
   } catch (e) {
     warnOnce("delete", e);
@@ -194,7 +210,7 @@ export const OAUTH_CLIENT_SECRET = "oauth/clientSecret";
 /** Named-tunnel connector token — a credential that lets cloudflared run the owner's tunnel,
  *  so it's keychain-stored and stripped from config.json (see config.ts TunnelConfig). */
 export const TUNNEL_TOKEN = "tunnel/token";
-/** Optional, owner-minted API Bearer token — a LOCAL credential (never touches connections.icu)
+/** Optional, owner-minted API Bearer token — a LOCAL credential (never touches Connections)
  *  that lets a remote/headless agent authenticate over the tunnel. Off by default (absent ⇒ no
  *  behavior change); keychain-stored and stripped from config.json (see config.ts apiToken). */
 export const API_TOKEN = "api/token";

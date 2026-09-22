@@ -16,11 +16,9 @@ import { addListener, removeListener } from "../src/bus.ts";
 
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
-// putSettings's response body calls resolveLoreServersEnabled(cfg), which — when
-// cfg.loreServersEnabled is absent — derives a default AND persists it via its own saveConfig()
-// call (see health.ts), independent of anything this test file is about. Pre-setting the field
-// avoids that unrelated side effect so the saveConfig/broadcast counts below measure only the
-// batching this suite targets.
+// resolveLoreServersEnabled used to PERSIST its derived default the first time it ran, which gave a
+// PUT that omitted the field a second saveConfig. It is a pure read now; the last test below pins
+// that, and these configs pre-set the field only so each test measures one thing.
 const noLoreDefaultCfg = (): RepoYetiConfig => ({ ...localCfg(), loreServersEnabled: true });
 
 // Mirrors tests/timer-rounds.test.ts's capture() helper.
@@ -150,4 +148,21 @@ test("diffStats + remoteBrowse together call refreshAllRepos exactly once", asyn
   } finally {
     /* restored in afterEach */
   }
+});
+
+test("reading status or PUTting settings never writes an undecided Lore default (a read is not a save)", async () => {
+  const app = createApp(localCfg()); // loreServersEnabled absent, no servers
+  saveSpy = spyOn(configModule, "saveConfig");
+  const status = await app.request("/api/status");
+  expect(status.status).toBe(200);
+  expect(((await status.json()) as { loreServersEnabled?: boolean }).loreServersEnabled).toBe(false);
+  expect(saveSpy.mock.calls.length).toBe(0);
+
+  const put = await app.request("/api/settings", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ remoteEditing: false }),
+  });
+  expect(put.status).toBe(200);
+  expect(saveSpy.mock.calls.length).toBe(1); // the batched save, and nothing after it
 });

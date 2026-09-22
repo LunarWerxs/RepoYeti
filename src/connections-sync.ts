@@ -28,7 +28,10 @@ import type {
   SettingsSyncStatus,
   TokenSet,
 } from "@cnct/connect";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  CONFIG_DIR,
   saveConfig,
   type RepoYetiConfig,
   type OAuthConfig,
@@ -178,6 +181,37 @@ let memory = new Map<string, string>();
 let keychainRefresh: string | null = null;
 let loaded = false;
 
+/**
+ * The refresh token's revocation TOMBSTONE, the guard src/api-token.ts already keeps for the API
+ * token (`apiTokenRevoked`). Disconnect and "sign out everywhere" delete the keychain copy, and
+ * deleteSecret answers false when the store refuses; that answer used to be dropped, so memory was
+ * cleared, the sign-out reported success, and the next boot read the SAME refresh token back out of
+ * the keychain and resumed syncing as the session the owner had just cut off. While this marker
+ * exists nothing is loaded from the keychain and every boot retries the delete. A marker file, not
+ * a config field: sign-out-all reaches clearTokens with no config handle to save.
+ */
+const REFRESH_TOMBSTONE = join(CONFIG_DIR, "connections-refresh.revoked");
+
+function setRefreshTombstone(on: boolean): void {
+  try {
+    if (on) writeFileSync(REFRESH_TOMBSTONE, `${new Date().toISOString()}\n`, { mode: 0o600 });
+    else rmSync(REFRESH_TOMBSTONE, { force: true });
+  } catch (e) {
+    console.warn(`repoyeti: could not ${on ? "write" : "clear"} the Connections sign-out marker: ${String(e)}`);
+  }
+}
+
+/** Delete the keychain copy, and remember a refusal so a restart cannot bring the token back. */
+async function forgetRefreshToken(): Promise<void> {
+  const cleared = await deleteSecret(CONNECTIONS_REFRESH_TOKEN);
+  setRefreshTombstone(!cleared);
+  if (!cleared) {
+    console.warn(
+      "repoyeti: the credential store refused to delete the Connections refresh token; it will not be loaded again, and the delete is retried at every start",
+    );
+  }
+}
+
 const tokenKeyFor = (clientId: string): string => `cnx.connect.tokens.${clientId}`;
 
 function storeFor(clientId: string): ConnectStore {
@@ -200,7 +234,9 @@ function storeFor(clientId: string): ConnectStore {
         const tokens = JSON.parse(value) as TokenSet;
         if (tokens.refreshToken && tokens.refreshToken !== keychainRefresh) {
           keychainRefresh = tokens.refreshToken;
-          await setSecret(CONNECTIONS_REFRESH_TOKEN, tokens.refreshToken);
+          // Stored = the keychain now holds THIS session's token, not the revoked one, so the
+          // tombstone has nothing left to guard. A refused write leaves it: the old bytes remain.
+          if (await setSecret(CONNECTIONS_REFRESH_TOKEN, tokens.refreshToken)) setRefreshTombstone(false);
         }
       } catch {
         /* non-JSON writes (PKCE records) need no keychain mirror */
@@ -210,7 +246,7 @@ function storeFor(clientId: string): ConnectStore {
       memory.delete(key);
       if (key === tokenKey && keychainRefresh) {
         keychainRefresh = null;
-        await deleteSecret(CONNECTIONS_REFRESH_TOKEN);
+        await forgetRefreshToken();
       }
     },
   };
@@ -246,7 +282,23 @@ async function connectFor(oauth: OAuthConfig): Promise<ConnectClient> {
 export async function initCloudSync(): Promise<void> {
   if (loaded) return;
   loaded = true;
+  if (existsSync(REFRESH_TOMBSTONE)) {
+    // A sign-out whose keychain delete was refused. Retry it, and load nothing either way: while
+    // the delete keeps failing, the bytes in the store are the revoked session's.
+    if (await deleteSecret(CONNECTIONS_REFRESH_TOKEN)) setRefreshTombstone(false);
+    return;
+  }
   keychainRefresh = await getSecret(CONNECTIONS_REFRESH_TOKEN);
+}
+
+/** @internal test seam: re-run the boot-time load, the way a daemon restart would. */
+export async function reloadCloudSyncForTests(): Promise<void> {
+  loaded = false;
+  keychainRefresh = null;
+  memory = new Map();
+  client = null;
+  clientKey = "";
+  await initCloudSync();
 }
 
 /** True when the daemon holds a Connections credential it can sync with (a refresh or access token). */
@@ -309,7 +361,7 @@ export async function clearTokens(): Promise<void> {
   client = null;
   clientKey = "";
   keychainRefresh = null;
-  await deleteSecret(CONNECTIONS_REFRESH_TOKEN);
+  await forgetRefreshToken();
 }
 
 // ── settings mapping (the allowlist) ─────────────────────────────────────────────

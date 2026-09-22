@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, rmSync, readdirSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIR, loadConfig, saveConfig, hydrateSecrets } from "../src/config.ts";
 import {
@@ -9,6 +9,8 @@ import {
   aiKeyName,
   OAUTH_CLIENT_SECRET,
   RELAY_PRIVATE_KEY,
+  keychainConfirmed,
+  setSecretStoreForTests,
 } from "../src/secrets.ts";
 import { createRelayIdentity } from "../src/relay.ts";
 
@@ -34,6 +36,99 @@ function restoreConfig(saved: string | null): void {
   if (saved !== null) writeFileSync(CONFIG_PATH, saved);
   else rmSync(CONFIG_PATH, { force: true });
 }
+
+// ── issue #25: the built-in client's issuer comes from the build, not the saved file ─────────────
+// An install first written against connections.icu kept that issuer in config.json, and loadConfig
+// let it override the corrected default, so the token's `iss` never matched again.
+
+function writeRawConfig(raw: unknown): void {
+  writeFileSync(CONFIG_PATH, JSON.stringify(raw));
+}
+/** The compiled-in client, read the way a fresh install sees it: with no config file at all. */
+function builtInClient() {
+  rmSync(CONFIG_PATH, { force: true });
+  return loadConfig().oauth!;
+}
+
+test("a saved built-in client re-derives issuer, callback and scopes and keeps its owner", () => {
+  const saved = snapshotConfig();
+  try {
+    const builtIn = builtInClient();
+    // The first is exactly what a pre-1.0.3 config.json holds; the second proves no one string is special.
+    for (const stale of ["https://accounts.connections.icu", "https://accounts.some-future-move.example"]) { // dead-host-ok
+      writeRawConfig({
+        roots: [],
+        oauth: { issuer: stale, clientId: builtIn.clientId, redirectUri: "https://old.example/cb", ownerSub: "existing-owner" },
+      });
+      const cfg = loadConfig();
+      expect(cfg.oauth?.issuer).toBe(builtIn.issuer);
+      expect(cfg.oauth?.redirectUri).toBe(builtIn.redirectUri);
+      expect(cfg.oauth?.scopes).toBe(builtIn.scopes);
+      expect(cfg.oauth?.ownerSub).toBe("existing-owner");
+    }
+  } finally {
+    restoreConfig(saved);
+  }
+});
+
+test("a saved oauth with no clientId is the built-in client, so auth stays enforced", () => {
+  const saved = snapshotConfig();
+  try {
+    const builtIn = builtInClient();
+    writeRawConfig({ roots: [], oauth: { ownerEmail: "owner@example.com" } });
+    const cfg = loadConfig();
+    expect(cfg.oauth?.issuer).toBe(builtIn.issuer);
+    expect(cfg.oauth?.clientId).toBe(builtIn.clientId);
+    expect(cfg.oauth?.ownerEmail).toBe("owner@example.com");
+  } finally {
+    restoreConfig(saved);
+  }
+});
+
+test("a user's own OIDC client keeps the issuer they chose, and an explicit null stays auth-less", () => {
+  const saved = snapshotConfig();
+  try {
+    const own = { issuer: "https://idp.example", clientId: "private-oidc-client", redirectUri: "https://me.example/cb" };
+    writeRawConfig({ roots: [], oauth: own });
+    expect(loadConfig().oauth).toEqual(own);
+    writeRawConfig({ roots: [], oauth: null });
+    expect(loadConfig().oauth).toBeNull();
+  } finally {
+    restoreConfig(saved);
+  }
+});
+
+// ── a config.json that cannot be used must never be silently replaced ───────────────────────
+// loadConfig answered every failure with the defaults, and load → change → save paths then wrote
+// those defaults over the real file, owner binding included.
+
+test("a corrupt config.json is moved aside, not left for the next save to overwrite", () => {
+  const saved = snapshotConfig();
+  const before = new Set(readdirSync(CONFIG_DIR));
+  try {
+    writeFileSync(CONFIG_PATH, '{"roots": [], "oauth": {"ownerSub": "the-owner"');
+    const cfg = loadConfig();
+    expect(cfg.roots).toEqual([]);
+    const aside = readdirSync(CONFIG_DIR).filter((f) => f.startsWith("config.json.corrupt-") && !before.has(f));
+    expect(aside.length).toBe(1);
+    expect(readFileSync(join(CONFIG_DIR, aside[0]!), "utf8")).toContain("the-owner");
+    for (const f of aside) rmSync(join(CONFIG_DIR, f), { force: true });
+  } finally {
+    restoreConfig(saved);
+  }
+});
+
+test("a config.json that exists but cannot be read makes loadConfig throw instead of returning defaults", () => {
+  const saved = snapshotConfig();
+  try {
+    rmSync(CONFIG_PATH, { force: true });
+    mkdirSync(CONFIG_PATH); // reading a directory fails with something other than ENOENT
+    expect(() => loadConfig()).toThrow(/could not be read/);
+  } finally {
+    rmSync(CONFIG_PATH, { recursive: true, force: true });
+    restoreConfig(saved);
+  }
+});
 
 // Probe whether an OS secret service is actually reachable on this host. On a headless box
 // with no libsecret it won't be, so the keychain-dependent tests skip rather than fail.
@@ -346,4 +441,35 @@ test("hydrateSecrets rejects and deletes a legacy relay key that does not match 
     }),
   );
   restoreConfig(saved);
+});
+
+// ── a refused write must not be forgotten by the next success ──────────────────────────────
+// `available` used to be "whatever the last op did", so provider A stored, provider B refused, any
+// later success re-confirmed the keychain, and the next save stripped B's key off disk while no
+// store held it.
+
+test("one refused keychain write keeps secrets on disk for the rest of the process", async () => {
+  const saved = snapshotConfig();
+  const restore = setSecretStoreForTests({
+    set: async (_service: string, name: string) => {
+      if (name === aiKeyName("openai")) throw new Error("the credential blob is too large");
+    },
+  });
+  try {
+    await withService(async () => {
+      expect(await setSecret(aiKeyName("groq"), "gsk_ok")).toBe(true);
+      expect(await setSecret(aiKeyName("openai"), "sk-refused")).toBe(false);
+      expect(await setSecret(aiKeyName("groq"), "gsk_ok_again")).toBe(true); // a later success...
+      expect(keychainConfirmed()).toBe(false); // ...does not re-confirm the store
+
+      const cfg = loadConfig();
+      cfg.ai = { providers: { openai: { apiKey: "sk-refused", model: "m" } } };
+      saveConfig(cfg);
+      const onDisk = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
+      expect(onDisk.ai.providers.openai.apiKey).toBe("sk-refused"); // kept: no store holds it
+    });
+  } finally {
+    restore();
+    restoreConfig(saved);
+  }
 });

@@ -39,3 +39,25 @@ export function restrictToCurrentUser(path: string): void {
     /* best-effort: an unrestricted file is what we had before, not a reason to fail startup */
   }
 }
+
+/**
+ * The directory form: restrict `dir` and make the grants INHERITABLE, so every file and folder
+ * created inside it afterwards starts owner-only. `(OI)(CI)` is what carries the grant down; without
+ * it the directory is locked and its new children inherit nothing useful. Existing files keep their
+ * own ACLs (a rename moves a file with its ACL), so callers still protect a file they rewrite in
+ * place. Same best-effort contract as restrictToCurrentUser.
+ */
+export function restrictDirToCurrentUser(dir: string): void {
+  if (process.platform !== "win32") return;
+  const user = process.env.USERNAME;
+  if (!user) return;
+  try {
+    spawnSync(
+      "icacls",
+      [dir, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`, "/grant:r", "*S-1-5-18:(OI)(CI)F"],
+      { stdio: "ignore", windowsHide: true, timeout: 5000 },
+    );
+  } catch {
+    /* best-effort, as above */
+  }
+}

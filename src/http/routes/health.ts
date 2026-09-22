@@ -99,16 +99,18 @@ import { parseBody, SettingsUpdateSchema } from "../../schemas.ts";
 export const PORTABLE_WINDOW_SIZE = { width: 840, height: 760 };
 
 /**
- * Resolve `loreServersEnabled`, deriving + persisting a one-time default on first read so
- * existing owners with servers already configured don't see the section suddenly collapse
- * (see RepoYetiConfig.loreServersEnabled).
+ * Resolve `loreServersEnabled`: the owner's explicit choice, else open exactly when servers are
+ * already configured, so an owner who has some never finds the section collapsed.
+ *
+ * A pure read. It used to persist the derived default on first read, which made GET /api/status a
+ * config WRITE and gave a PUT /api/settings that omitted the field a second save after its batched
+ * one (1.0 audit residual). Deriving on every read gives the same answer without either: the only
+ * case that differs is an owner who never touched the toggle and later removed every server, and
+ * for them a collapsed empty section is the better default anyway.
  */
 function resolveLoreServersEnabled(cfg: RepoYetiConfig): boolean {
   if (typeof cfg.loreServersEnabled === "boolean") return cfg.loreServersEnabled;
-  const enabled = (cfg.servers?.length ?? 0) > 0;
-  cfg.loreServersEnabled = enabled;
-  saveConfig(cfg);
-  return enabled;
+  return (cfg.servers?.length ?? 0) > 0;
 }
 
 function getHealth(c: Context) {

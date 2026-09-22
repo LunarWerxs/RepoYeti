@@ -190,6 +190,49 @@ test("[3] id_token with wrong iss is rejected with a 401 error page", async () =
   expect(body).toContain("verify");
 });
 
+// ── [3b] The rejection is diagnosable (issue #25) ───────────────────────────────
+//
+// The page stays generic, but the log must name the step, the failing claim and both issuer values:
+// an issuer drift was otherwise indistinguishable from any other 401, and diagnosing #25 took a
+// patched build. The token itself must never reach the log.
+
+async function captureErrors(fn: () => Promise<unknown>): Promise<string> {
+  const lines: string[] = [];
+  const orig = console.error;
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    await fn();
+  } finally {
+    console.error = orig;
+  }
+  return lines.join("\n");
+}
+
+test("[3b] a wrong iss logs the stage, the claim and both issuers, never the token", async () => {
+  const badToken = await mintToken({ iss: "https://accounts.connections.icu" }); // dead-host-ok: the pre-1.0.3 issuer IS the fixture
+  let status = 0;
+  const log = await captureErrors(async () => {
+    status = (await runHandleComplete(badToken)).status;
+  });
+  expect(status).toBe(401);
+  expect(log).toContain("sign-in failed during identity verification");
+  expect(log).toContain("claim=iss");
+  expect(log).toContain("token=https://accounts.connections.icu"); // dead-host-ok: asserting the fixture above
+  expect(log).toContain(`expected=${ISSUER}`);
+  expect(log).not.toContain(badToken);
+});
+
+test("[4b] a wrong aud logs the audience it carried and the client it expected", async () => {
+  const badToken = await mintToken({ aud: "other-client-id" });
+  const log = await captureErrors(() => runHandleComplete(badToken));
+  expect(log).toContain("claim=aud");
+  expect(log).toContain('token="other-client-id"');
+  expect(log).toContain(`expected=${CLIENT_ID}`);
+  expect(log).not.toContain(badToken);
+});
+
 // ── [4] Wrong audience ────────────────────────────────────────────────────────
 
 test("[4] id_token with wrong aud is rejected with a 401 error page", async () => {

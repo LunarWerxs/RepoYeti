@@ -24,7 +24,7 @@ import {
 } from "./secrets.ts";
 import { publicKeyFor } from "./relay.ts";
 import { normalizeBuzzCommunities } from "./buzz-url.ts";
-import { restrictToCurrentUser } from "./fs-perms.ts";
+import { restrictDirToCurrentUser, restrictToCurrentUser } from "./fs-perms.ts";
 
 export const VERSION = "1.0.3";
 
@@ -345,9 +345,9 @@ export interface RepoYetiConfig {
   servers?: LoreServer[];
   /**
    * Whether the Lore-servers settings section is expanded (owner setting; pure stored
-   * flag, no daemon-side effect). Absent = derive a sensible one-time default the first
-   * time /api/status is read: true if the owner already has servers configured, else
-   * false (see health.ts's GET /api/status). Once explicitly set, that value sticks.
+   * flag, no daemon-side effect). Absent = derived on every read, never written: true if the
+   * owner has servers configured, else false (health.ts resolveLoreServersEnabled). Once
+   * explicitly set, that value sticks.
    */
   loreServersEnabled?: boolean;
   /** Advanced, experimental Buzz Git compatibility. Off by default and non-secret. */
@@ -530,7 +530,7 @@ export interface RepoYetiConfig {
    * OPTIONAL, owner-minted API Bearer token (off by default). When present, a request carrying
    * `Authorization: Bearer <token>` passes the /api/* gate just like an owner session — so a
    * remote/headless agent can authenticate over the tunnel without a browser sign-in. It's a
-   * separate, LOCAL credential (minted via POST /api/auth/token; never touches connections.icu).
+   * separate, LOCAL credential (minted via POST /api/auth/token; never touches Connections).
    * Absent ⇒ auth behaves EXACTLY as OIDC-only (zero behavior change). Like the tunnel token, the
    * durable bytes live in the OS keychain (see secrets.ts API_TOKEN) — this in-memory slot is
    * hydrated at boot by `hydrateSecrets()` and stripped from config.json by `saveConfig()`.
@@ -740,6 +740,27 @@ const DEFAULTS: RepoYetiConfig = {
   oauth: { ...CONNECTIONS_OAUTH },
 };
 
+/**
+ * The built-in client's protocol fields (issuer, callback, scopes) belong to THIS BUILD, never to
+ * the saved file. config.json persists the whole `oauth` object because it also carries the owner
+ * binding, and `loadConfig` used to spread that saved object over the defaults, so every install
+ * kept the issuer it was first written with. When Connections moved off `connections.icu` (1.0.3),
+ * only fresh installs followed: an existing one still expected `iss` to be the old host, the token
+ * said `accounts.connectionsapi.com`, and every sign-in died at verification behind a generic page
+ * (issue #25). Pinning the one legacy string would break again at the next move, so the built-in
+ * client's fields are re-derived on every load and only the owner fields come from disk.
+ *
+ * A saved `oauth` with no clientId is also the built-in client: without this it would load with no
+ * issuer, `authEnforced` would read false, and a hand-trimmed file would open the daemon unauthed.
+ * A user's OWN client (a different clientId) is returned untouched, issuer and all.
+ */
+function pinBuiltInClient(saved: OAuthConfig | undefined): OAuthConfig | undefined {
+  // `!saved` also passes a JSON `null` through unchanged: that is an explicitly auth-less config.
+  if (!saved || typeof saved !== "object") return saved;
+  if (saved.clientId && saved.clientId !== CONNECTIONS_OAUTH.clientId) return saved;
+  return { ...saved, ...CONNECTIONS_OAUTH };
+}
+
 /** Effective access mode (defaults to local). */
 export function accessMode(cfg: RepoYetiConfig): AccessMode {
   return cfg.mode === "remote" ? "remote" : "local";
@@ -927,19 +948,61 @@ export function ensureConfigDir(): void {
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
 }
 
+/**
+ * config.json's text, or null when there is no file. A read that FAILS is not "no file".
+ *
+ * loadConfig used to answer every failure with the defaults, and several paths load, change one
+ * field and save (the updater's install id, `add-root`, boot-time secret hydration). So a single
+ * transient read error (Windows reports EBUSY/EACCES while an antivirus or indexer holds the file)
+ * handed back an empty config that the next save wrote over the real one: roots, identities, AI
+ * settings and the OWNER BINDING, after which the first person to sign in owned the daemon. A few
+ * short retries cover the transient case; past them this throws, because a failed start or a
+ * failed request is recoverable and a silently rewritten config is not.
+ */
+function readConfigText(): string | null {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return readFileSync(CONFIG_PATH, "utf8");
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return null;
+      if (attempt >= 5) {
+        throw new Error(
+          `config.json exists but could not be read (${code ?? String(e)}); refusing to fall back to defaults, which the next save would write over it`,
+        );
+      }
+      Bun.sleepSync(40 * attempt);
+    }
+  }
+}
+
 export function loadConfig(): RepoYetiConfig {
   ensureConfigDir();
-  if (!existsSync(CONFIG_PATH)) return { ...DEFAULTS };
+  const text = readConfigText();
+  if (text === null) return { ...DEFAULTS };
+  let raw: Partial<RepoYetiConfig>;
   try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Partial<RepoYetiConfig>;
-    return {
-      ...DEFAULTS,
-      ...raw,
-      roots: Array.isArray(raw.roots) ? raw.roots.map((r) => resolve(r)) : [],
-    };
+    raw = JSON.parse(text) as Partial<RepoYetiConfig>;
   } catch {
+    // Unparseable (a hand edit gone wrong, a disk that lost the tail). Starting from defaults is the
+    // only way to run, but the next save would destroy the only copy of the owner's settings, so
+    // the file is moved aside first and the log says where it went.
+    const aside = `${CONFIG_PATH}.corrupt-${Date.now()}`;
+    try {
+      renameSync(CONFIG_PATH, aside);
+      console.error(`[repoyeti] config.json could not be parsed; it was kept as ${aside} and RepoYeti started from defaults`);
+    } catch {
+      console.error("[repoyeti] config.json could not be parsed, and could not be moved aside; RepoYeti started from defaults");
+    }
     return { ...DEFAULTS };
   }
+  const cfg: RepoYetiConfig = {
+    ...DEFAULTS,
+    ...raw,
+    roots: Array.isArray(raw.roots) ? raw.roots.map((r) => resolve(r)) : [],
+  };
+  if ("oauth" in raw) cfg.oauth = pinBuiltInClient(raw.oauth);
+  return cfg;
 }
 
 /**
@@ -987,8 +1050,25 @@ function stripSecretsForDisk(cfg: RepoYetiConfig): RepoYetiConfig {
   return clone;
 }
 
+/** Whether this process has already restricted CONFIG_DIR (see saveConfig). */
+let configDirRestricted = false;
+
+/** @internal test seam: forget that CONFIG_DIR was restricted, as a fresh process would. */
+export function resetConfigDirRestrictionForTests(): void {
+  configDirRestricted = false;
+}
+
 export function saveConfig(cfg: RepoYetiConfig): void {
   ensureConfigDir();
+  // config.json is never secret-free: even with a confirmed keychain the projection keeps the relay
+  // signing key (RelayConfig says why it cannot be split), and the per-file ACL below is gated to
+  // keychain-less hosts for its cost. So the DIRECTORY is locked down instead, once per process,
+  // with inheritable grants: every file created in it afterwards, this save's temp file included,
+  // is owner-only from birth. One icacls per start rather than one per settings toggle.
+  if (!configDirRestricted) {
+    configDirRestricted = true;
+    restrictDirToCurrentUser(CONFIG_DIR);
+  }
   // With the keychain available this file holds no secret at all. When it ISN'T available
   // (secrets.ts falls back to plaintext, loudly) it holds the AI keys, the OAuth client secret,
   // the tunnel token and the API bearer token — so the 0600 has to be real. It isn't on NTFS,

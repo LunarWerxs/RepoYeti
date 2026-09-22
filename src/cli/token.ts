@@ -3,7 +3,7 @@
  * ALREADY-RUNNING local daemon over its HTTP API (src/cli/client.ts). Like the other CLI verbs it
  * never imports the in-process service/read layers (check-boundaries.ts enforces this).
  *
- * The token is a separate, LOCAL credential (never touches connections.icu) that lets a
+ * The token is a separate, LOCAL credential (never touches Connections) that lets a
  * remote/headless agent authenticate over the tunnel via `Authorization: Bearer <token>`.
  *
  *   new      mint (or overwrite) the token and print it — the ONLY time the value is shown

@@ -31,8 +31,9 @@ import {
   disable,
   updateAppearance,
   syncStatus,
+  reloadCloudSyncForTests,
 } from "../src/connections-sync.ts";
-import { getSecret, CONNECTIONS_REFRESH_TOKEN } from "../src/secrets.ts";
+import { getSecret, CONNECTIONS_REFRESH_TOKEN, setSecretStoreForTests } from "../src/secrets.ts";
 import { AUTO_COMMIT_INTERVAL_MIN_S } from "../src/auto-commit.ts";
 import { SYNC_INTERVAL_MAX_S } from "../src/remote-sync.ts";
 import type { RepoYetiConfig, OAuthConfig } from "../src/config.ts";
@@ -520,4 +521,53 @@ test("pullNow bounds the appearance blob: a nested or oversized document is not 
   server.settings = { prefs: {}, appearance: { theme: "light", compact: true } };
   await pullNow(cfg, OAUTH);
   expect(cfg.cloudSync?.appearance).toEqual({ theme: "light", compact: true });
+});
+
+// ── durable sign-out: a refused keychain delete cannot bring the session back at the next boot ──
+// The same defect the API token had (audit item 5): clearTokens dropped deleteSecret's answer, so a
+// credential store that refused the delete kept the refresh token, and the next boot's
+// initCloudSync loaded it and resumed syncing as the session the owner had just signed out.
+
+test("sign-out with a store that refuses the delete: the restart loads nothing, and retries the delete", async () => {
+  await rememberTokens({ refresh_token: "initial-refresh-token" }, OAUTH);
+  expect(await getSecret(CONNECTIONS_REFRESH_TOKEN)).toBe("initial-refresh-token");
+
+  const restore = setSecretStoreForTests({
+    delete: async () => {
+      throw new Error("credential store: access denied");
+    },
+  });
+  try {
+    await clearTokens();
+    // The bytes are still in the store: this is exactly the state that used to resurrect the session.
+    expect(await getSecret(CONNECTIONS_REFRESH_TOKEN)).toBe("initial-refresh-token");
+    await reloadCloudSyncForTests(); // restart, store still refusing
+    expect(hasConnection()).toBe(false);
+  } finally {
+    restore();
+  }
+
+  // Restart with a store that cooperates again: the delete is retried and lands, the marker goes.
+  await reloadCloudSyncForTests();
+  expect(hasConnection()).toBe(false);
+  expect(await getSecret(CONNECTIONS_REFRESH_TOKEN)).toBeNull();
+});
+
+test("a new sign-in after a refused sign-out is loaded normally at the next boot", async () => {
+  await rememberTokens({ refresh_token: "initial-refresh-token" }, OAUTH);
+  const restore = setSecretStoreForTests({
+    delete: async () => {
+      throw new Error("credential store: access denied");
+    },
+  });
+  try {
+    await clearTokens();
+  } finally {
+    restore();
+  }
+  // The owner signs in again; the store takes the NEW token, which retires the marker.
+  await rememberTokens({ refresh_token: "second-session-token" }, OAUTH);
+  await reloadCloudSyncForTests();
+  expect(hasConnection()).toBe(true);
+  expect(await getSecret(CONNECTIONS_REFRESH_TOKEN)).toBe("second-session-token");
 });

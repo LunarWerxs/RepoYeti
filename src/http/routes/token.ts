@@ -3,7 +3,7 @@
  *
  * These live under /api/* so they're owner-gated automatically by the auth middleware — only a
  * signed-in owner (or a request that already carries a valid token / local bypass) can mint, view,
- * or revoke. The token is a separate, LOCAL credential (never touches connections.icu) that lets a
+ * or revoke. The token is a separate, LOCAL credential (never touches Connections) that lets a
  * remote/headless agent authenticate over the tunnel. The durable bytes live in the OS keychain
  * (secrets.ts API_TOKEN) or, on a keychain-less host, in config.json; `cfg.apiToken` is the
  * hydrated in-memory slot the gate checks. The mint/revoke mechanics, and the guarantees each

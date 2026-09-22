@@ -104,8 +104,36 @@ async function discover(
   const res = await doFetch(`${iss}/.well-known/openid-configuration`);
   if (!res.ok) throw new Error(`OIDC discovery failed: ${res.status}`);
   const doc = (await res.json()) as Record<string, string>;
+  // OIDC Discovery requires the document's `issuer` to equal the URL it was fetched from, and the
+  // id_token's `iss` is checked against the CONFIGURED value below. When the two disagree every
+  // sign-in completes the whole browser dance and then fails verification (issue #25: the doc at
+  // the old connections.icu host declared connectionsapi.com). Say so once per discovery, naming
+  // both values, because the page the user sees cannot. Both are public URLs, never a credential.
+  const declared = typeof doc.issuer === "string" ? doc.issuer.replace(/\/$/, "") : "";
+  if (declared && declared !== iss) {
+    console.warn(
+      `[repoyeti] OIDC discovery at ${iss} declares issuer ${declared}; sign-in tokens will not verify until the configured issuer matches it`,
+    );
+  }
   discoveryCache = { issuer: iss, doc };
   return doc;
+}
+
+/** One log line naming why a sign-in failed, without a code or token in it. jose's claim errors
+ *  carry the claim that failed and the decoded payload; `iss` and `aud` are public identifiers, so
+ *  for those two the token's actual value is printed next to the expected one. That pair is the
+ *  whole diagnosis of an issuer or client drift, which is otherwise a generic 401 page. */
+export function describeSignInFailure(e: unknown, expected: { issuer: string; clientId: string }): string {
+  if (!(e instanceof Error)) return String(e).slice(0, 200);
+  const err = e as Error & { code?: string; claim?: string; payload?: Record<string, unknown> };
+  let out = err.code ? `${err.name} (${err.code})` : `${err.name}: ${err.message.slice(0, 200)}`;
+  if (err.claim) {
+    out += ` claim=${err.claim}`;
+    const got = err.payload?.[err.claim];
+    if (err.claim === "iss") out += ` token=${String(got).slice(0, 200)} expected=${expected.issuer}`;
+    if (err.claim === "aud") out += ` token=${JSON.stringify(got).slice(0, 200)} expected=${expected.clientId}`;
+  }
+  return out;
 }
 
 let jwksCache: { uri: string; set: ReturnType<typeof createRemoteJWKSet> } | null = null;
@@ -459,11 +487,16 @@ export async function handleComplete(
   // Allow a test-supplied fetch so unit tests can inject a mock IdP without a live network.
   const doFetch: FetchLike = opts?.fetchImpl ?? authFetch;
 
+  // Which step threw. The catch below serves discovery, the token request, JWKS and the id_token
+  // check alike, and it used to swallow the error whole, so an issuer drift and a network blip were
+  // the same page and the same silence in the log (issue #25).
+  let stage = "token exchange";
   try {
     const exchanged = await exchangeAuthCode(c, o, code, stateRedirectUri, tx.verifier, doFetch);
     if (!exchanged.ok) return exchanged.response;
     const { tok, doc } = exchanged;
 
+    stage = "identity verification";
     const keySet = opts?.jwksSet ?? jwks(doc.jwks_uri!);
     const { payload } = await jwtVerify(tok.id_token, keySet, {
       issuer: o.issuer.replace(/\/$/, ""),
@@ -471,6 +504,7 @@ export async function handleComplete(
     });
     const sub = String(payload.sub ?? "");
     const email = String((payload as { email?: string }).email ?? "");
+    stage = "session setup";
 
     // First-use ownership (TOFU): if no owner is configured yet, the first verified
     // sign-in claims this daemon and is persisted. After that it's locked to that
@@ -499,8 +533,9 @@ export async function handleComplete(
     }
     setSession(c, { sub, email: displayEmail, name, picture, exp: Date.now() + SESSION_TTL_MS }, opts);
     return c.redirect("/");
-  } catch {
-    return c.html(errPage("Couldn't verify your Connections sign-in."), 401);
+  } catch (e) {
+    console.error(`[repoyeti] sign-in failed during ${stage}: ${describeSignInFailure(e, o)}`);
+    return c.html(errPage("Couldn't verify your Connections sign-in. The RepoYeti log names the reason."), 401);
   }
 }
 
@@ -531,7 +566,7 @@ export function handleLogoutAll(c: Context, opts?: AuthOptions): Response {
  * minted `apiToken`, constant-time. OFF BY DEFAULT: when `apiToken` is unset/empty this ALWAYS
  * returns false — so an unconfigured daemon never matches a bearer header and auth behaves exactly
  * as OIDC-only (zero behavior change). The token is a separate, LOCAL credential (never touches
- * connections.icu); it lets a remote/headless agent authenticate over the tunnel. The host passes
+ * Connections); it lets a remote/headless agent authenticate over the tunnel. The host passes
  * its own token (RepoYeti: `cfg.apiToken`), keeping this decoupled from the full config shape.
  */
 export function validBearerToken(c: Context, apiToken?: string): boolean {
