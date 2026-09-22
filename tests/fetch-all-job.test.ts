@@ -78,8 +78,15 @@ async function repoWithRemote(prefix: string, name: string): Promise<string> {
 }
 
 /** Spin until the module-level single-flight job settles, so one test cannot leak into the next. */
+// Real `git fetch` runs behind this, so on a loaded machine a previous test's job can outlive a
+// short wait. Giving up silently let the next test start with that job still running and fail on
+// an unrelated assertion; now the wait is longer and a timeout says what actually happened.
 async function waitIdle(): Promise<void> {
-  for (let i = 0; i < 400 && isFetchingAll(); i++) await new Promise((r) => setTimeout(r, 10));
+  const deadline = Date.now() + 15_000;
+  while (isFetchingAll()) {
+    if (Date.now() > deadline) throw new Error("a fetch-all job was still running after 15s");
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 // ── the shared job lifecycle ─────────────────────────────────────────────────────
