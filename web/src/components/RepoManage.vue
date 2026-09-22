@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // Small per-repo "Remote & tags" dialog. Kept self-contained (its own file) so it stays
 // out of the large RepoCard template. Remote edits are local `.git/config` changes (no
-// network); tags are read-only.
+// network). Tags are listed, created, and pushed one at a time (no delete, no move).
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Loader2, Trash2, Tag } from "@lucide/vue";
+import { ArrowUpToLine, Loader2, Trash2, Tag } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
 import { fromNow } from "@/lib/util";
@@ -34,6 +34,8 @@ const tags = computed(() => store.tagsByRepo[props.repoId]?.tags ?? []);
 const tagName = ref("");
 const tagMessage = ref("");
 const tagPush = ref(false);
+/** The tag whose push is in flight, for its row's spinner. */
+const pushingTag = ref<string | null>(null);
 
 watch(open, (isOpen) => {
   if (isOpen) {
@@ -49,17 +51,41 @@ watch(open, (isOpen) => {
 async function createTag(): Promise<void> {
   const name = tagName.value.trim();
   if (!name || tagBusy.value) return;
+  const push = tagPush.value;
   const r = await store.createTag(props.repoId, {
     name,
     message: tagMessage.value.trim() || undefined,
-    push: tagPush.value,
+    push,
   });
   if (r.ok) {
     toast.success(r.message || t("repo.manage.tagCreated"));
     tagName.value = "";
     tagMessage.value = "";
-  } else {
-    toast.error(r.message || t("repo.manage.tagFailed"));
+    return;
+  }
+  // A create-and-push can succeed locally and fail on the network. The daemon keeps the local tag
+  // (an honest partial result), and re-running create would only answer "already exists", so the
+  // way forward is a push of that tag. createTag reloaded the list, which is how this knows the
+  // local half landed, without parsing the message.
+  const createdLocally = push && tags.value.some((tg) => tg.name === name);
+  toast.error(r.message || t("repo.manage.tagFailed"), {
+    ...(createdLocally ? { action: { label: t("repo.manage.tagRetryPush"), onClick: () => void pushTag(name) } } : {}),
+  });
+  if (createdLocally) {
+    tagName.value = "";
+    tagMessage.value = "";
+  }
+}
+
+async function pushTag(name: string): Promise<void> {
+  if (tagBusy.value) return;
+  pushingTag.value = name;
+  try {
+    const r = await store.pushTag(props.repoId, name);
+    if (r.ok) toast.success(t("repo.manage.tagPushed"));
+    else toast.error(r.message || t("repo.manage.tagPushFailed"));
+  } finally {
+    pushingTag.value = null;
   }
 }
 
@@ -121,7 +147,7 @@ async function remove(): Promise<void> {
         </div>
       </div>
 
-      <!-- tags (read-only) -->
+      <!-- tags: listed newest first, each pushable on its own -->
       <div class="flex flex-col gap-1.5 border-t border-border/40 pt-3">
         <div class="flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
           <Tag :size="14" class="text-muted-foreground" /> {{ $t("repo.manage.tagsTitle") }}
@@ -136,6 +162,20 @@ async function remove(): Promise<void> {
             <span class="mono shrink-0 text-[12px] text-foreground">{{ tg.name }}</span>
             <span class="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground" :title="tg.subject">{{ tg.subject }}</span>
             <span class="shrink-0 text-[11px] text-muted-foreground/70">{{ fromNow(tg.date) }}</span>
+            <Button
+              v-if="remote"
+              variant="ghost"
+              size="sm"
+              class="h-6 shrink-0 px-1.5 text-[11px]"
+              :disabled="tagBusy"
+              :title="$t('repo.manage.tagPushTitle', { name: tg.name })"
+              :aria-label="$t('repo.manage.tagPushTitle', { name: tg.name })"
+              @click="pushTag(tg.name)"
+            >
+              <Loader2 v-if="pushingTag === tg.name" class="animate-spin" />
+              <ArrowUpToLine v-else />
+              {{ $t("repo.manage.tagPushOne") }}
+            </Button>
           </div>
         </div>
 

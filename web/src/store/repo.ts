@@ -57,7 +57,11 @@ export function useRepoActions(
   function sortRepos(list: Repo[]): Repo[] {
     switch (sortMode.value) {
       case "name":
-        return [...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+        // Sort by the label the card actually shows (`displayName || name`), not the folder
+        // basename — otherwise a renamed repo sorts by a name the user never sees.
+        return [...list].sort((a, b) =>
+          (a.displayName || a.name).localeCompare(b.displayName || b.name, undefined, { sensitivity: "base" }),
+        );
       case "recent":
         return [...list].sort((a, b) => b.updatedAt - a.updatedAt);
       default:
@@ -329,7 +333,9 @@ export function useRepoActions(
     const q = filterQuery.value.trim().toLowerCase();
     const statuses = filterStatuses.value;
     return visibleRepos.value.filter((r) => {
-      if (q && !r.name.toLowerCase().includes(q)) return false;
+      // Match the label the card shows AND the folder name: a renamed repo used to be findable
+      // only by a folder name the card no longer displays.
+      if (q && ![r.displayName ?? "", r.name].some((label) => label.toLowerCase().includes(q))) return false;
       if (filterIdentity.value !== undefined) {
         const bad =
           filterIdentity.value === null ? !!r.identityId : r.identityId !== filterIdentity.value;
@@ -589,12 +595,15 @@ export function useRepoActions(
    */
   async function removeRepo(repoId: string): Promise<Repo | null> {
     const removed = findRepo(repoId) ?? null;
+    // Remember where it sat: on rollback a plain push would drop the card at the bottom,
+    // mis-ordering it under a saved drag arrangement or a name/recent sort.
+    const idx = repos.value.findIndex((r) => r.id === repoId);
     repos.value = repos.value.filter((r) => r.id !== repoId); // optimistic
     try {
       await api.removeRepo(repoId);
       return removed;
     } catch (e) {
-      if (removed) repos.value.push(removed); // roll back
+      if (removed) repos.value.splice(idx < 0 ? repos.value.length : idx, 0, removed); // roll back in place
       throw e;
     }
   }

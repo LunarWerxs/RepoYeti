@@ -10,7 +10,7 @@ vi.mock("@/api", () => ({ api: { tree } }));
 
 import { provideFileBrowser, type FileBrowserApi } from "@/lib/file-browser";
 import { defineComponent, h } from "vue";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 
 /** Mount a throwaway owner so provide/inject runs exactly as it does in RepoCardChanges. */
 function makeBrowser(repoId = "repo-1"): FileBrowserApi {
@@ -126,6 +126,27 @@ describe("file browser (All files mode)", () => {
     expect(b.open.size).toBe(0);
     await vi.waitFor(() => expect(tree).toHaveBeenCalledWith("repo-1", ""));
     expect(b.dirs.has("src")).toBe(false);
+  });
+
+  // Regression: reset() used to clear the ticket map, so a read already in flight kept the ticket
+  // the refresh then handed the replacement request — the stale response landed last and won.
+  it("keeps the refreshed root when a pre-refresh read was still in flight", async () => {
+    const b = makeBrowser();
+    let settleOld!: (v: unknown) => void;
+    let settleFresh!: (v: unknown) => void;
+    tree.mockReturnValueOnce(new Promise((r) => (settleOld = r)));
+    const old = b.load(""); // the root read that is in flight when refresh is clicked
+
+    tree.mockReturnValueOnce(new Promise((r) => (settleFresh = r)));
+    b.reset(); // invalidation + a fresh root read
+
+    settleFresh(listing("fresh.ts"));
+    await flushPromises();
+    settleOld(listing("stale.ts")); // lands after the refresh, must be dropped
+    await flushPromises();
+    await old;
+
+    expect(b.dirs.get("")?.entries.map((e) => e.name)).toEqual(["fresh.ts"]);
   });
 
   it("revealPath expands and loads every folder down to a FILE, but not the file itself", async () => {

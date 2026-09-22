@@ -236,15 +236,19 @@ onBeforeUnmount(() => {
        open, matching MonacoDiffViewer. -->
   <div
     ref="host"
-    class="h-full w-full transition-opacity duration-150 ease-out"
+    class="dirty-gutter-host h-full w-full transition-opacity duration-150 ease-out"
     :class="ready ? 'opacity-100' : 'opacity-0'"
   />
 </template>
 
 <style scoped>
 /* color tokens - lifted from raw literals by Odin's fix_color_tokens.py (2026-09-14); the Architect's
-   color-scheme-conformance check wants every color consumed through the token layer. */
-:root {
+   color-scheme-conformance check wants every color consumed through the token layer.
+   These live on the editor host, not `:root`: inside `<style scoped>` a `:root` selector compiles to
+   `:root[data-v-…]`, which never matches <html>, so the `var()`s below resolved to nothing and no
+   gutter marker was ever painted. Monaco creates the decoration nodes inside `.dirty-gutter-host`
+   (the div bound to `ref="host"`), so they inherit the values from there. */
+.dirty-gutter-host {
   --color-3fb950: #3fb950;
   --color-58a6ff: #58a6ff;
   --color-f85149: #f85149;

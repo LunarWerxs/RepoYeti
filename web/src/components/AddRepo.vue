@@ -80,7 +80,8 @@ watch(open, (isOpen) => {
     // A hand-off to the Scan modal is a detour, not a dismissal — keep the form for the trip back.
     resetForm();
   }
-  handingOffToScan = false;
+  // `handingOffToScan` deliberately outlives this close: the detour has not resolved yet. The scan
+  // watcher below clears it once we know which way the owner left the Scan modal.
 });
 watch(
   () => store.roots,
@@ -111,7 +112,10 @@ watch(
 watch(
   () => store.servers,
   (ss) => {
-    if (!loreServerUrl.value && ss.length) loreServerUrl.value = ss[0]!.url;
+    // Derive from the list like the Buzz watcher above: only topping up an empty selection let a
+    // server deleted in Settings linger as `loreServerUrl`, so the lore tab submitted a URL the
+    // owner had removed (or, with none left, claimed there were none while still cloning from one).
+    if (!ss.some((s) => s.url === loreServerUrl.value)) loreServerUrl.value = ss[0]?.url ?? "";
   },
   { immediate: true },
 );
@@ -146,6 +150,19 @@ function openScan(): void {
   store.scanReturnToAdd = true;
   store.scanOpen = true;
 }
+
+// Which way the hand-off ended. `back()` returns to this dialog (store.addRepoOpen) and keeps the
+// form; the Scan modal's X/Close, or its own Escape/overlay dismissal, abandons the flow — reset
+// then, because the close watcher above skipped resetForm for the detour and would otherwise leave
+// the half-filled form to resurface on the next unrelated open.
+watch(
+  () => store.scanOpen,
+  (isScanOpen) => {
+    if (isScanOpen || !handingOffToScan) return;
+    handingOffToScan = false;
+    if (!store.addRepoOpen) resetForm();
+  },
+);
 
 function buzzCloneUrl(): string {
   return buildBuzzCloneUrl(buzzCommunityUrl.value, buzzRepoPath.value);

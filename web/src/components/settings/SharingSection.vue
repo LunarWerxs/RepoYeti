@@ -352,8 +352,11 @@ async function inspectInvite(): Promise<void> {
   invitePreview.value = null;
   try {
     invitePreview.value = await api.inspectCollaboration(inviteUrl.value.trim());
-    localRepoId.value ||= store.repos[0]?.id ?? "";
-    remoteRepoId.value ||= invitePreview.value.repos[0]?.id ?? "";
+    localRepoId.value ||= store.repos[0]?.id ?? ""; // the owner's own pick is not invite-specific
+    // Assign unconditionally: `||=` preserved a stale pick from a previously inspected invite, so
+    // inspecting invite B kept invite A's remote repo id — the <select> then had no matching <option>
+    // and Join posted an id the server rejects as not covered by this invitation.
+    remoteRepoId.value = invitePreview.value.repos[0]?.id ?? "";
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : t("collaboration.inspectFailed"));
   } finally {

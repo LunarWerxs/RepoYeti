@@ -212,6 +212,22 @@ const canEdit = computed(() => {
   return diffEditable.value && props.target?.status !== "D";
 });
 
+// WHY this exists: `showEditControls` only says the viewer is in an editable SHAPE (a content/diff
+// text view), while `canEdit` also rejects truncated/binary/error/HEAD-fallback files and a tunnel
+// session with remote editing switched off. Rendering the Edit item on `showEditControls` alone
+// left a fully enabled-looking Edit whose `startEdit()` returned on its first line — it read as a
+// dead button. Same for Save when `canEdit` flips false mid-edit (the owner turns remote editing
+// off from another device): the button stayed clickable but `save()` bailed silently. So the two
+// controls below are gated on `canEdit` and carry this reason as their title, per the promise made
+// on the edit-mode comment above ("disable Edit up front with a clear reason").
+const editBlockedReason = computed<string | null>(() => {
+  if (canEdit.value) return null;
+  if (remoteEditBlocked.value) return t("fileViewer.editBlockedRemote");
+  if (truncated.value) return t("fileViewer.editBlockedTruncated");
+  if (fromHead.value) return t("fileViewer.editBlockedDeleted");
+  return t("fileViewer.editBlocked");
+});
+
 /** The loaded (unedited) source for whichever tab is currently editable. */
 const editableSource = computed(() => (viewerMode.value === "content" ? content.value : modified.value));
 
@@ -563,7 +579,8 @@ onBeforeUnmount(() => {
         </button>
         <button
           type="button"
-          :disabled="!dirty || saving"
+          :disabled="!dirty || saving || !canEdit"
+          :title="editBlockedReason ?? undefined"
           :class="
             cn(
               'flex h-[26px] shrink-0 items-center gap-1 rounded-md border px-2 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40',
@@ -610,7 +627,12 @@ onBeforeUnmount(() => {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" class="max-w-52">
-                <DropdownMenuItem v-if="showEditControls && !store.isGuest" @select="startEdit">
+                <DropdownMenuItem
+                  v-if="showEditControls && !store.isGuest"
+                  :disabled="!canEdit"
+                  :title="editBlockedReason ?? undefined"
+                  @select="startEdit"
+                >
                   <Pencil :size="14" />
                   {{ $t("fileViewer.edit") }}
                 </DropdownMenuItem>

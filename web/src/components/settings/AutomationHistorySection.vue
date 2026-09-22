@@ -149,8 +149,39 @@ function repoDetailBits(repo: AutomationRunRepo): string[] {
 // ── per-run detail: lazy + cached by id, including a null "not kept anymore" result — never
 //    re-fetched once settled ───────────────────────────────────────────────────────────────
 const expandedRunId = ref<string | null>(null);
-const detailCache = reactive<Record<string, { run: AutomationRun; repos: AutomationRunRepo[] } | null>>({});
+// `at` is the run's endedAt as of the fetch: a round cached while still in flight (at === null) is
+// considered stale the moment it settles, because the daemon was still appending repo rows to it.
+const detailCache = reactive<
+  Record<string, { run: AutomationRun; repos: AutomationRunRepo[]; at: number | null } | null>
+>({});
 const detailLoading = reactive<Record<string, boolean>>({});
+// A real server error (5xx/gateway/auth) on the detail fetch, kept apart from the cached null
+// "past the row cap" answer so a transient fault is not shown as "no longer kept".
+const detailError = reactive<Record<string, boolean>>({});
+
+/** The run list's own endedAt for a run, which only turns non-null once the round has settled. */
+function runEndedAt(id: string): number | null {
+  return store.automationRuns.find((run) => run.id === id)?.endedAt ?? null;
+}
+
+async function fetchDetail(id: string): Promise<void> {
+  detailLoading[id] = true;
+  try {
+    const detail = await store.loadAutomationRunDetail(id);
+    detailCache[id] = detail ? { ...detail, at: runEndedAt(id) } : null;
+    detailError[id] = false;
+  } catch (e) {
+    // An ApiError is a real server response (the store already turns the 404 cap into null), so a
+    // 5xx/gateway failure is transient: leave it retryable rather than caching the terminal "not
+    // kept anymore" answer. A below-HTTP failure (offline, non-JSON body) keeps that fallback, so
+    // the expansion shows that text instead of staying blank - and the rejection is swallowed so
+    // it does not escape the click handler as an unhandled one.
+    if (e instanceof ApiError) detailError[id] = true;
+    else detailCache[id] = null;
+  } finally {
+    detailLoading[id] = false;
+  }
+}
 
 async function toggleRun(id: string): Promise<void> {
   if (expandedRunId.value === id) {
@@ -158,14 +189,25 @@ async function toggleRun(id: string): Promise<void> {
     return;
   }
   expandedRunId.value = id;
-  if (id in detailCache) return;
-  detailLoading[id] = true;
-  try {
-    detailCache[id] = await store.loadAutomationRunDetail(id);
-  } finally {
-    detailLoading[id] = false;
-  }
+  const cached = detailCache[id];
+  // Re-fetch only a run we have no detail for, or one whose cached copy was taken mid-round
+  // (at === null) and whose endedAt has since arrived.
+  if (cached !== undefined && (cached === null || cached.at === runEndedAt(id))) return;
+  await fetchDetail(id);
 }
+
+// A round expanded while it was still running was cached from the partial repo list the daemon had
+// at tap time. It settles in place under the same id (store/automation-runs.ts), so refetch it the
+// moment its endedAt arrives - otherwise the open panel keeps showing only the repos processed then.
+watch(
+  () => store.automationRuns,
+  () => {
+    const id = expandedRunId.value;
+    if (!id) return;
+    const cached = detailCache[id];
+    if (cached !== undefined && cached !== null && cached.at !== runEndedAt(id)) void fetchDetail(id);
+  },
+);
 </script>
 
 <template>
@@ -251,6 +293,9 @@ async function toggleRun(id: string): Promise<void> {
             <div class="border-t border-border/60 bg-secondary/20 px-3.5 py-2.5">
               <p v-if="detailLoading[run.id]" class="text-[11.5px] text-muted-foreground">
                 {{ $t("settings.automationHistoryLoading") }}
+              </p>
+              <p v-else-if="detailError[run.id]" class="text-[11.5px] text-destructive">
+                {{ $t("settings.automationHistoryDetailFailed") }}
               </p>
               <p v-else-if="detailCache[run.id] === null" class="text-[11.5px] text-muted-foreground">
                 {{ $t("settings.automationHistoryDetailUnavailable") }}

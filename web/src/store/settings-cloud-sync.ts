@@ -19,15 +19,16 @@ export function useSettingsCloudSync(prefs: {
   remoteBrowse: Ref<boolean>;
   diffPatchBytes: Ref<number>;
   diffPatchEnabled: Ref<boolean>;
-  syncCheckEnabled: Ref<boolean>;
   syncIntervalSecs: Ref<number>;
-  keepInSync: Ref<boolean>;
   autoCommitMode: Ref<"interval" | "daily">;
   autoCommitIntervalSecs: Ref<number>;
   autoCommitAt: Ref<string>;
   autoCommitPull: Ref<boolean>;
   autoCommitAiFallback: Ref<"skip" | "basic">;
   autoScan: Ref<boolean>;
+  /** The rest of the daemon's PREF_KEYS the dashboard can change (editor, tray, update notices,
+   *  approval timeouts, the Lore section). Watched only; nothing here reads their values. */
+  alsoSynced?: Ref<unknown>[];
 }) {
   const {
     diffStatsEnabled,
@@ -37,9 +38,7 @@ export function useSettingsCloudSync(prefs: {
     remoteBrowse,
     diffPatchBytes,
     diffPatchEnabled,
-    syncCheckEnabled,
     syncIntervalSecs,
-    keepInSync,
     autoCommitMode,
     autoCommitIntervalSecs,
     autoCommitAt,
@@ -49,6 +48,12 @@ export function useSettingsCloudSync(prefs: {
   } = prefs;
 
   const { mode: themeMode, setTheme } = useTheme();
+
+  // The theme mode we last applied from a synced appearance blob. The theme watcher below runs
+  // async (Vue's pre-flush queue), so a flag set around absorbSyncStatus() would already be reset
+  // by the time the watcher sees the change; instead remember the applied value and have the
+  // watcher swallow exactly that one echo.
+  let appliedRemoteTheme: ThemeMode | null = null;
 
   const syncStatus = ref<SyncStatus>({
     ok: true,
@@ -73,7 +78,10 @@ export function useSettingsCloudSync(prefs: {
   function applyAppearance(appearance: Record<string, unknown> | null | undefined): void {
     if (!appearance) return;
     const theme = appearance.theme;
-    if (theme === "light" || theme === "dark" || theme === "system") setTheme(theme as ThemeMode);
+    if (theme === "light" || theme === "dark" || theme === "system") {
+      appliedRemoteTheme = theme as ThemeMode;
+      setTheme(theme as ThemeMode);
+    }
   }
 
   /** Adopt a fresh status from the daemon: update the ref, clear any error, and apply appearance. */
@@ -180,10 +188,16 @@ export function useSettingsCloudSync(prefs: {
 
   // When the owner changes theme locally AND sync is enabled+connected, debounce and push the
   // new appearance so other devices pick it up. Debounced so rapid theme toggling doesn't spam
-  // the daemon; skipped entirely while sync is off/disconnected or a status load is in flight
-  // (avoids echoing a just-applied pulled appearance straight back out).
+  // the daemon; skipped entirely while sync is off/disconnected or a status load is in flight.
+  // A theme change that applyAppearance() just made from a synced blob is the echo of an
+  // appearance the daemon already stores — pushing it back is a redundant write, so swallow it.
   let pushAppearanceTimer: ReturnType<typeof setTimeout> | undefined;
-  watch(themeMode, () => {
+  watch(themeMode, (next) => {
+    if (appliedRemoteTheme !== null) {
+      const echo = next === appliedRemoteTheme;
+      appliedRemoteTheme = null;
+      if (echo) return;
+    }
     if (!syncStatus.value.enabled || !syncStatus.value.connected || syncLoading.value) return;
     clearTimeout(pushAppearanceTimer);
     pushAppearanceTimer = setTimeout(() => {
@@ -192,7 +206,11 @@ export function useSettingsCloudSync(prefs: {
   });
 
   // When the owner changes any allowlisted synced pref (src/connections-sync.ts PREF_KEYS) locally
-  // AND sync is enabled+connected, debounce and push so other devices pick it up — mirrors the
+  // AND sync is enabled+connected, debounce and push so other devices pick it up. The list must
+  // MIRROR PREF_KEYS: it had drifted to two keys the daemon deliberately never syncs (syncCheck,
+  // keepInSync: a machine arms background pulls only by its own consent) while missing the nine
+  // added on 2026-08-25, so a change to the default editor, the tray icon or an approval timeout
+  // stayed on this machine until someone pressed Sync now. — mirrors the
   // theme watcher above (same guards, same 800ms debounce). A plain `syncPush()` is enough: the
   // daemon's pushNow() always collects the *current* cfg's PREF_KEYS, so there's nothing to pass
   // from here. Best-effort like pushAppearance — silent on failure, the next explicit action retries.
@@ -206,15 +224,14 @@ export function useSettingsCloudSync(prefs: {
       remoteBrowse,
       diffPatchBytes,
       diffPatchEnabled,
-      syncCheckEnabled,
       syncIntervalSecs,
-      keepInSync,
       autoCommitMode,
       autoCommitIntervalSecs,
       autoCommitAt,
       autoCommitPull,
       autoCommitAiFallback,
       autoScan,
+      ...(prefs.alsoSynced ?? []),
     ],
     () => {
       // NOT connected is the interesting case for the nudge, and it is the branch the push path

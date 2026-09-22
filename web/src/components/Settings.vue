@@ -38,11 +38,12 @@ const ExperimentalServersSection = defineAsyncComponent(
 
 const open = defineModel<boolean>("open", { required: true });
 const props = withDefaults(
-  defineProps<{ side?: PushPanelSide; rightOffsetPx?: number; targetTab?: string | null }>(),
+  defineProps<{ side?: PushPanelSide; rightOffsetPx?: number; targetTab?: string | null; navSeq?: number }>(),
   {
     side: "right",
     rightOffsetPx: 0,
     targetTab: null,
+    navSeq: 0,
   },
 );
 
@@ -93,12 +94,25 @@ watch(
   // Also handles a Settings instance first mounted already open (component tests/embedders).
   { immediate: true },
 );
-// Handle a deep-link that arrives while the panel is ALREADY open (open didn't transition).
+// Handle a deep-link that arrives while the panel is ALREADY open (open didn't transition). AppShell
+// bumps `navSeq` on every request, so a second deep-link to the SAME tab still retargets below.
 watch(
   () => props.targetTab,
   (t) => {
     const target = asTab(t);
     if (open.value && target) tab.value = target;
+  },
+);
+// A deep-link can name the tab the panel is ALREADY on, or the user deep-linked once and then
+// flipped to another tab before a second notification for that same tab arrives. In both cases
+// `targetTab` does not change, so the watcher above never fires; the shell bumps `navSeq` on every
+// request, so retarget whenever that moves even when the requested tab is identical.
+watch(
+  () => props.navSeq,
+  () => {
+    if (!open.value) return;
+    const target = asTab(props.targetTab);
+    if (target) tab.value = target;
   },
 );
 </script>

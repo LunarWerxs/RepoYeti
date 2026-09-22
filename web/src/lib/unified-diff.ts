@@ -29,7 +29,9 @@ export const MAX_MODELS_CELLS = 500_000;
  *  blank last line. Empty string → no lines (an added file's empty original, etc.). */
 function splitLines(s: string): string[] {
   if (s === "") return [];
-  return s.replace(/\n$/, "").split(/\r?\n/);
+  // Strip the terminator as a unit: `/\n$/` left the CR of a CRLF file attached to the last line,
+  // so the final row carried a stray "\r" that the whitespace-pre viewer printed verbatim.
+  return s.replace(/\r?\n$/, "").split(/\r?\n/);
 }
 
 /**
@@ -39,26 +41,27 @@ function splitLines(s: string): string[] {
  */
 export function parsePatch(patch: string): DiffRow[] {
   const rows: DiffRow[] = [];
+  // Header lines are only headers before the first hunk. Once inside a hunk a deletion of "-- note"
+  // is emitted as "-- note" prefixed by "-" → "--- note", which the old always-on "--- " filter
+  // silently swallowed (same for an addition "++ x" → "+++ x"); so track hunk state instead.
+  let inHunk = false;
   for (const line of patch.split(/\r?\n/)) {
-    if (
-      line.startsWith("diff --git") ||
-      line.startsWith("index ") ||
-      line.startsWith("--- ") ||
-      line.startsWith("+++ ") ||
-      line.startsWith("new file mode") ||
-      line.startsWith("deleted file mode") ||
-      line.startsWith("old mode") ||
-      line.startsWith("new mode") ||
-      line.startsWith("similarity index") ||
-      line.startsWith("rename from") ||
-      line.startsWith("rename to") ||
-      line.startsWith("\\") // "\ No newline at end of file"
-    ) {
+    if (line.startsWith("diff --git")) {
+      inHunk = false; // a new file's headers follow
       continue;
     }
-    if (line.startsWith("@@")) rows.push({ kind: "meta", text: line });
-    else if (line.startsWith("Binary files")) rows.push({ kind: "meta", text: line });
-    else if (line.startsWith("+")) rows.push({ kind: "add", text: line.slice(1) });
+    if (line.startsWith("@@")) {
+      inHunk = true;
+      rows.push({ kind: "meta", text: line });
+      continue;
+    }
+    if (line.startsWith("Binary files")) {
+      rows.push({ kind: "meta", text: line });
+      continue;
+    }
+    if (!inHunk) continue; // file header / index / rename noise
+    if (line.startsWith("\\")) continue; // "\ No newline at end of file"
+    if (line.startsWith("+")) rows.push({ kind: "add", text: line.slice(1) });
     else if (line.startsWith("-")) rows.push({ kind: "del", text: line.slice(1) });
     else if (line.startsWith(" ")) rows.push({ kind: "ctx", text: line.slice(1) });
     // anything else (stray blank line between files, etc.) is ignored

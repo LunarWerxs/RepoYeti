@@ -97,4 +97,35 @@ describe("IdentityManager.vue", () => {
     ]);
     expect(createSpy).not.toHaveBeenCalled();
   });
+
+  it("keeps focus in the field being typed in while editing an identity inline", async () => {
+    // The inline panel focused its first field from a `:ref` callback, which Vue re-runs on every
+    // render, so each keystroke in a later field yanked focus back to the display name.
+    const store = useStore();
+    store.identities.push({
+      id: "id-1",
+      displayName: "Work",
+      gitUsername: "me",
+      gitEmail: "me@work.example",
+      sshKeyPath: null,
+    } as never);
+    const wrapper = mountManager();
+    await wrapper.vm.$nextTick();
+    const edit = wrapper.findAll("button").find((b) => b.attributes("aria-label") === "edit");
+    expect(edit).toBeTruthy();
+    await edit!.trigger("click");
+    await new Promise((r) => setTimeout(r, 0));
+
+    const inputs = wrapper.findAll('[data-inline-panel="id-1"] input[data-slot="input"]');
+    expect(inputs.length).toBeGreaterThanOrEqual(3);
+    expect(document.activeElement).toBe(inputs[0]!.element); // opening focuses the first field
+
+    const email = inputs[2]!.element as HTMLInputElement;
+    email.focus();
+    for (const ch of "abc") {
+      await inputs[2]!.setValue(email.value + ch);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(document.activeElement).toBe(email);
+    }
+  });
 });

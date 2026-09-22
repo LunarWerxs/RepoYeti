@@ -76,8 +76,14 @@ watch(showRemote, (open) => {
 // notification → the Automation tab where AI providers live); cleared when the panel closes so a
 // later plain open lands on General again.
 const settingsTab = ref<string | null>(null);
+// Bumped on every onSettings request. The tab string alone can't signal a second deep-link to the
+// SAME tab (e.g. a repeat AI-key notification arrives after the user flipped to another tab): the
+// value is unchanged and the panel is already open, so neither watcher in Settings fires. This
+// monotonic stamp gives Settings something to react to regardless of the requested tab.
+const settingsNavSeq = ref(0);
 function onSettings(mode: "toggle" | "open", tab?: string): void {
   settingsTab.value = tab ?? null;
+  settingsNavSeq.value += 1;
   showSettings.value = mode === "open" ? true : !showSettings.value;
 }
 
@@ -228,7 +234,7 @@ onBeforeUnmount(() => {
 
     <AddRepo v-model:open="store.addRepoOpen" />
     <ScanProjects v-model:open="store.scanOpen" />
-    <Settings v-model:open="showSettings" :side="settingsSide" :right-offset-px="pageShiftPx" :target-tab="settingsTab" />
+    <Settings v-model:open="showSettings" :side="settingsSide" :right-offset-px="pageShiftPx" :target-tab="settingsTab" :nav-seq="settingsNavSeq" />
     <!-- "I want to share ONE repo, not my whole dashboard" — the remote modal hands off to
          Settings → Access, where share links live. -->
     <RemoteAccess v-model:open="showRemote" @share-links="onSettings('open', 'access')" />

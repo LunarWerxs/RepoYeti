@@ -126,6 +126,11 @@ export function useAutomationRuns() {
   const runs = ref<AutomationRun[]>([]);
   const runsReady = ref(false);
   const runsLoading = ref(false);
+  // Whether the history list was successfully fetched. `runsReady` only gates the panel's loading
+  // line and is set even when the request FAILED (so the panel stops spinning and reads the empty
+  // list), so the "prepend only into a list that was actually loaded" rule keys off this instead -
+  // otherwise a failed load would gain one fabricated run out of a history it never fetched.
+  const runsLoaded = ref(false);
 
   function defaultActiveRounds(): { auto_commit: AutomationRoundState; sync_check: AutomationRoundState } {
     return {
@@ -143,15 +148,27 @@ export function useAutomationRuns() {
   async function loadAutomationRuns(): Promise<void> {
     if (runsLoading.value) return;
     runsLoading.value = true;
+    // Snapshot what this kind is watching BEFORE the round-trip, so a run (re)established while the
+    // request was in flight is detected below and never overwritten by the stale reply.
+    const liveBefore = {
+      auto_commit: liveRuns.value.auto_commit?.runId ?? null,
+      sync_check: liveRuns.value.sync_check?.runId ?? null,
+    };
     try {
       const r = await api.automation.runs({ limit: 100 });
       runs.value = r.runs;
-      activeRounds.value = { auto_commit: r.active.autoCommit, sync_check: r.active.syncCheck };
-      // Adopt any round that is already in flight. Without this, a panel opened mid-round shows
-      // "running" and then silently drops every progress event that follows, because the straggler
-      // guard below has no live run to match them against. A run row with a null outcome is the
-      // only thing that says "still going" - endedAt is null for an interrupted run too.
+      runsLoaded.value = true;
       for (const kind of ["auto_commit", "sync_check"] as const) {
+        // A round that started while this request was in flight: the server snapshotted the reply
+        // BEFORE that run existed, so it has no in-flight row and reports `running: false`. Writing
+        // that over the live state would drop every progress event for the rest of the round (the
+        // straggler guard below has nothing left to match them against), so the live state wins.
+        if ((liveRuns.value[kind]?.runId ?? null) !== liveBefore[kind]) continue;
+        activeRounds.value[kind] = kind === "auto_commit" ? r.active.autoCommit : r.active.syncCheck;
+        // Adopt any round that is already in flight. Without this, a panel opened mid-round shows
+        // "running" and then silently drops every progress event that follows, because the straggler
+        // guard below has no live run to match them against. A run row with a null outcome is the
+        // only thing that says "still going" - endedAt is null for an interrupted run too.
         const inFlight = r.runs.find((run) => run.kind === kind && run.outcome === null);
         liveRuns.value[kind] = inFlight
           ? {
@@ -166,6 +183,11 @@ export function useAutomationRuns() {
     } catch {
       runs.value = [];
       activeRounds.value = defaultActiveRounds();
+      // A failed load knows nothing about what is live, so drop any stale live run too instead of
+      // leaving one claiming to be running next to a reset `activeRounds` (and, since `runsLoaded`
+      // stays false, a later terminal event will not fabricate a row into the emptied list).
+      liveRuns.value = { auto_commit: null, sync_check: null };
+      runsLoaded.value = false;
     } finally {
       runsReady.value = true;
       runsLoading.value = false;
@@ -180,7 +202,11 @@ export function useAutomationRuns() {
     try {
       return await api.automation.run(id);
     } catch (e) {
-      if (e instanceof ApiError) return null;
+      // null means exactly one thing: the run is past the row cap (the route's NOT_FOUND, its only
+      // 404). Any OTHER ApiError - a 500 from the query, a 502/504 from the tunnel, an auth
+      // failure - is a transient fault, not "gone", so let it propagate for the caller to surface
+      // instead of masquerading as a cap hit.
+      if (e instanceof ApiError && e.status === 404) return null;
       throw e;
     }
   }
@@ -194,7 +220,12 @@ export function useAutomationRuns() {
   async function cancelAutomationRound(kind: AutomationRunKind): Promise<void> {
     activeRounds.value[kind] = { ...activeRounds.value[kind], cancelling: true };
     try {
-      await api.automation.cancel(kind);
+      const { cancelled } = await api.automation.cancel(kind);
+      // `cancelled: false` is a successful "no round was in flight" answer, not an error
+      // (src/http/routes/automation.ts). No terminal SSE will ever arrive for a round that never
+      // existed, so clearing the optimistic flags here is the only thing that unsticks the Stop
+      // button - otherwise it reads "Stopping" and stays disabled until the next round starts.
+      if (!cancelled) activeRounds.value[kind] = { running: false, cancelling: false };
     } catch (e) {
       activeRounds.value[kind] = { ...activeRounds.value[kind], cancelling: false };
       throw e;
@@ -213,8 +244,9 @@ export function useAutomationRuns() {
    *     is ignored - except `_started`, which always adopts: it DEFINES the new live run.
    *   - A terminal event (`_done`/`_cancelled`) clears that kind's live run and its optimistic
    *     `cancelling` flag, and prepends a synthesized `AutomationRun` to `runs` so an open history
-   *     list updates without a refetch - but only when `runsReady` is true; a list nobody has
-   *     loaded stays empty rather than silently gaining one row out of a history it never fetched.
+   *     list updates without a refetch - but only when `runsLoaded` is true; a list nobody has
+   *     loaded (or whose load failed) stays empty rather than silently gaining one row out of a
+   *     history it never fetched.
    *   - `automation_run_started` sets that kind's live run and `activeRounds[kind].running = true`;
    *     a terminal event sets it back to false.
    */
@@ -242,7 +274,7 @@ export function useAutomationRuns() {
     liveRuns.value[kind] = null;
     activeRounds.value[kind] = { running: false, cancelling: false };
 
-    if (!runsReady.value) return; // nobody has loaded the history list — nothing to prepend into
+    if (!runsLoaded.value) return; // nobody has loaded the history list — nothing to prepend into
     runs.value = settleRunRow(runs.value, synthesizedTerminalRun(fields, kind, runId, eventName));
   }
 

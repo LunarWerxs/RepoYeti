@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, computed, nextTick, useTemplateRef } from "vue";
+import { reactive, ref, computed, nextTick, useTemplateRef, watch } from "vue";
 import { Plus, Pencil, Trash2, KeyRound, Save, X, Check, Users, RefreshCw } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useI18n } from "vue-i18n";
@@ -35,6 +35,7 @@ const showForm = ref(false);
 const saving = ref(false);
 const confirmId = ref<string | null>(null);
 const formEl = useTemplateRef<HTMLElement>("formEl");
+const rootEl = useTemplateRef<HTMLElement>("rootEl");
 const form = reactive({ displayName: "", gitUsername: "", gitEmail: "", sshKeyPath: "" });
 
 const formTitle = computed(() => (editingId.value ? t("identity.form.titleEdit") : t("identity.form.titleNew")));
@@ -74,10 +75,17 @@ async function revealForm(): Promise<void> {
   formEl.value?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
   formEl.value?.querySelector<HTMLInputElement>('[data-slot="input"]')?.focus();
 }
-/** Focus the first field of a just-opened INLINE row panel (already in view, so no scroll). */
-async function focusInline(rowEl: HTMLElement | null): Promise<void> {
+/**
+ * Focus the first field of a just-opened INLINE row panel (already in view, so no scroll). Called
+ * once, from openEdit. It used to be the panel's `:ref` callback, and Vue calls an inline function
+ * ref again on EVERY render: each keystroke in the username, email or key field re-rendered the
+ * row and pulled focus back to the display-name field, so those fields took one character at a time.
+ */
+async function focusInline(id: string): Promise<void> {
   await nextTick();
-  rowEl?.querySelector<HTMLInputElement>('[data-slot="input"]')?.focus();
+  rootEl.value
+    ?.querySelector<HTMLInputElement>(`[data-inline-panel="${CSS.escape(id)}"] [data-slot="input"]`)
+    ?.focus();
 }
 function openNew(): void {
   editingId.value = null;
@@ -97,6 +105,7 @@ function openEdit(i: Identity): void {
   form.gitUsername = i.gitUsername;
   form.gitEmail = i.gitEmail;
   form.sshKeyPath = i.sshKeyPath ?? "";
+  void focusInline(i.id);
 }
 function useDetected(i: DetectedIdentity): void {
   editingId.value = null;
@@ -113,6 +122,15 @@ function cancel(): void {
 }
 // Whether the "hidden" (dismissed-but-still-detected) list is expanded for review.
 const showDismissed = ref(false);
+// The expand state must not outlive the list it describes. It used to, so restoring every hidden
+// suggestion (which empties the list and hides the toggle) left showDismissed true, and the next
+// dismissal — which re-showed the toggle — silently auto-opened the panel the user had never reopened.
+watch(
+  () => store.dismissedDetectedIdentities.length,
+  (count) => {
+    if (count === 0) showDismissed.value = false;
+  },
+);
 
 /** Hide a detected suggestion — detection re-reads the machine, so this is the only way to make an
  *  unwanted one (or one whose saved copy you deleted) stop coming back. Offers a temporary Undo. */
@@ -191,7 +209,7 @@ async function remove(id: string): Promise<void> {
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5">
+  <div ref="rootEl" class="flex flex-col gap-1.5">
     <!-- Plural key: this is the multi-identity MANAGER (identitiesRelevant), while the singular
          `identity.title` heads the one-row opt-in group in IdentitiesSection. -->
     <SettingsGroup :label="$t('identity.titlePlural')" :description="$t('identity.description')">
@@ -409,7 +427,7 @@ async function remove(id: string): Promise<void> {
 
             <!-- inline edit panel (accordion, one row open at a time) -->
             <ExpandTransition :open="editingId === i.id">
-              <div :ref="(el) => focusInline(el as HTMLElement | null)" class="border-t border-border/60 p-3.5">
+              <div :data-inline-panel="i.id" class="border-t border-border/60 p-3.5">
                 <div class="flex flex-col gap-3">
                   <label class="block">
                     <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.displayName") }}</span>

@@ -18,6 +18,10 @@
     "truncated": "Large file: showing a truncated preview",
     "compactDiff": "Large file: showing a compact diff",
     "edit": "Edit",
+    "editBlocked": "This file can't be edited here.",
+    "editBlockedRemote": "Editing over the remote connection is turned off in Settings.",
+    "editBlockedTruncated": "This file is too large to edit safely here.",
+    "editBlockedDeleted": "This file was deleted; there is nothing on disk to edit.",
     "cancel": "Cancel",
     "save": "Save",
     "saving": "Saving…",
@@ -90,6 +94,7 @@
     "linkLabel": "Commit identity",
     "linkNone": "Don't change author",
     "linkNotSet": "Not set",
+    "linkLinked": "Linked",
     "linkToggle": "Show commit-identity picker",
     "refresh": "Refresh accounts",
     "switch": "Switch",
@@ -725,13 +730,19 @@
       "tagPush": "Push to origin",
       "tagCreated": "Tag created",
       "tagFailed": "Couldn't create the tag",
+      "tagPushOne": "Push",
+      "tagPushTitle": "Push {name} to origin",
+      "tagPushed": "Tag pushed",
+      "tagPushFailed": "Couldn't push the tag",
+      "tagRetryPush": "Retry push",
       "open": "Remote & tags"
     },
     "expand": "Expand",
     "identity": {
       "dropdownLabel": "Git identity for this repo",
       "noIdentity": "No identity",
-      "setTitle": "Set git identity"
+      "setTitle": "Set git identity",
+      "assignFailed": "Could not change the git identity for this repository"
     },
     "syncAccount": {
       "dropdownLabel": "GitHub account to sync this repo as",
@@ -740,7 +751,8 @@
       "fromRemote": "from this repo's remote",
       "fromPermission": "from GitHub permissions",
       "machineDefault": "Automatic",
-      "setTitle": "Choose the GitHub account this repo syncs as"
+      "setTitle": "Choose the GitHub account this repo syncs as",
+      "assignFailed": "Could not change the sync account for this repository"
     },
     "rename": {
       "action": "Rename",
@@ -899,7 +911,10 @@
     "updateReview": "Review update",
     "updateApplied": "Update installed",
     "updateRestarting": "Restart to finish — the badge on the Version row does it.",
-    "updateFailed": "Couldn't install the update"
+    "updateFailed": "Couldn't install the update",
+    "updateCopyLog": "Copy build log",
+    "updateLogCopied": "Build log copied",
+    "updateLogCopyFailed": "Couldn't copy it here. The same build log is in the RepoYeti log file."
   },
   "scan": {
     "title": "Scan for projects",
@@ -1193,6 +1208,7 @@
     "autoCommitIncidentAck": "Acknowledge",
     "autoCommitIncidentAckFailed": "Could not acknowledge that incident",
     "automationHistoryTitle": "Automation history",
+    "automationHistoryDetailFailed": "Couldn't load this run's details.",
     "automationHistoryHint": "What the auto-commit and sync-check loops actually did while nobody was watching the dashboard, including rounds that did nothing.",
     "automationHistoryKindAutoCommit": "Auto-commit",
     "automationHistoryKindSyncCheck": "Sync check",

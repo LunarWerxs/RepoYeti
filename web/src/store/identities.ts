@@ -118,18 +118,27 @@ export function useIdentities(repos: Ref<Repo[]>) {
   // ── ⭐ Identity Firewall — rules pinning a required identity to a repo-path glob ──────
   const identityRules = ref<IdentityRule[]>([]);
   const identityRulesReady = ref(false);
+  // A failed rules GET used to look identical to "the daemon has no rules": it blanked the list
+  // and marked itself ready. Consumers then seeded the editor from that blank list and its
+  // whole-list PUT (setIdentityRules) silently replaced the rules still persisted on the daemon.
+  // Track the load's outcome separately so the two states can't be conflated.
+  const identityRulesError = ref(false);
   async function loadIdentityRules(): Promise<void> {
     try {
       identityRules.value = await api.identityRules();
-    } catch {
-      identityRules.value = [];
-    } finally {
+      identityRulesError.value = false;
       identityRulesReady.value = true;
+    } catch {
+      // Leave identityRules untouched (last known / initial) and ready false — an error is NOT
+      // an empty list, and seeding/Saving against this unknown state is what dropped saved rules.
+      identityRulesError.value = true;
     }
   }
   /** Replace the full rule list. Throws ApiError (NOT_FOUND) → the caller toasts; adopts the
-   *  server's persisted list on success. */
+   *  server's persisted list on success. Refuses while the last load failed: this PUT replaces
+   *  the *whole* list, so saving over state we never read would drop every persisted rule. */
   async function setIdentityRules(rules: IdentityRule[]): Promise<void> {
+    if (identityRulesError.value) throw new Error("identity rules not loaded");
     identityRules.value = await api.setIdentityRules(rules);
   }
 
@@ -202,6 +211,7 @@ export function useIdentities(repos: Ref<Repo[]>) {
     restoreDetectedIdentities,
     identityRules,
     identityRulesReady,
+    identityRulesError,
     loadIdentityRules,
     setIdentityRules,
     ghAvailable,

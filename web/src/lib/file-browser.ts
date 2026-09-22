@@ -126,12 +126,13 @@ function makeApi(repoId?: string): FileBrowserApi {
       }
     },
     reset: () => {
+      // Invalidate every in-flight read by bumping its ticket instead of clearing the map. Clearing
+      // it would rewind a path's counter to 1, which is exactly the ticket a request that is already
+      // in flight is holding — so that stale read would still match at :84/:94 and land after this
+      // refresh, resurrecting the listing we just threw away. Bumping keeps the counters monotonic.
+      for (const p of dirs.keys()) tickets.set(p, (tickets.get(p) ?? 0) + 1);
       dirs.clear();
       open.clear();
-      // Clearing the tickets too is what makes the refresh a real one: a read still in flight now
-      // matches no ticket, so it is dropped instead of landing afterwards and resurrecting a
-      // listing the refresh just threw away.
-      tickets.clear();
       void load("");
     },
     busy: () => {

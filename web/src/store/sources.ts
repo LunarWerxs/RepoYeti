@@ -88,7 +88,15 @@ export function useSources(
   async function cancelScan(): Promise<void> {
     scanCancelRequested.value = true;
     try {
-      await api.cancelScan();
+      const r = await api.cancelScan();
+      // `cancelled: false` means the daemon had no scan to stop, so no `scan_cancelled` event is
+      // coming. Settle locally instead of waiting forever: our `scanning` was stale (e.g. the
+      // terminal frame was lost), and nothing else would ever clear the "Stopping…" spinner.
+      if (!r.cancelled) {
+        scanning.value = false;
+        scanDone.value = true;
+        scanCancelRequested.value = false;
+      }
     } catch (e) {
       scanCancelRequested.value = false;
       throw e;
@@ -231,7 +239,14 @@ export function useSources(
   async function cancelFetchAll(): Promise<void> {
     fetchAllCancelRequested.value = true;
     try {
-      await api.cancelFetchAll();
+      const r = await api.cancelFetchAll();
+      // As in cancelScan: `cancelled: false` means there was no sweep to stop, so the terminal
+      // fetch_all_* event this control is waiting on will never arrive. Settle it locally rather
+      // than leaving "Stopping…" (and the disabled control) stuck on a stale `fetchingAll`.
+      if (!r.cancelled) {
+        fetchingAll.value = false;
+        fetchAllCancelRequested.value = false;
+      }
     } catch (e) {
       fetchAllCancelRequested.value = false;
       throw e;

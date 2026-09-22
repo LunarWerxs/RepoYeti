@@ -170,6 +170,7 @@ const rootEl = useTemplateRef<HTMLElement>("rootEl");
 const compact = ref(true);
 let ro: ResizeObserver | null = null;
 let io: IntersectionObserver | null = null;
+let panelWidth = 0;
 onMounted(() => {
   if (typeof ResizeObserver === "undefined" || !rootEl.value) return;
   ro = new ResizeObserver((entries) => {
@@ -179,6 +180,16 @@ onMounted(() => {
     // subject truncated after a couple of words. 640 keeps Description at ~224px or better, and
     // anything narrower gets the two-line compact rows, which read better at that size anyway.
     if (w > 0) compact.value = w < 640;
+    // A width change also re-wraps the commit-message body: text that fit the 8-line clamp at the
+    // old width can need more lines at the new one. Re-measure, or bodyMaxHeight stays pinned to
+    // the stale (shorter) height while bodyOverflows is still false — the extra lines get clipped
+    // with no fade and no "Show more". Guard on the width so the max-height we set can't feed back
+    // into this observer as a height-only change and loop. nextTick so the re-measure runs against
+    // the post-reflow layout (e.g. after a compact/wide row switch).
+    if (w > 0 && w !== panelWidth) {
+      panelWidth = w;
+      void nextTick(measureBody);
+    }
   });
   ro.observe(rootEl.value);
 });

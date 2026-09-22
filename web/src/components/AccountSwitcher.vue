@@ -28,8 +28,21 @@ const store = useStore();
 // display-only state; nothing to persist). The linked identity's name still shows collapsed
 // so the info isn't lost from view.
 const linkOpen = reactive<Record<string, boolean>>({});
+// The same login can be authenticated on more than one host (github.com + a GHE host), which gh
+// reports as two distinct accounts. Keying this map — and the v-for — by login alone made those
+// rows share one disclosure flag, so opening one row's picker also popped the other's open.
+function accKey(a: GhAccount): string {
+  return `${a.host}/${a.login}`;
+}
 function toggleLink(a: GhAccount): void {
-  linkOpen[a.login] = !linkOpen[a.login];
+  linkOpen[accKey(a)] = !linkOpen[accKey(a)];
+}
+// A link that resolves to no name only means the identities haven't loaded yet — the server
+// clears account links when their identity is deleted, so a set `identityId` is always real.
+// Showing "Not set" there asserted the link was gone and left nothing to reopen the picker with.
+function linkName(a: GhAccount): string {
+  if (!a.identityId) return t("accounts.linkNotSet");
+  return store.identityById[a.identityId]?.displayName ?? t("accounts.linkLinked");
 }
 
 async function switchTo(a: GhAccount): Promise<void> {
@@ -124,27 +137,27 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
             <div v-if="store.identitiesRelevant" class="mt-1.5 flex items-center gap-1.5">
               <span class="shrink-0 text-[11px] text-muted-foreground">{{ $t("accounts.linkLabel") }}:</span>
               <span class="truncate text-[11px] text-foreground/80">
-                {{ a.identityId ? (store.identityById[a.identityId]?.displayName ?? $t("accounts.linkNotSet")) : $t("accounts.linkNotSet") }}
+                {{ linkName(a) }}
               </span>
-              <Tooltip v-if="store.identities.length">
+              <Tooltip v-if="store.identities.length || a.identityId">
                 <TooltipTrigger as-child>
                   <Button
                     variant="ghost"
                     size="icon-sm"
                     class="size-5 shrink-0 text-muted-foreground"
                     :aria-label="$t('accounts.linkToggle')"
-                    :aria-expanded="!!linkOpen[a.login]"
+                    :aria-expanded="!!linkOpen[accKey(a)]"
                     @click="toggleLink(a)"
                   >
                     <Link2 :size="12" />
-                    <ChevronDown :size="10" :class="cn('transition-transform', linkOpen[a.login] && 'rotate-180')" />
+                    <ChevronDown :size="10" :class="cn('transition-transform', linkOpen[accKey(a)] && 'rotate-180')" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{{ $t("accounts.linkToggle") }}</TooltipContent>
               </Tooltip>
               <span v-else class="text-[11px] text-muted-foreground/70">· {{ $t("accounts.linkEmpty") }}</span>
             </div>
-            <ExpandTransition :open="!!linkOpen[a.login] && store.identities.length > 0 && store.identitiesRelevant">
+            <ExpandTransition :open="!!linkOpen[accKey(a)] && (store.identities.length > 0 || !!a.identityId) && store.identitiesRelevant">
               <div class="pt-1.5">
                 <Select
                   :model-value="a.identityId ?? NONE"

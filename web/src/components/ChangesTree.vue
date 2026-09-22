@@ -450,8 +450,9 @@ onBeforeUnmount(() => {
         <!-- leading checkbox column, reserved in-flow on EVERY row kind at EVERY depth so the
              boxes line up in one gutter and disclosing one never reflows the row (the same
              reserve-space convention the file row's chevron spacer already used). Dropped in a
-             read-only tree, which has no selection at all, so the pull preview keeps its indent. -->
-        <span v-if="!readOnly" class="w-3.5 shrink-0" aria-hidden="true" />
+             read-only tree, which has no selection at all, so the pull preview keeps its indent.
+             Also dropped for a view-tier guest, whose selection has no consumer (see below). -->
+        <span v-if="!readOnly && canControl" class="w-3.5 shrink-0" aria-hidden="true" />
         <ChevronRight
           :size="14"
           class="shrink-0 text-muted-foreground/70 transition-transform duration-150"
@@ -468,7 +469,7 @@ onBeforeUnmount(() => {
            whenever anything anywhere in the tree is selected. Nested one indent step per depth, so
            a parent's box sits immediately left of its children's rather than on top of them. -->
       <button
-        v-if="!readOnly && files.length"
+        v-if="!readOnly && canControl && files.length"
         type="button"
         role="checkbox"
         tabindex="-1"
@@ -553,7 +554,7 @@ onBeforeUnmount(() => {
           <!-- two reserved columns: the checkbox gutter (matches the folder row's, and dropped in
                a read-only tree for the same reason), then the chevron column a folder occupies,
                which keeps file icons aligned under folder icons. -->
-          <span v-if="!readOnly" class="w-3.5 shrink-0" aria-hidden="true" />
+          <span v-if="!readOnly && canControl" class="w-3.5 shrink-0" aria-hidden="true" />
           <span class="w-3.5 shrink-0" aria-hidden="true" />
           <component :is="icon" class="shrink-0 text-[15px]" />
           <span
@@ -624,9 +625,12 @@ onBeforeUnmount(() => {
         <!-- Not rendered in a read-only tree (the pull preview): selection exists to drive
              "Commit selected", and there is nothing to commit there. It was previously only
              transparent, so it stayed hoverable and clickable — offering to tick files for a
-             pull, which is all-or-nothing and cannot honour a subset. -->
+             pull, which is all-or-nothing and cannot honour a subset.
+             Also dropped for a view-tier guest (canControl false): the only consumer of the
+             selection is the control-tier "Commit selected" bar, so ticking a row for them writes
+             persisted state and shows checked/destructive-tinted visuals but can never act. -->
         <button
-          v-if="!readOnly"
+          v-if="!readOnly && canControl"
           type="button"
           role="checkbox"
           tabindex="-1"

@@ -434,6 +434,19 @@ export function useGitOps(
       delete gitOpBusy[repoId];
     }
   }
+  /** Push an existing local tag. The daemon has had this route since the tag-push account fix; the
+   *  dashboard had no way to reach it, so a "created locally, but push failed" tag could only be
+   *  pushed from a terminal. Shares the "tag" busy slot so it can't overlap a create. */
+  async function pushTag(repoId: string, name: string): Promise<ActionResult> {
+    gitOpBusy[repoId] = "tag";
+    try {
+      return await api.pushTag(repoId, name);
+    } catch (e) {
+      return asResult(e);
+    } finally {
+      delete gitOpBusy[repoId];
+    }
+  }
   async function setRemote(repoId: string, url: string, name?: string): Promise<ActionResult> {
     gitOpBusy[repoId] = "remote";
     try {
@@ -508,6 +521,7 @@ export function useGitOps(
     incomingLoading,
     loadIncoming,
     createTag,
+    pushTag,
     setRemote,
     removeRemote,
     stashSave,

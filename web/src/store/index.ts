@@ -172,7 +172,11 @@ export const useStore = defineStore("repoyeti", () => {
       // flows through asResult only ever runs from an already-authenticated dashboard (AppShell
       // gates loadAll()/the whole UI behind the sign-in screen), so this can't be a pre-auth 401.
       // Flip the gate back on immediately instead of leaving the owner behind a generic toast.
-      if (e.status === 401) handleUnauthorized();
+      // Only the UNCODED 401: the auth gate answers with an empty body (src/auth.ts), while a
+      // coded one is the daemon reporting something else, today only AI_AUTH_FAILED (the AI
+      // PROVIDER refused its key). Treating that as a lost session threw the owner onto the
+      // sign-in screen for a stale API key in Settings.
+      if (e.status === 401 && !e.code) handleUnauthorized();
       return { ok: false, code: e.code ?? "ERROR", message: e.message };
     }
     return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e) };
@@ -309,6 +313,7 @@ export const useStore = defineStore("repoyeti", () => {
     incomingLoading,
     loadIncoming,
     createTag,
+    pushTag,
     setRemote,
     removeRemote,
     stashSave,
@@ -437,6 +442,7 @@ export const useStore = defineStore("repoyeti", () => {
     restoreDetectedIdentities,
     identityRules,
     identityRulesReady,
+    identityRulesError,
     loadIdentityRules,
     setIdentityRules,
     ghAvailable,
@@ -582,6 +588,7 @@ export const useStore = defineStore("repoyeti", () => {
     mcpAutoApprove,
     mcpAutoApproveTimeoutSecs,
     defaultEditor,
+    loreServersEnabled,
     pullRepo: (repoId) => doAction(repoId, "pull"),
   });
 
@@ -979,6 +986,7 @@ export const useStore = defineStore("repoyeti", () => {
     incomingLoading,
     loadIncoming,
     createTag,
+    pushTag,
     setRemote,
     removeRemote,
     stashSave,
@@ -1258,6 +1266,7 @@ export const useStore = defineStore("repoyeti", () => {
     restoreDetectedIdentities,
     identityRules,
     identityRulesReady,
+    identityRulesError,
     loadIdentityRules,
     setIdentityRules,
     cloneRepo,

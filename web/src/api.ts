@@ -823,6 +823,8 @@ export const api = {
   /** Create a tag (annotated when a message is given), optionally pushing it to origin. */
   createTag: (id: string, input: { name: string; message?: string; push?: boolean }) =>
     req<ActionResult>("POST", `/api/repos/${id}/tag`, input),
+  /** Push one EXISTING local tag to origin: the retry for a create whose push half failed. */
+  pushTag: (id: string, name: string) => req<ActionResult>("POST", `/api/repos/${id}/tag/push`, { name }),
   /** Add or update a remote (default origin). Throws ApiError on a bad URL. */
   setRemote: (id: string, url: string, name?: string) =>
     req<ActionResult>("POST", `/api/repos/${id}/remote`, name ? { url, name } : { url }),

@@ -74,9 +74,34 @@ describe("settings store — debounced cloud-sync pref auto-push", () => {
     store.syncStatus = syncStatus({ connected: false });
     const pushSpy = vi.spyOn(api, "syncPush");
 
-    store.keepInSync = true;
+    store.remoteEditing = false;
     await vi.advanceTimersByTimeAsync(1000);
     expect(pushSpy).not.toHaveBeenCalled();
+  });
+
+  it("pushes the prefs added to PREF_KEYS later, and never the two that are machine-local by design", async () => {
+    // The watch list had drifted from the daemon's PREF_KEYS: it missed the editor, tray, update
+    // and approval settings, and watched syncCheck/keepInSync, which the daemon refuses to sync.
+    const store = useStore();
+    store.syncStatus = syncStatus();
+    const pushSpy = vi.spyOn(api, "syncPush").mockResolvedValue(syncStatus());
+
+    store.keepInSync = !store.keepInSync;
+    store.syncCheckEnabled = !store.syncCheckEnabled;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pushSpy).not.toHaveBeenCalled();
+
+    for (const change of [
+      () => (store.defaultEditor = "cursor"),
+      () => (store.hideTrayIcon = !store.hideTrayIcon),
+      () => (store.mcpApprovalTimeoutSecs = 45),
+      () => (store.loreServersEnabled = !store.loreServersEnabled),
+    ]) {
+      pushSpy.mockClear();
+      change();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(pushSpy).toHaveBeenCalledOnce();
+    }
   });
 
   it("is silent/best-effort on failure — never throws out of the watcher, never busy-flags Sync Now", async () => {

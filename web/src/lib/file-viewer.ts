@@ -96,6 +96,12 @@ export async function closeFile(): Promise<void> {
  */
 export function dismissViewerForRepo(repoId: string): void {
   if (state.target?.repoId !== repoId) return;
+  // A guarded close/switch may have raised the discard prompt before the repo vanished. That
+  // prompt lives outside `state` (pendingDiscard), so clearing open/target below would leave the
+  // dialog up over the dashboard with no editor behind it — and its awaiting close/switch promise
+  // would never settle. Settle it as "keep editing" (the edits can no longer be saved either way)
+  // so the dialog closes with the viewer.
+  resolveDiscard(false);
   editorDirty.value = false;
   state.open = false;
   state.target = null;

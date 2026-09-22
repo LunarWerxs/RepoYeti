@@ -383,6 +383,17 @@ describe("mid-session 401 handling", () => {
     expect(store.authenticated).toBe(false);
   });
 
+  it("leaves authenticated alone when the 401 is the AI provider refusing its key", async () => {
+    // AI_AUTH_FAILED rides a 401 too, but it is about a key in Settings, not this session.
+    const store = useStore();
+    vi.spyOn(api, "fetch").mockRejectedValue(new ApiError(401, "Groq rejected the API key", { code: "AI_AUTH_FAILED" }));
+
+    const result = await store.doAction("r", "fetch");
+
+    expect(result.code).toBe("AI_AUTH_FAILED");
+    expect(store.authenticated).toBe(true);
+  });
+
   it("leaves authenticated alone for a non-401 failure", async () => {
     const store = useStore();
     vi.spyOn(api, "fetch").mockRejectedValue(new ApiError(500, "boom"));

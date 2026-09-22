@@ -43,18 +43,31 @@ async function onToggle(enabled: boolean): Promise<void> {
 }
 
 async function syncNow(): Promise<void> {
+  // pullSync/pushSync absorb a handled failure ({ok:false} with HTTP 200 — expired token,
+  // rate-limit) into store.syncError and never rethrow, so catching alone would let a green
+  // "pushDone" toast fire on the exact path that means nothing synced. Inspect the returned
+  // status instead: only claim success on a genuinely ok + still-connected result.
   try {
     await store.pullSync();
   } catch {
     toast.error(t("settings.cloudSync.pullFailed"));
     return;
   }
+  if (!store.syncStatus.ok || !store.syncStatus.connected) {
+    toast.error(t("settings.cloudSync.pullFailed"));
+    return;
+  }
   try {
     await store.pushSync();
-    toast.success(t("settings.cloudSync.pushDone"));
   } catch {
     toast.error(t("settings.cloudSync.pushFailed"));
+    return;
   }
+  if (!store.syncStatus.ok || !store.syncStatus.connected) {
+    toast.error(t("settings.cloudSync.pushFailed"));
+    return;
+  }
+  toast.success(t("settings.cloudSync.pushDone"));
 }
 
 /** Two-step confirm, matching the tunnel-forget / sign-out-all pattern elsewhere in Settings. */

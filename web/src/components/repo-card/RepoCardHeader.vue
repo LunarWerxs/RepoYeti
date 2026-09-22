@@ -23,6 +23,7 @@ import {
   EyeOff,
   ShieldAlert,
 } from "@lucide/vue";
+import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { api } from "../../api";
 import type { ResolvedRepoAccount } from "../../types";
@@ -74,6 +75,16 @@ const rowLabel = computed(() => {
 function onRowActivate(): void {
   if (selecting.value) toggleSelected(props.repo.id);
   else emit("toggle");
+}
+// Keys aimed at a nested control belong to that control. The drag handle, the identity/sync
+// menu trigger and the expand chevron are all real <button>s that handle Enter/Space themselves,
+// but the keydown still bubbles to this row: acting on it too expanded the card behind the menu
+// (or, via the row's preventDefault, cancelled the control's own activation so the menu never
+// opened). Only handle keys whose target is the row itself — role="button" is the row's own role.
+function onRowKeydown(e: KeyboardEvent): void {
+  if ((e.target as HTMLElement).closest("button,[role='button']") !== e.currentTarget) return;
+  e.preventDefault();
+  onRowActivate();
 }
 
 const st = computed(() => props.repo.status);
@@ -137,7 +148,9 @@ const identityViolationTitle = computed(() => {
   return t("repo.badge.identityViolation", { name });
 });
 function onIdentity(id: string | null): void {
-  void store.assignIdentity(props.repo.id, id);
+  // assignIdentity rolls the optimistic patch back and rethrows; `void`-ing it left the avatar
+  // flipping back with no explanation (and an unhandled rejection in the console).
+  store.assignIdentity(props.repo.id, id).catch(() => toast.error(t("repo.identity.assignFailed")));
 }
 
 // What this dropdown actually offers depends on whether identities are in play (see the store's
@@ -150,7 +163,10 @@ const triggerLabel = computed(() =>
 
 // ── sync account (which GitHub account this repo fetches/pulls/pushes as) ──────
 function onAccount(a: { host: string; login: string } | null): void {
-  void store.assignRepoAccount(props.repo.id, a?.host ?? null, a?.login ?? null);
+  // Same as onIdentity: the store rethrows after rolling the optimistic patch back, so the pick
+  // would revert silently if the daemon rejected it.
+  store.assignRepoAccount(props.repo.id, a?.host ?? null, a?.login ?? null)
+    .catch(() => toast.error(t("repo.syncAccount.assignFailed")));
 }
 
 // What the repo will sync as when nothing is pinned. A repo usually answers this itself — via its
@@ -188,8 +204,8 @@ const detectedReason = computed(() => {
     class="group flex cursor-pointer items-center gap-1 rounded-md p-2 outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring/40 sm:gap-1.5 sm:p-2.5"
     :class="selecting && picked && 'bg-primary/10'"
     @click="onRowActivate"
-    @keydown.enter.prevent="onRowActivate"
-    @keydown.space.prevent="onRowActivate"
+    @keydown.enter="onRowKeydown"
+    @keydown.space="onRowKeydown"
   >
     <!-- In multi-select mode the drag handle's slot becomes the selection checkbox — same
          position, so rows don't reflow when the mode flips. See @/lib/repo-selection. -->

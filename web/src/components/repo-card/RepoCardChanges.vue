@@ -341,6 +341,10 @@ function runContentSearch(): void {
 
 // Each keystroke (or toggle) cancels any in-flight request and drops stale matches, then
 // re-arms the debounce. Below the threshold (or with content mode off) we don't hit git.
+// `immediate` because treeQuery/contentMode live in RepoCard and outlive this component's
+// unmount (see above): on remount the refs are already populated while contentMatches was just
+// reset to empty, so without a run on mount the lit toggle would silently filter by filename
+// only. The body no-ops when the mode is off or the query is below the threshold.
 watch([treeQuery, contentMode], () => {
   if (searchTimer) clearTimeout(searchTimer);
   searchAbort?.abort();
@@ -352,7 +356,7 @@ watch([treeQuery, contentMode], () => {
   }
   contentLoading.value = true; // show the spinner immediately, even during the debounce
   searchTimer = setTimeout(runContentSearch, 180);
-});
+}, { immediate: true });
 
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer);
@@ -890,8 +894,10 @@ async function onCopyPath(path: string): Promise<void> {
           </Tooltip>
           <!-- clear the per-file selection. Only present while something IS selected, and tinted
                toward destructive so it reads as "this throws something away" rather than as one
-               more neutral toolbar icon — it is next to two icons that only filter. -->
-          <Tooltip v-if="treeSelection.count.value > 0">
+               more neutral toolbar icon — it is next to two icons that only filter. Control-tier
+               only: a view-tier guest gets no selection boxes to clear (ChangesTree hides them),
+               so the chip would be dead weight there. -->
+          <Tooltip v-if="store.canControl && treeSelection.count.value > 0">
             <TooltipTrigger as-child>
               <button
                 type="button"

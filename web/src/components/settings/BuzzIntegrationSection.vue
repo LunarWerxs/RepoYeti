@@ -100,9 +100,16 @@ async function removeCommunity(id: string): Promise<void> {
 
 async function runPreflight(): Promise<void> {
   if (checking.value) return;
+  // Remember which community this run is evidence for: preflight runs git --version / ls-remote
+  // and can take seconds, during which the owner may switch the dropdown. Committing the response
+  // unconditionally would render Community A's rows under Community B, defeating the watcher above
+  // that clears the result on selection. Only the request that still matches the current selection
+  // is allowed to populate `preflight`.
+  const requestedId = selectedCommunityId.value;
   checking.value = true;
   try {
-    preflight.value = await store.runBuzzPreflight(selectedCommunityId.value || undefined);
+    const result = await store.runBuzzPreflight(requestedId || undefined);
+    if (requestedId === selectedCommunityId.value) preflight.value = result;
   } catch {
     toast.error(t("settings.buzzPreflightFailed"));
   } finally {

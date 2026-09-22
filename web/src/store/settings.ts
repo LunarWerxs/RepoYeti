@@ -90,6 +90,7 @@ export function useSettings(deps: {
   mcpAutoApprove: Ref<boolean>;
   mcpAutoApproveTimeoutSecs: Ref<number>;
   defaultEditor: Ref<string | null>;
+  loreServersEnabled: Ref<boolean>;
   /** The barrel's doAction("pull") — powers the behind-toast's "Pull now" action. */
   pullRepo?: (repoId: string) => Promise<ActionResult>;
 }) {
@@ -669,15 +670,23 @@ export function useSettings(deps: {
     remoteBrowse,
     diffPatchBytes,
     diffPatchEnabled,
-    syncCheckEnabled,
     syncIntervalSecs,
-    keepInSync,
     autoCommitMode,
     autoCommitIntervalSecs,
     autoCommitAt,
     autoCommitPull,
     autoCommitAiFallback,
     autoScan,
+    alsoSynced: [
+      updateNotify,
+      portableMode,
+      hideTrayIcon,
+      defaultEditor,
+      mcpAutoDeny,
+      mcpApprovalTimeoutSecs,
+      mcpAutoApproveTimeoutSecs,
+      deps.loreServersEnabled,
+    ],
   });
 
   // ── desktop opt-in + header-bell notifications — split into its own module ────────────────
