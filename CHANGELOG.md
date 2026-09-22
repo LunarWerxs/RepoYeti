@@ -4,6 +4,203 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Signing in works again on installs set up before 1.0.3.** 1.0.3 moved the built-in "Sign in
+  with Connections" client to `accounts.connectionsapi.com`, but only for new installs: config.json
+  stores the whole `oauth` object (it also holds the owner binding) and loading spread the saved
+  copy over the defaults, so an existing install kept expecting tokens issued by
+  `accounts.connections.icu`. Every token now says `connectionsapi.com`, so every sign-in finished
+  the whole browser round trip and then failed verification behind a generic "Couldn't verify"
+  page, and "Sign out everywhere" could not help. The built-in client's issuer, callback and scopes
+  are now read from the build on every load and only the owner fields come from disk, so the next
+  move cannot strand anyone either; a user's own OIDC client keeps its own issuer. Reported, with
+  the diagnosis, in [#25](https://github.com/LunarWerxs/RepoYeti/issues/25) and
+  [#26](https://github.com/LunarWerxs/RepoYeti/pull/26) by @renanfranca.
+
+- **A failed sign-in names its reason in the log.** The verification step swallowed its error
+  whole, so an issuer drift, an audience mismatch, an expired token and a network blip were one
+  page and no log line; diagnosing #25 took a patched build. The log now says which step failed and
+  why, and for an `iss` or `aud` mismatch prints the token's value next to the expected one (both
+  public identifiers, never the token). OIDC discovery also warns when the document's `issuer`
+  disagrees with the configured one, which is the whole of #25 in one line.
+
+- **A failed source self-update keeps its build log.** The updater recorded every step's command
+  and output, then threw the transcript away on every failure path, so a failed update reached you
+  as one line and a bug report could never include the build output. The failure now carries the
+  transcript: the daemon log gets all of it (including unattended updates, which have no toast), and
+  both update prompts offer **Copy build log**. The rest of
+  [#24](https://github.com/LunarWerxs/RepoYeti/issues/24).
+
+- **Removing any repository deleted every "share all repositories" link.** The cleanup that drops
+  a removed repo's share grants also deleted every share left with no per-repo grants, and a
+  share-everything link has none by design, so the recipient's link started answering 404 and the
+  row vanished from the Sharing panel. Only a scoped share that named the removed repo, and now
+  names nothing, is removed. Removing a scan root did the opposite and released no grants at all;
+  both paths now agree. Creating and editing a share are now single transactions too.
+
+- **A view-only share link could read git-ignored files.** `.env` needs no browsing to find, and
+  the file and diff routes read any path they were given, so a guest could fetch it by name even
+  though the policy withholds the tree browser for exactly that reason. A guest's working-tree read
+  of a path git ignores now answers "not found". Tracked, changed and untracked-but-visible files,
+  and history, are unaffected, and so is the owner.
+
+- **A symlink could lead a read, write or delete somewhere it must never go.** A repository is
+  untrusted input (it may be someone else's clone), and a committed directory link is a legal
+  entry. Deleting a folder through one (`vendor -> /home/you`, then delete `vendor/projects`)
+  recursively deleted the folder OUTSIDE the checkout; the single-file delete already refused this
+  and the folder delete did not. A link that points into `.git` (`meta -> .git`) passed every check
+  because `.git` is inside the repo: a view link could read `.git/config` (remote URLs sometimes
+  carry credentials) and a write through `meta/hooks/` would plant a hook the daemon's next git
+  command runs. Every raw read, write, move and delete now checks the resolved path is inside the
+  repo and outside `.git`/`.lore`, the tree browser included, and the experimental Lore backend's
+  delete had the same hole.
+
+- **Opening a file in an editor found only as its `.cmd` shim could run a command (Windows).** That
+  launch is a plain `cmd /c`, and Bun leaves an argument with no spaces unquoted, so a file named
+  `x&calc` in a cloned repo became a command the moment you opened it (measured: an `&ver` suffix
+  ran `ver`). Paths holding `& | < > ^ % !` are now refused on that launch path, which is a rare
+  fallback: editors are normally launched through their real executable, which never touches cmd.
+
+- **Commit all no longer commits conflict markers.** During a merge with unresolved files, its
+  `git add -A` staged them as they sat, markers and all, which clears the very state git uses to
+  refuse such a commit. It now refuses while any file is still conflicted, as Smart Commit already
+  did; a merge whose conflicts are all resolved still concludes normally.
+
+- **An AI key pool now actually rotates past a rate limit.** The 429 pause was per provider, so
+  after key A was rate-limited the pool's switch to key B was answered from A's pause without ever
+  calling B, and B was marked as cooling too. The pause is now per key.
+
+- **A bad AI provider key no longer sends the dashboard to the sign-in screen.** The provider's
+  refusal reaches the dashboard as a 401, and every 401 was read as "your session ended". Only the
+  sign-in gate's own 401 (which carries no error code) does that now.
+
+- **A shared repo's presence snapshot was dropped whole when the collaborator had a new file.** The
+  owner's validator accepted every status letter except "N" (untracked) and "T" (type change), so
+  one new file in the collaborator's checkout discarded their entire snapshot and the owner saw no
+  presence from them at all.
+
+- **Share links minted on a default setup now use the permanent relay address.** With the hosted
+  relay on by default and no relay URL saved, links were recorded as relay links but handed out as
+  quick-tunnel links, so they died with the tunnel while the Sharing panel still vouched for them.
+
+- **"Sign out everywhere" and Disconnect cannot be undone by a stubborn keychain.** When the OS
+  credential store refused to delete the Connections refresh token, the sign-out still reported
+  success and the next start loaded the same token and resumed syncing. A refused delete now leaves
+  a marker: nothing is loaded while it exists, and the delete is retried at every start.
+
+- **One refused keychain write can no longer cost you an API key.** After any successful keychain
+  operation the store counted as confirmed, and "confirmed" is what lets a save remove plaintext
+  keys from config.json, so a key the store had just refused (Windows rejects an oversized one) was
+  stripped from disk while no store held it, and was gone at the next start. A refusal now holds
+  for the rest of the process.
+
+- **A config.json that cannot be read is never silently replaced.** Loading answered every failure
+  with the defaults, and several paths load, change one field and save, so a single transient read
+  error (an antivirus holding the file) or a damaged file became a config with no roots, no
+  settings and no owner. Transient read errors are retried and then refuse to continue; an
+  unparseable file is moved aside as `config.json.corrupt-<time>` before anything can overwrite it.
+
+- **The pull preview no longer writes into `.git/objects`.** Its conflict check runs
+  `git merge-tree --write-tree`, which has no dry run and writes the merged tree, so every preview of
+  a diverged branch left unreachable objects behind until a gc, from an endpoint whose whole promise
+  is that it changes nothing. Those writes now go to a temporary directory that is removed after.
+
+- **`repoyeti start --root --relaunch` no longer bypasses the single-instance guard.** The relaunch
+  signal was read as any `--relaunch` anywhere in the arguments, including a root folder literally
+  named that, and the auto-update successor skips the "already running?" check.
+
+- **Reading the dashboard's status no longer writes config.json.** The Lore-servers section's
+  default was persisted on first read, so a GET wrote the config and a settings save could write it
+  twice. It is derived on read now.
+
+- **The tunnel can be started again after cloudflared failed to launch synchronously.** A launch
+  that failed before the start call returned left an inert handle behind, so the daemon believed a
+  tunnel was running and refused every retry until restart. (Bun 1.4 reports a missing cloudflared
+  asynchronously, so this guards the other path.)
+
+- **Docs and the README's licence link follow Connections off `connections.icu`.**
+
+- **Smaller fixes from a full file-by-file review of the daemon and dashboard.** Each one was
+  checked against the code before it was fixed and carries a regression test:
+  - The config folder is locked to your account on Windows once per start, so `config.json`
+    (which always holds the relay signing key) is owner-only without a permission call per save.
+  - Viewing an old version of a large file no longer loads the whole blob into memory first.
+  - Diff line counts work for non-ASCII file names, and a diff that timed out is reported as
+    incomplete instead of as a smaller total.
+  - Discarding or deleting an untracked symlink removes it instead of silently doing nothing.
+  - History shows an error for a broken or missing repository instead of an empty list, and a
+    commit subject containing an unusual control character is no longer cut short.
+  - The AI commit message sees staged files in a brand-new repository with no commits yet.
+  - AI conflict resolution keeps a good answer that follows a malformed draft for the same region.
+  - A request with a garbled JSON body is refused instead of answering "ok" and changing nothing.
+  - Discard, stage and delete failures answer 409 like their siblings instead of 500.
+  - A manual update now holds the same "installing" slot as the automatic one, so a restart can
+    no longer cut it off halfway; a failed restart no longer leaves every dashboard on
+    "Restarting…"; a second restart tap cannot spawn a competing successor.
+  - A stale `index.lock` is cleared in worktrees and submodules too, and a timed-out clone quotes
+    the budget it actually waited.
+  - Buzz accepts every spelling git allows for `credential.useHttpPath=true`.
+  - Repositories using git's newer reftable ref store are watched live instead of only polled.
+  - When cloudflared dies under a live tunnel, the dead address is cleared instead of advertised,
+    and a tunnel address split across two output chunks is still found.
+  - The relay's "registered" state cannot come back after the tunnel was stopped.
+  - Two repositories with the same folder name each keep their identity suggestion.
+  - Your account switch shows the new git author at once instead of after a 10-second cache.
+  - Settings that sync now push on change for every synced preference (editor, tray icon, update
+    notices, approval timeouts, the Lore section), and the two that deliberately stay on one
+    machine no longer trigger a push; a theme you just pulled is not pushed straight back.
+  - "Sync now" no longer shows success when the sync actually failed.
+  - A failed load of Identity Firewall rules can no longer be saved over the real ones.
+  - Removing a repository now removes its card from a per-repo share guest's dashboard.
+  - Share guests with view access are no longer offered file checkboxes that do nothing.
+  - The repository filter matches the name the card shows as well as the folder name, name sort
+    follows the shown name, and a failed removal puts the card back where it was.
+  - Enter or Space on a button inside a repository row no longer also expands the row, and a
+    rejected identity or sync-account change says so instead of silently reverting.
+  - The file viewer disables Edit and Save with the reason when a file cannot be edited.
+  - A commit message's "Show more" is re-measured when the panel is resized.
+  - The changes search keeps searching file contents after the card is collapsed and reopened.
+  - The diff viewer keeps lines that begin with `-- ` or `++ `, and no stray carriage return on the
+    last line of a CRLF file.
+  - The editor's changed-line gutter markers are visible again.
+  - A notification that deep-links to the Settings tab you already left now switches back to it.
+  - Accounts with the same login on two hosts no longer share one picker toggle, and a linked
+    account no longer reads "Not set" while identities are still loading.
+  - Inspecting a second collaboration invite no longer keeps the first invite's repository.
+  - A Buzz preflight result can no longer appear under a community you switched to meanwhile.
+  - Cancelling a scan or Fetch all that already ended no longer leaves "Stopping…" stuck.
+  - Automation history refreshes an expanded round once it finishes and says when details fail.
+  - The dismissed-suggestions list no longer reopens by itself after Restore all.
+  - Add repository drops a Lore server you deleted and forgets a half-filled form you abandoned
+    for the project scan.
+  - An AI commit plan that lists one file twice in a group lists it once.
+  - The file browser's refresh can no longer be overwritten by the listing it replaced.
+  - Closing the viewer for a removed repository also closes its pending "discard changes?" prompt.
+  - The release workflow's token is read-only except in the publish job, a red browser gate keeps
+    its daemon log for diagnosis, and the release smoke test and coverage gate clean up their
+    temporary folders on failure.
+
+### Added
+
+- **Push an existing tag from the dashboard.** Remote & tags lists a Push button per tag, and a
+  create-and-push whose push half fails now offers **Retry push**. The daemon has accepted this
+  since the tag-push account fix, but the dashboard had no way to call it, so a tag created locally
+  whose push failed could only be pushed from a terminal.
+
+### Internal
+
+- **The dashboard has a coverage floor.** The daemon has had one since 1.0; the dashboard had none,
+  so a change could delete a component's every test and stay green. CI and the release gate now run
+  the dashboard suite with coverage and fail below the measured baseline (lines 58%, branches 53.5%).
+
+- **The release smoke test follows the daemon it launched.** It picked a free port, released it,
+  and told the daemon to use it, so another process could take the port in between and either fail
+  the run or, by answering 200, pass it. It now reads the port and pid the daemon records and checks
+  the health answer is RepoYeti's.
+
 ## [1.0.3] - 2026-09-20
 
 ### Fixed

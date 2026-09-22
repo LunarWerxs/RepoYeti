@@ -80,7 +80,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | **HTTP framework** | **Hono** | Tiny, TS-native. Its middleware model makes auth **structural**: a single `app.use()` gates the whole router, so you *cannot* add an unauthenticated route by accident. |
 | **Storage** | **`bun:sqlite`**, WAL mode, `synchronous=NORMAL` | Only store that survives concurrent writers (watcher + API + git ops). One file: `repoyeti.db`. Retry on `SQLITE_BUSY`; fall back to `journal_mode=DELETE` if WAL won't open (Windows AV). |
 | **Tunnel** | **`cloudflared` quick or named tunnel** + stable OAuth callback for Quick Tunnels | Quick Tunnels stay zero-config and rotating; the relay returns OAuth to their announced origin without proxying the dashboard. Named tunnels use their stable callback directly. The tunnel client is NOT vendored: the release is a single executable (release.yml asserts a one-file archive), so `cloudflared` must be on `PATH` for `--tunnel` in every install. `resolveCloudflaredExecutable` still prefers a sibling `vendor/` copy if one is ever placed there. |
-| **Auth** | **"Sign in with Connections"**, public OIDC (AEGIS) at `accounts.connections.icu`; daemon verifies the login token and trusts one owner `sub` | Stand-alone relying party using connections.icu's **public** OAuth, like "Log in with Google." No shared secret, no Connections-repo coupling, no homegrown password/PIN. See §7. |
+| **Auth** | **"Sign in with Connections"**, public OIDC (AEGIS) at `accounts.connectionsapi.com`; daemon verifies the login token and trusts one owner `sub` | Stand-alone relying party using Connections' **public** OAuth, like "Log in with Google." No shared secret, no Connections-repo coupling, no homegrown password/PIN. See §7. |
 | **Transport / sync** | **SSE** daemon→phone, **REST** phone→daemon | v2 decided this. SSE auto-reconnects through cloudflared with no WebSocket upgrade; maps cleanly onto the event-driven watcher. Commands are request/response → REST. |
 | **Frontend** | **Vue 3 + Vite**, PWA, **embedded in the binary**; **import pre-built libraries, minimal hand-written UI** | Static files bundled at `bun --compile` time; daemon serves them, no second server. **Owner directive: lean on smart pre-built libs, write minimal UI to maintain.** Stack: **reka-ui** (shadcn-vue–style component kit, `src/components/ui/`) · **Tailwind v4** (`@tailwindcss/vite`) · **@vueuse/core** (composables: `useEventSource` handles SSE+reconnect, `useColorMode`, `useLocalStorage`) · **@formkit/auto-animate** (zero-config list/card transitions, solving "no layout shift on SSE updates" for free) · **@lucide/vue** icons · **vue-sonner** toasts · **Pinia** state · **vite-plugin-pwa** (auto manifest + service worker). |
 | **Secrets** | **OS keychain via `keytar`** | SSH key *paths* in SQLite (the daemon never reads key bytes, only passes the path to `ssh -i`). Git PATs, the owner's Connections OAuth tokens, and any confidential `client_secret` in keychain by handle, resolved at call time. |
@@ -127,7 +127,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 | **Stage / commit from phone** | Phase 5 patch | Highest-risk mobile UX surface. Pull/push of *pre-staged* commits covers ~90% of remote use. |
 | Workspaces grouping UI | Phase 5 | `workspaces` table exists in schema (for future identity inheritance); v1 UI is a flat list. |
 | Named Cloudflare tunnel (stable URL) | Phase 5 | One-flag config upgrade (`CF_TUNNEL_TOKEN`); quick tunnel is fine for the demo loop. |
-| TOTP second factor | n/a | The connections.icu identity (Cognito, behind the owner's own MFA) already satisfies the auth non-negotiable. |
+| TOTP second factor | n/a | The Connections identity (Cognito, behind the owner's own MFA) already satisfies the auth non-negotiable. |
 | PAT / HTTPS remote auth | Phase 5 | SSH-key injection covers GitHub/GitLab/Bitbucket; HTTPS-PAT via `GIT_ASKPASS` is a separate path. |
 | Multi-root discovery | Phase 5 | One root (`~/code`, `~/Projects`) covers the common case. |
 | Session-management UI / per-device revoke | Phase 5 | A "sign out everywhere" clears daemon sessions; the Connections login itself is governed by AEGIS. v1 has a single owner session. **Partly landed:** §17's Sharing panel is per-*link* listing + revoke. Per-*device* owner-session revoke is still just the "sign out everywhere" hammer. |
@@ -161,7 +161,7 @@ wired; see §16 for the `updater-engine` design and the `useSelfUpdate` composab
 │   └─ static: embedded Vue 3 PWA                                                     │
 │                            │                                                        │
 │  Secrets ──► OS keychain (Bun.secrets): owner Connections tokens, PATs, client_secret?  │
-│             (SSH key paths in DB)  ──► OAuth @ accounts.connections.icu (OIDC)      │
+│             (SSH key paths in DB)  ──► OAuth @ accounts.connectionsapi.com (OIDC)      │
 │                            │                                                        │
 │  cloudflared child process ─────► https://xxxx.trycloudflare.com (HTTPS edge)      │
 └────────────────────────────────────────────────────────────────────────────────────┘
@@ -253,7 +253,7 @@ and `ignored_paths` (the "Remove" tombstones that stop a rescan from resurrectin
 **Invariant:** owner authentication secrets do not land in SQLite, only key *paths* (SSH) and
 keychain *handles*. Share-link tokens are the deliberate exception added in §17: they are retained
 in `shares.token` solely so the owner can copy an existing link, making `repoyeti.db`
-bearer-sensitive. Connections credentials remain issued and revoked by connections.icu and stored
+bearer-sensitive. Connections credentials remain issued and revoked by Connections and stored
 outside SQLite.
 
 ---
@@ -304,22 +304,22 @@ UI can render the right state.
 
 ## 7. Security model: "Sign in with Connections" (public OIDC), non-negotiable
 
-> **Decision (owner directive):** RepoYeti is a **stand-alone codebase**. It uses connections.icu for
+> **Decision (owner directive):** RepoYeti is a **stand-alone codebase**. It uses Connections for
 > **authentication only**, through the **public API**, never any internal/first-party mechanism. The
 > earlier Studio-`introspection_secret` design is **dropped** (that's the internal first-party path).
-> RepoYeti authenticates the owner via **"Sign in with Connections"**, connections.icu's public,
+> RepoYeti authenticates the owner via **"Sign in with Connections"**, Connections' public,
 > standards-compliant **OpenID Connect** provider (AEGIS), exactly like any "Log in with Google" app.
-> RepoYeti's only contact with connections.icu is calling its **public OAuth URLs**; it imports nothing
+> RepoYeti's only contact with Connections is calling its **public OAuth URLs**; it imports nothing
 > from the Connections repo and shares no secret with it.
 
 ### The public provider (verbatim, public surface)
 
-- **Issuer / IdP:** `https://accounts.connections.icu` (RS256 id_tokens, PKCE, refresh tokens)
-- **Discovery:** `https://accounts.connections.icu/.well-known/openid-configuration`
+- **Issuer / IdP:** `https://accounts.connectionsapi.com` (RS256 id_tokens, PKCE, refresh tokens)
+- **Discovery:** `https://accounts.connectionsapi.com/.well-known/openid-configuration`
 - **Authorize:** `GET /oauth/authorize?client_id=…&redirect_uri=…&response_type=code&scope=openid%20profile%20email&code_challenge=…&code_challenge_method=S256&state=…`
 - **Token:** `POST /oauth/token` (Authorization Code + PKCE)
 - **Userinfo:** `GET /oauth/userinfo` → `{ sub, email, name, … }`
-- **Contract:** `https://studio.connections.icu/v1/openapi.json`; integration guide:
+- **Contract:** `https://studio.connectionsapi.com/v1/openapi.json`; integration guide:
   `docs/architecture/auth/ACCAP_SIGN_IN_WITH_CONNECTIONS.md`; button:
   `docs/how-to/SIGN_IN_WITH_CONNECTIONS_BUTTON.md`.
 
@@ -329,7 +329,7 @@ RepoYeti is registered once as a **third-party OAuth app** (relying party) → i
 ### How auth works
 
 1. The user taps **"Sign in with Connections"** → standard **Authorization Code + PKCE** dance against
-   `accounts.connections.icu/oauth/authorize` (scopes `openid profile email`).
+   `accounts.connectionsapi.com/oauth/authorize` (scopes `openid profile email`).
 2. The daemon catches the redirect (`?code&state`), exchanges the code at `/oauth/token`, and gets an
    **RS256 `id_token`** + access token.
 3. The daemon **verifies the `id_token`** against the provider's **public JWKS** (from the discovery
@@ -526,7 +526,7 @@ These were not in the original briefs; they will bite if ignored.
   within 1s of a local commit.
 
 - **Phase 2: "Sign in with Connections" (public OIDC).**
-  `/oauth/login` (Authorization Code + PKCE → `accounts.connections.icu/oauth/authorize`,
+  `/oauth/login` (Authorization Code + PKCE → `accounts.connectionsapi.com/oauth/authorize`,
   `scope=openid profile email`) + `/oauth/callback` (exchange at `/oauth/token`, verify the RS256
   `id_token` against the public JWKS from the discovery doc, confirm `sub`/`email` === trusted owner,
   set a `__Host-` session). Single Hono middleware gates every `/api/*` route. Reads OAuth config
@@ -549,7 +549,7 @@ These were not in the original briefs; they will bite if ignored.
 
 - **Phase 5: Hardening + distribution.**
   Zod input validation; inotify-limit guard + 30s targeted-poll fallback; named-CF-tunnel upgrade path
-  (`repoyeti.connections.icu` via Cloudflare, see §13); `bun --compile` for Win/Mac/Linux; `npm publish`;
+  (a named Cloudflare tunnel hostname, see §13); `bun --compile` for Win/Mac/Linux; `npm publish`;
   stage+commit-from-phone patch; workspace UI; multi-root; "sign out everywhere"; optional Path-A named tunnel.
 
 - **Phase 6: Tauri tray (explicitly deferred).**
@@ -663,7 +663,7 @@ service/read/git`, and the MCP core/tools/backend touch the service only through
 - **SSE, not WebSockets**: server-push, event-driven, auto-reconnect through cloudflared.
 - **Auth = "Sign in with Connections" (public OIDC), not a homegrown credential and not the internal
   Studio path**: RepoYeti is a stand-alone relying party that only calls the public
-  `accounts.connections.icu/oauth/*` URLs and verifies tokens via the public JWKS; it shares no secret
+  `accounts.connectionsapi.com/oauth/*` URLs and verifies tokens via the public JWKS; it shares no secret
   with and imports nothing from the Connections repo. (Owner directive: public API, auth only, stand-alone.)
 - **Quick Tunnels use the stable relay callback** (§7). The daemon announces its current HTTPS origin
   with Ed25519 once per tunnel startup; the Worker resolves only that id and returns `code` + `state`
@@ -675,12 +675,12 @@ service/read/git`, and the MCP core/tools/backend touch the service only through
 
 ---
 
-## 13. connections.icu integration: what the owner provisions
+## 13. Connections integration: what the owner provisions
 
-RepoYeti is a **stand-alone relying party** that uses connections.icu **only** for "Sign in with
+RepoYeti is a **stand-alone relying party** that uses Connections **only** for "Sign in with
 Connections" (public OIDC). It imports nothing from the Connections repo. To light up auth end-to-end
 (everything else builds without it), the owner provides, all via the **public developer console**
-(`studio.connections.icu` → developer apps), not by editing the Connections monorepo:
+(`studio.connectionsapi.com` → developer apps), not by editing the Connections monorepo:
 
 1. **A registered RepoYeti OAuth app.** Create a "Sign in with Connections" app → yields a public
    **`client_id`** (and, if registered confidential, a `client_secret` that stays only on the daemon).
@@ -1163,7 +1163,7 @@ owner can mint an **optional API token** and the agent authenticates with a Bear
 - Then send `Authorization: Bearer <token>` (or set `REPOYETI_TOKEN` for the CLI verbs and
   `repoyeti mcp`).
 - It's a **separate, local credential** (constant-time compared, kept in the OS keychain); it never
-  touches connections.icu and exists only on this daemon.
+  touches Connections and exists only on this daemon.
 - **Off by default, and it never weakens the default posture.** When no token is set, auth is
   byte-for-byte the OIDC-only behavior described above; a request over the tunnel still requires a
   signed-in owner *or* the explicit token. The token is purely additive, for the headless case.
