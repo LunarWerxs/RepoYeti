@@ -20,7 +20,20 @@ export async function parseBody<T>(
   c: Context,
   schema: z.ZodType<T>,
 ): Promise<{ ok: true; data: T } | { ok: false; res: Response }> {
-  const raw = await c.req.json().catch(() => ({}));
+  // Read the bytes ourselves so a garbled/truncated body (one that would make `c.req.json()`
+  // reject) is NOT mistaken for an empty one. That distinction matters: every all-optional schema
+  // here (SettingsUpdateSchema, ShareUpdateSchema) parses `{}` successfully, so the old
+  // `c.req.json().catch(() => ({}))` made a short read return `{ ok: true }` while applying no
+  // field at all. Only a genuinely empty body stays `{}`; malformed JSON is now a BAD_REQUEST.
+  const text = await c.req.text();
+  let raw: unknown = {};
+  if (text.trim()) {
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return { ok: false, res: jsonError(c, "BAD_REQUEST", "body: invalid JSON") };
+    }
+  }
   const r = schema.safeParse(raw);
   if (r.success) return { ok: true, data: r.data };
   const issue = r.error.issues[0];

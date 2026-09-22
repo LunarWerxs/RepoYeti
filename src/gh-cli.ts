@@ -361,6 +361,11 @@ export async function switchGhAccount(
     // Already active — no switch needed, but still honor a linked author so it stays in sync.
     if (applyAuthor) {
       await applyGlobalAuthor(applyAuthor);
+      // The snapshot read above predates the author write, so without this it is still inside its
+      // SNAPSHOT_TTL_MS window and gets served back verbatim — the caller (and every GET
+      // /api/accounts for the next 10s) would report the OLD global author right after a
+      // successful switch. Drop it before re-reading, exactly as the switch path below does.
+      invalidateAccountsSnapshot();
       return { ok: true, snapshot: await accountsSnapshot() };
     }
     return { ok: true, snapshot: before };

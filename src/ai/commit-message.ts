@@ -6,6 +6,7 @@
  * Failures map to a small set of stable codes the UI can render (mirrors the classify()
  * pattern in git-actions.ts).
  */
+import { createHash } from "node:crypto";
 import { readResponseTextLimited } from "../process-output.ts";
 import type { AiProviderId, CommitStyle } from "../config.ts";
 import {
@@ -60,8 +61,21 @@ const REQUEST_TIMEOUT_MS = 20_000;
 // "Auto" or flipping styles can't machine-gun the API, short enough to self-heal. The provider's
 // real message (which does say "try again in 3h36m") is kept and re-surfaced verbatim.
 const GATE_MAX_MS = 60_000;
-/** provider id → when we may probe again, plus the message to answer with until then. */
+/** gate key (see rateGateKey) → when we may probe again, plus the message to answer with until then. */
 const rateGate = new Map<string, { until: number; message: string }>();
+
+/**
+ * The pause is per CREDENTIAL, not per provider. It was keyed by provider alone, and that defeated
+ * the key pool (src/ai/credential-pool.ts) on exactly the error the pool exists for: key A's 429
+ * paused the provider, withKeyRotation moved on to key B, and requestJson answered B from the pause
+ * without ever calling it, so B was reported rate-limited too and cooled for a minute. The message,
+ * plan and conflict calls made with ONE key still share its pause, as before. Only a hash prefix of
+ * the key is kept, never the key.
+ */
+export function rateGateKey(provider: string, apiKey: string): string {
+  if (!apiKey) return provider;
+  return `${provider}:${createHash("sha256").update(apiKey).digest("hex").slice(0, 16)}`;
+}
 
 /** Seconds from a `Retry-After` header (delta-seconds or HTTP-date), or null. */
 function parseRetryAfter(h: string | null): number | null {
@@ -72,16 +86,24 @@ function parseRetryAfter(h: string | null): number | null {
   return Number.isFinite(when) ? Math.max(0, (when - Date.now()) / 1000) : null;
 }
 
-/** Clear a provider's pause — call when its key/model changes, so a fix takes effect at once. */
-export function clearRateGate(provider?: string): void {
-  if (provider) rateGate.delete(provider);
-  else rateGate.clear();
+/** The gate keys that belong to `provider`: its keyless entry and every per-key one. */
+function providerGateKeys(provider: string): string[] {
+  return [...rateGate.keys()].filter((k) => k === provider || k.startsWith(`${provider}:`));
 }
 
-/** For tests/diagnostics: ms until `provider` may be probed again (0 = not gated). */
+/** Clear a provider's pauses (every key's) — call when its key/model changes, so a fix takes effect at once. */
+export function clearRateGate(provider?: string): void {
+  if (!provider) {
+    rateGate.clear();
+    return;
+  }
+  for (const k of providerGateKeys(provider)) rateGate.delete(k);
+}
+
+/** For tests/diagnostics: ms until the provider's longest-paused key may be probed again (0 = none gated). */
 export function rateGateRemainingMs(provider: string): number {
-  const g = rateGate.get(provider);
-  return g ? Math.max(0, g.until - Date.now()) : 0;
+  const now = Date.now();
+  return Math.max(0, ...providerGateKeys(provider).map((k) => (rateGate.get(k)?.until ?? now) - now));
 }
 
 // ── prompt building (PURE) ───────────────────────────────────────────────────────
@@ -501,7 +523,7 @@ export async function generateCommitMessage(
     },
     fetchImpl,
     REQUEST_TIMEOUT_MS,
-    provider, // share the rate-limit pause with the plan call — same provider, same budget
+    rateGateKey(provider, apiKey), // shares the pause with the plan call made with the same key
   );
   const text = adapter.extractCompletion(json);
   const cleaned = cleanCommitMessage(text ?? "");

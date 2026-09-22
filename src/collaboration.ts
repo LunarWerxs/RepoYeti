@@ -270,7 +270,10 @@ function validChanges(value: unknown): value is ChangedFile[] {
     if (
       !relativePath(f.path) ||
       typeof f.status !== "string" ||
-      !/^[MADRUC]$/.test(f.status) ||
+      // Every letter readChanges emits (src/read/status.ts toChangedFile). "N" (untracked) and "T"
+      // (type change) were missing, so one new file in a collaborator's checkout made this reject
+      // the WHOLE snapshot and the owner silently saw no presence from them at all.
+      !/^[MADRUCNT]$/.test(f.status) ||
       typeof f.staged !== "boolean" ||
       (f.from !== undefined && !relativePath(f.from))
     ) {

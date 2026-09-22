@@ -368,7 +368,14 @@ async function streamGitPatchStats(
     stdout: "pipe",
     stderr: "ignore",
   });
-  const killTimer = setTimeout(() => proc.kill(), DIFF_TIMEOUT_MS);
+  // A timed-out child is a runaway guard just like the byte cap: the stream ends or errors and
+  // the loop below bails, so without flagging it the caller got a partial per-file map with
+  // truncated=false and rendered an incomplete total as if it were complete.
+  let timedOut = false;
+  const killTimer = setTimeout(() => {
+    timedOut = true;
+    proc.kill();
+  }, DIFF_TIMEOUT_MS);
   const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
   const decoder = new TextDecoder("utf-8", { fatal: false });
   const parser = createPatchStatParser();
@@ -402,7 +409,7 @@ async function streamGitPatchStats(
       /* ignore */
     }
   }
-  return { perFile: parser.finish(), truncated };
+  return { perFile: parser.finish(), truncated: truncated || timedOut };
 }
 
 /**
@@ -425,7 +432,12 @@ export async function computeDiffStats(
 ): Promise<{ perFile: Map<string, DiffStat>; total: DiffStat; truncated: boolean }> {
   const { perFile, truncated } = await streamGitPatchStats(
     absPath,
-    ["diff", "HEAD", "-M", "--no-color", "--no-ext-diff"],
+    // Force literal UTF-8 path headers, as git-actions/diff.ts does. git's default
+    // core.quotePath=true emits `+++ "b/h\303\251llo.txt"` for non-ASCII names, which
+    // unquotePath's JSON.parse cannot decode (\3 is not a JSON escape), so the key became a
+    // mangled `h/303/251llo.txt` that never matched the real porcelain path — the per-file
+    // stat silently vanished for every non-ASCII-named file.
+    ["-c", "core.quotePath=false", "diff", "HEAD", "-M", "--no-color", "--no-ext-diff"],
     DIFF_CAP_BYTES,
   );
 

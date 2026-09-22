@@ -410,12 +410,16 @@ export async function detectIdentities(repos: RepoIdentityHint[] = []): Promise<
 
   const seen = new Set<string>();
   return mergeDetectedIdentityHints(detected).filter((item) => {
+    // Detail carries the repo absPath for git-local candidates (see detectedFromRepoGitConfig).
+    // Omitting it collapsed two repos that share a basename and the same user.name/user.email
+    // onto one key, so the second repo's identity suggestion was silently dropped.
     const key = [
       item.source,
       item.suggestion.gitUsername,
       item.suggestion.gitEmail,
       item.suggestion.sshKeyPath ?? "",
       item.title,
+      item.detail,
     ].join("\0");
     if (seen.has(key)) return false;
     seen.add(key);

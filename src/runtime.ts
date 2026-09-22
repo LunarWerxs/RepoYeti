@@ -31,12 +31,22 @@ import {
  * and refuse anyone else who later tries to move this id's address. Everything here is best-effort:
  * the relay exists to keep already-sent links working, and it going down must not surface as a
  * failure in a tool that manages local repositories perfectly well without it.
+ *
+ * `generation` is the remote-route generation the announce belongs to (only `publishRemoteRoutes`
+ * passes one). The announce await is a network round-trip, and a tunnel can be stopped while it is
+ * in flight — `stopManagedTunnel` bumps the generation and clears the status, so an announce that
+ * outlives its tunnel must not write "registered" back over that reset.
  */
-export async function publishToRelay(cfg: RepoYetiConfig, origin: string): Promise<void> {
+export async function publishToRelay(
+  cfg: RepoYetiConfig,
+  origin: string,
+  generation?: number,
+): Promise<void> {
   const relay = relayEffective(cfg);
   if (!relay.enabled) return;
   const identity = await ensureRelayIdentity(cfg);
   const res = await announce(relay.url, identity, origin);
+  if (generation !== undefined && generation !== remoteRouteGeneration) return;
   relayAnnounced = res.ok;
   relayError = res.ok ? null : (res.error ?? "announce failed");
   if (!res.ok) console.warn(`repoyeti: relay announce failed — ${res.error}`);
@@ -149,14 +159,14 @@ export async function publishRemoteRoutes(
   const generation = ++remoteRouteGeneration;
   if (!isQuickTunnelOrigin(origin)) {
     oauthCallbackRoute = null;
-    await publishToRelay(cfg, origin);
+    await publishToRelay(cfg, origin, generation);
     return;
   }
 
   const redirectUri = cfg.oauth?.redirectUri;
   if (!redirectUri) {
     oauthCallbackRoute = null;
-    await publishToRelay(cfg, origin);
+    await publishToRelay(cfg, origin, generation);
     return;
   }
 
@@ -201,7 +211,7 @@ export async function publishRemoteRoutes(
       relayError,
     });
   } else if (relay.enabled) {
-    await publishToRelay(cfg, origin);
+    await publishToRelay(cfg, origin, generation);
   }
 }
 
@@ -325,11 +335,15 @@ export function publicShareOrigin(cfg: RepoYetiConfig): string | null {
  * tunnel is up, so a local-only owner still gets a link that works on their machine.
  */
 export function shareLinkFor(cfg: RepoYetiConfig, token: string, fallbackOrigin: string): string {
-  const url = cfg.relay?.url?.trim();
+  // The EFFECTIVE relay, the same one getRelayBase and publicShareOrigin use. This read the saved
+  // `relay.url` only, and a zero-config install has none (the hosted relay is the default), so it
+  // handed out the rotating quick-tunnel link while recording the permanent relay as the share's
+  // origin. The panel then called the link healthy for exactly as long as the tunnel happened to live.
+  const relay = relayEffective(cfg);
   const id = cfg.relay?.identity?.id;
   // relayShareUrl owns the fragment form; don't rebuild it here, or the two can drift apart and
   // the drift would leak the token to the relay rather than fail loudly.
-  if (getRelayBase(cfg) && url && id) return relayShareUrl(url, id, token);
+  if (getRelayBase(cfg) && relay.url && id) return relayShareUrl(relay.url, id, token);
   return `${(tunnelUrl ?? fallbackOrigin).replace(/\/+$/, "")}/s/${token}`;
 }
 
@@ -385,16 +399,30 @@ export function startManagedTunnel(
     // a failure to reach it must never affect local git management.
     void publishRemoteRoutes(cfg, url);
   };
+  // A launch that fails SYNCHRONOUSLY (spawnCloudflared's catch: a spawn that throws rather than
+  // emitting 'error', which is how some Bun versions report a missing cloudflared) runs onErr before
+  // the start call below returns, and that call then hands back an inert `{ stop() {} }`. Assigning
+  // it unconditionally put a dead handle back after onErr had cleared it: tunnelActive() read true
+  // forever, the early return above refused every later start, and installing cloudflared did
+  // nothing until the daemon was restarted. Bun 1.4.2 reports it asynchronously, so this is a guard
+  // for the other path, not a fix for the current runtime.
+  let failed = false;
   const onErr = (msg: string): void => {
+    failed = true;
     tunnelStarting = false;
     tunnelHandle = null;
+    // Broadcast the cleared URL AND drop the module state it is read from: /api/status reports
+    // getTunnelUrl(), so clearing only the broadcast left a dead URL readable there (and in every
+    // share link built from it) — see the exit-after-ready path in src/tunnel.ts.
+    tunnelUrl = null;
     onFailed?.(msg);
     broadcast("daemon_status", { tunnelUrl: null, tunnelActive: false, error: msg });
   };
   const named = namedTunnel(cfg);
-  tunnelHandle = named
+  const handle = named
     ? startNamedTunnel(named.token, named.hostname, onUrl, onErr)
     : startTunnel(serverPort, onUrl, onErr);
+  if (!failed) tunnelHandle = handle;
 }
 
 /** Tear the tunnel down (idempotent) and tell clients it's gone. */

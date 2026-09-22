@@ -123,6 +123,12 @@ test("describes a clean fast-forward pull without touching the working tree", as
   expect((await gitPullFfOnly(work, null)).code).toBe("OK");
 }, UPSTREAM_ROUND_TIMEOUT_MS);
 
+/** Loose-object count, as git reports it: the number a merge-tree write would raise. */
+async function looseObjects(repo: string): Promise<number> {
+  const out = await $`git -C ${repo} count-objects -v`.text();
+  return Number(/^count: (\d+)/m.exec(out)?.[1] ?? Number.NaN);
+}
+
 test("predicts a conflict before the pull, still without touching the working tree", async () => {
   const { work, other } = await fixture();
   await publishUpstream(other);
@@ -134,6 +140,7 @@ test("predicts a conflict before the pull, still without touching the working tr
   await W("commit", "-q", "-m", "local: edit a");
   await W("fetch", "-q");
   const before = readFileSync(join(work, "a.txt"), "utf8");
+  const objectsBefore = await looseObjects(work);
 
   const r = await readIncoming(work);
   expect(r.ok).toBe(true);
@@ -145,7 +152,9 @@ test("predicts a conflict before the pull, still without touching the working tr
   expect(r.conflictCheck).toBe(true);
   expect(r.conflicts).toContain("a.txt");
 
-  // The merge was simulated in the object store only.
+  // The merge was simulated against the object store, and wrote nothing INTO it: merge-tree's
+  // merged tree and blobs went to a quarantine directory that is gone now (1.0 audit, git P2).
+  expect(await looseObjects(work)).toBe(objectsBefore);
   expect(readFileSync(join(work, "a.txt"), "utf8")).toBe(before);
   expect((await $`git -C ${work} status --porcelain`.text()).trim()).toBe("");
   // And no merge was left half-applied.
@@ -407,3 +416,19 @@ test("incoming files keep a non-ASCII name as itself and report a rename with bo
   // The per-commit totals decoded from `log -z --numstat` count both rows.
   expect(r.commits[0]?.stat).toMatchObject({ filesChanged: 2, addedLines: 1, removedLines: 0 });
 }, UPSTREAM_ROUND_TIMEOUT_MS);
+
+test("the preview's worktree hash equals the status hash for the same tree, staged rename included", async () => {
+  const { work, other } = await fixture();
+  await publishUpstream(other);
+  const W = git(work);
+  await W("fetch", "-q");
+  // A staged rename is exactly what porcelain v1 and v2 describe differently (v2 names the source).
+  await W("mv", "a.txt", "renamed.txt");
+  writeFileSync(join(work, "untracked.txt"), "new\n");
+
+  const preview = await readIncoming(work);
+  const status = await readStatus(work);
+  expect(preview.ok).toBe(true);
+  expect(status.worktreeStateHash).toBeTruthy();
+  expect(preview.snapshot?.worktreeStateHash).toBe(status.worktreeStateHash ?? undefined);
+});

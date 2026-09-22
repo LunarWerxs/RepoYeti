@@ -195,6 +195,11 @@ const STATUS_BY_CODE: Partial<Record<ApiCode, ContentfulStatusCode>> = {
   NOTHING_TO_STASH: 409,
   STASH_CONFLICT: 409,
   STASH_EMPTY: 409,
+  // The git action itself failed (discard/stage/delete aborted); the tree is unchanged and the
+  // owner must resolve it. Without an entry these fell through to 500, unlike every sibling.
+  DISCARD_FAILED: 409,
+  STAGE_FAILED: 409,
+  DELETE_FAILED: 409,
   PLAN_STALE: 409,
   NOT_CONFLICTED: 409,
   CONFLICT_STALE: 409,

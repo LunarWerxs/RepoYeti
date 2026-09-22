@@ -463,3 +463,29 @@ test("accepted collaborations expose remote dirty state and enforce ten quiet mi
     globalThis.fetch = originalFetch;
   }
 });
+
+test("a snapshot carrying an untracked or type-changed file is accepted, not dropped whole", () => {
+  initDb();
+  const token = `presence-${crypto.randomUUID()}`;
+  createShare(hashToken(token), {
+    label: "peer presence",
+    perm: "view",
+    collaborative: true,
+    scopeAll: true,
+    repoIds: [],
+    expiresAt: null,
+    token,
+  });
+  const live = {
+    ...snapshot,
+    updatedAt: Date.now(),
+    repoId: `repo-${crypto.randomUUID()}`,
+    changes: [
+      { path: "notes/new-idea.md", status: "N", staged: false },
+      { path: "bin/tool", status: "T", staged: false },
+    ],
+  };
+  const channel = collaborationChannel(token);
+  expect(receiveCollaborationSnapshot(token, channel, live.participantId, encryptSnapshot(token, live))).toBe(true);
+  expect(readCollaborationSnapshots()).toContainEqual(live);
+});

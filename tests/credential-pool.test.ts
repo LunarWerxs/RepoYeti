@@ -122,3 +122,30 @@ test("acquireKeys falls back to the soonest-to-clear key when every key is cooli
   const stillTrying = acquireKeys("groq", keys);
   expect(stillTrying.length).toBe(1);
 });
+
+// ── the 429 pause must not answer for a DIFFERENT key ────────────────────────────────
+// requestJson's rate-limit pause was keyed by provider, so key A's 429 made rotation to key B a
+// no-op: B was answered from the pause without a request, reported rate-limited, and cooled.
+
+test("a pool rotates past a 429 to a key that actually gets called, and only the limited key pauses", async () => {
+  const { requestJson, rateGateKey } = await import("../src/ai/commit-message.ts");
+  const provider = `gate-${crypto.randomUUID()}`; // a fresh provider id, so no earlier test's pause applies
+  const called: string[] = [];
+  const fetchFor = (key: string) => (async () => {
+    called.push(key);
+    return key === "key-a"
+      ? new Response(JSON.stringify({ error: { message: "slow down" } }), { status: 429, headers: { "retry-after": "30" } })
+      : new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const attempt = (key: string) =>
+    requestJson("https://ai.example/v1", { method: "POST" }, fetchFor(key), 5_000, rateGateKey(provider, key));
+
+  const result = await withKeyRotation("groq", ["key-a", "key-b"], attempt);
+  expect(result).toEqual({ ok: true });
+  expect(called).toEqual(["key-a", "key-b"]); // B was really asked, not answered from A's pause
+
+  // A is still paused (no request goes out); B is not.
+  await expect(attempt("key-a")).rejects.toMatchObject({ code: "AI_RATE_LIMITED" });
+  expect(called).toEqual(["key-a", "key-b"]);
+  expect(await attempt("key-b")).toEqual({ ok: true });
+});

@@ -226,7 +226,8 @@ export function parsePorcelainV2(raw: string): PorcelainStatus {
   return { ...header, files };
 }
 
-async function readPorcelainStatus(git: SimpleGit): Promise<PorcelainStatus> {
+/** @internal shared with read/incoming.ts, whose preview snapshot must hash the SAME list. */
+export async function readPorcelainStatus(git: SimpleGit): Promise<PorcelainStatus> {
   return parsePorcelainV2(
     await git.raw(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]),
   );

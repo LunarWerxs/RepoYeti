@@ -5,8 +5,8 @@
  * Auth + author identity are injected per operation (`-c core.sshCommand` + `-c user.*`)
  * via git.ts — global/repo config is never mutated.
  */
-import { rmSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, rmSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   gitFor,
   identityConfigArgs,
@@ -79,6 +79,12 @@ export interface ClassifyContext {
    * on that path is never a passphrase, and saying so sends the owner after a phantom.
    */
   couldPromptForPassphrase?: boolean;
+  /**
+   * The idle budget the op that failed was actually run with. A clone gets CLONE_TIMEOUT_MS, not
+   * NET_BLOCK_MS, and the timeout message quotes this value — without it a clone killed after 300s
+   * of silence told the owner "git sent no output for 120s", i.e. a budget it never spent.
+   */
+  idleTimeoutMs?: number;
 }
 
 /** Map a thrown git error (simple-git surfaces stderr in the message) to a code. */
@@ -155,7 +161,7 @@ export function classify(err: unknown, ctx?: ClassifyContext): ActionResult {
     }
     return fail(
       "NETWORK_TIMEOUT",
-      `git sent no output for ${Math.round(NET_BLOCK_MS / 1000)}s and was stopped — the remote or the network is not responding`,
+      `git sent no output for ${Math.round((ctx?.idleTimeoutMs ?? NET_BLOCK_MS) / 1000)}s and was stopped — the remote or the network is not responding`,
     );
   }
   if (
@@ -226,12 +232,38 @@ export async function classifyRemote(
  */
 export function clearStaleIndexLock(absPath: string): void {
   try {
-    const lock = join(absPath, ".git", "index.lock");
+    const lock = join(resolveGitDir(absPath), "index.lock");
     const age = Date.now() - statSync(lock).mtimeMs;
     if (age >= NET_BLOCK_MS) rmSync(lock, { force: true });
   } catch {
     /* no lock, no .git, or no permission — nothing to recover */
   }
+}
+
+/**
+ * The directory that actually owns `index.lock`.
+ *
+ * An ordinary checkout keeps it at `<absPath>/.git/index.lock`, but a linked worktree or a
+ * registered submodule has a `.git` FILE pointing at the real gitdir (`<parent>/.git/worktrees/…`
+ * or `<parent>/.git/modules/…`, the exact layouts registerRepo accepts). The lock lives THERE, so
+ * joining onto the literal `.git` path threw ENOENT, clearStaleIndexLock's catch swallowed it, and
+ * the corpse outlived the kill — every later op then failed with "Unable to create
+ * '.git/index.lock': File exists", the state that function exists to prevent. Mirrors the
+ * `.git`-file pointer resolution in gitDirFor (src/git.ts, not exported); falls back to the literal
+ * path when resolution fails.
+ */
+function resolveGitDir(absPath: string): string {
+  const marker = join(absPath, ".git");
+  try {
+    const s = statSync(marker);
+    if (s.isFile() && s.size <= 16_384) {
+      const target = /^gitdir:\s*(.+?)\s*$/im.exec(readFileSync(marker, "utf8"))?.[1]?.trim();
+      if (target) return isAbsolute(target) ? target : resolve(dirname(marker), target);
+    }
+  } catch {
+    /* no `.git` marker at all — the literal path below is the best we can do */
+  }
+  return marker;
 }
 
 export async function gitFetch(
@@ -348,7 +380,11 @@ export async function gitClone(
   } catch (err) {
     // No repo exists yet to read remotes from, but the URL we were handed IS the transport — so
     // unlike classifyRemote there's nothing to look up, and the context costs nothing to pass
-    // always (classify only consults it on a timeout).
-    return classify(err, { couldPromptForPassphrase: !identity?.sshKeyPath && isSshUrl(url) });
+    // always (classify only consults it on a timeout). idleTimeoutMs names the clone budget so a
+    // timed-out clone quotes the 300s it actually waited, not the ordinary NET_BLOCK_MS.
+    return classify(err, {
+      couldPromptForPassphrase: !identity?.sshKeyPath && isSshUrl(url),
+      idleTimeoutMs: CLONE_TIMEOUT_MS,
+    });
   }
 }

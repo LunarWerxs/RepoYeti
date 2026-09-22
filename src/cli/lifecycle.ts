@@ -121,8 +121,30 @@ function applyIdentityMergeToConfig(cfg: RepoYetiConfig): void {
  *  anything that reads it directly. `start`'s own flag loop ignores unknown flags, so the extra
  *  token is harmless to arg parsing. */
 const RELAUNCH_FLAG = "--relaunch";
+/** `start` flags that take the NEXT token as their value, exactly as parseStartFlags consumes them. */
+const START_VALUE_FLAGS = new Set(["--root", "--port"]);
 function isRelaunch(): boolean {
-  return process.env.REPOYETI_RELAUNCH === "1" || process.argv.includes(RELAUNCH_FLAG);
+  return process.env.REPOYETI_RELAUNCH === "1" || argvRequestsRelaunch(process.argv);
+}
+
+/**
+ * True when `--relaunch` appears as a FLAG, not as the value of `--root`/`--port`. A bare
+ * `argv.includes` read `repoyeti start --root --relaunch` (a root folder literally named that) as
+ * the auto-update successor, and the successor is exempt from the single-instance probe, so a second
+ * daemon booted beside the first and both wrote the same SQLite file (1.0 audit, delivery P2).
+ * buildRelaunchArgv already skips value-flag values for the same reason; this is the reading side.
+ * @internal exported for tests.
+ */
+export function argvRequestsRelaunch(argv: readonly string[]): boolean {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg && START_VALUE_FLAGS.has(arg) && argv[i + 1]) {
+      i++; // the value, whatever it looks like
+      continue;
+    }
+    if (arg === RELAUNCH_FLAG) return true;
+  }
+  return false;
 }
 
 /** Parsed `start` CLI flags. `--root` is applied as a side effect immediately (it doesn't affect

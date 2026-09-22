@@ -69,6 +69,17 @@ export function splitShowZ(out: string): { header: string; records: string[] } {
 
 const isPair = (status: string): boolean => status.startsWith("R") || status.startsWith("C");
 
+/** A numstat row opens with `<added>\t<removed>\t` (each count a number or "-" for binary). A
+ *  header never does: it is the caller's `--format` line, which starts with a field value. */
+const NUMSTAT_ROW = /^(?:\d+|-)\t(?:\d+|-)\t/;
+
+/** True for the two-path (rename/copy) numstat form: the row has nothing after its second tab, its
+ *  two paths follow as their own tokens. */
+const isPairRow = (row: string): boolean => {
+  const cols = row.split("\t");
+  return cols.length > 2 && cols.slice(2).join("") === "";
+};
+
 /** Decode name-status record tokens (see the module note for the shapes). */
 export function parseNameStatusZ(tokens: readonly string[]): NameStatusRecord[] {
   const out: NameStatusRecord[] = [];
@@ -121,20 +132,33 @@ export function recordKey(record: { path: string; from?: string }): string {
  */
 export function parseLogNumstatZ(out: string): Array<{ header: string; records: NumstatRecord[] }> {
   const commits: Array<{ header: string; rows: string[] }> = [];
+  // A rename/copy row ends at its second tab and its two paths follow as their own tokens (see the
+  // module note). Those path tokens do not have a numstat row's shape, so they are claimed by
+  // count before the header test can look at them.
+  let pendingPaths = 0;
   for (const token of splitZ(out)) {
     if (token === "") continue; // commit boundary: the next non-empty token is a header
+    if (pendingPaths > 0) {
+      pendingPaths -= 1;
+      commits[commits.length - 1]?.rows.push(token);
+      continue;
+    }
     const current = commits.at(-1);
-    // A header carries the caller's format; every caller here uses the unit separator in it, and
-    // a numstat row never does (its separators are tabs). The header token also carries the
-    // FIRST numstat row after its newline.
-    if (token.includes("\x1f") || !current) {
+    // Identify a row by its OWN shape, not by the header's unit separator. The old test asked
+    // whether the token contains 0x1F, but a numstat row's PATH is raw bytes under -z and a path
+    // may legally contain 0x1F on Unix: "2\t0\ta\x1fname.txt" then looked like a header, starting
+    // a phantom commit and stranding the real one's remaining rows on it. The header token also
+    // carries the FIRST numstat row after its newline.
+    if (!NUMSTAT_ROW.test(token) || !current) {
       const newline = token.indexOf("\n");
       const header = newline < 0 ? token : token.slice(0, newline);
       const firstRow = newline < 0 ? "" : token.slice(newline + 1);
       commits.push({ header, rows: firstRow ? [firstRow] : [] });
+      if (firstRow && isPairRow(firstRow)) pendingPaths = 2;
       continue;
     }
     current.rows.push(token);
+    if (isPairRow(token)) pendingPaths = 2;
   }
   return commits.map(({ header, rows }) => ({ header, records: parseNumstatZ(rows) }));
 }

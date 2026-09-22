@@ -74,6 +74,21 @@ function launchFailure(err: unknown): string {
 }
 
 /**
+ * A stateful scanner for ONE output stream: each chunk is matched together with the tail of the
+ * previous one. A pipe may split a line across two 'data' events, and matching chunk by chunk
+ * missed a URL cut mid-hostname: cloudflared kept running, `exit` never fired, and the tunnel sat
+ * at "starting" with no error. 512 characters holds any line `detect` looks for.
+ */
+export function tailScanner(detect: (chunk: string) => string | null, keep = 512): (buf: Buffer) => string | null {
+  let tail = "";
+  return (buf) => {
+    const text = tail + buf.toString();
+    tail = text.slice(-keep);
+    return detect(text);
+  };
+}
+
+/**
  * Spawn cloudflared with `args`, watching the merged stdout/stderr stream. The first time `detect`
  * returns a URL from a chunk, fire `onUrl` (once). A launch failure or an exit before readiness
  * fires `onError`. Shared by the quick and named tunnels — they differ only in args + `detect`.
@@ -93,25 +108,42 @@ function spawnCloudflared(
   }
 
   let found = false;
-  const scan = (buf: Buffer): void => {
+  /** Set by `stop()`: a kill WE asked for is a clean teardown, not a tunnel failure. */
+  let stopped = false;
+  const watch = (feed: (buf: Buffer) => string | null) => (buf: Buffer): void => {
     if (found) return;
-    const url = detect(buf.toString());
+    const url = feed(buf);
     if (url) {
       found = true;
       onUrl(url);
     }
   };
-  proc.stdout?.on("data", scan);
-  proc.stderr?.on("data", scan);
+  // One scanner per stream, so stdout and stderr lines never interleave into a false match.
+  proc.stdout?.on("data", watch(tailScanner(detect)));
+  proc.stderr?.on("data", watch(tailScanner(detect)));
 
   // ENOENT arrives here, not as a throw from spawn(): the failure is asynchronous.
   proc.on("error", (err) => onError(launchFailure(err)));
   proc.on("exit", (code) => {
-    if (!found) onError(`cloudflared exited (code ${code}) before the tunnel was ready`);
+    // Our own stop() killed it — stopManagedTunnel clears the state and broadcasts the teardown, so
+    // reporting an error here would contradict that clean shutdown.
+    if (stopped) return;
+    // `found` alone was the whole guard, so cloudflared dying UNDER a live tunnel (a crash, lost
+    // network, being killed) was indistinguishable from a clean `stop()` and onError never fired.
+    // onError is the only channel that clears the runtime's tunnelUrl/tunnelActive, so /api/status
+    // and the daemon_status broadcast kept advertising a public host that was already unreachable.
+    if (!found) {
+      onError(`cloudflared exited (code ${code}) before the tunnel was ready`);
+    } else {
+      onError(
+        `cloudflared exited (code ${code}) after the tunnel was ready — the public URL is no longer reachable`,
+      );
+    }
   });
 
   return {
     stop() {
+      stopped = true;
       try {
         proc.kill();
       } catch {

@@ -15,7 +15,8 @@ import { gitFor } from "../git.ts";
 import { readGate } from "../gitgate.ts";
 import { parseNameStatusZ, parseNumstatZ, recordKey, splitShowZ } from "./git-records.ts";
 
-const US = "\x1f"; // field separator (unit separator) — can't appear in a ref name or subject
+const US = "\x1f"; // field separator (unit separator) — git forbids it in a ref name; a commit
+// subject may still contain it, so %s is always parsed as a TRAILING remainder (see parseNumstatLog).
 
 /** Caps: keep payloads small for a phone. A repo with thousands of branches/commits is
  *  unusable to scroll anyway — we send the most recent slice. */
@@ -287,8 +288,12 @@ function parseNumstatLog(raw: string): LogEntry[] {
   for (const line of raw.split("\n")) {
     if (line.trim() === "") continue;
     if (line.includes(US)) {
-      const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", subject = ""] =
+      const [hash = "", shortHash = "", authorName = "", authorEmail = "", at = "0", parentsRaw = "", refs = "", ...subjectRest] =
         line.split(US);
+      // The subject is the LAST field and may itself contain US (git only rejects NUL in messages),
+      // so rejoin the remainder — destructuring 8 fixed parts truncated it at the first US, making
+      // the History list disagree with readCommit, whose sibling parser already rejoins.
+      const subject = subjectRest.join(US);
       const parents = parentsRaw.trim() ? parentsRaw.trim().split(" ") : [];
       commits.push({
         hash,
@@ -314,6 +319,27 @@ function parseNumstatLog(raw: string): LogEntry[] {
     if (removedRaw !== "-") current.stat.removedLines += Number(removedRaw) || 0;
   }
   return commits;
+}
+
+/**
+ * True only for an unborn HEAD: a brand-new repo with no commits, where `git log` exits non-zero
+ * but the history is genuinely empty rather than broken. Every other failure (repo deleted or
+ * moved, corrupt object store, HEAD on a missing ref) must NOT be reported as an empty success:
+ * readLog would otherwise answer `ok` with zero commits for a broken repo, indistinguishable from
+ * a fresh one, while readBranches/readTags/readStashes all surface that class as ERROR.
+ *
+ * Asked of git, not read out of the error text: git's messages are localized (LANG is not pinned
+ * for the daemon's children), and a match on English prose would turn every fresh repo on a German
+ * or Japanese machine into an error. `rev-parse -q --verify HEAD` prints nothing and exits 1 with
+ * no stderr exactly when HEAD resolves to no commit, which simple-git hands back as an empty string;
+ * a missing or corrupt repository makes it throw instead.
+ */
+async function isUnbornHead(absPath: string): Promise<boolean> {
+  try {
+    return (await gitFor(absPath).raw(["rev-parse", "-q", "--verify", "HEAD"])).trim() === "";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -370,8 +396,12 @@ export async function readLog(
             `--pretty=format:${fmt}`,
           ]);
         }
-      } catch {
-        return { ok: true, code: "OK" as const, commits: [], hasMore: false }; // unborn HEAD
+      } catch (e) {
+        // Only an unborn HEAD is a genuinely empty history; anything else (deleted/corrupt repo,
+        // missing ref, a broken git) must reach the outer catch as ERROR rather than masquerade as
+        // "no commits" — see isUnbornHead.
+        if (!(await isUnbornHead(absPath))) throw e;
+        return { ok: true, code: "OK" as const, commits: [], hasMore: false };
       }
       const commits = parseNumstatLog(raw);
       return {

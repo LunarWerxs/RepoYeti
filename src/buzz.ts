@@ -287,7 +287,11 @@ export async function preflightBuzz(
         )
       : pass("HELPER_OK", "git-credential-nostr is installed and configured in the Git helper chain.");
 
-  const httpPathRun = await run(["git", "config", "--get", "credential.useHttpPath"]);
+  // `git config --get` echoes the stored token verbatim, so Git's other enabled boolean spellings
+  // (1/yes/on, or a bare key meaning true) read back as something other than "true". Ask Git to
+  // normalise the value instead of string-comparing, or those owners are stuck failing
+  // HTTP_PATH_DISABLED and never reach the authentication probe.
+  const httpPathRun = await run(["git", "config", "--type=bool", "--get", "credential.useHttpPath"]);
   const httpPathEnabled = httpPathRun.code === 0 && httpPathRun.stdout.trim().toLowerCase() === "true";
   const useHttpPath = httpPathEnabled
     ? pass("HTTP_PATH_OK", "credential.useHttpPath=true is configured.")

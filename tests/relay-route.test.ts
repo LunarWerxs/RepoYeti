@@ -396,3 +396,12 @@ test("a link minted BEFORE the relay was switched on is still flagged stale", ()
   // Turning the relay on does not resurrect links that carry a dead trycloudflare hostname.
   expect(isStaleOrigin("https://old-host.trycloudflare.com", publicShareOrigin(cfg))).toBe(true);
 });
+
+test("shareLinkFor uses the DEFAULT relay when none is saved, matching the origin it records", () => {
+  // Zero-config: relay on by default, no `url` in config.json. The link and the recorded origin
+  // must name the same place, or the Sharing panel vouches for a link that dies with the tunnel.
+  const cfg = base({ relay: { identity: createRelayIdentity() } });
+  const url = shareLinkFor(cfg, "tok123", "http://127.0.0.1:7171");
+  expect(url).toBe(`${publicShareOrigin(cfg)}#/s/tok123`);
+  expect(url.split("#")[0]).not.toContain("tok123");
+});

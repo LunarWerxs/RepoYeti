@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 
 import { join } from "node:path";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { setServerPort, startManagedTunnel, stopManagedTunnel } from "../src/runtime.ts";
+import { setServerPort, startManagedTunnel, stopManagedTunnel, tunnelActive } from "../src/runtime.ts";
 import { resolveCloudflaredExecutable, startTunnel } from "../src/tunnel.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 
@@ -78,4 +78,40 @@ test("startManagedTunnel hands a launch failure to its caller, not only to SSE",
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;
   }
+});
+
+// Whichever way the launch fails (a synchronous throw at spawn, or an async 'error'), no tunnel may
+// be left behind and a second start must be attempted. The synchronous path used to store an inert
+// handle over the null onFailed had just written, so tunnelActive() read true forever.
+test("a launch that fails synchronously leaves no tunnel behind, and a second start is attempted", async () => {
+  const previousPath = process.env.PATH;
+  process.env.PATH = tmp();
+  const cfg = { roots: [], port: 7171, maxDepth: 6, maxRepos: 200 } as unknown as RepoYetiConfig;
+  try {
+    setServerPort(7171);
+    let failures = 0;
+    startManagedTunnel(cfg, undefined, () => failures++);
+    await Bun.sleep(50);
+    expect(failures).toBe(1);
+    expect(tunnelActive()).toBe(false);
+    // Not refused by the "already running" early return: it tries again, and fails again, honestly.
+    startManagedTunnel(cfg, undefined, () => failures++);
+    await Bun.sleep(50);
+    expect(failures).toBe(2);
+    expect(tunnelActive()).toBe(false);
+  } finally {
+    stopManagedTunnel();
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+
+// A pipe can split cloudflared's URL line across two reads; matching each chunk alone missed it and
+// the tunnel sat at "starting" forever with cloudflared alive and nothing reported.
+test("the URL scanner finds a quick-tunnel URL split across two chunks", async () => {
+  const { tailScanner } = await import("../src/tunnel.ts");
+  const detect = (chunk: string) => /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i.exec(chunk)?.[0] ?? null;
+  const feed = tailScanner(detect);
+  expect(feed(Buffer.from("INF |  https://quiet-river-12.trycloudf"))).toBeNull();
+  expect(feed(Buffer.from("lare.com  |\n"))).toBe("https://quiet-river-12.trycloudflare.com");
 });

@@ -254,9 +254,18 @@ export function watchRepo(
   // local/remote/tag namespaces. Logs and the indirection file are useful bonuses.
   const markerWatched = addWatch(layout.gitDir);
   const commonWatched = addWatch(layout.commonDir);
-  const refsWatched = layout.isGit
-    ? addWatch(join(layout.commonDir, "refs"), true)
-    : true;
+  // The loose-ref store differs by backend: a normal repo keeps refs under common-dir/refs,
+  // while a reftable repo (`extensions.refStorage=reftable`) writes them under
+  // common-dir/reftable — a path the refs watch never saw, so an external tag/fetch/update-ref
+  // stayed invisible until the poll fallback. Watch whichever store exists, and treat "neither
+  // directory" as covered so a reftable checkout that omits refs/ isn't torn down to polling.
+  const reftableDir = join(layout.commonDir, "reftable");
+  const refsDir = join(layout.commonDir, "refs");
+  let refsWatched = true;
+  if (layout.isGit) {
+    if (existsSync(reftableDir)) refsWatched = addWatch(reftableDir, true);
+    else if (existsSync(refsDir)) refsWatched = addWatch(refsDir, true);
+  }
   addWatch(join(layout.gitDir, "logs"), false, false);
   // Watch the indirection file too, but don't make health depend on this bonus descriptor.
   if (layout.markerPath !== layout.gitDir) addWatch(layout.markerPath, false, false);

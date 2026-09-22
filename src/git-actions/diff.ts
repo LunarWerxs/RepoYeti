@@ -84,7 +84,8 @@ async function boundedGit(absPath: string, args: string[], cap: number): Promise
 /**
  * Accumulate a bounded `git diff` (up to `cap` bytes) with the unborn-HEAD fallback baked in: try
  * `git diff HEAD <extraArgs> [-- <chunk>…]`, and if that comes back empty — a repo with no commits
- * yet errors/empties on `diff HEAD` — retry the same WITHOUT `HEAD` against the worktree. Pass
+ * yet errors/empties on `diff HEAD` — retry the same WITHOUT `HEAD` against the worktree, and then
+ * `git diff --cached` for the unborn-HEAD-plus-staged case neither of the first two can see. Pass
  * `paths=null` (or empty) for the whole tree (no pathspec); otherwise the pathspec is chunked so a
  * big group can't overflow the OS arg limit. `extraArgs` carries per-caller flags (e.g. -U0 -M).
  *
@@ -112,7 +113,16 @@ async function boundedDiff(
     return out.trim();
   };
   const withHead = await run(["diff", "HEAD", ...extraArgs]);
-  const tracked = withHead || (await run(["diff", ...extraArgs]));
+  // `git diff HEAD` fails outright on an UNBORN HEAD (fresh `git init`, zero commits) — and plain
+  // `git diff` is index↔worktree, so a fresh repo whose changes are all STAGED (`git add .` before
+  // the first commit, the documented "just start committing" flow) came back empty from BOTH: the
+  // file list showed every added file while the diff body said "(no textual diff)". untrackedDiffs
+  // can't rescue it either, because staged files are no longer in `git ls-files --others`. `git
+  // diff --cached` (index↔HEAD) is the only base that still sees staged content in that state; in a
+  // repo WITH commits it is subsumed by the `HEAD` run above (an empty `diff HEAD` means worktree ==
+  // HEAD, hence index == HEAD too), so it only ever costs a child on a genuinely diff-less tree.
+  const tracked =
+    withHead || (await run(["diff", ...extraArgs])) || (await run(["diff", "--cached", ...extraArgs]));
   // A tracked diff big enough to fill the raw cap must NOT cost every new file its content. That
   // is the same first-come-first-served failure the fold doctrine below exists to prevent, and
   // returning early here would silently reproduce the original "only the first file" bug on any

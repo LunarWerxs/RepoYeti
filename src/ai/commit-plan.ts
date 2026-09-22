@@ -11,7 +11,15 @@ import {
   planMaxTokens,
   type AiProviderRuntime,
 } from "./adapters.ts";
-import { AiError, BODY_DOCTRINE, requestJson, wrapCommitBody, type AiCode, type FetchFn } from "./commit-message.ts";
+import {
+  AiError,
+  BODY_DOCTRINE,
+  rateGateKey,
+  requestJson,
+  wrapCommitBody,
+  type AiCode,
+  type FetchFn,
+} from "./commit-message.ts";
 import { normalizeRelPath } from "../paths.ts";
 
 const PLAN_TIMEOUT_MS = 45_000;
@@ -273,9 +281,11 @@ export function parseCommitPlan(text: string, knownPaths: string[]): CommitPlan 
     const subject = String(g.subject ?? "").trim();
     const rawFiles = Array.isArray(g.files) ? g.files : [];
     // Keep only real, not-yet-claimed paths (drops hallucinations + dedupes across groups).
-    const files = rawFiles
-      .map((p: unknown) => normalizeRelPath(p))
-      .filter((p: string) => known.has(p) && !seen.has(p));
+    // Dedupe WITHIN the group too: `seen` is filled only after this filter, so a repeated path
+    // in one group's `files` slipped through and rendered twice (plan card + auto-commit staging).
+    const files = [...new Set(rawFiles.map((p: unknown) => normalizeRelPath(p)))].filter(
+      (p: string) => known.has(p) && !seen.has(p),
+    );
     if (!subject || files.length === 0) continue;
     for (const p of files) seen.add(p);
     const scope = String(g.scope ?? "").trim();
@@ -385,7 +395,7 @@ export async function generateCommitPlan(
       },
       fetchImpl,
       PLAN_TIMEOUT_MS,
-      provider, // gate on 429 so re-clicking Auto can't machine-gun a limited provider
+      rateGateKey(provider, apiKey), // gate on 429 so re-clicking Auto can't machine-gun a limited key
     );
     return parseCommitPlan(adapter.extractCompletion(json), knownPaths);
   };

@@ -15,16 +15,21 @@
  *                                    matches what merging actually brings in)
  *   · `read-tree -n -m -u`         — dry-run the checkout safety rules for a fast-forward,
  *                                    including dirty paths that would be overwritten
- *   · `merge-tree --write-tree`    — a full merge simulated in memory. Exits non-zero and names
- *                                    the paths when the merge would conflict, which is the part
- *                                    most git GUIs make you discover by attempting the merge and
- *                                    then backing out.
+ *   · `merge-tree --write-tree`    — a full merge simulated against the object store. Names the
+ *                                    paths when the merge would conflict, which is the part most
+ *                                    git GUIs make you discover by attempting the merge and then
+ *                                    backing out. It has no dry run and WRITES the merged tree, so
+ *                                    its object writes are quarantined (see mergeTreeQuarantined)
+ *                                    and `.git` is left exactly as it was.
  */
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { gitFor } from "../git.ts";
 import { readGate } from "../gitgate.ts";
 import type { CommitStat, LogEntry } from "./inspect.ts";
-import { readWorktreeStateHash } from "./status.ts";
+import { readPorcelainStatus, readWorktreeStateHash } from "./status.ts";
 import { parseLogNumstatZ, parseNameStatusZ, parseNumstatZ, recordKey, splitZ } from "./git-records.ts";
 
 const US = "\x1f"; // field separator — see inspect.ts
@@ -187,7 +192,10 @@ async function captureSnapshot(
 ): Promise<IncomingSnapshot> {
   const headOid = (await git.raw(["rev-parse", "--verify", "HEAD"])).trim().toLowerCase();
   const upstreamOid = (await git.raw(["rev-parse", "--verify", upstream])).trim().toLowerCase();
-  const status = await git.status();
+  // The SAME porcelain-v2 reader readStatus hashes. The dashboard compares the two hashes to decide
+  // whether a preview still describes the tree (RepoCardActions previewMatchesStatus), so they must
+  // come from one parser: two parsers agree only until one of them changes a field.
+  const status = await readPorcelainStatus(git);
   const indexWorktreeHash = await readWorktreeStateHash(git, status.files);
   return {
     headOid,
@@ -404,7 +412,38 @@ async function checkFastForwardSafety(
   }
 }
 
+/**
+ * `merge-tree --write-tree` with its object writes sent to a throwaway directory.
+ *
+ * There is no dry-run form: it writes the merged tree (and every merged blob) into the object store
+ * even when all the caller wants is the conflict list. So every diverged pull preview left loose
+ * objects in `.git/objects` that nothing references and only a gc reclaims, from an endpoint whose
+ * whole promise is that it changes nothing (1.0 audit, git P2). GIT_OBJECT_DIRECTORY points git's
+ * WRITES at a fresh temp directory, GIT_ALTERNATE_OBJECT_DIRECTORIES keeps every READ on the real
+ * store (whose own alternates are followed as usual), and the directory is removed afterwards.
+ * `--git-path objects` rather than `<repo>/.git/objects`: a linked worktree's objects live in the
+ * common dir, and git answers with that.
+ */
+async function mergeTreeQuarantined(absPath: string, git: ReturnType<typeof gitFor>, upstream: string): Promise<string> {
+  const objects = resolve(absPath, (await git.raw(["rev-parse", "--git-path", "objects"])).trim());
+  const quarantine = mkdtempSync(join(tmpdir(), "repoyeti-mergetree-"));
+  try {
+    const sandboxed = gitFor(absPath, 30_000, {
+      GIT_OBJECT_DIRECTORY: quarantine,
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: objects,
+    });
+    return await sandboxed.raw(["merge-tree", "--write-tree", "--name-only", "HEAD", upstream]);
+  } finally {
+    try {
+      rmSync(quarantine, { recursive: true, force: true });
+    } catch {
+      /* a leftover temp directory costs disk, never correctness */
+    }
+  }
+}
+
 async function checkDivergedMerge(
+  absPath: string,
   git: ReturnType<typeof gitFor>,
   upstream: string,
 ): Promise<{ conflicts: string[]; conflictCheck: boolean }> {
@@ -419,7 +458,7 @@ async function checkDivergedMerge(
     // those messages are prose that varies by conflict type. Note simple-git RESOLVES
     // here even though git exits 1 on conflicts, so the exit code is not available to us
     // and the output is the only signal.
-    const out = await git.raw(["merge-tree", "--write-tree", "--name-only", "HEAD", upstream]);
+    const out = await mergeTreeQuarantined(absPath, git, upstream);
     const lines = out.split("\n");
     const paths: string[] = [];
     for (const line of lines.slice(1)) {
@@ -435,10 +474,11 @@ async function checkDivergedMerge(
 }
 
 /** ── would it conflict? ──────────────────────────────────────────────────────── `merge-tree
- *  --write-tree` performs the whole merge against the object store and writes the result as a
- *  tree object. It never reads or writes the working tree or the index, so this is safe to run
- *  on a dirty repo. Older git lacks --write-tree entirely, hence conflictCheck. */
+ *  --write-tree` performs the whole merge against the object store, its writes quarantined (see
+ *  mergeTreeQuarantined). It never reads or writes the working tree or the index, so this is safe
+ *  to run on a dirty repo. Older git lacks --write-tree entirely, hence conflictCheck. */
 async function evaluateConflictRisk(
+  absPath: string,
   git: ReturnType<typeof gitFor>,
   upstream: string,
   relation: IncomingResult["relation"],
@@ -462,7 +502,7 @@ async function evaluateConflictRisk(
     pullDisposition = probe.pullDisposition;
     dispositionMessage = probe.dispositionMessage;
   } else if (hasIncoming && relation === "diverged") {
-    const probe = await checkDivergedMerge(git, upstream);
+    const probe = await checkDivergedMerge(absPath, git, upstream);
     conflicts = probe.conflicts;
     conflictCheck = probe.conflictCheck;
   }
@@ -500,6 +540,7 @@ export async function readIncoming(absPath: string): Promise<IncomingResult> {
       const { commits, commitsTruncated } = await readIncomingCommits(git, upstream);
       const { files, stat } = await readIncomingFileEffect(git, upstream, hasIncoming);
       const { conflicts, conflictCheck, pullDisposition, dispositionMessage } = await evaluateConflictRisk(
+        absPath,
         git,
         upstream,
         relation,

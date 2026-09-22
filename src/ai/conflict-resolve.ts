@@ -20,7 +20,7 @@
 // sentinel-delimited block is per-hunk recoverable, so a mangled hunk 3 costs hunk 3 only.
 import type { AiProviderId } from "../config.ts";
 import { AI_ADAPTERS, CONFLICT_SAMPLING, conflictMaxTokens, type AiProviderRuntime } from "./adapters.ts";
-import { AiError, requestJson, type AiCode, type FetchFn } from "./commit-message.ts";
+import { AiError, rateGateKey, requestJson, type AiCode, type FetchFn } from "./commit-message.ts";
 
 const RESOLVE_TIMEOUT_MS = 90_000;
 
@@ -443,9 +443,19 @@ function windowFile(text: string, parsed: ParsedConflictFile): { body: string; w
   return { body, windowed: true };
 }
 
-export function resolveUserPrompt(path: string, text: string, parsed: ParsedConflictFile): string {
+/**
+ * Build the user prompt for the whole-file context. Returns the windowing decision alongside the
+ * text so callers need not re-derive it — the prompt itself contains no reliable signal for it
+ * (a small file can contain the literal words "unchanged line", and a windowed file whose kept
+ * lines elide nothing contains none).
+ */
+function buildUserPrompt(
+  path: string,
+  text: string,
+  parsed: ParsedConflictFile,
+): { prompt: string; windowed: boolean } {
   const { body, windowed } = windowFile(text, parsed);
-  return (
+  const prompt =
     `File: ${path}\n` +
     `Conflicts: ${parsed.hunks.length}, numbered 1 to ${parsed.hunks.length} in the order they appear.\n` +
     (windowed
@@ -455,8 +465,12 @@ export function resolveUserPrompt(path: string, text: string, parsed: ParsedConf
     `\n===== FILE (conflict markers intact) =====\n${body}\n` +
     `\n===== CONFLICT REGIONS =====\n${parsed.hunks.map(renderHunk).join("\n")}\n` +
     `\nResolve all ${parsed.hunks.length} region${parsed.hunks.length === 1 ? "" : "s"} using the ` +
-    "output format. Apply rule 6 whenever you are not sure — a flagged region is a good outcome."
-  );
+    "output format. Apply rule 6 whenever you are not sure — a flagged region is a good outcome.";
+  return { prompt, windowed };
+}
+
+export function resolveUserPrompt(path: string, text: string, parsed: ParsedConflictFile): string {
+  return buildUserPrompt(path, text, parsed).prompt;
 }
 
 // ── response parsing (PURE) ────────────────────────────────────────────────────────────
@@ -514,7 +528,14 @@ export function parseConflictResolution(
   const byIndex = new Map(hunks.map((h) => [h.index, h]));
   const resolutions: HunkResolution[] = [];
   const rejected: RejectedHunk[] = [];
-  const seen = new Set<number>();
+  // Indices the model emitted at least one block for; a hunk NOT in here is the only thing that
+  // counts as "missing". Tracked separately from `resolved` so a region whose sole block was
+  // unusable is reported as rejected, never as skipped.
+  const answered = new Set<number>();
+  // Indices we already ACCEPTED a block for. Only an accepted block makes a later one a
+  // "duplicate" — marking this before the block passed its checks used to let a malformed first
+  // block shadow a well-formed second block for the same region.
+  const resolved = new Set<number>();
 
   const blockRe = new RegExp(
     `${escapeRe(SENTINEL_START)}\\s*(\\d+)\\s*>>>\\r?\\n([\\s\\S]*?)${escapeRe(SENTINEL_END)}\\s*\\1\\s*>>>`,
@@ -524,16 +545,17 @@ export function parseConflictResolution(
     const index = Number.parseInt(m[1] ?? "", 10);
     const hunk = byIndex.get(index);
     if (!hunk) continue; // a region number that does not exist — ignore rather than reject
-    if (seen.has(index)) {
+    if (resolved.has(index)) {
       rejected.push({ index, reason: "duplicate" });
       continue;
     }
-    seen.add(index);
+    const repeated = answered.has(index);
+    answered.add(index);
 
     const block = m[2] ?? "";
     const split = block.indexOf(SENTINEL_BODY);
     if (split === -1) {
-      rejected.push({ index, reason: "malformed" });
+      rejected.push({ index, reason: repeated ? "duplicate" : "malformed" });
       continue;
     }
     const header = block.slice(0, split);
@@ -547,7 +569,7 @@ export function parseConflictResolution(
     // A resolution carrying conflict markers is not a resolution. Refusing it here is what keeps
     // "applied" from ever meaning "the markers moved somewhere else in the file".
     if (hasConflictMarkers(content)) {
-      rejected.push({ index, reason: "conflict-markers" });
+      rejected.push({ index, reason: repeated ? "duplicate" : "conflict-markers" });
       continue;
     }
 
@@ -559,10 +581,17 @@ export function parseConflictResolution(
       : "low") as ResolutionConfidence;
     const note = (/NOTE:\s*(.+)/i.exec(header)?.[1] ?? "").trim().slice(0, 400);
     const audit = assessResolution(hunk, content);
+    resolved.add(index);
+    // A usable block supersedes an unusable one recorded earlier for the SAME region: models
+    // routinely emit a malformed draft followed by the real answer, and the draft's rejection
+    // must not stand as the region's outcome once a good block arrives.
+    for (let i = rejected.length - 1; i >= 0; i--) {
+      if (rejected[i]!.index === index) rejected.splice(i, 1);
+    }
     resolutions.push({ index, content, confidence, note, ...audit });
   }
 
-  for (const h of hunks) if (!seen.has(h.index)) rejected.push({ index: h.index, reason: "missing" });
+  for (const h of hunks) if (!answered.has(h.index)) rejected.push({ index: h.index, reason: "missing" });
   resolutions.sort((a, b) => a.index - b.index);
   rejected.sort((a, b) => a.index - b.index);
   return { resolutions, rejected };
@@ -596,8 +625,7 @@ export async function generateConflictResolution(
 ): Promise<ConflictResolution> {
   const adapter = AI_ADAPTERS[provider];
   const hasBase = parsed.hunks.some((h) => h.baseText !== undefined);
-  const user = resolveUserPrompt(path, text, parsed);
-  const windowed = user.includes("unchanged line");
+  const { prompt: user, windowed } = buildUserPrompt(path, text, parsed);
 
   const json = await requestJson(
     adapter.generateUrl(model, apiKey, runtime),
@@ -618,7 +646,7 @@ export async function generateConflictResolution(
     },
     fetchImpl,
     RESOLVE_TIMEOUT_MS,
-    provider, // shares the rate-limit pause with the message/plan calls — same provider budget
+    rateGateKey(provider, apiKey), // shares the pause with the message/plan calls made with this key
   );
 
   const completion = adapter.extractCompletion(json) ?? "";
