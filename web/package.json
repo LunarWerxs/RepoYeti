@@ -1,7 +1,7 @@
 {
   "name": "repoyeti-web",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.1.0",
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "//test": "Web tests run under VITEST via `bun run test` — NOT `bun test`. Bun's native runner has no Vue SFC compiler, so `.vue` imports resolve to a string path and @vue/test-utils crashes (WeakMap key error). Same reason CI uses `bun run test`. This run IS the gate (ci.yml + release.yml call it). There is deliberately no `test:watch` alias: a watch process never exits, so no gate could ever run it, and it would verify nothing a gate sees — for the dev loop run `bunx vitest` in `web/`. There is deliberately no `test:e2e` alias either: that developer suite needs YOUR live daemon on :4319 (web/playwright.config.ts) so it can never run in CI; the specs still exist and run via `bunx playwright test` in `web/`, while the release browser gate (`test:gate`) is the gated one.",

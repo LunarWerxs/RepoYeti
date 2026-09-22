@@ -177,8 +177,7 @@ test("a partial apply leaves the untouched region's markers byte-for-byte intact
   const untouched = read.hunks![1]!.raw;
 
   const applied = await applyConflictResolutions(id, file, read.hash!, [{ index: 1, content: "a-merged" }]);
-  expect(applied.ok).toBe(true);
-  expect(applied.remaining).toBe(read.hunks!.length - 1);
+  expect(applied).toMatchObject({ ok: true, remaining: read.hunks!.length - 1 });
 
   const onDisk = readFileSync(join(dir, file), "utf8");
   expect(onDisk).toContain("a-merged");
