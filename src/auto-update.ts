@@ -39,7 +39,7 @@
 import { broadcast } from "./bus.ts";
 import { listPending } from "./approvals.ts";
 import { hasActiveOperations } from "./opqueue.ts";
-import { applyUpdate, checkForUpdate } from "./updater.ts";
+import { applyUpdate, checkForUpdate, logUpdateFailure } from "./updater.ts";
 
 /** Check cadence bounds (seconds): 15 min floor, 7 day ceiling, default 6 h. */
 export const AUTO_UPDATE_INTERVAL_MIN_S = 900;
@@ -98,8 +98,10 @@ let relaunchWired = false;
 export function setAutoUpdateHooks(h: Partial<AutoUpdateHooks>): void {
   hooks = { ...realHooks, ...h };
   relaunchWired = typeof h.relaunch === "function";
-  // A fresh hook set is a fresh world (boot, or a test's arrange step) — no deferral history.
+  // A fresh hook set is a fresh world (boot, or a test's arrange step) — no deferral history and no
+  // previous relaunch.
   opsDeferrals = 0;
+  relaunching = false;
 }
 
 // ── runtime state (mirrors cfg.autoUpdate*; primed at boot in app.ts, toggled on the settings route) ──
@@ -110,7 +112,23 @@ let started = false; // true only after the daemon finishes booting (startAutoUp
 let timer: ReturnType<typeof setTimeout> | null = null;
 let ticking = false;
 let applying = false; // an apply is in flight — never overlap checks/applies
+let relaunching = false; // a successor was already spawned — a second restart would race it for the port
 let opsDeferrals = 0; // consecutive op-queue busy-deferrals — capped, see the header
+
+/** Take the single apply slot for a MANUAL install (POST /api/updates/apply). Returns false when an
+ *  apply already holds it. Manual applies used to take no slot at all, so `applying` stayed false for
+ *  the whole minutes-long git pull + `bun install:all` + web build and a "Restart to finish" (or the
+ *  6h timer) sailed through every guard, shutting the daemon down mid-install: a half-applied
+ *  checkout while the UI reported the update installed. One slot now serves both callers. */
+export function beginUpdateApply(): boolean {
+  if (applying) return false;
+  applying = true;
+  return true;
+}
+/** Release the slot taken by beginUpdateApply() — success or failure, the apply is over. */
+export function releaseUpdateApply(): void {
+  applying = false;
+}
 
 export function autoUpdateEnabled(): boolean {
   return enabled;
@@ -203,24 +221,32 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
   }
   opsDeferrals = 0;
 
-  applying = true;
+  // Re-take the slot here, not just at the top: `hooks.check()` awaited above, and a MANUAL install
+  // may have started meanwhile. beginUpdateApply() is the one place both callers go through.
+  if (!beginUpdateApply()) return { checked: true, applied: false, relaunched: false, reason: "busy" };
   try {
     broadcast("auto_update_applying", { from: status.currentCommit, to: status.remoteCommit });
     const res = await hooks.apply();
     if (!res.ok) return { checked: true, applied: false, relaunched: false, reason: "apply-failed" };
     if (res.restartRequired) {
-      broadcast("auto_update_restarting", { message: res.message });
       // The update IS applied on disk either way; only the restart can fail here (lifecycle's
       // handler catches a failed spawn and deliberately stays up rather than exit with no
       // successor). Reporting that as `relaunched: true` would make the one outcome worth
       // knowing about — applied, still running the old code — indistinguishable from success.
-      return { checked: true, applied: true, relaunched: hooks.relaunch() };
+      // Announce only AFTER a successor exists: broadcasting first left every dashboard stuck on
+      // "Restarting…" forever when the spawn failed, because the reset only comes from an SSE
+      // reconnect, and a daemon that never went down never drops the stream.
+      const relaunched = hooks.relaunch();
+      if (relaunched) broadcast("auto_update_restarting", { message: res.message });
+      return { checked: true, applied: true, relaunched };
     }
     return { checked: true, applied: true, relaunched: false };
-  } catch {
+  } catch (e) {
+    // Unattended: no toast, no dialog, so the log line is the only record of why (issue #24).
+    logUpdateFailure(e);
     return { checked: true, applied: false, relaunched: false, reason: "apply-threw" };
   } finally {
-    applying = false;
+    releaseUpdateApply();
   }
 }
 
@@ -243,6 +269,9 @@ export type RelaunchRefusal =
   | "pending-approval"
   /** A git/file op is queued or running through the op-queue this instant. */
   | "active-operation"
+  /** A successor was ALREADY spawned by an earlier call and the shutdown is merely pending. This
+   *  daemon is on its way down; spawning another successor would race the first for the port. */
+  | "already-restarting"
   /** The successor could not be spawned. This daemon is still up and still serving. */
   | "spawn-failed";
 
@@ -273,10 +302,17 @@ export type RelaunchOutcome = { ok: true } | { ok: false; reason: RelaunchRefusa
  */
 export function requestRelaunch(): RelaunchOutcome {
   if (!relaunchWired) return { ok: false, reason: "no-handler" };
+  // Already on the way down (shutdown is scheduled ~800ms out): a second tap, or the same tap sent
+  // by a second dashboard, must not spawn a competing successor. Never cleared — the process is
+  // going down, and the flag resets with it.
+  if (relaunching) return { ok: false, reason: "already-restarting" };
   if (applying) return { ok: false, reason: "update-in-flight" };
   if (hooks.hasPendingApprovals()) return { ok: false, reason: "pending-approval" };
   if (hooks.hasActiveOperations()) return { ok: false, reason: "active-operation" };
   if (!hooks.relaunch()) return { ok: false, reason: "spawn-failed" };
+  // Set only after a successor EXISTS: a failed spawn leaves this daemon up, and permanently
+  // refusing the retry that would fix it would be worse than the duplicate it guards against.
+  relaunching = true;
   // Announce only AFTER a successor exists, on the same event the unattended restart uses, so every
   // OTHER connected dashboard shows "Restarting…" and reads the stream drop about to follow as
   // expected rather than as a fault. (The client that asked flips its own flag off the HTTP answer;

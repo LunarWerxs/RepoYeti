@@ -19,6 +19,7 @@ import { useStore } from "../store";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 import { startSelecting } from "@/lib/repo-selection";
 import { SOURCE_URL } from "@/lib/links";
+import { toastUpdateFailure } from "@/lib/update-failure";
 
 defineProps<{ connected: boolean; repoCount: number }>();
 const emit = defineEmits<{
@@ -206,9 +207,7 @@ async function updateApp(): Promise<void> {
       description: result.restartRequired ? t("header.updateRestart") : undefined,
     });
   } catch (e) {
-    toast.error(t("header.updateFailed"), {
-      description: e instanceof Error ? e.message : undefined,
-    });
+    toastUpdateFailure(t("header.updateFailed"), e, t);
   }
 }
 

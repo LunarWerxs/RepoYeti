@@ -1,8 +1,8 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
-import { applyUpdate, checkForUpdate } from "../../updater.ts";
-import { requestRelaunch, type RelaunchRefusal } from "../../auto-update.ts";
-import { jsonError, type ApiErrorCode } from "../../contract.ts";
+import { applyUpdate, checkForUpdate, logUpdateFailure } from "../../updater.ts";
+import { beginUpdateApply, releaseUpdateApply, requestRelaunch, type RelaunchRefusal } from "../../auto-update.ts";
+import { jsonError, statusForCode, type ApiErrorCode } from "../../contract.ts";
 
 /**
  * What each refusal from requestRelaunch() looks like on the wire.
@@ -29,6 +29,10 @@ const REFUSALS: Record<RelaunchRefusal, { code: ApiErrorCode; message: string }>
     code: "BUSY",
     message: "a git operation is running right now — try again in a moment",
   },
+  "already-restarting": {
+    code: "BUSY",
+    message: "the daemon is already restarting — wait for it to come back",
+  },
   "spawn-failed": {
     code: "ERROR",
     message: "couldn't start the replacement daemon — this one is still running, so nothing was lost",
@@ -42,12 +46,24 @@ export function register(app: Hono, _deps: Deps): void {
   });
 
   app.post("/api/updates/apply", async (c) => {
+    // Take the auto-updater's single apply slot for the WHOLE install. A manual apply used to touch
+    // no shared state, so `applying` stayed false across its minutes-long git pull + install + web
+    // build: a concurrent "Restart to finish" (or the 6h timer) passed every guard and shut the
+    // daemon down mid-install, leaving a half-applied checkout while the UI said "installed".
+    if (!beginUpdateApply()) {
+      return jsonError(c, "BUSY", "an update is already installing — wait for it to finish", 409);
+    }
     try {
       const result = await applyUpdate();
       return c.json(result);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      return jsonError(c, "ERROR", message);
+      // The transcript goes to the log AND back to the owner: the dashboard offers it as "Copy build
+      // log", which is what a bug report about a failed update needs (issue #24). Owner-only route.
+      const output = logUpdateFailure(e);
+      return c.json({ ok: false, code: "ERROR", message, output }, statusForCode("ERROR"));
+    } finally {
+      releaseUpdateApply();
     }
   });
 

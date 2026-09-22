@@ -73,6 +73,42 @@ export function applyUpdate(): Promise<UpdateApplyResult> {
     : (gitEngine.applyUpdate() as Promise<UpdateApplyResult>);
 }
 
+/** Most characters of transcript a failure hands back. A build log can be long, and the failing
+ *  step is the LAST entry, so the cap drops from the front. */
+const TRANSCRIPT_MAX_CHARS = 64_000;
+
+/**
+ * The step transcript a failed apply carries. The kit engine attaches `output` to its rejection
+ * (RepoYeti issue #24: it used to reach a caller only on success, so a failure reported one line and
+ * lost the build output that explained it). The compiled-release path records no steps, so it has
+ * none and this returns an empty list.
+ */
+export function failedUpdateTranscript(e: unknown): string[] {
+  const output = (e as { output?: unknown } | null | undefined)?.output;
+  if (!Array.isArray(output)) return [];
+  const kept: string[] = [];
+  let total = 0;
+  for (let i = output.length - 1; i >= 0; i--) {
+    const entry = output[i];
+    if (typeof entry !== "string") continue;
+    const clipped = entry.length > TRANSCRIPT_MAX_CHARS ? `…${entry.slice(-TRANSCRIPT_MAX_CHARS)}` : entry;
+    if (kept.length && total + clipped.length > TRANSCRIPT_MAX_CHARS) break;
+    kept.unshift(clipped);
+    total += clipped.length;
+  }
+  return kept;
+}
+
+/** Log a failed update with its transcript, so an unattended failure, which has no toast at all,
+ *  still leaves the whole reason in the daemon log. Returns the transcript for the caller. */
+export function logUpdateFailure(e: unknown): string[] {
+  const message = e instanceof Error ? e.message : String(e);
+  const transcript = failedUpdateTranscript(e);
+  const detail = transcript.length ? `\n${transcript.join("\n")}` : "";
+  console.error(`[repoyeti] update failed: ${message}${detail}`);
+  return transcript;
+}
+
 export function cleanupStaleUpdateArtifacts(): void {
   if (isCompiledRelease()) cleanupReleaseArtifacts();
 }

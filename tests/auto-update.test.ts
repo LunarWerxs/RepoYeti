@@ -133,6 +133,35 @@ test("does not relaunch when the apply fails", async () => {
   expect(relaunched).toBe(0);
 });
 
+test("an unattended apply that throws logs the reason AND the build transcript (issue #24)", async () => {
+  setAutoUpdateEnabled(true); // testing the apply path
+  const failure = Object.assign(new Error("Failed to resolve import ./button-variants"), {
+    output: ["$ git pull --ff-only origin main\nok", "$ bun run --cwd web build\nerror: Failed to resolve import"],
+  });
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true }),
+    apply: async () => {
+      throw failure;
+    },
+    relaunch: () => true,
+  });
+  const logged: string[] = [];
+  const orig = console.error;
+  console.error = (...args: unknown[]) => {
+    logged.push(args.map(String).join(" "));
+  };
+  let r: Awaited<ReturnType<typeof runAutoUpdateOnce>>;
+  try {
+    r = await runAutoUpdateOnce();
+  } finally {
+    console.error = orig;
+  }
+  expect(r.reason).toBe("apply-threw");
+  const log = logged.join("\n");
+  expect(log).toContain("update failed: Failed to resolve import ./button-variants");
+  expect(log).toContain("$ bun run --cwd web build");
+});
+
 test("reports the reason when the check itself fails", async () => {
   setAutoUpdateHooks({
     check: async () => status({ ok: false, reason: "no update remote configured" }),

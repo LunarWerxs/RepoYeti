@@ -13,6 +13,7 @@ import { useI18n } from "vue-i18n";
 import { AlertTriangle, Download, Loader2, Sparkles } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
+import { toastUpdateFailure } from "@/lib/update-failure";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -44,9 +45,7 @@ async function updateNow(): Promise<void> {
       description: result.restartRequired ? t("notify.updateRestarting") : undefined,
     });
   } catch (e) {
-    toast.error(t("notify.updateFailed"), {
-      description: e instanceof Error ? e.message : undefined,
-    });
+    toastUpdateFailure(t("notify.updateFailed"), e, t);
   } finally {
     applying.value = false;
   }
