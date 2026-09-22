@@ -35,6 +35,26 @@ function restoreConfig(saved: string | null): void {
   else rmSync(CONFIG_PATH, { force: true });
 }
 
+test("a saved Connections login host migrates to the issuer that signs its identity tokens", () => {
+  const saved = snapshotConfig();
+  try {
+    const cfg = loadConfig();
+    cfg.oauth!.issuer = "https://accounts.connections.icu";
+    cfg.oauth!.ownerSub = "existing-owner";
+    saveConfig(cfg);
+    const migrated = loadConfig();
+    expect(migrated.oauth?.issuer).toBe("https://accounts.connectionsapi.com");
+    expect(migrated.oauth?.ownerSub).toBe("existing-owner");
+
+    migrated.oauth!.clientId = "private-oidc-client";
+    migrated.oauth!.issuer = "https://accounts.connections.icu";
+    saveConfig(migrated);
+    expect(loadConfig().oauth?.issuer).toBe("https://accounts.connections.icu");
+  } finally {
+    restoreConfig(saved);
+  }
+});
+
 // Probe whether an OS secret service is actually reachable on this host. On a headless box
 // with no libsecret it won't be, so the keychain-dependent tests skip rather than fail.
 const HAVE_KEYCHAIN = await withService(async () => {

@@ -932,6 +932,12 @@ export function loadConfig(): RepoYetiConfig {
   if (!existsSync(CONFIG_PATH)) return { ...DEFAULTS };
   try {
     const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Partial<RepoYetiConfig>;
+    // Older installs kept the Connections login host as the issuer. Its OIDC discovery document
+    // now declares connectionsapi.com, so tokens from a successful login fail the `iss` check.
+    // Only migrate RepoYeti's baked-in client; a user's own OIDC client keeps its chosen issuer.
+    if (raw.oauth?.clientId === CONNECTIONS_OAUTH.clientId && raw.oauth.issuer === "https://accounts.connections.icu") {
+      raw.oauth.issuer = CONNECTIONS_OAUTH.issuer;
+    }
     return {
       ...DEFAULTS,
       ...raw,
