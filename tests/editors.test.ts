@@ -9,6 +9,7 @@ import {
   buildEditorArgs,
   wrapForPlatform,
   cmdReparseHazard,
+  cmdShimHazard,
   systemRevealArgv,
   probeEditor,
   detectEditors,
@@ -73,6 +74,15 @@ test("cmdReparseHazard: %VAR% / ^ in an arg is unsafe on EVERY win32 launch (all
   // Non-Windows never uses cmd /c.
   expect(cmdReparseHazard("linux", ["/repo/%X%"])).toBe(false);
   expect(cmdReparseHazard("darwin", ["/repo/a^b"])).toBe(false);
+});
+
+test("cmdShimHazard: a shim launch refuses every character cmd would run or expand", () => {
+  // The `.cmd`-shim launch is a plain `cmd /c`, and Bun leaves a spaceless argv element unquoted,
+  // so these reach cmd as live syntax. `x&calc` is a legal Windows file name in a cloned repo.
+  for (const bad of ["C:/r/x&calc", "C:/r/a|b", "C:/r/a>b", "C:/r/a<b", "C:/r/%PATH%", "C:/r/a^b", "C:/r/!X!"]) {
+    expect(cmdShimHazard(["C:/r", bad])).toBe(true);
+  }
+  expect(cmdShimHazard(["C:/r", "C:/r/src/main (copy).ts", "C:/r/a-b_c.d"])).toBe(false);
 });
 
 // NOTE: the win32 `cmd /c start ""` detach contract itself is guarded by the SHARED kit primitive's

@@ -11,7 +11,7 @@
  * nested repository checkout.
  */
 import { test, expect } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 import { mustUpsertRepo } from "./helpers/upsert.ts";
@@ -279,4 +279,33 @@ test("deleteFile refuses a path REACHING INTO an oddly-cased .git", async () => 
   expect(r.ok).toBe(false);
   expect(r.message).toContain("refusing to touch");
   expect(existsSync(join(dir, ".git", "HEAD"))).toBe(true);
+});
+
+// ── a folder delete never follows a link out of the checkout ───────────────────────────
+// `vendor -> <somewhere else>` is a legal committed entry, and `vendor/projects` is a clean relative
+// path. rmSync is recursive, so without the realpath guard the whole outside folder went with it.
+// A junction, because Windows creates one without admin rights; elsewhere it is a directory link.
+
+test("deleteFile recursive:true refuses a folder reached through a link that leaves the repo, and deletes nothing", async () => {
+  const dir = await repo();
+  const outside = mkScratchDir("gm-delete-outside-");
+  mkdirSync(join(outside, "projects"));
+  writeFileSync(join(outside, "projects", "precious.txt"), "not the repo's to delete\n");
+  symlinkSync(outside, join(dir, "vendor"), "junction");
+  const id = mustUpsertRepo(dir, "del-rec-link-escape", "auto", false);
+
+  const r = await deleteFile(id, "vendor/projects", true);
+  expect(r.ok).toBe(false);
+  expect(r.message).toContain("escapes the repository");
+  expect(existsSync(join(outside, "projects", "precious.txt"))).toBe(true);
+});
+
+test("deleteFile recursive:true refuses a folder reached through a link into .git", async () => {
+  const dir = await repo();
+  symlinkSync(join(dir, ".git"), join(dir, "meta"), "junction");
+  const id = mustUpsertRepo(dir, "del-rec-link-git", "auto", false);
+
+  const r = await deleteFile(id, "meta/refs", true);
+  expect(r.ok).toBe(false);
+  expect(existsSync(join(dir, ".git", "refs", "heads"))).toBe(true);
 });

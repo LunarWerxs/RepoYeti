@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { $ } from "bun";
@@ -13,6 +13,7 @@ import {
   readCommitImagePreview,
   readBinaryPreview,
   readFileDiff,
+  writeFileContent,
   getDiffPatchBytes,
   setDiffPatchBytes,
   getDiffPatchEnabled,
@@ -480,4 +481,22 @@ test("diff of a deleted file has empty modified (all removed)", async () => {
   expect(res.ok).toBe(true);
   expect(res.original).toBe("export const bye = 1;\n");
   expect(res.modified).toBe("");
+});
+
+// ── a link INTO .git is the same boundary as .git itself ───────────────────────────────
+// `meta -> .git` spells no `.git` segment and resolves inside the repo, so both older checks
+// passed it: a view link could read `.git/config`, and a write could plant `.git/hooks/*`.
+
+test("refuses reads and writes through a link that resolves into .git", async () => {
+  const dir = await gitRepo();
+  symlinkSync(join(dir, ".git"), join(dir, "meta"), "junction");
+  const id = mustUpsertRepo(dir, "repo-link-into-git", "auto", false);
+
+  const read = await readFileContent(id, "meta/config");
+  expect(read.ok).toBe(false);
+  expect(read.content).toBeUndefined();
+
+  const write = await writeFileContent(id, "meta/hooks/pre-commit", "#!/bin/sh\necho pwned\n");
+  expect(write.ok).toBe(false);
+  expect(existsSync(join(dir, ".git", "hooks", "pre-commit"))).toBe(false);
 });

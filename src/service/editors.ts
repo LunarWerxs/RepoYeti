@@ -267,6 +267,27 @@ export function cmdReparseHazard(platform: EditorPlatform, args: string[]): bool
 }
 
 /**
+ * True when an arg would reach cmd.exe as COMMAND TEXT on the `.cmd`/`.bat` shim launch.
+ *
+ * That launch is a plain `cmd /c <shim> <args>`, and it is the one win32 path cmd still parses
+ * (the detached path goes through WMI and never touches cmd; see detached-spawn.mjs). Bun quotes an
+ * argv element for CreateProcess only when it holds a space, tab or quote, so a spaceless path
+ * reaches cmd bare and every metacharacter in it is live. Measured on Windows 11 with Bun 1.4:
+ * spawning `["cmd", "/c", "echo", "C:\\repo\\x&ver"]` ran `ver`. A repo is untrusted input (a clone of
+ * someone else's code), `&` is legal in a Windows file name, and so a file named `x&calc` became a
+ * command the moment the owner opened it in an editor found only as its PATH shim.
+ *
+ * `%` and `^` are the cmdReparseHazard pair. `&` `|` `<` `>` chain or redirect commands; `!`
+ * expands variables wherever delayed expansion is on, which a registry value can turn on for every
+ * cmd.exe. Refusing is the whole fix, not a stopgap: this shim path is a rare fallback (probeEditor
+ * resolves nearly every editor to its real .exe), and a correct quoting scheme for cmd would be far
+ * more code on a path that almost never runs.
+ */
+export function cmdShimHazard(args: string[]): boolean {
+  return args.some((a) => /[%^&|<>!]/.test(a));
+}
+
+/**
  * Reveal a location in the OS file manager (the `system` pseudo-editor). Always resolvable.
  * With `fileAbs` it reveals (SELECTS) that specific file inside its folder — `explorer /select,` on
  * Windows, `open -R` on macOS; Linux has no portable "select" verb, so it opens the file's parent
@@ -424,6 +445,14 @@ export async function openInEditor(
     // (it stays a daemon child that a Quit reaps — same as before this fix). probeEditor resolves
     // nearly every catalog editor to its real .exe, which IS detached, so this is a rare fallback.
     if (platform === "win32" && res.kind === "exe" && isWindowsScript(res.exe)) {
+      if (cmdShimHazard(editorArgs)) {
+        return {
+          ok: false,
+          code: "BAD_PATH",
+          message: `the path contains a character (one of % ^ & | < > !) that ${def.label}'s command-line shim would run as a command; install ${def.label}'s desktop app or open the file another way`,
+          editor: wanted,
+        };
+      }
       argv = wrapped;
     } else {
       ({ argv, detached } = buildDetachedSpawn(platform, wrapped));

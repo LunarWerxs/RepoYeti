@@ -7,7 +7,7 @@
 import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { pathWithin } from "../paths.ts";
+import { realPathConfined } from "../paths.ts";
 import { gitFor, identityConfigArgs } from "../git.ts";
 import { readStatus } from "../read/status.ts";
 import type { Identity } from "../db.ts";
@@ -44,6 +44,16 @@ export async function gitCommitAll(
   if (pre.error) return fail("ERROR", pre.error);
   if (pre.detached || !pre.branch) return fail("DETACHED_HEAD", "detached HEAD — resolve at your desk");
   if (!amend && pre.dirty === 0) return fail("NOTHING_TO_COMMIT", "nothing to commit");
+  // `add -A` stages a conflicted file exactly as it sits, markers and all, which clears the unmerged
+  // entries git itself would refuse to commit, so `<<<<<<<` went into history with no warning.
+  // Smart Commit has refused this since its preflight existed; Commit all never did. A merge whose
+  // conflicts are all resolved is still fine to conclude here (that is how the phone finishes one).
+  if (pre.conflicted) {
+    return fail(
+      "OPERATION_IN_PROGRESS",
+      "some files still have unresolved conflicts — resolve them (the conflict panel can) before committing",
+    );
+  }
   try {
     const git = gitFor(absPath);
     await git.raw([...identityConfigArgs(identity), "add", "-A"]);
@@ -249,8 +259,17 @@ export async function gitCommitGroups(
  */
 function unlinkConfinedFile(absPath: string, relPath: string): void {
   const abs = join(absPath, relPath);
-  if (!existsSync(abs) || !lstatSync(abs).isFile()) return;
-  if (!pathWithin(realpathSync(absPath), realpathSync(dirname(abs)))) {
+  let st: ReturnType<typeof lstatSync>;
+  try {
+    st = lstatSync(abs);
+  } catch {
+    return; // leaf is already gone — nothing to unlink
+  }
+  // lstat, not stat: a symlink leaf must report ITSELF. `isFile()` is false for a symlink, so
+  // gating on it alone silently no-op'd Discard/Delete of an untracked symlink while the caller
+  // still reported success; accept a symlink here so the link itself gets unlinked.
+  if (!st.isFile() && !st.isSymbolicLink()) return;
+  if (!realPathConfined(realpathSync(absPath), realpathSync(dirname(abs)))) {
     throw new Error("path escapes the repository through a link");
   }
   unlinkSync(abs);
@@ -325,6 +344,19 @@ function countFilesRecursive(dir: string): number {
 async function gitDeleteDirectory(absPath: string, relPath: string): Promise<ActionResult & { deleted?: number }> {
   const abs = join(absPath, relPath);
   let deleted = 0;
+  // The same link confinement unlinkConfinedFile applies, and here it matters more: rmSync below is
+  // RECURSIVE. `resolveRepoPath` only confines the spelling, so with a committed directory link
+  // (`vendor -> /home/me`) the clean path `vendor/projects` resolved through the link and the whole
+  // folder OUTSIDE the checkout was deleted, unrecoverably. `git rm` refuses a path beyond a symlink,
+  // so nothing earlier stopped it. The parent is resolved, not the leaf: a leaf that is itself a
+  // link is removed as a link (rmSync does not follow it), which is what "delete this" means.
+  try {
+    if (!realPathConfined(realpathSync(absPath), realpathSync(dirname(abs)))) {
+      return fail("DELETE_FAILED", "path escapes the repository through a link");
+    }
+  } catch (e) {
+    return fail("DELETE_FAILED", e instanceof Error ? e.message : String(e));
+  }
   try {
     deleted = countFilesRecursive(abs);
   } catch (e) {

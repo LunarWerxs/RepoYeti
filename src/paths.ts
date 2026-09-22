@@ -1,4 +1,4 @@
-import { relative, isAbsolute, resolve } from "node:path";
+import { relative, isAbsolute, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 
 /**
@@ -100,4 +100,22 @@ export function normalizeRelPath(p: unknown): string {
 export function pathTouchesVcsMarker(clean: string, marker: string): boolean {
   const needle = marker.toLowerCase();
   return clean.split("/").some((segment) => segment.toLowerCase() === needle);
+}
+
+/**
+ * The confinement check for a path AFTER symlinks are resolved: inside the real repo root, and not
+ * inside its `.git` or `.lore`.
+ *
+ * Every raw-filesystem read, write, move and delete resolved its target with realpath and checked
+ * `pathWithin(realRoot, real)`, while the metadata guard (`pathTouchesVcsMarker`) ran on the path as
+ * SPELLED. A committed directory link that points INTO the metadata (`meta -> .git`) passes both:
+ * `meta/config` spells no `.git` segment, and `.git` is inside the repo. So a share guest's view
+ * link could read `.git/config` (remote URLs with embedded credentials), and a write through
+ * `meta/hooks/pre-commit` would plant a hook the daemon's next git command runs. Checking the
+ * RESOLVED path's segments closes both. `realRoot` and `real` must both come from realpathSync.
+ */
+export function realPathConfined(realRoot: string, real: string): boolean {
+  if (!pathWithin(realRoot, real)) return false;
+  const rel = relative(realRoot, real).split(sep).join("/");
+  return !pathTouchesVcsMarker(rel, ".git") && !pathTouchesVcsMarker(rel, ".lore");
 }

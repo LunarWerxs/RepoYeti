@@ -219,6 +219,28 @@ export function unignorePath(absPath: string): void {
  *
  * Returns the removed repo's view, or null if the id was unknown.
  */
+/**
+ * Drop one repo's share grants, and any SCOPED share this leaves with nothing to show.
+ *
+ * The sweep used to be `DELETE FROM shares WHERE id NOT IN (SELECT share_id FROM share_repos)`,
+ * which also matched every "share all repositories" link: a scope_all share has no share_repos
+ * rows by design (createShare writes none, updateShare deletes them). So removing ANY repo from the
+ * dashboard hard-deleted every share-everything link, the recipient's link started answering 404,
+ * and the owner's Sharing panel lost the row with nothing to say why. Only the shares that named
+ * THIS repo are candidates now, and only a scoped one that is left empty is removed.
+ *
+ * Shared by forgetRepo and deleteRepos: the scan-root removal path (deleteRepos) used to skip this
+ * entirely, leaving grants to repos that no longer exist and empty scoped links that still signed in.
+ */
+function releaseShareGrants(d: ReturnType<typeof getDb>, repoId: string): void {
+  const named = d.query(`SELECT share_id FROM share_repos WHERE repo_id = ?`).all(repoId) as { share_id: string }[];
+  d.query(`DELETE FROM share_repos WHERE repo_id = ?`).run(repoId);
+  const dropIfEmpty = d.query(
+    `DELETE FROM shares WHERE id = ? AND scope_all = 0 AND NOT EXISTS (SELECT 1 FROM share_repos WHERE share_id = ?)`,
+  );
+  for (const { share_id } of named) dropIfEmpty.run(share_id, share_id);
+}
+
 export function forgetRepo(id: string, ignore = true): RepoView | null {
   const repo = getRepo(id);
   if (!repo) return null;
@@ -230,8 +252,7 @@ export function forgetRepo(id: string, ignore = true): RepoView | null {
          ON CONFLICT(abs_path) DO UPDATE SET name = excluded.name, ignored_at = excluded.ignored_at`,
       ).run(repo.absPath, repo.name, Date.now());
     }
-    d.query(`DELETE FROM share_repos WHERE repo_id = ?`).run(id);
-    d.query(`DELETE FROM shares WHERE id NOT IN (SELECT share_id FROM share_repos)`).run();
+    releaseShareGrants(d, id);
     d.query(`DELETE FROM git_commit_stats WHERE repo_id = ?`).run(id);
     // Unlike share_events (an audit trail that must outlive the share it logged), an
     // operational-error group has no meaning once its repo is gone - there is nothing left to
@@ -265,6 +286,7 @@ export function deleteRepos(ids: string[]): void {
   const clearErrors = d.query(`DELETE FROM operational_errors WHERE repo_id = ?`);
   const tx = d.transaction((xs: string[]) => {
     for (const id of xs) {
+      releaseShareGrants(d, id);
       clearStats.run(id);
       clearErrors.run(id);
       stmt.run(id);

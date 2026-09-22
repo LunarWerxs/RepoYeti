@@ -232,3 +232,34 @@ test("sshCommandFor validates and quotes identity key paths", () => {
   expect(() => sshCommandFor(`${key}" -o ProxyCommand=bad`)).toThrow(/unsupported/);
   expect(() => sshCommandFor(join(dir, "missing"))).toThrow(/not a file/);
 });
+
+// Commit all used to `add -A` straight over unmerged paths, which clears git's own refusal and puts
+// the conflict markers into history. Smart Commit refused this already; now both do.
+test("gitCommitAll refuses while a merge still has unresolved conflicts, and commits nothing", async () => {
+  const dir = await repo();
+  const g = (...args: string[]) => $`git -C ${dir} -c user.name=Seed -c user.email=s@s.io ${args}`.quiet();
+  writeFileSync(join(dir, "c.txt"), "base\n");
+  await g("add", "-A");
+  await g("commit", "-q", "-m", "base");
+  await g("checkout", "-q", "-b", "other");
+  writeFileSync(join(dir, "c.txt"), "theirs\n");
+  await g("commit", "-q", "-am", "theirs");
+  await g("checkout", "-q", "main");
+  writeFileSync(join(dir, "c.txt"), "ours\n");
+  await g("commit", "-q", "-am", "ours");
+  await g("merge", "other").nothrow(); // conflicts, exits 1
+  const head = (await $`git -C ${dir} rev-parse HEAD`.text()).trim();
+
+  const r = await gitCommitAll(dir, ID, "merge");
+  expect(r.ok).toBe(false);
+  expect(r.code).toBe("OPERATION_IN_PROGRESS");
+  expect((await $`git -C ${dir} rev-parse HEAD`.text()).trim()).toBe(head);
+  expect(readFileSync(join(dir, "c.txt"), "utf8")).toContain("<<<<<<<"); // left for the owner to resolve
+
+  // Resolved, the same merge concludes through Commit all.
+  writeFileSync(join(dir, "c.txt"), "resolved\n");
+  await g("add", "c.txt");
+  const done = await gitCommitAll(dir, ID, "merge other");
+  expect(done.ok).toBe(true);
+  expect((await $`git -C ${dir} rev-parse HEAD^2`.text()).trim()).not.toBe("");
+});

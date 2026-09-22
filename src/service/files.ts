@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { pathWithin, normalizeRelPath } from "../paths.ts";
+import { pathWithin, normalizeRelPath, realPathConfined } from "../paths.ts";
 import { getRepo } from "../db.ts";
 import { enqueue } from "../opqueue.ts";
 import { gitFor, safeGitEnv } from "../git.ts";
@@ -242,25 +242,62 @@ function insideGitMetadata(clean: string): boolean {
   return clean.split("/").some((segment) => segment.toLowerCase() === ".git");
 }
 
-/** Contents of a path at an arbitrary git rev (`git show <rev>:<path>`). A missing blob — the
+/** Contents of a path at an arbitrary git rev (`<rev>:<path>`). A missing blob — the
  *  path doesn't exist at that rev (a deletion, an add-from-nothing, or a root commit's parent) —
  *  comes back NOT_FOUND. Binary/oversized blobs are flagged + capped, like the working-tree reader. */
 async function readBlobAtRev(absPath: string, rev: string, clean: string): Promise<FileContentResult> {
   try {
-    const content = await gitFor(absPath).raw(["show", `${rev}:${clean}`]);
-    const binary = content.includes("\u0000");
-    const size = Buffer.byteLength(content, "utf8");
+    // Probe the size, then stream at most MAX_FILE_BYTES + 1: `git show rev:path` buffered the WHOLE
+    // blob as a JS string first, so the MAX_FILE_BYTES slice only ran after a multi-hundred-MB blob
+    // was already in memory (OOM, not "capped like the working-tree reader"). A missing path makes
+    // `cat-file -s` fail, which lands in the NOT_FOUND catch below as before.
+    const object = `${rev}:${clean}`;
+    const size = Number((await gitFor(absPath).raw(["cat-file", "-s", object])).trim());
+    if (!Number.isSafeInteger(size) || size < 0) return { ok: false, code: "NOT_FOUND", message: "file not found" };
     const truncated = size > MAX_FILE_BYTES;
-    return {
-      ok: true,
-      code: "OK",
-      path: clean,
-      ref: "head",
-      size,
-      binary,
-      truncated,
-      content: binary ? "" : truncated ? content.slice(0, MAX_FILE_BYTES) : content,
+
+    const proc = Bun.spawn(["git", "cat-file", "blob", object], {
+      cwd: absPath,
+      env: safeGitEnv(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const kill = (): void => {
+      try {
+        proc.kill();
+      } catch {
+        /* already exited */
+      }
     };
+    const timer = setTimeout(kill, 30_000);
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        readBytesStreamLimited(proc.stdout, MAX_FILE_BYTES + 1, kill),
+        readTextStreamLimited(proc.stderr, 256 * 1024, kill),
+        proc.exited,
+      ]);
+      // Hitting the cap kills git mid-write, so a non-zero exit is expected there — only a real
+      // failure (the stream ended on its own) is an error.
+      if (exitCode !== 0 && !stdout.truncated) throw new Error(stderr.text.trim() || "could not read blob");
+      const bytes = Buffer.from(stdout.bytes.subarray(0, MAX_FILE_BYTES));
+      const binary = bytes.includes(0);
+      return {
+        ok: true,
+        code: "OK",
+        path: clean,
+        ref: "head",
+        size,
+        binary,
+        truncated,
+        // TextDecoder, as readWorkText uses: it drops a UTF-8 BOM, and so must this side, or the
+        // Diff tab shows a change on line 1 of every BOM file (`git show` via simple-git kept it).
+        content: binary ? "" : new TextDecoder("utf-8", { fatal: false }).decode(bytes),
+      };
+    } finally {
+      clearTimeout(timer);
+      kill();
+      await proc.exited.catch(() => undefined);
+    }
   } catch {
     return { ok: false, code: "NOT_FOUND", message: "file not found" };
   }
@@ -309,7 +346,7 @@ function resolveReadableWorkFile(repoRoot: string, abs: string): SafeWorkFile | 
 
   const realRoot = realpathSync(repoRoot);
   const real = realpathSync(abs);
-  if (!pathWithin(realRoot, real)) throw new Error("path escapes the repository through a link");
+  if (!realPathConfined(realRoot, real)) throw new Error("path escapes the repository through a link");
   const st = statSync(real);
   if (!st.isFile()) throw new Error("path is not a regular file");
   return { real, size: st.size };
@@ -659,6 +696,35 @@ export function resolveRepoPath(
 }
 
 /**
+ * True when git IGNORES `relPath` in this repo: build output, local credentials, the `.env` next to
+ * the code. A share guest's working-tree reads stop here (routes/files.ts).
+ *
+ * The guest policy already withholds the tree browser for exactly this reason ("where `.env` files,
+ * local credentials and build output live", share/policy.ts), but `GET /file` and `GET /diff` read
+ * any path they were GIVEN, and `.env` is not a secret name: a view link could fetch it by guessing.
+ * Everything a guest can legitimately reach (tracked files, untracked-but-visible changes, history)
+ * is by definition not ignored, so this takes away nothing the dashboard shows them. `check-ignore`
+ * never reports a tracked path, so committed content stays readable even when a pattern matches it.
+ *
+ * Fails CLOSED: a path that will not resolve, a git error, or a repo that is not git answers true.
+ * The only caller is the guest gate, where "cannot tell" must mean "no".
+ */
+export async function isIgnoredPath(repoId: string, relPath: string): Promise<boolean> {
+  const repo = getRepo(repoId);
+  if (repo?.vcs !== "git") return true;
+  const r = resolveRepoPath(repo.absPath, relPath);
+  if ("error" in r) return true;
+  try {
+    // Prints the path when ignored and nothing when not (exit 1 with empty stderr, which simple-git
+    // resolves rather than throws); a real failure has stderr and throws into the catch.
+    const out = await gitFor(repo.absPath).raw(["check-ignore", "--", r.clean]);
+    return out.trim() !== "";
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Read one changed file's contents for the viewer drawer. Read-only and untrusted-path
  * safe: the request's path is normalised and confined to the repo (no traversal). The
  * working-tree version is read straight off disk (fast, no git); a path that's gone from
@@ -794,7 +860,7 @@ async function writeFileContentQueued(
   // Resolve symlinks for real: the *real* parent dir must sit inside the *real* repo root,
   // so a symlinked parent can't redirect the write outside the repo.
   try {
-    if (!pathWithin(realpathSync(repo.absPath), realpathSync(dirname(r.abs)))) {
+    if (!realPathConfined(realpathSync(repo.absPath), realpathSync(dirname(r.abs)))) {
       return { ok: false, code: "NOT_WRITABLE", message: "path escapes the repository" };
     }
   } catch {
@@ -926,7 +992,7 @@ async function moveFileQueued(
   const dstParent = dirname(dst.abs);
   try {
     mkdirSync(dstParent, { recursive: true });
-    if (!pathWithin(realpathSync(repo.absPath), realpathSync(dstParent))) {
+    if (!realPathConfined(realpathSync(repo.absPath), realpathSync(dstParent))) {
       return { ok: false, code: "NOT_WRITABLE", message: "destination escapes the repository" };
     }
   } catch {

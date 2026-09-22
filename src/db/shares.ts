@@ -124,27 +124,31 @@ export function createShare(tokenHash: string, input: ShareInput): Share {
   const id = randomUUID();
   const now = Date.now();
   const db2 = getDb();
-  db2
-    .query(
-      `INSERT INTO shares (id, token_hash, label, perm, collaborative, scope_all, created_at, expires_at, revoked_at, last_used_at, use_count, origin, token)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)`,
-    )
-    .run(
-      id,
-      tokenHash,
-      input.label,
-      input.perm,
-      input.collaborative ? 1 : 0,
-      input.scopeAll ? 1 : 0,
-      now,
-      input.expiresAt,
-      input.origin ?? null,
-      input.token ?? null,
-    );
-  if (!input.scopeAll) {
-    const ins = db2.query(`INSERT OR IGNORE INTO share_repos (share_id, repo_id) VALUES (?, ?)`);
-    for (const repoId of input.repoIds) ins.run(id, repoId);
-  }
+  // One transaction: a scoped share whose grants failed half-way would be a live link exposing a
+  // different set of repos than the owner picked, with nothing to notice it.
+  db2.transaction(() => {
+    db2
+      .query(
+        `INSERT INTO shares (id, token_hash, label, perm, collaborative, scope_all, created_at, expires_at, revoked_at, last_used_at, use_count, origin, token)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)`,
+      )
+      .run(
+        id,
+        tokenHash,
+        input.label,
+        input.perm,
+        input.collaborative ? 1 : 0,
+        input.scopeAll ? 1 : 0,
+        now,
+        input.expiresAt,
+        input.origin ?? null,
+        input.token ?? null,
+      );
+    if (!input.scopeAll) {
+      const ins = db2.query(`INSERT OR IGNORE INTO share_repos (share_id, repo_id) VALUES (?, ?)`);
+      for (const repoId of input.repoIds) ins.run(id, repoId);
+    }
+  })();
   return {
     id,
     label: input.label,
@@ -221,20 +225,24 @@ export function updateShare(id: string, patch: ShareUpdate): Share | null {
   const scopeAll = patch.scopeAll ?? current.scopeAll;
   const expiresAt = patch.expiresAt === undefined ? current.expiresAt : patch.expiresAt;
 
-  db2
-    .query(`UPDATE shares SET label = ?, perm = ?, collaborative = ?, scope_all = ?, expires_at = ? WHERE id = ?`)
-    .run(label, perm, collaborative ? 1 : 0, scopeAll ? 1 : 0, expiresAt, id);
+  // One transaction: narrowing a share-everything link to a list is an UPDATE plus a rewrite of
+  // its grants, and a failure between them left a scoped share with no repos at all.
+  db2.transaction(() => {
+    db2
+      .query(`UPDATE shares SET label = ?, perm = ?, collaborative = ?, scope_all = ?, expires_at = ? WHERE id = ?`)
+      .run(label, perm, collaborative ? 1 : 0, scopeAll ? 1 : 0, expiresAt, id);
 
-  // Rewrite the scope only when this call actually says something about it. Replacing the set
-  // wholesale (delete-then-insert) rather than diffing keeps "the grant is exactly this list"
-  // true even if a previous write left rows behind.
-  if (scopeAll) {
-    db2.query(`DELETE FROM share_repos WHERE share_id = ?`).run(id);
-  } else if (patch.repoIds !== undefined) {
-    db2.query(`DELETE FROM share_repos WHERE share_id = ?`).run(id);
-    const ins = db2.query(`INSERT OR IGNORE INTO share_repos (share_id, repo_id) VALUES (?, ?)`);
-    for (const repoId of patch.repoIds) ins.run(id, repoId);
-  }
+    // Rewrite the scope only when this call actually says something about it. Replacing the set
+    // wholesale (delete-then-insert) rather than diffing keeps "the grant is exactly this list"
+    // true even if a previous write left rows behind.
+    if (scopeAll) {
+      db2.query(`DELETE FROM share_repos WHERE share_id = ?`).run(id);
+    } else if (patch.repoIds !== undefined) {
+      db2.query(`DELETE FROM share_repos WHERE share_id = ?`).run(id);
+      const ins = db2.query(`INSERT OR IGNORE INTO share_repos (share_id, repo_id) VALUES (?, ?)`);
+      for (const repoId of patch.repoIds) ins.run(id, repoId);
+    }
+  })();
   return getShare(id);
 }
 
@@ -426,28 +434,31 @@ export function createCollaborationLink(input: CollaborationLinkInput): Collabor
   const d = getDb();
   // A local repo can map to a given remote repo only once. Re-pairing intentionally replaces the
   // old participant id/token so a rotated invitation does not leave a dead publisher beside it.
-  d.query(`DELETE FROM collaboration_links WHERE local_repo_id = ? AND remote_repo_id = ?`).run(
-    input.localRepoId,
-    input.remoteRepoId,
-  );
-  d.query(
-    `INSERT INTO collaboration_links
-       (id, invite_url, token, relay_url, channel_id, remote_origin, daemon_id, participant_id, local_repo_id, remote_repo_id, label, created_at, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-  ).run(
-    id,
-    "",
-    input.token,
-    input.relayUrl,
-    input.channelId,
-    input.remoteOrigin,
-    input.daemonId,
-    input.participantId,
-    input.localRepoId,
-    input.remoteRepoId,
-    input.label,
-    createdAt,
-  );
+  // Delete and insert commit together: a failed insert must not leave the pair with no mapping.
+  d.transaction(() => {
+    d.query(`DELETE FROM collaboration_links WHERE local_repo_id = ? AND remote_repo_id = ?`).run(
+      input.localRepoId,
+      input.remoteRepoId,
+    );
+    d.query(
+      `INSERT INTO collaboration_links
+         (id, invite_url, token, relay_url, channel_id, remote_origin, daemon_id, participant_id, local_repo_id, remote_repo_id, label, created_at, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    ).run(
+      id,
+      "",
+      input.token,
+      input.relayUrl,
+      input.channelId,
+      input.remoteOrigin,
+      input.daemonId,
+      input.participantId,
+      input.localRepoId,
+      input.remoteRepoId,
+      input.label,
+      createdAt,
+    );
+  })();
   return {
     id,
     ...input,

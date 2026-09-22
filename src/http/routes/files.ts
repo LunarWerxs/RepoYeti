@@ -32,6 +32,7 @@ import {
   readImagePreview,
   readBinaryPreview,
   readFileDiff,
+  isIgnoredPath,
   readCommitFile,
   readCommitImagePreview,
   readCommitBinaryPreview,
@@ -40,6 +41,8 @@ import {
   forceRefresh,
 } from "../../service/index.ts";
 import { requireId, remoteBrowseBlocked, remoteEditingBlocked, withGuestStatus } from "../respond.ts";
+import { effectiveGuest } from "../../auth.ts";
+import type { RepoYetiConfig } from "../../config.ts";
 
 type ImageResult = Awaited<ReturnType<typeof readImagePreview>>;
 
@@ -178,13 +181,30 @@ async function getTreeSearchRoute(c: Context, cfg: Deps["cfg"]) {
   return jsonError(c, result.code as ApiErrorCode, result.message ?? "could not search files");
 }
 
+/**
+ * A share guest may read the working tree only where git does not ignore the path. `/file` and
+ * `/diff` are guest routes that read any path they are given, and a view link is "look at what I
+ * changed", not "read my .env" (see isIgnoredPath). Answered as NOT_FOUND so the refusal does not
+ * confirm the file exists. The owner is unaffected: effectiveGuest is null for every owner request.
+ */
+async function guestIgnoredRead(c: Context, cfg: RepoYetiConfig, id: string, path: string): Promise<Response | null> {
+  if (!effectiveGuest(c, cfg)) return null;
+  if (!(await isIgnoredPath(id, path))) return null;
+  return jsonError(c, "NOT_FOUND", "file not found");
+}
+
 // Read one changed file's contents for the read-only viewer drawer. Path is a query
 // param (?path=…); it's normalised + confined to the repo in readFileContent.
-async function getFileRoute(c: Context) {
+async function getFileRoute(c: Context, cfg: RepoYetiConfig) {
   const id = requireId(c);
   if (id instanceof Response) return id;
   const path = c.req.query("path") ?? "";
   const ref = c.req.query("ref") === "head" ? "head" : "work";
+  // `ref=head` reads the committed blob, which is history a guest can already see.
+  if (ref === "work") {
+    const refused = await guestIgnoredRead(c, cfg, id, path);
+    if (refused) return refused;
+  }
   const preview = c.req.query("preview");
   if (preview === "image") {
     return previewResponse(await readImagePreview(id, path, ref), c.req.header("range"));
@@ -213,10 +233,12 @@ async function getSearchRoute(c: Context) {
 }
 
 // Both sides (HEAD + working tree) of a changed file, for the viewer's Diff tab.
-async function getDiffRoute(c: Context) {
+async function getDiffRoute(c: Context, cfg: RepoYetiConfig) {
   const id = requireId(c);
   if (id instanceof Response) return id;
   const path = c.req.query("path") ?? "";
+  const refused = await guestIgnoredRead(c, cfg, id, path);
+  if (refused) return refused;
   const result = await readFileDiff(id, path);
   if (result.ok) return c.json(result);
   return c.json(result, result.code === "NOT_FOUND" ? 404 : 400);
@@ -472,9 +494,9 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.get("/api/repos/:id/changes", getChangesRoute);
   app.get("/api/repos/:id/tree", (c) => getTreeRoute(c, cfg));
   app.get("/api/repos/:id/tree-search", (c) => getTreeSearchRoute(c, cfg));
-  app.get("/api/repos/:id/file", getFileRoute);
+  app.get("/api/repos/:id/file", (c) => getFileRoute(c, cfg));
   app.get("/api/repos/:id/search", getSearchRoute);
-  app.get("/api/repos/:id/diff", getDiffRoute);
+  app.get("/api/repos/:id/diff", (c) => getDiffRoute(c, cfg));
   app.get("/api/repos/:id/commit/:hash/file", getCommitFileRoute);
   app.put("/api/repos/:id/file", (c) => putFileRoute(c, cfg));
   app.post("/api/repos/:id/discard", (c) => postDiscardRoute(c, cfg));

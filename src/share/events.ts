@@ -77,7 +77,14 @@ const SCOPED_BY_LIST = new Set([
 export function guestEventData(share: Share, event: string, payload: unknown): GuestEvent | null {
   if (SCOPED_BY_ID.has(event)) {
     const p = payload as RepoIdPayload;
-    if (!p?.id || !shareCoversRepo(share, p.id)) return null;
+    if (!p?.id) return null;
+    // A removal is broadcast AFTER forgetRepo released the repo's share grants, so for a per-repo
+    // share the coverage check below always failed and the guest's card stayed until a reload. A
+    // repo that no longer exists is let through as its bare `{ id }`: the guest learns nothing but
+    // an id they either held (their card goes) or never saw (a no-op). Kept here rather than in
+    // shareCoversRepo, which also gates guest REQUESTS and must keep meaning "granted".
+    if (event === "repo_removed" && !getRepo(p.id)) return { event, data: JSON.stringify({ id: p.id }) };
+    if (!shareCoversRepo(share, p.id)) return null;
     // repo_state_changed carries a full status, whose remote URL may embed a credential.
     if (event === "repo_state_changed") {
       const s = payload as { id: string; status: Parameters<typeof guestStatus>[0] };

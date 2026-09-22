@@ -474,3 +474,19 @@ test("GET /api/repos/:id/tree rejects traversal with a 4xx, not a listing", asyn
   expect(res.ok).toBe(false);
   expect(res.status).toBeGreaterThanOrEqual(400);
 });
+
+test("asking for a linked directory BY PATH is confined to what it resolves to", async () => {
+  // Listing never descends a link, but `?path=vendor` names one directly, and stat/readdir follow it.
+  const dir = await gitRepo();
+  const outside = mkScratchDir("repo-tree-outside-");
+  writeFileSync(join(outside, "not-yours.txt"), "x");
+  symlinkSync(outside, join(dir, "vendor"), "junction");
+  symlinkSync(join(dir, ".git"), join(dir, "meta"), "junction");
+  const id = mustUpsertRepo(dir, "repo-tree-link-by-path", "auto", false);
+
+  for (const path of ["vendor", "meta", "meta/refs"]) {
+    const res = await listRepoTree(id, path);
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("escapes the repository");
+  }
+});

@@ -18,13 +18,13 @@
  * exactly the stall the gate's foreground lane exists to remove. It is pure `readdir`.
  */
 import type { Dirent } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getRepo } from "../db.ts";
 import { backendFor } from "../vcs/index.ts";
 import { gitFor, safeGitEnv } from "../git.ts";
 import { readGate } from "../gitgate.ts";
-import { normalizeRelPath, pathTouchesVcsMarker, pathWithin } from "../paths.ts";
+import { normalizeRelPath, pathTouchesVcsMarker, pathWithin, realPathConfined } from "../paths.ts";
 
 /** One entry in a listed directory. */
 export interface RepoTreeEntry {
@@ -127,6 +127,13 @@ export async function listRepoTree(repoId: string, relPath = ""): Promise<RepoTr
   }
 
   try {
+    // The check above is on the SPELLING. A requested path that runs through a directory link
+    // (`vendor -> /`, `meta -> .git`) resolves somewhere else, and stat/readdir follow it: listing
+    // never DESCENDS into a link (see the docstring), but asking for one by path used to list its
+    // target. Confine the resolved path the way the file reader does.
+    if (!realPathConfined(await realpath(repo.absPath), await realpath(abs))) {
+      return { ok: false, code: "ERROR", message: "path escapes the repository through a link" };
+    }
     // Reject a non-directory explicitly rather than letting readdir's ENOTDIR surface as a
     // generic error — the client shows this verbatim.
     const info = await stat(abs);

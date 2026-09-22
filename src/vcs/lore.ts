@@ -25,9 +25,10 @@
  *   git fetch             → (none; Lore is centralized) → fetch() is a benign no-op
  *   git stash             → (none)                       → UNSUPPORTED
  */
-import { existsSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { sdkStatus, sdkBranches, sdkLog } from "./lore-sdk.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { realPathConfined } from "../paths.ts";
 import type { Identity, RepoStatus } from "../db.ts";
 import type { ChangedFile } from "../read/status.ts";
 import {
@@ -562,6 +563,17 @@ export async function loreDeleteFile(
   recursive = false,
 ): Promise<{ ok: boolean; message?: string; deleted?: number }> {
   const abs = join(absPath, relPath);
+  // The git backend's guard (gitDeleteDirectory, unlinkConfinedFile), for the same reason: the path
+  // is confined only in SPELLING, so a committed directory link (`vendor -> D:\outside`) made both
+  // branches below delete through it, recursively in the folder case. Resolve the PARENT: a leaf
+  // that is itself a link is removed as a link, never followed.
+  try {
+    if (!realPathConfined(realpathSync(absPath), realpathSync(dirname(abs)))) {
+      return { ok: false, message: "path escapes the repository through a link" };
+    }
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
   if (recursive) {
     let isDir = false;
     try {
