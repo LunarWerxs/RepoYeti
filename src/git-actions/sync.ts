@@ -87,91 +87,119 @@ export interface ClassifyContext {
   idleTimeoutMs?: number;
 }
 
-/** Map a thrown git error (simple-git surfaces stderr in the message) to a code. */
-export function classify(err: unknown, ctx?: ClassifyContext): ActionResult {
-  const raw = err instanceof Error ? err.message : String(err);
-  const low = raw.toLowerCase();
+/** git refused a fast-forward that would clobber an uncommitted edit. */
+function wouldOverwrite(low: string): boolean {
+  return low.includes("would be overwritten") || low.includes("commit your changes or stash");
+}
 
-  if (low.includes("would be overwritten") || low.includes("commit your changes or stash")) {
-    // A fast-forward that can't land without clobbering an uncommitted edit. git aborts
-    // atomically (nothing is touched), so this is safe to surface and retry after the owner
-    // commits or stashes — both of which RepoYeti can do from the phone.
-    return fail(
-      "WOULD_OVERWRITE",
-      "your uncommitted changes would be overwritten; commit or stash them first",
-    );
-  }
-  if (
+/** The remote branch has commits we don't have, so a fast-forward is impossible. */
+function isNonFastForward(low: string): boolean {
+  return (
     low.includes("non-fast-forward") ||
     low.includes("fetch first") ||
     low.includes("updates were rejected") ||
     low.includes("not possible to fast-forward") ||
     low.includes("cannot fast-forward") ||
     low.includes("need to specify how to reconcile")
-  ) {
-    return fail("NON_FAST_FORWARD", "remote has diverged — resolve at your desk");
-  }
-  if (
+  );
+}
+
+/**
+ * The branch tracks nothing. `git pull` says this differently from `git push` — the "no tracking
+ * information" sentence, which without this line fell through to ERROR and put git's four-line
+ * lecture about `--set-upstream` in front of the owner instead of the one thing to do about it.
+ */
+function isNoUpstream(low: string): boolean {
+  return (
     low.includes("has no upstream branch") ||
     low.includes("no upstream configured") ||
-    // What `git pull` says for the same state — a different sentence for "this branch tracks
-    // nothing", which without this line fell through to ERROR and put git's four-line lecture
-    // about `--set-upstream` in front of the owner instead of the one thing to do about it.
     low.includes("no tracking information")
-  ) {
-    return fail("NO_UPSTREAM", "branch has no upstream — set one at your desk");
-  }
-  // git asked a credential helper for a password and got nothing. On a headless daemon
-  // (GIT_TERMINAL_PROMPT=0) there is no prompt to fall back to, so this is terminal — and the
-  // stock message ("could not read Password for 'https://someone@github.com'") reads as if that
-  // account is signed out, when the real cause is almost always that it is signed in but not
-  // ACTIVE, and `gh auth git-credential` only ever serves the active account. Name the account git
-  // actually asked for, so the message points at the right thing.
-  if (low.includes("could not read password") || low.includes("terminal prompts disabled")) {
-    const who = /could not read password for '([^']+)'/i.exec(raw)?.[1] ?? "";
-    // Take only the username half of the userinfo: `https://user:ghp_xxx@github.com` would
-    // otherwise put the token itself in the message we hand back to the caller.
-    const login = /^https?:\/\/([^@:]+)(?::[^@]*)?@/i.exec(who)?.[1] ?? "";
-    return fail(
-      "GH_ACCOUNT_NOT_AUTHORIZED",
-      login
-        ? `git needs credentials for the GitHub account "${login}" and none were available`
-        : "git needs GitHub credentials and none were available",
-    );
-  }
-  if (
+  );
+}
+
+/** git asked a credential helper for a password and got nothing. */
+function isMissingCredentials(low: string): boolean {
+  return low.includes("could not read password") || low.includes("terminal prompts disabled");
+}
+
+/** git rejected the transport's authentication. */
+function isAuthFailed(low: string): boolean {
+  return (
     low.includes("permission denied") ||
     low.includes("could not read from remote repository") ||
     low.includes("authentication failed") ||
     low.includes("host key verification failed") ||
     low.includes("publickey")
-  ) {
-    return fail("SSH_AUTH_FAILED", "authentication failed — check this repo's identity / SSH key");
-  }
-  // We killed git for going silent (or the transport itself timed out). This used to be reported
-  // as SSH_PASSPHRASE_REQUIRED unconditionally — which named a cause that, on an https remote or a
-  // passphrase-free key, cannot exist. Only claim the passphrase when the caller confirms git could
-  // actually have been sitting at a prompt; otherwise say plainly that it stopped responding.
-  if (isTimeout(err)) {
-    if (ctx?.couldPromptForPassphrase) {
-      return fail(
-        "SSH_PASSPHRASE_REQUIRED",
-        "git stopped responding, and this remote's SSH key can prompt for a passphrase — load it into ssh-agent, or use a passphrase-free key",
-      );
-    }
-    return fail(
-      "NETWORK_TIMEOUT",
-      `git sent no output for ${Math.round((ctx?.idleTimeoutMs ?? NET_BLOCK_MS) / 1000)}s and was stopped — the remote or the network is not responding`,
-    );
-  }
-  if (
+  );
+}
+
+/** git has nothing (useful) configured to talk to. */
+function isNoRemote(low: string): boolean {
+  return (
     low.includes("no configured push destination") ||
     low.includes("does not appear to be a git repository") ||
     low.includes("no such remote") ||
     low.includes("no remote")
-  ) {
-    return fail("NO_REMOTE", "no remote configured for this repo");
+  );
+}
+
+/**
+ * git asked a credential helper for a password and got nothing. On a headless daemon
+ * (GIT_TERMINAL_PROMPT=0) there is no prompt to fall back to, so this is terminal — and the stock
+ * message ("could not read Password for 'https://someone@github.com'") reads as if that account is
+ * signed out, when the real cause is almost always that it is signed in but not ACTIVE, and
+ * `gh auth git-credential` only ever serves the active account. Name the account git actually asked
+ * for, so the message points at the right thing.
+ */
+function missingCredentialsResult(raw: string): ActionResult {
+  const who = /could not read password for '([^']+)'/i.exec(raw)?.[1] ?? "";
+  // Take only the username half of the userinfo: `https://user:ghp_xxx@github.com` would
+  // otherwise put the token itself in the message we hand back to the caller.
+  const login = /^https?:\/\/([^@:]+)(?::[^@]*)?@/i.exec(who)?.[1] ?? "";
+  return fail(
+    "GH_ACCOUNT_NOT_AUTHORIZED",
+    login
+      ? `git needs credentials for the GitHub account "${login}" and none were available`
+      : "git needs GitHub credentials and none were available",
+  );
+}
+
+/**
+ * We killed git for going silent (or the transport itself timed out). This used to be reported as
+ * SSH_PASSPHRASE_REQUIRED unconditionally — which named a cause that, on an https remote or a
+ * passphrase-free key, cannot exist. Only claim the passphrase when the caller confirms git could
+ * actually have been sitting at a prompt; otherwise say plainly that it stopped responding.
+ */
+function timeoutResult(ctx?: ClassifyContext): ActionResult {
+  if (ctx?.couldPromptForPassphrase) {
+    return fail(
+      "SSH_PASSPHRASE_REQUIRED",
+      "git stopped responding, and this remote's SSH key can prompt for a passphrase — load it into ssh-agent, or use a passphrase-free key",
+    );
   }
+  return fail(
+    "NETWORK_TIMEOUT",
+    `git sent no output for ${Math.round((ctx?.idleTimeoutMs ?? NET_BLOCK_MS) / 1000)}s and was stopped — the remote or the network is not responding`,
+  );
+}
+
+/** Map a thrown git error (simple-git surfaces stderr in the message) to a code. */
+export function classify(err: unknown, ctx?: ClassifyContext): ActionResult {
+  const raw = err instanceof Error ? err.message : String(err);
+  const low = raw.toLowerCase();
+
+  // A fast-forward that can't land without clobbering an uncommitted edit. git aborts atomically
+  // (nothing is touched), so this is safe to surface and retry after the owner commits or stashes —
+  // both of which RepoYeti can do from the phone.
+  if (wouldOverwrite(low)) {
+    return fail("WOULD_OVERWRITE", "your uncommitted changes would be overwritten; commit or stash them first");
+  }
+  if (isNonFastForward(low)) return fail("NON_FAST_FORWARD", "remote has diverged — resolve at your desk");
+  if (isNoUpstream(low)) return fail("NO_UPSTREAM", "branch has no upstream — set one at your desk");
+  if (isMissingCredentials(low)) return missingCredentialsResult(raw);
+  if (isAuthFailed(low)) return fail("SSH_AUTH_FAILED", "authentication failed — check this repo's identity / SSH key");
+  if (isTimeout(err)) return timeoutResult(ctx);
+  if (isNoRemote(low)) return fail("NO_REMOTE", "no remote configured for this repo");
   return fail("ERROR", diagnosisLine(raw).slice(0, 300));
 }
 
