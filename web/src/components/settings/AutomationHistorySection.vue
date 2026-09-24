@@ -205,7 +205,7 @@ watch(
     const id = expandedRunId.value;
     if (!id) return;
     const cached = detailCache[id];
-    if (cached !== undefined && cached !== null && cached.at !== runEndedAt(id)) void fetchDetail(id);
+    if (cached != null && cached.at !== runEndedAt(id)) void fetchDetail(id);
   },
 );
 </script>
