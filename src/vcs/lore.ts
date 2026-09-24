@@ -537,6 +537,46 @@ function countFilesRecursive(dir: string): number {
   return n;
 }
 
+/** The escape message when `abs` reaches outside the repo through a link, or null when confined. */
+function loreConfinementError(absPath: string, abs: string): string | null {
+  try {
+    if (!realPathConfined(realpathSync(absPath), realpathSync(dirname(abs)))) {
+      return "path escapes the repository through a link";
+    }
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** True when `abs` is a directory. A stat failure (nothing at the leaf) reads as "not a directory". */
+function isDirectoryAt(abs: string): boolean {
+  try {
+    return statSync(abs).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Delete a whole directory tree ourselves (Lore has no bulk `rm -r`), then record every removal in
+ * ONE `lore stage --scan .` — the same bulk primitive the git→lore mapping uses for `git add -A`,
+ * rather than one `lore stage` per file (which could overflow the CLI's arg list on a big folder).
+ */
+async function loreDeleteDirectory(absPath: string, abs: string): Promise<{ ok: boolean; message?: string; deleted?: number }> {
+  let deleted = 0;
+  try {
+    deleted = countFilesRecursive(abs);
+    rmSync(abs, { recursive: true, force: true });
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
+  const run = await runLore(absPath, ["stage", "--scan", "."]);
+  if (run.spawnError) return { ok: false, message: "lore CLI not available" };
+  if (run.code !== 0) return { ok: false, message: classifyLore(run).message };
+  return { ok: true, deleted };
+}
+
 /**
  * Delete ONE file from disk outright (the changes-tree "Delete" action) — distinct from
  * loreDiscardFile, which restores a path to its committed/absent state. This one has no restore
@@ -567,34 +607,9 @@ export async function loreDeleteFile(
   // is confined only in SPELLING, so a committed directory link (`vendor -> D:\outside`) made both
   // branches below delete through it, recursively in the folder case. Resolve the PARENT: a leaf
   // that is itself a link is removed as a link, never followed.
-  try {
-    if (!realPathConfined(realpathSync(absPath), realpathSync(dirname(abs)))) {
-      return { ok: false, message: "path escapes the repository through a link" };
-    }
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : String(e) };
-  }
-  if (recursive) {
-    let isDir = false;
-    try {
-      isDir = statSync(abs).isDirectory();
-    } catch {
-      /* nothing at the leaf — fall through to the single-file path below */
-    }
-    if (isDir) {
-      let deleted = 0;
-      try {
-        deleted = countFilesRecursive(abs);
-        rmSync(abs, { recursive: true, force: true });
-      } catch (e) {
-        return { ok: false, message: e instanceof Error ? e.message : String(e) };
-      }
-      const run = await runLore(absPath, ["stage", "--scan", "."]);
-      if (run.spawnError) return { ok: false, message: "lore CLI not available" };
-      if (run.code !== 0) return { ok: false, message: classifyLore(run).message };
-      return { ok: true, deleted };
-    }
-  }
+  const confinementError = loreConfinementError(absPath, abs);
+  if (confinementError) return { ok: false, message: confinementError };
+  if (recursive && isDirectoryAt(abs)) return loreDeleteDirectory(absPath, abs);
   try {
     if (existsSync(abs) && statSync(abs).isFile()) unlinkSync(abs);
   } catch (e) {
