@@ -61,6 +61,69 @@ const SCOPED_BY_LIST = new Set([
   "repo_auto_commit_blocked",
 ]);
 
+/** Project one `SCOPED_BY_ID` event: the id must be one this share covers. */
+function projectScopedById(share: Share, event: string, payload: unknown): GuestEvent | null {
+  const p = payload as RepoIdPayload;
+  if (!p?.id) return null;
+  // A removal is broadcast AFTER forgetRepo released the repo's share grants, so for a per-repo
+  // share the coverage check below always failed and the guest's card stayed until a reload. A
+  // repo that no longer exists is let through as its bare `{ id }`: the guest learns nothing but
+  // an id they either held (their card goes) or never saw (a no-op). Kept here rather than in
+  // shareCoversRepo, which also gates guest REQUESTS and must keep meaning "granted".
+  if (event === "repo_removed" && !getRepo(p.id)) return { event, data: JSON.stringify({ id: p.id }) };
+  if (!shareCoversRepo(share, p.id)) return null;
+  // repo_state_changed carries a full status, whose remote URL may embed a credential.
+  if (event === "repo_state_changed") {
+    const s = payload as { id: string; status: Parameters<typeof guestStatus>[0] };
+    return { event, data: JSON.stringify({ id: s.id, status: guestStatus(s.status) }) };
+  }
+  return { event, data: JSON.stringify(payload) };
+}
+
+/** Project one `SCOPED_BY_LIST` event: filter its `repos` array down to the share's scope. */
+function projectScopedByList(share: Share, event: string, payload: unknown): GuestEvent | null {
+  const p = payload as RepoListPayload;
+  const repos = (p?.repos ?? []).filter((r) => r?.id && shareCoversRepo(share, r.id));
+  if (repos.length === 0) return null; // nothing in scope ⇒ the guest never learns it happened
+  return { event, data: JSON.stringify({ ...p, repos }) };
+}
+
+/**
+ * Project `repo_added`. A repo appearing is only in scope for an "all repos" share; a per-repo
+ * share was granted a fixed list and must not silently widen when the owner clones something new.
+ */
+function projectRepoAdded(share: Share, event: string, payload: unknown): GuestEvent | null {
+  if (!share.scopeAll) return null;
+  const p = payload as { repo?: Parameters<typeof guestRepoView>[0] };
+  // Read `hidden` off the RAW repo — guestRepoView flattens it, so checking after projecting
+  // would always see false. A hidden repo is out of scope for a scopeAll share (db.ts
+  // getSharedRepos / shareCoversRepo), and an event may not smuggle in what the list won't show.
+  if (!p?.repo || p.repo.hidden) return null;
+  return { event, data: JSON.stringify({ repo: guestRepoView(p.repo) }) };
+}
+
+/**
+ * Project `repo_hidden_changed` as the SCOPE CHANGE it actually is.
+ *
+ * Hiding a repo is the owner's own dashboard bookkeeping — EXCEPT on an all-repos share, where it
+ * is what puts the repo out of scope. Delivering the flag itself would be both a leak of that
+ * bookkeeping and useless to the guest, whose repo view has `hidden` flattened; translating it
+ * (hidden ⇒ the repo left their dashboard, un-hidden ⇒ it arrived on it) is exactly what the
+ * owner's own view does.
+ *
+ * A per-repo share is untouched: that grant names the repo outright, and decluttering your own
+ * dashboard must not silently revoke a link you deliberately handed someone.
+ */
+function projectHiddenChanged(share: Share, payload: unknown): GuestEvent | null {
+  if (!share.scopeAll) return null;
+  const p = payload as { id?: string; hidden?: boolean };
+  if (!p?.id) return null;
+  if (p.hidden) return { event: "repo_removed", data: JSON.stringify({ id: p.id }) };
+  const repo = getRepo(p.id);
+  if (!repo) return null; // raced with a real removal; the repo_removed for it is already queued
+  return { event: "repo_added", data: JSON.stringify({ repo: guestRepoView(repo) }) };
+}
+
 /**
  * Project one broadcast event for one guest. Returns the event + JSON to send, or null to drop.
  *
@@ -75,60 +138,9 @@ const SCOPED_BY_LIST = new Set([
  * controls can't act on.
  */
 export function guestEventData(share: Share, event: string, payload: unknown): GuestEvent | null {
-  if (SCOPED_BY_ID.has(event)) {
-    const p = payload as RepoIdPayload;
-    if (!p?.id) return null;
-    // A removal is broadcast AFTER forgetRepo released the repo's share grants, so for a per-repo
-    // share the coverage check below always failed and the guest's card stayed until a reload. A
-    // repo that no longer exists is let through as its bare `{ id }`: the guest learns nothing but
-    // an id they either held (their card goes) or never saw (a no-op). Kept here rather than in
-    // shareCoversRepo, which also gates guest REQUESTS and must keep meaning "granted".
-    if (event === "repo_removed" && !getRepo(p.id)) return { event, data: JSON.stringify({ id: p.id }) };
-    if (!shareCoversRepo(share, p.id)) return null;
-    // repo_state_changed carries a full status, whose remote URL may embed a credential.
-    if (event === "repo_state_changed") {
-      const s = payload as { id: string; status: Parameters<typeof guestStatus>[0] };
-      return { event, data: JSON.stringify({ id: s.id, status: guestStatus(s.status) }) };
-    }
-    return { event, data: JSON.stringify(payload) };
-  }
-
-  if (SCOPED_BY_LIST.has(event)) {
-    const p = payload as RepoListPayload;
-    const repos = (p?.repos ?? []).filter((r) => r?.id && shareCoversRepo(share, r.id));
-    if (repos.length === 0) return null; // nothing in scope ⇒ the guest never learns it happened
-    return { event, data: JSON.stringify({ ...p, repos }) };
-  }
-
-  // A repo appearing is only in scope for an "all repos" share; a per-repo share was granted a
-  // fixed list and must not silently widen when the owner clones something new.
-  if (event === "repo_added") {
-    if (!share.scopeAll) return null;
-    const p = payload as { repo?: Parameters<typeof guestRepoView>[0] };
-    // Read `hidden` off the RAW repo — guestRepoView flattens it, so checking after projecting
-    // would always see false. A hidden repo is out of scope for a scopeAll share (db.ts
-    // getSharedRepos / shareCoversRepo), and an event may not smuggle in what the list won't show.
-    if (!p?.repo || p.repo.hidden) return null;
-    return { event, data: JSON.stringify({ repo: guestRepoView(p.repo) }) };
-  }
-
-  // Hiding a repo is the owner's own dashboard bookkeeping — EXCEPT on an all-repos share, where
-  // it is what puts the repo out of scope. Delivering the flag itself would be both a leak of that
-  // bookkeeping and useless to the guest, whose repo view has `hidden` flattened; delivering the
-  // SCOPE CHANGE is neither. So it is translated: hidden ⇒ the repo left their dashboard, un-hidden
-  // ⇒ it arrived on it, which is exactly what the owner's own view does.
-  //
-  // A per-repo share is untouched: that grant names the repo outright, and decluttering your own
-  // dashboard must not silently revoke a link you deliberately handed someone.
-  if (event === "repo_hidden_changed") {
-    if (!share.scopeAll) return null;
-    const p = payload as { id?: string; hidden?: boolean };
-    if (!p?.id) return null;
-    if (p.hidden) return { event: "repo_removed", data: JSON.stringify({ id: p.id }) };
-    const repo = getRepo(p.id);
-    if (!repo) return null; // raced with a real removal; the repo_removed for it is already queued
-    return { event: "repo_added", data: JSON.stringify({ repo: guestRepoView(repo) }) };
-  }
-
+  if (SCOPED_BY_ID.has(event)) return projectScopedById(share, event, payload);
+  if (SCOPED_BY_LIST.has(event)) return projectScopedByList(share, event, payload);
+  if (event === "repo_added") return projectRepoAdded(share, event, payload);
+  if (event === "repo_hidden_changed") return projectHiddenChanged(share, payload);
   return null;
 }
