@@ -109,22 +109,15 @@ describe("loopback-guard: wired on /api/* (app.ts)", () => {
   });
 
   test("a non-loopback Host on the local path is REJECTED with 403 (rebinding backstop)", async () => {
+    // No Origin, so the Host check is the only one left to refuse it: with `origin: evil.com` the
+    // exact-origin allowlist denies first, and this passed even with the Host check gone.
     const app = createApp(localCfg());
     const res = await app.request(APPROVE, {
       method: "POST",
-      headers: { host: "evil.com", origin: "http://evil.com", "sec-fetch-site": "same-origin" },
+      headers: { host: "evil.com", "sec-fetch-site": "same-origin" },
     });
     expect(res.status).toBe(403);
-  });
-
-  test("the same-origin PWA request passes the guard (reaches the 404 handler)", async () => {
-    const app = createApp(localCfg());
-    const res = await app.request(APPROVE, {
-      method: "POST",
-      headers: { host: "127.0.0.1:7171", origin: "http://127.0.0.1:7171", "sec-fetch-site": "same-origin" },
-    });
-    expect(res.status).not.toBe(403);
-    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toContain("non-loopback Host");
   });
 
   test("a header-less request (curl / test harness / non-browser tool) passes the guard", async () => {

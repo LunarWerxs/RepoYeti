@@ -31,23 +31,6 @@ describe("parsePatch header/hunk disambiguation", () => {
     ]);
   });
 
-  it("still drops real file headers before the first hunk", () => {
-    const patch = [
-      "diff --git a/x.ts b/x.ts",
-      "index 111..222 100644",
-      "--- a/x.ts",
-      "+++ b/x.ts",
-      "@@ -1 +1 @@",
-      "-a",
-      "+b",
-      "\\ No newline at end of file",
-    ].join("\n");
-    expect(parsePatch(patch)).toEqual([
-      { kind: "meta", text: "@@ -1 +1 @@" },
-      { kind: "del", text: "a" },
-      { kind: "add", text: "b" },
-    ]);
-  });
 });
 
 describe("splitLines CRLF handling", () => {

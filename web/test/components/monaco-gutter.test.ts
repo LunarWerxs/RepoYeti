@@ -87,7 +87,8 @@ describe("MonacoViewer dirty-diff gutter colours", () => {
     });
     const host = wrapper.find(".dirty-gutter-host");
     expect(host.exists()).toBe(true);
-    expect(host.attributes("class")).toContain("dirty-gutter-host");
+    // The class only helps if it sits on the very element Monaco is mounted into.
+    expect(monacoMock.api.editor.create).toHaveBeenCalledWith(host.element, expect.anything());
     wrapper.unmount();
   });
 });

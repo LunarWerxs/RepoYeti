@@ -55,13 +55,13 @@ test("writeFileContent refuses a path that escapes the repo", async () => {
   expect(existsSync(join(dir, "..", "escape.txt"))).toBe(false);
 });
 
-test("writeFileContent refuses binary (NUL-bearing) content", async () => {
-  const dir = plainRepo();
-  const id = mustUpsertRepo(dir, "write-binary", "auto", false);
-
-  const r = await writeFileContent(id, "x.bin", `a${String.fromCharCode(0)}b`);
-  expect(r.ok).toBe(false);
-  expect(r.code).toBe("IS_BINARY");
+test.each([
+  ["binary (NUL-bearing) content", "write-binary", "x.bin", `a${String.fromCharCode(0)}b`, "IS_BINARY"],
+  ["to write inside .git (no hook RCE)", "write-dotgit", ".git/hooks/pre-commit", "#!/bin/sh\necho pwned\n", "NOT_WRITABLE"],
+  ["a path whose parent directory is missing (NOT_FOUND)", "write-noparent", "a/b/c/new.ts", "hi", "NOT_FOUND"],
+])("writeFileContent refuses %s", async (_case, name, path, content, code) => {
+  const id = mustUpsertRepo(plainRepo(), name, "auto", false);
+  expect(await writeFileContent(id, path, content)).toMatchObject({ ok: false, code });
 });
 
 test("writeFileContent refuses content over the size cap", async () => {
@@ -110,14 +110,6 @@ test("PUT /api/repos/:id/file 404s an unknown repo", async () => {
   expect(res.status).toBe(404);
 });
 
-test("writeFileContent refuses to write inside .git (no hook RCE)", async () => {
-  const dir = plainRepo();
-  const id = mustUpsertRepo(dir, "write-dotgit", "auto", false);
-  const r = await writeFileContent(id, ".git/hooks/pre-commit", "#!/bin/sh\necho pwned\n");
-  expect(r.ok).toBe(false);
-  expect(r.code).toBe("NOT_WRITABLE");
-});
-
 test("writeFileContent refuses to clobber a file larger than the edit cap", async () => {
   const dir = plainRepo();
   writeFileSync(join(dir, "big.log"), "x".repeat(2_000_001)); // > MAX_FILE_BYTES on disk
@@ -127,15 +119,6 @@ test("writeFileContent refuses to clobber a file larger than the edit cap", asyn
   expect(r.ok).toBe(false);
   expect(r.code).toBe("TOO_LARGE");
   expect(readFileSync(join(dir, "big.log"), "utf8").length).toBe(2_000_001); // intact
-});
-
-test("writeFileContent returns NOT_FOUND when the parent directory is missing", async () => {
-  const dir = plainRepo();
-  const id = mustUpsertRepo(dir, "write-noparent", "auto", false);
-
-  const r = await writeFileContent(id, "a/b/c/new.ts", "hi");
-  expect(r.ok).toBe(false);
-  expect(r.code).toBe("NOT_FOUND");
 });
 
 // ── compare-and-write (audit item 1) ─────────────────────────────────────────────

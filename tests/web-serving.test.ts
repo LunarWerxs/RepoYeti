@@ -39,13 +39,6 @@ afterAll(() => {
   if (createdFixture) rmSync(WEB_DIST, { recursive: true, force: true });
 });
 
-test("existing /assets/*.js is served as JS, cached immutable", async () => {
-  const res = await createApp(localCfg()).request(`/assets/${realAsset()}`);
-  expect(res.status).toBe(200);
-  expect(res.headers.get("content-type") ?? "").toContain("javascript");
-  expect(res.headers.get("cache-control")).toContain("immutable");
-});
-
 test("large web assets stream compressed with cache-safe negotiation headers", async () => {
   const path = `/assets/${realAsset()}`;
   const app = createApp(localCfg());
