@@ -347,6 +347,67 @@ async function isUnbornHead(absPath: string): Promise<boolean> {
  * Read-only. On an unborn HEAD (brand-new repo with no commits) `git log` exits non-zero;
  * that surfaces as an empty list, not an error.
  */
+/** The normalized author filter readLog hands to the two-pass fetch. */
+type NormalizedLogAuthor = NonNullable<ReturnType<typeof normalizeLogAuthorFilter>>;
+
+/**
+ * Which refs one `git log` walks for a scope. HEAD-only stays the historical default (a linear
+ * current-branch log). local/all add the other branch tips (+ remotes) plus --date-order, so the
+ * graph's lanes stay stable across pages. HEAD is passed explicitly so a detached checkout still
+ * appears.
+ */
+function logScopeArgs(refScope: RefScope): string[] {
+  if (refScope === "all") return ["HEAD", "--branches", "--tags", "--remotes", "--date-order"];
+  if (refScope === "local") return ["HEAD", "--branches", "--tags", "--date-order"];
+  return [];
+}
+
+/** Merge-selection flags for one log page (`--merges` / `--no-merges`), or none. */
+function logMergeFlag(merges?: MergeFilter): string[] {
+  if (merges === "only") return ["--merges"];
+  if (merges === "exclude") return ["--no-merges"];
+  return [];
+}
+
+/**
+ * Fetch ONE page of `git log` — the author-filtered two-pass fetch, or the plain single pass.
+ *
+ * Returns null for an unborn HEAD (a genuinely empty history). Every other failure (deleted or
+ * corrupt repo, missing ref, a broken git) is rethrown so the caller reports ERROR rather than
+ * masquerading as "no commits" — see isUnbornHead.
+ */
+async function fetchLogPage(
+  absPath: string,
+  scopeArgs: string[],
+  mergeFlag: string[],
+  normalizedAuthor: NormalizedLogAuthor | undefined,
+  fmt: string,
+  off: number,
+  cap: number,
+): Promise<{ raw: string; hasMore: boolean } | null> {
+  try {
+    if (normalizedAuthor) return await fetchAuthorFilteredLog(absPath, scopeArgs, mergeFlag, normalizedAuthor, fmt, off, cap);
+    const raw = await gitFor(absPath).raw([
+      "log",
+      "--no-color",
+      ...scopeArgs,
+      ...mergeFlag,
+      "--use-mailmap",
+      `--max-count=${cap}`,
+      `--skip=${off}`,
+      // Per-commit file/line totals for the history table's "changes" column. This makes the output
+      // MULTI-line per commit (a numstat line per changed file follows each record), which the
+      // parser handles by shape — see the US test.
+      "--numstat",
+      `--pretty=format:${fmt}`,
+    ]);
+    return { raw, hasMore: false };
+  } catch (e) {
+    if (!(await isUnbornHead(absPath))) throw e;
+    return null;
+  }
+}
+
 export async function readLog(
   absPath: string,
   limit = LOG_PAGE_DEFAULT,
@@ -357,58 +418,24 @@ export async function readLog(
 ): Promise<LogResult> {
   const cap = Math.min(Math.max(1, Math.floor(limit)), LOG_PAGE_MAX);
   const off = Math.max(0, Math.floor(skip));
+  // %P = space-separated parent hashes (→ merge detection). Subject (%s) stays LAST so any
+  // odd character in it can't shift earlier fields when we split on the unit separator.
+  const fmt = ["%H", "%h", "%aN", "%aE", "%at", "%P", "%D", "%s"].join(US);
+  const scopeArgs = logScopeArgs(refScope);
+  const mergeFlag = logMergeFlag(merges);
+  const normalizedAuthor = normalizeLogAuthorFilter(author);
   try {
     return await readGate.run(async () => {
-      // %P = space-separated parent hashes (→ merge detection). Subject (%s) stays LAST so any
-      // odd character in it can't shift earlier fields when we split on the unit separator.
-      const fmt = ["%H", "%h", "%aN", "%aE", "%at", "%P", "%D", "%s"].join(US);
-      const mergeFlag = merges === "only" ? ["--merges"] : merges === "exclude" ? ["--no-merges"] : [];
-      const normalizedAuthor = normalizeLogAuthorFilter(author);
-      // Which refs to walk. HEAD-only stays the historical default (linear current-branch log).
-      // local/all add the other branch tips (+ remotes) plus --date-order, so the graph's lanes
-      // stay stable across pages. HEAD is passed explicitly so a detached checkout still appears.
-      const scopeArgs =
-        refScope === "all"
-          ? ["HEAD", "--branches", "--tags", "--remotes", "--date-order"]
-          : refScope === "local"
-            ? ["HEAD", "--branches", "--tags", "--date-order"]
-            : [];
-      let raw = "";
-      let hasMore = false;
-      try {
-        if (normalizedAuthor) {
-          const fetched = await fetchAuthorFilteredLog(absPath, scopeArgs, mergeFlag, normalizedAuthor, fmt, off, cap);
-          raw = fetched.raw;
-          hasMore = fetched.hasMore;
-        } else {
-          raw = await gitFor(absPath).raw([
-            "log",
-            "--no-color",
-            ...scopeArgs,
-            ...mergeFlag,
-            "--use-mailmap",
-            `--max-count=${cap}`,
-            `--skip=${off}`,
-            // Per-commit file/line totals for the history table's "changes" column. This makes the
-            // output MULTI-line per commit (a numstat line per changed file follows each record),
-            // which the parser below handles by shape — see the US test.
-            "--numstat",
-            `--pretty=format:${fmt}`,
-          ]);
-        }
-      } catch (e) {
-        // Only an unborn HEAD is a genuinely empty history; anything else (deleted/corrupt repo,
-        // missing ref, a broken git) must reach the outer catch as ERROR rather than masquerade as
-        // "no commits" — see isUnbornHead.
-        if (!(await isUnbornHead(absPath))) throw e;
-        return { ok: true, code: "OK" as const, commits: [], hasMore: false };
-      }
-      const commits = parseNumstatLog(raw);
+      const page = await fetchLogPage(absPath, scopeArgs, mergeFlag, normalizedAuthor, fmt, off, cap);
+      if (!page) return { ok: true, code: "OK" as const, commits: [], hasMore: false };
+      const commits = parseNumstatLog(page.raw);
       return {
         ok: true,
         code: "OK" as const,
         commits,
-        hasMore: normalizedAuthor ? hasMore : commits.length === cap,
+        // A plain page is capped by --max-count, so a full page means there may be more; the
+        // author-filtered pass knows its own hasMore.
+        hasMore: normalizedAuthor ? page.hasMore : commits.length === cap,
       };
     });
   } catch (e) {
