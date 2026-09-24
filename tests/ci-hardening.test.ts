@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { findRepoRoot } from "./helpers/repo-root.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import { useSuiteTimeout } from "./helpers/timeouts.ts";
 
@@ -10,7 +11,10 @@ import { useSuiteTimeout } from "./helpers/timeouts.ts";
 // script's unconditional cleanup so the same regressions cannot come back silently.
 useSuiteTimeout();
 
-const appRoot = resolve(import.meta.dir, "..");
+// Walk up to the app root (package.json + .git) instead of hop-counting `..`: a fixed hop count
+// silently points at the wrong directory — with no error, just a wrong answer — the moment this
+// file moves, which turns the workflow assertions below into a fake pass.
+const appRoot = findRepoRoot(import.meta.dir);
 
 interface WorkflowStep {
   run?: string;
