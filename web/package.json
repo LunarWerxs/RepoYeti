@@ -4,7 +4,7 @@
   "version": "1.1.0",
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
-  "//test": "Web tests run under VITEST via `bun run test` — NOT `bun test`. Bun's native runner has no Vue SFC compiler, so `.vue` imports resolve to a string path and @vue/test-utils crashes (WeakMap key error). Same reason CI uses `bun run test`. This run IS the gate (ci.yml + release.yml call it). There is deliberately no `test:watch` alias: a watch process never exits, so no gate could ever run it, and it would verify nothing a gate sees — for the dev loop run `bunx vitest` in `web/`. There is deliberately no `test:e2e` alias either: that developer suite needs YOUR live daemon on :4319 (web/playwright.config.ts) so it can never run in CI; the specs still exist and run via `bunx playwright test` in `web/`, while the release browser gate (`test:gate`) is the gated one.",
+  "//test": "Web tests run under VITEST via `bun run test` — NOT `bun test`. Bun's native runner has no Vue SFC compiler, so `.vue` imports resolve to a string path and @vue/test-utils crashes (WeakMap key error). This run IS the gate: ci.yml and release.yml invoke exactly `bun run test --coverage`, so the dashboard coverage floor from vitest.config.ts applies to the run that is the gate — a change that strips a component's tests fails the build rather than passing it. There is deliberately no `test:coverage` alias: the gates pass `--coverage` themselves, so a second name for the same command would be a script no gate ever reaches. There is deliberately no `test:watch` alias either: a watch process never exits, so no gate could ever run it, and it would verify nothing a gate sees — for the dev loop run `bunx vitest` in `web/`. There is deliberately no `test:e2e` alias: that developer suite needs YOUR live daemon on :4319 (web/playwright.config.ts) so it can never run in CI; the specs still exist and run via `bunx playwright test` in `web/`, while the release browser gate (`test:gate`) is the gated one.",
   "scripts": {
     "dev": "vite",
     "//build": "Builds land in dist-next, then swap-dist renames it over dist. The daemon serves dist live — building in place left it empty/partial for the whole build (the Monaco chunk-404 bug).",
@@ -15,8 +15,6 @@
     "typecheck": "vue-tsc -b",
     "i18n:check": "node scripts/i18n-check.mjs",
     "test": "vitest run",
-    "//test:coverage": "The same suite with the coverage floor from vitest.config.ts. CI and the release gate run THIS, not `test`, so a change that strips a component's tests fails the build rather than passing it.",
-    "test:coverage": "vitest run --coverage",
     "//test:gate": "The RELEASE browser gate: three facts no unit test can establish (exact-origin refusal, SSE reconnect hydration, menus landing on screen). Unlike test:e2e it needs NOTHING running — its global setup boots an isolated daemon on an ephemeral port with a throwaway state dir. It does need `bun run build` first (the daemon serves dist) and a browser binary (`bunx playwright install chromium`).",
     "test:gate": "playwright test -c playwright.gate.config.ts"
   },

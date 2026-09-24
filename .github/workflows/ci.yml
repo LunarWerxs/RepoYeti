@@ -78,8 +78,11 @@ jobs:
         run: bun audit || true
       # Vitest: pure-lib units + component render + store smoke (no server needed), with the dashboard
       # coverage floor from web/vitest.config.ts. The daemon has had a floor since 1.0 (check:coverage);
-      # the dashboard had none, so deleting a component's tests stayed green.
-      - run: bun run test:coverage
+      # the dashboard had none, so deleting a component's tests stayed green. `--coverage` is passed
+      # HERE rather than by a second `test:coverage` script so the gated command and the dev command
+      # are the same name (a separate alias no gate invoked was the 2026-09-22 verification-runs-nowhere
+      # finding).
+      - run: bun run test --coverage
       - run: bun run build # vue-tsc type-check + production bundle (re-runs i18n:check)
       # The Playwright DEVELOPER suite (web/test/e2e) is still intentionally NOT in CI — it needs a
       # live daemon with the owner's real repositories plus a Vite dev server, so it can only run

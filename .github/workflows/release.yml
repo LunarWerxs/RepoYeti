@@ -102,7 +102,7 @@ jobs:
       # publish under a floor that push-time CI would have refused.
       - run: bun run check:coverage
       - if: runner.os == 'Linux'
-        run: bun run --cwd web test:coverage
+        run: bun run --cwd web test --coverage
 
   # The browser gate, same job as CI's (see .github/workflows/ci.yml for what it covers and why).
   # It is here as well as there because tagging is the moment nobody is watching: the three things
