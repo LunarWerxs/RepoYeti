@@ -378,6 +378,103 @@ export interface OpenResult {
 }
 
 /**
+ * Confine the optional file path to the repo (blocks `../` escapes). A path that no longer exists
+ * on disk (a just-deleted file) degrades to opening the folder only. A resolution failure is
+ * returned as the BAD_PATH result itself — distinguished from the success shape by its `ok` field.
+ */
+function resolveEditorFile(repoAbsPath: string, relPath: string | undefined): { fileAbs?: string } | OpenResult {
+  if (!relPath?.trim()) return {};
+  const r = resolveRepoPath(repoAbsPath, relPath);
+  if ("error" in r) return { ok: false, code: "BAD_PATH", message: r.error };
+  return { fileAbs: existsSync(r.abs) ? r.abs : undefined };
+}
+
+/** The argv + detach decision for one editor, or the error result that stops the launch. */
+type LaunchPlan = { ok: true; argv: string[]; detached: boolean } | { ok: false; result: OpenResult };
+
+/**
+ * Work out how (and whether) `wanted` can be launched on `platform`. Pure decision: nothing is
+ * spawned here.
+ */
+function planLaunch(wanted: string, platform: EditorPlatform, folderAbs: string, fileAbs: string | undefined): LaunchPlan {
+  if (wanted === SYSTEM_FILE_MANAGER) {
+    // The OS file manager (explorer / open / xdg-open) hands the request to the existing shell
+    // singleton and exits; it is never a lasting child of the daemon, so it needs no detach
+    // hand-off (and stays off the `cmd /c start` path, so a `%`/`^` folder name isn't refused).
+    // With a resolved file path, reveal (select) that file inside its folder rather than just
+    // opening the repo root — so a right-click "Reveal in File Explorer" lands on the file.
+    return { ok: true, argv: systemRevealArgv(platform, folderAbs, fileAbs), detached: false };
+  }
+  const def = CATALOG.find((e) => e.id === wanted)!;
+  const res = probeEditor(def, platform, realDeps());
+  if (!res) return { ok: false, result: { ok: false, code: "NO_EDITOR", message: `${def.label} isn't installed`, editor: wanted } };
+  const editorArgs = buildEditorArgs(def, folderAbs, fileAbs);
+  if (!editorArgs) {
+    return { ok: false, result: { ok: false, code: "BAD_PATH", message: `${def.label} can't open a folder`, editor: wanted } };
+  }
+  // A real GUI editor must OUTLIVE the daemon (quitting RepoYeti must not close your editor), so
+  // on win32 it's launched through a `cmd /c start ""` hand-off (buildDetachedSpawn below) to escape
+  // the tray's `taskkill /T` Quit. cmd re-parses every arg, expanding `%…%` (a post-confinement bypass)
+  // and stripping `^` — so refuse such a path up front, on every win32 launch that goes through cmd
+  // (both the detached `cmd /c start` and the .cmd-shim `cmd /c` below), keeping the repo-confinement
+  // guarantee intact. See cmdReparseHazard.
+  if (cmdReparseHazard(platform, editorArgs)) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        code: "BAD_PATH",
+        message: "the file path contains a character (% or ^) this editor's Windows launcher can't open safely",
+        editor: wanted,
+      },
+    };
+  }
+  const wrapped = wrapForPlatform(platform, res, editorArgs);
+  // Detach so the editor survives a tray Quit — EXCEPT a win32 .cmd/.bat shim, which `cmd /c start`
+  // can't reliably relaunch (start's internal `cmd /c "<batch>"` hits cmd's double-quote-strip on a
+  // spaced path and launches nothing). Such a shim keeps its plain `cmd /c <shim>` launch, unchanged
+  // (it stays a daemon child that a Quit reaps — same as before this fix). probeEditor resolves
+  // nearly every catalog editor to its real .exe, which IS detached, so this is a rare fallback.
+  if (platform === "win32" && res.kind === "exe" && isWindowsScript(res.exe)) {
+    if (cmdShimHazard(editorArgs)) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          code: "BAD_PATH",
+          message: `the path contains a character (one of % ^ & | < > !) that ${def.label}'s command-line shim would run as a command; install ${def.label}'s desktop app or open the file another way`,
+          editor: wanted,
+        },
+      };
+    }
+    return { ok: true, argv: wrapped, detached: false };
+  }
+  const { argv, detached } = buildDetachedSpawn(platform, wrapped);
+  return { ok: true, argv, detached };
+}
+
+/**
+ * Spawn a resolved editor argv. `detached` (POSIX setsid) plus the win32 `cmd /c start` hand-off in
+ * buildDetachedSpawn keep the editor out of the daemon's process tree, so a tray Quit
+ * (taskkill /T) can't reap it. Don't await exit — a GUI editor runs for as long as the user keeps
+ * it open. Unref so the child never keeps the daemon's event loop alive.
+ */
+function spawnEditor(editor: string, argv: string[], detached: boolean): OpenResult {
+  try {
+    const proc = Bun.spawn(argv, {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      ...(detached ? { detached: true } : {}),
+    });
+    proc.unref();
+    return { ok: true, code: "OK", editor, argv };
+  } catch (e) {
+    return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e), editor };
+  }
+}
+
+/**
  * Launch an editor on a repo (and optionally one changed file within it). `editorId` omitted /
  * empty ⇒ the effective default is used. The file path is confined to the repo before it reaches
  * an argv. Set `REPOYETI_EDITOR_DRYRUN=1` (or pass `dryRun`) to resolve the argv WITHOUT spawning
@@ -395,88 +492,19 @@ export async function openInEditor(
   const platform = opts.platform ?? (process.platform as EditorPlatform);
   const folderAbs = resolve(repo.absPath);
 
-  // Confine the optional file path to the repo (blocks `../` escapes). A path that no longer
-  // exists on disk (a just-deleted file) degrades to opening the folder only.
-  let fileAbs: string | undefined;
-  if (relPath?.trim()) {
-    const r = resolveRepoPath(repo.absPath, relPath);
-    if ("error" in r) return { ok: false, code: "BAD_PATH", message: r.error };
-    if (existsSync(r.abs)) fileAbs = r.abs;
-  }
+  const resolvedFile = resolveEditorFile(repo.absPath, relPath);
+  if ("ok" in resolvedFile) return resolvedFile;
 
   // Resolve which editor to launch (explicit choice → owner default → first available).
   const editors = detectEditors(platform);
   const wanted = editorId?.trim() ? editorId : effectiveDefaultEditor(opts.defaultEditor, editors);
   if (!isKnownEditor(wanted)) return { ok: false, code: "NO_EDITOR", message: `unknown editor: ${wanted}` };
 
-  let argv: string[];
-  let detached = false;
-  if (wanted === SYSTEM_FILE_MANAGER) {
-    // The OS file manager (explorer / open / xdg-open) hands the request to the existing shell
-    // singleton and exits; it is never a lasting child of the daemon, so it needs no detach
-    // hand-off (and stays off the `cmd /c start` path, so a `%`/`^` folder name isn't refused).
-    // With a resolved file path, reveal (select) that file inside its folder rather than just
-    // opening the repo root — so a right-click "Reveal in File Explorer" lands on the file.
-    argv = systemRevealArgv(platform, folderAbs, fileAbs);
-  } else {
-    const def = CATALOG.find((e) => e.id === wanted)!;
-    const res = probeEditor(def, platform, realDeps());
-    if (!res) return { ok: false, code: "NO_EDITOR", message: `${def.label} isn't installed`, editor: wanted };
-    const editorArgs = buildEditorArgs(def, folderAbs, fileAbs);
-    if (!editorArgs) return { ok: false, code: "BAD_PATH", message: `${def.label} can't open a folder`, editor: wanted };
-    // A real GUI editor must OUTLIVE the daemon (quitting RepoYeti must not close your editor), so
-    // on win32 it's launched through a `cmd /c start ""` hand-off (buildDetachedSpawn below) to escape
-    // the tray's `taskkill /T` Quit. cmd re-parses every arg, expanding `%…%` (a post-confinement bypass)
-    // and stripping `^` — so refuse such a path up front, on every win32 launch that goes through cmd
-    // (both the detached `cmd /c start` and the .cmd-shim `cmd /c` below), keeping the repo-confinement
-    // guarantee intact. See cmdReparseHazard.
-    if (cmdReparseHazard(platform, editorArgs)) {
-      return {
-        ok: false,
-        code: "BAD_PATH",
-        message: "the file path contains a character (% or ^) this editor's Windows launcher can't open safely",
-        editor: wanted,
-      };
-    }
-    const wrapped = wrapForPlatform(platform, res, editorArgs);
-    // Detach so the editor survives a tray Quit — EXCEPT a win32 .cmd/.bat shim, which `cmd /c start`
-    // can't reliably relaunch (start's internal `cmd /c "<batch>"` hits cmd's double-quote-strip on a
-    // spaced path and launches nothing). Such a shim keeps its plain `cmd /c <shim>` launch, unchanged
-    // (it stays a daemon child that a Quit reaps — same as before this fix). probeEditor resolves
-    // nearly every catalog editor to its real .exe, which IS detached, so this is a rare fallback.
-    if (platform === "win32" && res.kind === "exe" && isWindowsScript(res.exe)) {
-      if (cmdShimHazard(editorArgs)) {
-        return {
-          ok: false,
-          code: "BAD_PATH",
-          message: `the path contains a character (one of % ^ & | < > !) that ${def.label}'s command-line shim would run as a command; install ${def.label}'s desktop app or open the file another way`,
-          editor: wanted,
-        };
-      }
-      argv = wrapped;
-    } else {
-      ({ argv, detached } = buildDetachedSpawn(platform, wrapped));
-    }
-  }
+  const plan = planLaunch(wanted, platform, folderAbs, resolvedFile.fileAbs);
+  if (!plan.ok) return plan.result;
 
   if (opts.dryRun || process.env.REPOYETI_EDITOR_DRYRUN === "1") {
-    return { ok: true, code: "OK", editor: wanted, argv };
+    return { ok: true, code: "OK", editor: wanted, argv: plan.argv };
   }
-
-  try {
-    // `detached` (POSIX setsid) plus the win32 `cmd /c start` hand-off in buildDetachedSpawn keep the
-    // editor out of the daemon's process tree, so a tray Quit (taskkill /T) can't reap it. Don't
-    // await exit — a GUI editor runs for as long as the user keeps it open. Unref so the child
-    // never keeps the daemon's event loop alive.
-    const proc = Bun.spawn(argv, {
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "ignore",
-      ...(detached ? { detached: true } : {}),
-    });
-    proc.unref();
-    return { ok: true, code: "OK", editor: wanted, argv };
-  } catch (e) {
-    return { ok: false, code: "ERROR", message: e instanceof Error ? e.message : String(e), editor: wanted };
-  }
+  return spawnEditor(wanted, plan.argv, plan.detached);
 }
