@@ -9,9 +9,18 @@ import { randomUUID } from "node:crypto";
 import { enqueue } from "../opqueue.ts";
 import { resolveRepoIdentity, enforceIdentityPolicy } from "../identity.ts";
 import { backendFor } from "../vcs/index.ts";
-import { gitRemoteSet, gitRemoteRemove, gitTagCreate, gitTagPush } from "../git-actions.ts";
+import {
+  gitRemoteSet,
+  gitRemoteRemove,
+  gitTagCreate,
+  gitTagPush,
+  gitUndoRedo,
+  planUndoRedo,
+  type UndoExpect,
+  type UndoPlan,
+} from "../git-actions.ts";
 import type { ActionCode, ActionResult, CommitGroupSpec, CommitGroupResult } from "../contract.ts";
-import type { RepoStatus } from "../db.ts";
+import { getRepo, type RepoStatus } from "../db.ts";
 import { runAction, refreshRepo, accountAuthFor, type ActionOutcome } from "./core.ts";
 import { guardRepo } from "./guards.ts";
 import { resolveRepoPath } from "./files.ts";
@@ -76,6 +85,23 @@ export const stashPopRepo = (id: string, index = 0): Promise<ActionOutcome> =>
   runAction(id, "stash-pop", (b, p) => b.stashPop(p, index));
 export const stashDropRepo = (id: string, index = 0): Promise<ActionOutcome> =>
   runAction(id, "stash-drop", (b, p) => b.stashDrop(p, index));
+
+// ── reflog undo / redo (git-only; the route guards on repo.vcs) ───────────────────
+// The run goes through the op-queue like every other mutation and re-plans inside its slot. The
+// re-plan alone would happily undo whatever step is newest by then, so `expect` (the step the
+// owner confirmed) makes the run refuse when an auto-commit or other op landed after the preview.
+export const undoRepo = (id: string, expect?: UndoExpect): Promise<ActionOutcome> =>
+  runAction(id, "undo", (_b, p) => gitUndoRedo(p, "undo", expect));
+export const redoRepo = (id: string, expect?: UndoExpect): Promise<ActionOutcome> =>
+  runAction(id, "redo", (_b, p) => gitUndoRedo(p, "redo", expect));
+
+/** What an undo and a redo press would do right now (read-only; the confirm dialog shows it). */
+export async function previewUndoRepo(id: string): Promise<{ ok: boolean; code: ActionCode; message?: string; undo?: UndoPlan; redo?: UndoPlan }> {
+  const repo = getRepo(id);
+  if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
+  const [undo, redo] = await Promise.all([planUndoRedo(repo.absPath, "undo"), planUndoRedo(repo.absPath, "redo")]);
+  return { ok: true, code: "OK", undo, redo };
+}
 
 // ── remote actions (set-url / remove origin) ──────────────────────────────────────
 // Local `.git/config` edits (no network). runAction refreshes status after, so the card's

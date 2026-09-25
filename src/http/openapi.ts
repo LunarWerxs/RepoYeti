@@ -21,6 +21,7 @@ import {
   CheckoutSchema,
   CreateBranchSchema,
   DeleteBranchSchema,
+  UndoRunSchema,
   StashSaveSchema,
   StashRefSchema,
   DiscardSchema,
@@ -168,6 +169,13 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/repos/:id/checkout": { summary: "Switch to a branch.", response: ActionResponse, body: CheckoutSchema, tags: ["branches"] },
   "POST /api/repos/:id/branch": { summary: "Create a branch (optionally switch to it).", response: ActionResponse, body: CreateBranchSchema, tags: ["branches"] },
   "DELETE /api/repos/:id/branch": { summary: "Delete a branch.", response: ActionResponse, body: DeleteBranchSchema, tags: ["branches"] },
+  "GET /api/repos/:id/undo": { summary: "Preview the reflog step an undo and a redo would take (git only).", tags: ["git"] },
+  "POST /api/repos/:id/undo": {
+    summary: "Undo the last git action from the reflog: switch back, or step the branch back with its changes kept (never reset --hard).",
+    body: UndoRunSchema,
+    tags: ["git"],
+  },
+  "POST /api/repos/:id/redo": { summary: "Redo the git action the last undo reversed.", body: UndoRunSchema, tags: ["git"] },
 
   // ── history ─────────────────────────────────────────────────────────────────────
   "GET /api/repos/:id/log": {

@@ -46,3 +46,16 @@ export {
   gitStashPop,
   gitStashDrop,
 } from "./refs.ts";
+export {
+  UNDO_REFLOG_TAG,
+  REDO_REFLOG_TAG,
+  pickStep,
+  readHeadReflog,
+  planUndoRedo,
+  gitUndoRedo,
+  type ReflogEntry,
+  type UndoStep,
+  type UndoPlan,
+  type UndoDirection,
+  type UndoExpect,
+} from "./undo.ts";

@@ -96,6 +96,20 @@ All notable changes to RepoYeti are documented here. The format is based on
   `GET /api/repos/:id/fixup-base` and the read-only MCP tool `fixup_base`, so an agent can commit
   review feedback as a fixup too, through `git_commit` only when the whole tree (untracked files
   included) fixes one commit. The approach follows lazygit's base-commit finder.
+- **Undo the last git action, including one made outside the app.** The only undo RepoYeti had
+  covered repo flags (pin, star, hide), so a mis-tapped commit, pull or branch switch on a phone,
+  or an unattended Scheduled auto-commit, had to wait for a desk. The repo card's menu now has
+  Undo / Redo last git action, and the CLI has `repoyeti undo|redo <repo> [--dry-run]`
+  (`GET/POST /api/repos/:id/undo`, `POST /api/repos/:id/redo`). The step comes from the HEAD
+  reflog, read with lazygit's grammar, and each undo tags its own reflog entry
+  (`[repoyeti undo]`) so a second press steps further back instead of undoing the undo. Where
+  lazygit uses `reset --hard` with an auto-stash, this never does: a commit is stepped back with
+  `reset --soft` so its changes stay staged, a pull with `reset --keep` which git aborts before it
+  touches an edited file, and a commit already on a remote (a merge commit included), a rebase
+  (a rebasing pull included) or a cherry-pick is refused (`UNDO_REFUSED`) instead of being reset
+  past. The dialog and the CLI show the exact reflog step before anything moves, and the run is
+  bound to that step: if a Scheduled auto-commit lands in between, it is refused rather than
+  undoing a step nobody confirmed.
 
 ## [1.1.0] - 2026-09-22
 

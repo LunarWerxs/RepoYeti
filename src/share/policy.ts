@@ -272,6 +272,11 @@ export const OWNER_ONLY: readonly string[] = [
   "POST /api/repos/:id/move",
   "POST /api/repos/:id/gitignore",
   "POST /api/repos/:id/checkout",
+  // Reflog undo/redo moves HEAD and can take back the owner's own commit or pull: the same
+  // "mid-flight working state" reason as checkout, and the preview reads the owner's reflog.
+  "GET /api/repos/:id/undo",
+  "POST /api/repos/:id/undo",
+  "POST /api/repos/:id/redo",
   "POST /api/repos/:id/branch",
   "DELETE /api/repos/:id/branch",
   "POST /api/repos/:id/stash",

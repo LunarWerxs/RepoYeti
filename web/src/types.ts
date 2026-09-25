@@ -522,6 +522,22 @@ export interface StashEntry {
   date: number;
 }
 
+/** One reflog undo/redo step (mirrors UndoStep in src/git-actions/undo.ts). */
+export interface UndoStep {
+  kind: "checkout" | "commit" | "move" | "barrier";
+  from: string;
+  to: string;
+  subject: string;
+}
+/** GET /api/repos/:id/undo: what an undo and a redo press would do right now. */
+export interface UndoPreview {
+  ok: boolean;
+  code: ApiCode;
+  message?: string;
+  undo?: { ok: boolean; code: ApiCode; message: string; step?: UndoStep };
+  redo?: { ok: boolean; code: ApiCode; message: string; step?: UndoStep };
+}
+
 export interface StashList {
   ok: boolean;
   code: ApiCode;
@@ -605,6 +621,8 @@ export type ApiErrorCode =
   | "NOTHING_TO_STASH"
   | "STASH_CONFLICT"
   | "STASH_EMPTY"
+  | "NOTHING_TO_UNDO"
+  | "UNDO_REFUSED"
   | "DISCARD_FAILED"
   | "STAGE_FAILED"
   | "DELETE_FAILED"

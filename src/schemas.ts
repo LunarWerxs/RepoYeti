@@ -229,6 +229,11 @@ export const CommitSchema = z.object({
 export const CheckoutSchema = z.object({ branch: nonEmpty });
 export const CreateBranchSchema = z.object({ name: nonEmpty, switch: z.boolean().optional() });
 export const DeleteBranchSchema = z.object({ name: nonEmpty });
+/** POST undo/redo: the previewed step the owner confirmed, so a step that changed since is refused.
+ *  Optional: a bare `{}` (a script that never previewed) runs whatever step is current. */
+export const UndoRunSchema = z.object({
+  expect: z.object({ to: nonEmpty.max(256), subject: z.string().max(4096) }).optional(),
+});
 
 // ── stash ───────────────────────────────────────────────────────────────────────────
 export const StashSaveSchema = z.object({ message: z.string().optional() });
