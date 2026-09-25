@@ -41,8 +41,9 @@ import {
   forceRefresh,
 } from "../../service/index.ts";
 import { requireId, remoteBrowseBlocked, remoteEditingBlocked, withGuestStatus } from "../respond.ts";
-import { effectiveGuest } from "../../auth.ts";
+import { effectiveGuest, isRemoteRequest } from "../../auth.ts";
 import type { RepoYetiConfig } from "../../config.ts";
+import { isSecretFileName, normalizeRelPath, windowsPathAlias } from "../../paths.ts";
 
 type ImageResult = Awaited<ReturnType<typeof readImagePreview>>;
 
@@ -149,6 +150,9 @@ async function getTreeRoute(c: Context, cfg: Deps["cfg"]) {
   if (id instanceof Response) return id;
   const blocked = remoteBrowseBlocked(c, cfg);
   if (blocked) return blocked;
+  // `GIT~1` would list the metadata directory the tree refuses by name.
+  const denied = fileAccessRefused(c, c.req.query("path") ?? "", { content: false });
+  if (denied) return denied;
   const result = await listRepoTree(id, c.req.query("path") ?? "");
   if (result.ok)
     return c.json({
@@ -193,12 +197,34 @@ async function guestIgnoredRead(c: Context, cfg: RepoYetiConfig, id: string, pat
   return jsonError(c, "NOT_FOUND", "file not found");
 }
 
+/**
+ * The allow/deny check every path this module serves or saves passes BEFORE the service layer
+ * touches disk (idea: vite's isFileLoadingAllowed, vitejs/vite, MIT; written fresh). The service
+ * confines a path to the repo; this refuses the spellings and names that confinement cannot see:
+ *   - a Windows alias (8.3 short name, alternate data stream, trailing dot/space) for everyone,
+ *     since it names a different file than the one every later guard inspects (windowsPathAlias);
+ *   - with `content`, a secret-shaped name (.env, private keys) over remote access. A loopback
+ *     owner still reads and edits their own .env: the risk is the tunnel, not the desk.
+ * Name-based, so the 403 confirms nothing about whether the file exists.
+ */
+function fileAccessRefused(c: Context, path: string, opts: { content: boolean }): Response | null {
+  const clean = normalizeRelPath(path);
+  const alias = windowsPathAlias(clean);
+  if (alias) return jsonError(c, "BAD_REQUEST", alias);
+  if (opts.content && isRemoteRequest(c) && isSecretFileName(clean)) {
+    return jsonError(c, "FORBIDDEN", "secret files (.env, private keys) are not served over remote access");
+  }
+  return null;
+}
+
 // Read one changed file's contents for the read-only viewer drawer. Path is a query
 // param (?path=…); it's normalised + confined to the repo in readFileContent.
 async function getFileRoute(c: Context, cfg: RepoYetiConfig) {
   const id = requireId(c);
   if (id instanceof Response) return id;
   const path = c.req.query("path") ?? "";
+  const denied = fileAccessRefused(c, path, { content: true });
+  if (denied) return denied;
   const ref = c.req.query("ref") === "head" ? "head" : "work";
   // `ref=head` reads the committed blob, which is history a guest can already see.
   if (ref === "work") {
@@ -237,6 +263,8 @@ async function getDiffRoute(c: Context, cfg: RepoYetiConfig) {
   const id = requireId(c);
   if (id instanceof Response) return id;
   const path = c.req.query("path") ?? "";
+  const denied = fileAccessRefused(c, path, { content: true });
+  if (denied) return denied;
   const refused = await guestIgnoredRead(c, cfg, id, path);
   if (refused) return refused;
   const result = await readFileDiff(id, path);
@@ -249,6 +277,9 @@ async function getDiffRoute(c: Context, cfg: RepoYetiConfig) {
 async function getCommitFileRoute(c: Context<BlankEnv, "/api/repos/:id/commit/:hash/file">) {
   const id = requireId(c);
   if (id instanceof Response) return id;
+  // A committed .env is still a secret, so history reads take the same name check.
+  const denied = fileAccessRefused(c, c.req.query("path") ?? "", { content: true });
+  if (denied) return denied;
   const preview = c.req.query("preview");
   if (preview === "image") {
     return previewResponse(
@@ -285,6 +316,8 @@ async function putFileRoute(c: Context<BlankEnv, "/api/repos/:id/file">, cfg: De
   const blocked = remoteEditingBlocked(c, cfg);
   if (blocked) return blocked;
   const path = c.req.query("path") ?? "";
+  const denied = fileAccessRefused(c, path, { content: true });
+  if (denied) return denied;
   const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   if (typeof b.content !== "string") {
     return c.json({ ok: false, code: "NO_CONTENT", message: "content (string) is required" }, 400);
@@ -313,6 +346,8 @@ async function postDiscardRoute(c: Context, cfg: Deps["cfg"]) {
   if (blocked) return blocked;
   const p = await parseBody(c, DiscardSchema);
   if (!p.ok) return p.res;
+  const denied = fileAccessRefused(c, p.data.path, { content: false });
+  if (denied) return denied;
   const result = await discardFile(id, p.data.path);
   if (result.ok) return c.json(withGuestStatus(c, cfg, result));
   const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
@@ -332,6 +367,8 @@ async function postDeleteFileRoute(c: Context, cfg: Deps["cfg"]) {
   if (blocked) return blocked;
   const p = await parseBody(c, DeleteFileSchema);
   if (!p.ok) return p.res;
+  const denied = fileAccessRefused(c, p.data.path, { content: false });
+  if (denied) return denied;
   const result = await deleteFile(id, p.data.path, p.data.recursive);
   if (result.ok) return c.json(withGuestStatus(c, cfg, result));
   const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
@@ -358,6 +395,8 @@ async function getConflictsRoute(c: Context) {
 async function getConflictRoute(c: Context) {
   const id = requireId(c);
   if (id instanceof Response) return id;
+  const denied = fileAccessRefused(c, c.req.query("path") ?? "", { content: true });
+  if (denied) return denied;
   const result = await readConflictFile(id, c.req.query("path") ?? "");
   if (!result.ok) {
     const status: ContentfulStatusCode =
@@ -386,6 +425,8 @@ async function postConflictApplyRoute(c: Context, cfg: Deps["cfg"]) {
   if (blocked) return blocked;
   const p = await parseBody(c, ConflictApplySchema);
   if (!p.ok) return p.res;
+  const denied = fileAccessRefused(c, p.data.path, { content: true });
+  if (denied) return denied;
   const result = await applyConflictResolutions(id, p.data.path, p.data.hash, p.data.accepted);
   if (result.ok) return c.json(result);
   const status: ContentfulStatusCode =
@@ -411,6 +452,8 @@ async function postConflictSideRoute(c: Context, cfg: Deps["cfg"]) {
   if (blocked) return blocked;
   const p = await parseBody(c, ConflictSideSchema);
   if (!p.ok) return p.res;
+  const denied = fileAccessRefused(c, p.data.path, { content: true });
+  if (denied) return denied;
   const result = await chooseConflictSide(id, p.data.path, p.data.side);
   if (result.ok) return c.json(withGuestStatus(c, cfg, result));
   const status: ContentfulStatusCode =
@@ -429,6 +472,8 @@ async function postConflictStageRoute(c: Context, cfg: Deps["cfg"]) {
   if (id instanceof Response) return id;
   const p = await parseBody(c, StageSchema);
   if (!p.ok) return p.res;
+  const denied = fileAccessRefused(c, p.data.path, { content: false });
+  if (denied) return denied;
   const result = await stageResolvedConflict(id, p.data.path);
   if (result.ok) return c.json(withGuestStatus(c, cfg, result));
   const status: ContentfulStatusCode =
@@ -445,6 +490,8 @@ async function postStageRoute(c: Context, cfg: Deps["cfg"]) {
   if (id instanceof Response) return id;
   const p = await parseBody(c, StageSchema);
   if (!p.ok) return p.res;
+  const denied = fileAccessRefused(c, p.data.path, { content: false });
+  if (denied) return denied;
   const result = await stageFile(id, p.data.path);
   if (result.ok) return c.json(withGuestStatus(c, cfg, result));
   const status: ContentfulStatusCode = result.code === "NOT_FOUND" ? 404 : statusForCode(result.code as ApiErrorCode);
@@ -461,6 +508,8 @@ async function postGitignoreRoute(c: Context, cfg: Deps["cfg"]) {
   if (blocked) return blocked;
   const p = await parseBody(c, GitignoreAddSchema);
   if (!p.ok) return p.res;
+  const denied = fileAccessRefused(c, p.data.path, { content: false });
+  if (denied) return denied;
   const result = await addToGitignore(id, p.data.path);
   if (result.ok) return c.json(withGuestStatus(c, cfg, result));
   const status: ContentfulStatusCode =
@@ -480,6 +529,9 @@ async function postMoveRoute(c: Context, cfg: Deps["cfg"]) {
   if (typeof b.from !== "string" || typeof b.toDir !== "string") {
     return c.json({ ok: false, code: "ERROR", message: "from and toDir (strings) are required" }, 400);
   }
+  const denied =
+    fileAccessRefused(c, b.from, { content: false }) ?? fileAccessRefused(c, b.toDir, { content: false });
+  if (denied) return denied;
   const result = await moveFile(id, b.from, b.toDir);
   if (!result.ok) {
     const status: ContentfulStatusCode =
