@@ -217,19 +217,64 @@ export function readSession(c: Context, o: OAuthConfig, opts?: AuthOptions): Ses
 const LOCAL_COOKIE = "gm_local";
 const LOCAL_TTL_MS = 30 * 24 * 3600 * 1000;
 
+/** The slice of Bun's `Server` we read: Bun.serve hands the server to `app.fetch` as Hono's env. */
+interface PeerSource {
+  requestIP?: (req: Request) => { address: string } | null;
+}
+
 /**
- * True when the request came in over the tunnel (Cloudflare adds these; localhost has none).
+ * The TCP peer's address as the socket reports it, or null when there is no socket to ask
+ * (an in-process `app.request()` / `app.fetch()` call with no server env, which is how every
+ * route test drives the app). Never read from a header: this is the one signal a caller cannot
+ * forge, which is why remoteness is derived from it first.
+ */
+function socketPeer(c: Context): string | null {
+  const env = c.env as PeerSource | undefined;
+  if (typeof env?.requestIP !== "function") return null;
+  try {
+    return env.requestIP(c.req.raw)?.address ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Loopback in any spelling the socket may report: 127.0.0.0/8, ::1, or IPv4-mapped 127.x. */
+function isLoopbackAddress(addr: string): boolean {
+  const a = addr.toLowerCase().replace(/^::ffff:/, "");
+  return a === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(a);
+}
+
+/** True when the socket reports a peer and it is not this machine. */
+function nonLoopbackPeer(c: Context): boolean {
+  const peer = socketPeer(c);
+  return peer !== null && !isLoopbackAddress(peer);
+}
+
+/**
+ * True when the request came from anywhere but this machine.
  *
- * ⚠️ SECURITY ASSUMPTION (F2): "local vs remote" is inferred PURELY from these proxy headers.
- * This is correct behind Cloudflare (the named tunnel always injects `cf-connecting-ip`, and a
- * remote caller can't strip them). But if you deploy RepoYeti behind a DIFFERENT reverse proxy
- * that does NOT set any of these, a genuinely remote request would be misclassified as LOCAL —
- * letting it use the "continue local" bypass and skip owner auth. Only expose the daemon through
- * a proxy that sets `cf-connecting-ip` / `x-forwarded-*` (see README "Deploying behind a proxy"),
- * or bind it to loopback only. Do not loosen this without re-deriving remoteness from a trusted
- * signal (e.g. the bound socket address), not a spoofable header.
+ * Peer first (the rule gin-gonic/gin applies before it reads X-Forwarded-For): a socket peer
+ * that is NOT loopback is remote, full stop, whatever headers it did or did not send. Only a
+ * loopback peer - the one hop RepoYeti trusts, because cloudflared runs on this machine and
+ * connects from 127.0.0.1 - gets its proxy headers honoured: Cloudflare injects
+ * `cf-connecting-ip` / `x-forwarded-*` and a remote caller cannot strip them, so a loopback
+ * request carrying any of them arrived over the tunnel. When no socket peer is known (the
+ * in-process test harness), the header rule alone decides, exactly as before.
+ *
+ * WHY peer-first: the header-only rule (F2) misclassified a genuinely remote request as LOCAL
+ * whenever nothing in front of the daemon added a proxy header, which hands it the "continue
+ * local" bypass and skips owner auth. The daemon binds 127.0.0.1 today, so every real peer is
+ * loopback and this changes nothing in the shipped build; it makes a future LAN bind (or any
+ * path that lets a non-loopback socket reach the daemon) fail closed instead of open. Being
+ * remote also skips the loopback guard, so authMiddleware refuses such a peer outright when no
+ * OIDC client is configured (otherwise it would reach an open /api/*).
+ *
+ * ⚠️ Still true: a proxy running ON this machine that forwards remote traffic without adding any
+ * of these headers is indistinguishable from a local caller (its peer is loopback). Only front
+ * the daemon with a proxy that sets `cf-connecting-ip` / `x-forwarded-*`.
  */
 export function isRemoteRequest(c: Context): boolean {
+  if (nonLoopbackPeer(c)) return true;
   return !!(
     c.req.header("cf-connecting-ip") ||
     c.req.header("x-forwarded-for") ||
@@ -660,7 +705,8 @@ async function guestGate(
 }
 
 /** Middleware gating /api/*. The invariants:
- *  - No OIDC client at all (bare test configs) → fully open.
+ *  - No OIDC client at all (bare test configs) → open to this machine; a non-loopback socket
+ *    peer is refused (401), since nothing else would authenticate it.
  *  - A request over the tunnel ALWAYS requires a signed-in owner (or a valid API Bearer token),
  *    in any mode — or, failing that, a live share-link cookie limited to that share's policy.
  *  - A local (loopback) request: open in "local" mode; in "remote" mode it needs either an
@@ -676,7 +722,10 @@ async function guestGate(
 export function authMiddleware(cfg: RepoYetiConfig) {
   // biome-ignore lint/suspicious/noConfusingVoidType: `void` is load-bearing — the pass-through branches `return next()` (Promise<void>); narrowing to `undefined` breaks that.
   return async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
-    if (!authEnforced(cfg)) return next();
+    // WHY: with no OIDC client there is no owner to sign in, so a non-loopback peer would be
+    // remote (skipping the loopback guard) AND unauthenticated - a fully open /api/*. Nothing but
+    // this machine may use an unauthenticated daemon.
+    if (!authEnforced(cfg)) return nonLoopbackPeer(c) ? c.body(null, 401) : next();
     const path = new URL(c.req.url).pathname;
     // Public: health + the probes the gate itself relies on. continue-local is here too —
     // it self-guards on loopback, so it must be reachable from the (otherwise-gated) gate.

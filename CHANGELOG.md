@@ -127,6 +127,18 @@ All notable changes to RepoYeti are documented here. The format is based on
   (`.pem`, `.key`, `.p12`, `.pfx`, `id_rsa` and friends) and credential stores are refused by name
   with a 403, so they never leave the machine; at the desk the owner reads and edits them as before.
   The idea comes from vite's `isFileLoadingAllowed`.
+### Security
+
+- **Defence in depth for a non-loopback bind: a socket peer that is not this machine is always
+  remote, and an unauthenticated daemon refuses it.** The daemon told a local caller from a remote
+  one only by the absence of `cf-connecting-ip` / `x-forwarded-*`, so a remote request that
+  reached it with none of those headers would count as local and could take the "Continue local
+  for now" bypass past owner sign-in. The daemon binds 127.0.0.1, so every real peer is this
+  machine and the headers still decide for all shipped traffic (a proxy on the same machine that
+  adds no headers is unchanged). If the daemon is ever bound beyond loopback, a non-loopback peer
+  is now remote whatever headers it sends, proxy headers are honoured only from a loopback peer
+  (the peer-first rule gin-gonic/gin applies to `X-Forwarded-For`), and with no OIDC client
+  configured such a peer gets a 401 instead of an open `/api/*`.
 
 ## [1.1.0] - 2026-09-22
 
