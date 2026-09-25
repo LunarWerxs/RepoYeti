@@ -16,6 +16,7 @@ import {
   gitTagPush,
   gitUndoRedo,
   planUndoRedo,
+  type UndoExpect,
   type UndoPlan,
 } from "../git-actions.ts";
 import type { ActionCode, ActionResult, CommitGroupSpec, CommitGroupResult } from "../contract.ts";
@@ -86,12 +87,13 @@ export const stashDropRepo = (id: string, index = 0): Promise<ActionOutcome> =>
   runAction(id, "stash-drop", (b, p) => b.stashDrop(p, index));
 
 // ── reflog undo / redo (git-only; the route guards on repo.vcs) ───────────────────
-// The run goes through the op-queue like every other mutation, and re-plans inside its slot, so a
-// preview the owner confirmed cannot be applied to a HEAD that moved in between.
-export const undoRepo = (id: string): Promise<ActionOutcome> =>
-  runAction(id, "undo", (_b, p) => gitUndoRedo(p, "undo"));
-export const redoRepo = (id: string): Promise<ActionOutcome> =>
-  runAction(id, "redo", (_b, p) => gitUndoRedo(p, "redo"));
+// The run goes through the op-queue like every other mutation and re-plans inside its slot. The
+// re-plan alone would happily undo whatever step is newest by then, so `expect` (the step the
+// owner confirmed) makes the run refuse when an auto-commit or other op landed after the preview.
+export const undoRepo = (id: string, expect?: UndoExpect): Promise<ActionOutcome> =>
+  runAction(id, "undo", (_b, p) => gitUndoRedo(p, "undo", expect));
+export const redoRepo = (id: string, expect?: UndoExpect): Promise<ActionOutcome> =>
+  runAction(id, "redo", (_b, p) => gitUndoRedo(p, "redo", expect));
 
 /** What an undo and a redo press would do right now (read-only; the confirm dialog shows it). */
 export async function previewUndoRepo(id: string): Promise<{ ok: boolean; code: ActionCode; message?: string; undo?: UndoPlan; redo?: UndoPlan }> {

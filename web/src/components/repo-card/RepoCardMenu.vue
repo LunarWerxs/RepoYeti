@@ -197,7 +197,8 @@ const manageOpen = ref(false);
 
 // ── undo / redo the last git action, read from the reflog (git repos only) ─────
 // A confirm dialog, not a one-tap toast action like pin/star: this moves HEAD, so the owner sees
-// the exact reflog step first. The daemon re-plans inside its op-queue slot on the real run.
+// the exact reflog step first. The confirmed step travels with the run, so if an auto-commit or
+// another op lands in between, the daemon refuses instead of undoing a step the dialog never showed.
 const { friendly, toastResult } = useRepoFeedback();
 const undoOpen = ref(false);
 const undoDirection = ref<"undo" | "redo">("undo");
@@ -216,8 +217,9 @@ async function openUndo(direction: "undo" | "redo"): Promise<void> {
 }
 async function confirmUndo(): Promise<void> {
   const direction = undoDirection.value;
+  const step = undoPlan.value?.step;
   undoOpen.value = false;
-  const r = await store.undoGit(props.repo.id, direction);
+  const r = await store.undoGit(props.repo.id, direction, step ? { to: step.to, subject: step.subject } : undefined);
   toastResult(r, direction === "undo" ? t("repo.gitUndo.undone") : t("repo.gitUndo.redone"));
 }
 </script>

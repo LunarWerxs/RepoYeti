@@ -57,4 +57,5 @@ export {
   type UndoStep,
   type UndoPlan,
   type UndoDirection,
+  type UndoExpect,
 } from "./undo.ts";

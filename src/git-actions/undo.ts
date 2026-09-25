@@ -75,7 +75,10 @@ function stepFor(entry: ReflogEntry, prevHash: string): UndoStep | null {
   if (/^commit( \((amend|merge)\))?:/.test(s) && prevHash) {
     return { kind: "commit", from: prevHash, to: entry.hash, subject: s };
   }
-  if (/^(pull|merge |reset: moving to )/.test(s) && prevHash) {
+  // `pull` / `merge <args>` must reach its colon with no "(": a rebasing pull logs
+  // `pull (start|pick|finish): ...` sequencer entries, and treating each pick as a move would walk
+  // the branch back through replayed states that never existed. Those fall through to a barrier.
+  if (/^(?:(?:pull|merge)(?: [^(:]*)?:|reset: moving to )/.test(s) && prevHash) {
     return { kind: "move", from: prevHash, to: entry.hash, subject: s };
   }
   return { kind: "barrier", from: prevHash, to: entry.hash, subject: s };
@@ -166,7 +169,10 @@ export async function planUndoRedo(absPath: string, direction: UndoDirection): P
   const git = gitFor(absPath);
   const head = (await git.raw(["rev-parse", "HEAD"])).trim();
   if (head !== expected) return refuse("the branch has moved since that step - nothing was changed");
-  if (direction === "undo" && step.kind === "commit") {
+  // A merge commit made by `merge x:` or `pull:` is as much a new commit as `commit (merge):`, so it
+  // gets the same guard. A fast-forward move is not: its target is on the remote by design.
+  const madeCommit = step.kind === "commit" || (step.kind === "move" && /: Merge made by /.test(step.subject));
+  if (direction === "undo" && madeCommit) {
     // A commit a remote already has cannot be taken back without a force-push to match it.
     const published = (await git.raw(["branch", "-r", "--contains", step.to])).trim();
     if (published) return refuse(`that commit is already pushed (${published.split("\n")[0]!.trim()}) - revert it at your desk instead`);
@@ -175,14 +181,26 @@ export async function planUndoRedo(absPath: string, direction: UndoDirection): P
   return { ...ok(`${verb} ${pre.branch} to ${short(target)} (${step.subject})`), step };
 }
 
+/** The step a caller previewed and confirmed: its `to` and reflog subject identify it. */
+export interface UndoExpect {
+  to: string;
+  subject: string;
+}
+
 /**
  * Run the undo or redo that planUndoRedo resolves. Callers serialise this through the per-repo
  * op-queue (service/actions.ts), so the plan cannot go stale between the check and the write.
+ * `expect` binds the run to the step the owner confirmed: if a Scheduled auto-commit or another
+ * op landed between the preview and the tap, the fresh plan names a different step and the run is
+ * refused instead of undoing something the dialog never showed.
  */
-export async function gitUndoRedo(absPath: string, direction: UndoDirection): Promise<ActionResult> {
+export async function gitUndoRedo(absPath: string, direction: UndoDirection, expect?: UndoExpect): Promise<ActionResult> {
   const plan = await planUndoRedo(absPath, direction);
   if (!plan.ok || !plan.step) return { ok: plan.ok, code: plan.code, message: plan.message };
   const step = plan.step;
+  if (expect && (expect.to !== step.to || expect.subject !== step.subject)) {
+    return fail("UNDO_REFUSED", `the last action is now "${step.subject}", not the one you confirmed - nothing was changed`);
+  }
   const target = direction === "undo" ? step.from : step.to;
   // The tag is what lets the next press see this step as ours and count past it.
   const git = gitFor(absPath, undefined, {

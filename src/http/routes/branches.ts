@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import { jsonError } from "../../contract.ts";
 import { getRepo } from "../../db.ts";
-import { parseBody, CheckoutSchema, CreateBranchSchema, DeleteBranchSchema } from "../../schemas.ts";
+import { parseBody, CheckoutSchema, CreateBranchSchema, DeleteBranchSchema, UndoRunSchema } from "../../schemas.ts";
 import {
   checkoutRepo,
   createBranchRepo,
@@ -60,11 +60,15 @@ export function register(app: Hono, { cfg }: Deps): void {
   app.post("/api/repos/:id/undo", async (c) => {
     const id = gitOnly(c);
     if (id instanceof Response) return id;
-    return actionJson(c, cfg, await undoRepo(id));
+    const p = await parseBody(c, UndoRunSchema);
+    if (!p.ok) return p.res;
+    return actionJson(c, cfg, await undoRepo(id, p.data.expect));
   });
   app.post("/api/repos/:id/redo", async (c) => {
     const id = gitOnly(c);
     if (id instanceof Response) return id;
-    return actionJson(c, cfg, await redoRepo(id));
+    const p = await parseBody(c, UndoRunSchema);
+    if (!p.ok) return p.res;
+    return actionJson(c, cfg, await redoRepo(id, p.data.expect));
   });
 }

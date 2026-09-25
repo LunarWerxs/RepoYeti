@@ -814,7 +814,8 @@ export const api = {
     ),
   /** Reflog undo/redo of the last git action: preview both directions, then run one. */
   undoPreview: (id: string) => req<UndoPreview>("GET", `/api/repos/${id}/undo`),
-  undoGit: (id: string, direction: "undo" | "redo") => req<ActionResult>("POST", `/api/repos/${id}/${direction}`, {}),
+  undoGit: (id: string, direction: "undo" | "redo", expect?: { to: string; subject: string }) =>
+    req<ActionResult>("POST", `/api/repos/${id}/${direction}`, expect ? { expect } : {}),
   stashes: (id: string) => req<StashList>("GET", `/api/repos/${id}/stashes`),
   stashSave: (id: string, message?: string) =>
     req<ActionResult>("POST", `/api/repos/${id}/stash`, message ? { message } : {}),

@@ -306,8 +306,8 @@ async function stashVerb(pos: string[]): Promise<void> {
 }
 
 interface UndoPreview {
-  undo?: ActionResult & { step?: { subject: string } };
-  redo?: ActionResult & { step?: { subject: string } };
+  undo?: ActionResult & { step?: { to: string; subject: string } };
+  redo?: ActionResult & { step?: { to: string; subject: string } };
 }
 
 /** `undo|redo <repo> [--dry-run]`: reverse (or re-apply) the last git action the reflog shows.
@@ -315,15 +315,18 @@ interface UndoPreview {
 async function undoVerb(direction: "undo" | "redo", pos: string[], flags: ParsedArgs["flags"]): Promise<void> {
   const usage = `usage: repoyeti ${direction} <repo> [--dry-run]`;
   const repo = await resolveRepo(requireRepoArg(pos, usage));
+  // Preview first and bind the run to the step printed here: if an auto-commit lands in between,
+  // the daemon refuses rather than undoing a step this command never showed.
+  const plan = (await get<UndoPreview>(`/api/repos/${repo.id}/undo`))[direction];
+  if (!plan) throw new UsageError(usage);
+  if (plan.step) console.log(dim(`last action: ${plan.step.subject}`));
   if (flags["dry-run"] === true || flags["dry-run"] === "true") {
-    const plan = (await get<UndoPreview>(`/api/repos/${repo.id}/undo`))[direction];
-    if (!plan) throw new UsageError(usage);
-    if (plan.step) console.log(dim(`last action: ${plan.step.subject}`));
     console.log(plan.ok ? `${cyan("would")} ${plan.message}` : red(`✗ ${plan.code}: ${plan.message}`));
     if (!plan.ok) process.exitCode = 1;
     return;
   }
-  const r = await post<ActionResult>(`/api/repos/${repo.id}/${direction}`, {});
+  const expect = plan.step ? { to: plan.step.to, subject: plan.step.subject } : undefined;
+  const r = await post<ActionResult>(`/api/repos/${repo.id}/${direction}`, expect ? { expect } : {});
   console.log(`${green("✓")} ${r.message}`);
 }
 

@@ -137,10 +137,14 @@ export function useGitOps(
 
   /** Reflog undo/redo of the last git action. HEAD may move (branch or commit), so the branch
    *  list, the changed-file tree and the history all refresh, like a switch does. */
-  async function undoGit(repoId: string, direction: "undo" | "redo"): Promise<ActionResult> {
+  async function undoGit(
+    repoId: string,
+    direction: "undo" | "redo",
+    expect?: { to: string; subject: string },
+  ): Promise<ActionResult> {
     gitOpBusy[repoId] = direction;
     try {
-      const r = await api.undoGit(repoId, direction);
+      const r = await api.undoGit(repoId, direction, expect);
       applyActionStatus(repoId, r);
       await Promise.all([loadBranches(repoId), loadChanges(repoId)]);
       if (r.ok) onHistoryChanged(repoId);

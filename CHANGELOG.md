@@ -17,9 +17,11 @@ All notable changes to RepoYeti are documented here. The format is based on
   (`[repoyeti undo]`) so a second press steps further back instead of undoing the undo. Where
   lazygit uses `reset --hard` with an auto-stash, this never does: a commit is stepped back with
   `reset --soft` so its changes stay staged, a pull with `reset --keep` which git aborts before it
-  touches an edited file, and a commit already on a remote, a rebase or a cherry-pick is refused
-  (`UNDO_REFUSED`) instead of being reset past. The dialog shows the exact reflog step before
-  anything moves.
+  touches an edited file, and a commit already on a remote (a merge commit included), a rebase
+  (a rebasing pull included) or a cherry-pick is refused (`UNDO_REFUSED`) instead of being reset
+  past. The dialog and the CLI show the exact reflog step before anything moves, and the run is
+  bound to that step: if a Scheduled auto-commit lands in between, it is refused rather than
+  undoing a step nobody confirmed.
 
 ## [1.1.0] - 2026-09-22
 
