@@ -1129,7 +1129,9 @@
       "commit": "Commit the current message",
       "viewerClose": "Close the file viewer",
       "viewerSave": "Save the file you're editing",
-      "treeResize": "Resize a list (changed files, history)"
+      "treeResize": "Resize a list (changed files, history)",
+      "selectAll": "Select every repository on screen (select mode)",
+      "selectClear": "Clear the repository selection (select mode)"
     },
     "defaultCommitAction": "Default commit button",
     "defaultCommitActionHint": "Choose what the main commit button does. Commit & Sync pulls then pushes after committing; repositories without a sync target safely fall back to Commit.",

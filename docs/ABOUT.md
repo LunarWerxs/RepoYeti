@@ -65,7 +65,7 @@ edit the dossier, not this block. Everything ABOVE the marker is yours.
 
 - **Live repo status grid** - Every discovered repo's branch, dirty count, and ahead/behind is watched event-driven and pushed to the dashboard within seconds of a local change. - `src/http/routes/repos.ts`, `src/http/routes/health.ts`
 - **Git-graph commit history** - Lazily-paged commit graph with lanes, merges, and a per-commit files-and-lines delta, resizable to read more at once. - `src/http/routes/log.ts`
-- **Bulk repo actions** - Select any number of repos (tap, Shift-click a range, Ctrl+A for all, Escape to clear) and pin, star, hide, remove, pull or push them in one action; pin, star, hide and remove undo, and pull and push keep the per-repo fast-forward-only and never-force guards. - `src/http/routes/repo-flags.ts`
+- **Bulk repo actions** - Select any number of repos and pin, star, hide, or remove them in one action; every action undoes. - `src/http/routes/repo-flags.ts`
 - **Preview a pull before pulling** - See the incoming commits, the files they touch, and any conflicts they would cause before anything is fetched or merged. - `src/service/reads.ts`
 - **Monaco diff and file viewer/editor** - The real VS Code editor component renders HEAD-to-tree diffs with syntax highlighting and lets you edit and save a file directly. - `src/http/routes/files.ts`, `web/src/lib/monaco-setup.ts`
 - **Smart Commit (AI multi-commit splitter)** - One tap turns a messy working tree into an ordered set of small, logically-scoped commits at file granularity (never a split hunk), which you review/edit before they are created. - `src/ai/commit-plan.ts`

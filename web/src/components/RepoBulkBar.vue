@@ -21,6 +21,8 @@ import { toast } from "vue-sonner";
 import { useEventListener } from "@vueuse/core";
 import { useStore } from "../store";
 import { keyRequests } from "@/lib/multi-select";
+import { fileViewer } from "@/lib/file-viewer";
+import { shortcutsActive } from "@/lib/hotkeys";
 import { isSectionCollapsed } from "@/lib/repo-sections";
 import {
   applyRequests,
@@ -70,16 +72,27 @@ onBeforeUnmount(() => {
 });
 
 /**
- * Every repo the dashboard is currently SHOWING — the target of "select all".
+ * Every repo the dashboard is currently SHOWING, in the order the cards are drawn: the target of
+ * "select all", Ctrl+A and a Shift-range alike, so every keyboard or button path into the selection
+ * (which also feeds bulk Remove and Push) follows one rule for "visible".
  *
  * This has to honour the filter bar, not just the hidden flag: with a search/status/identity
  * filter on, AppShell renders `filteredRepos` (a subset), so sourcing this from `visibleRepos`
  * would tick repos that aren't on screen — and a following "Remove" would delete repos the
- * owner filtered away and never saw.
+ * owner filtered away and never saw. Unfiltered, it is Pinned, Starred, then the rest, and a
+ * collapsed section is left out for the same reason: its cards are off screen. The catch-all
+ * section is only collapsible while a section sits above it, the same rule RepoList uses.
  */
-const visibleIds = computed(() =>
-  (store.filtersActive ? store.filteredRepos : store.visibleRepos).map((r) => r.id),
-);
+const visibleIds = computed(() => {
+  if (store.filtersActive) return store.filteredRepos.map((r) => r.id);
+  const hasSections = store.pinnedRepos.length > 0 || store.starredRepos.length > 0;
+  const shown = [
+    ...(isSectionCollapsed("pinned") ? [] : store.pinnedRepos),
+    ...(isSectionCollapsed("starred") ? [] : store.starredRepos),
+    ...(hasSections && isSectionCollapsed("other") ? [] : store.otherRepos),
+  ];
+  return shown.map((r) => r.id);
+});
 const allSelected = computed(
   () => visibleIds.value.length > 0 && selectionCount.value === visibleIds.value.length,
 );
@@ -95,28 +108,17 @@ function toggleAll(): void {
   applyRequests([{ type: "setAll", selected: !allSelected.value }], visibleIds.value);
 }
 
-/**
- * The repos a Shift-range may sweep, in the order the cards are drawn: the filtered list, or
- * Pinned, Starred, then the rest. A collapsed section is left out because its cards are off screen,
- * and a range must never tick a repo the owner cannot see (a following Remove would take it). The
- * catch-all section is only collapsible while a section sits above it, the same rule RepoList uses.
- */
-const rangeIds = computed(() => {
-  if (store.filtersActive) return store.filteredRepos.map((r) => r.id);
-  const hasSections = store.pinnedRepos.length > 0 || store.starredRepos.length > 0;
-  const shown = [
-    ...(isSectionCollapsed("pinned") ? [] : store.pinnedRepos),
-    ...(isSectionCollapsed("starred") ? [] : store.starredRepos),
-    ...(hasSections && isSectionCollapsed("other") ? [] : store.otherRepos),
-  ];
-  return shown.map((r) => r.id);
-});
-onBeforeUnmount(provideRangeOrder(() => rangeIds.value));
+// A Shift-range sweeps the same on-screen order, so it never ticks a repo the owner cannot see.
+onBeforeUnmount(provideRangeOrder(() => visibleIds.value));
 
 // Ctrl/Cmd+A ticks every visible repo and Escape clears, from anywhere on the dashboard except a
 // field (where Ctrl+A means "select this text") or an open dialog/menu (which owns its own Escape).
+// Both are app accelerators, so the Settings master switch turns them off (see @/lib/hotkeys).
+// While the file viewer is open, Escape belongs to it: this document listener runs before its
+// window one, and one keypress must not both drop a hand-built selection and close the viewer.
 useEventListener(document, "keydown", (e: KeyboardEvent) => {
-  if (e.defaultPrevented || busy.value) return;
+  if (!shortcutsActive() || e.defaultPrevented || busy.value) return;
+  if (e.key === "Escape" && fileViewer.open) return;
   const target = e.target as HTMLElement | null;
   if (target?.closest?.("input,textarea,select,[contenteditable='true'],[role='dialog'],[role='menu']")) return;
   const requests = keyRequests(e, selectionCount.value > 0);
