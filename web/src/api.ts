@@ -212,6 +212,9 @@ export interface RuntimeStatus {
   updateNotify: boolean;
   /** Auto-update check cadence in seconds. */
   autoUpdateIntervalSecs: number;
+  /** Update cooldown in days: the auto-update timer only takes an update at least this old
+   *  (0 = off). Set through PUT /api/settings `autoUpdateCooldownDays`. */
+  autoUpdateCooldownDays: number;
   /** Whether the whole machine is auto-scanned for repos on every app start (owner setting). */
   autoScan: boolean;
   /** Whether the Lore-servers settings section is expanded (owner setting; a pure display

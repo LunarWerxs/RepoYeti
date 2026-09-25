@@ -130,6 +130,9 @@ const NEVER_SYNCED = [
   "syncCheck",
   "keepInSync",
   "autoUpdate",
+  // The update cooldown is a supply-chain safety delay chosen for THIS machine's unattended
+  // installs; a synced 0 would silently switch it off on a machine that relies on it.
+  "autoUpdateCooldownDays",
   "mcpApprovalGate", // turning the gate OFF is fail-open; that must be a per-machine choice
   "mcpAutoApprove", // likewise fail-open
   // Opens this machine's local ports through the daemon: security posture, decided per machine.

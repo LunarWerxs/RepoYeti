@@ -42,6 +42,7 @@ import {
   setAutoUpdateEnabled,
   setUpdateNotifyEnabled,
   setAutoUpdateIntervalSecs,
+  setAutoUpdateCooldownDays,
   AUTO_UPDATE_INTERVAL_DEFAULT_S,
 } from "../auto-update.ts";
 import {
@@ -170,6 +171,7 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   setAutoUpdateEnabled(cfg.autoUpdate === true);
   setUpdateNotifyEnabled(cfg.updateNotify !== false);
   setAutoUpdateIntervalSecs(cfg.autoUpdateIntervalSecs ?? AUTO_UPDATE_INTERVAL_DEFAULT_S);
+  setAutoUpdateCooldownDays(cfg.autoUpdateCooldownDays ?? 0); // absent = off
   // ⭐ Agent Safety Rail: gate defaults ON (absent = gated); timeouts default to 120s. Auto-deny
   // defaults ON (absent = the historic always-times-out behavior); auto-approve is opt-in (off).
   setApprovalGateEnabled(cfg.mcpApprovalGate !== false);

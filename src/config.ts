@@ -484,6 +484,13 @@ export interface RepoYetiConfig {
   /** Auto-update check cadence in seconds. Clamped to [900, 604800]; absent = 21600 (6 h). */
   autoUpdateIntervalSecs?: number;
   /**
+   * Update cooldown in whole days: the auto-update timer announces and installs only an update at
+   * least this old (commit time on a source checkout, release publication time on a compiled
+   * build), so a bad or compromised release has that long to be caught first. Clamped to [0, 30];
+   * absent or 0 = off. A manual check or install ignores it. See src/auto-update.ts.
+   */
+  autoUpdateCooldownDays?: number;
+  /**
    * Auto-scan the whole machine on every app start. Absent/false = OFF (opt-in) — a fresh
    * install never sweeps the filesystem unasked. Purely a stored flag: the WEB client reads
    * it at boot and decides whether to fire `POST /api/scan`; the daemon itself takes no

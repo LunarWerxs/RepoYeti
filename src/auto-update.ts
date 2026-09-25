@@ -20,6 +20,8 @@
  * EITHER is on, and only the second one ever applies.
  *
  * A dirty working tree is NEVER updated (`canApply` gates it), so uncommitted local work is safe.
+ * With cfg.autoUpdateCooldownDays set, an update younger than that is neither announced nor
+ * applied by this timer (see AUTO_UPDATE_COOLDOWN_MAX_DAYS).
  * Timer shape mirrors auto-commit.ts / remote-sync.ts: a self-rescheduling setTimeout (never
  * setInterval) so a slow apply can't stack. Primed + toggled live from src/http/app.ts + PUT
  * /api/settings; started/stopped in src/cli/lifecycle.ts.
@@ -50,6 +52,23 @@ export const AUTO_UPDATE_INTERVAL_DEFAULT_S = 21_600;
 export function clampAutoUpdateInterval(secs: number): number {
   if (!Number.isFinite(secs)) return AUTO_UPDATE_INTERVAL_DEFAULT_S;
   return Math.min(AUTO_UPDATE_INTERVAL_MAX_S, Math.max(AUTO_UPDATE_INTERVAL_MIN_S, Math.round(secs)));
+}
+
+/**
+ * Update cooldown (days): the timer adopts only an update at least this old, so a bad or
+ * compromised push has that long to be caught and pulled before every unattended install runs it.
+ * 0 = off, the default. Age is the remote commit's committer time on a source checkout and the
+ * release's `published_at` on a compiled build. Only the timer honours it: a manual install is
+ * the owner deciding, and a manual check still shows the newest version. Idea adapted from
+ * ohmyzsh's `zstyle ':omz:update' cooldown`.
+ */
+export const AUTO_UPDATE_COOLDOWN_MAX_DAYS = 30;
+const DAY_MS = 86_400_000;
+
+/** Clamp a requested cooldown into [0, MAX] whole days; a non-finite value means off. */
+export function clampAutoUpdateCooldownDays(days: number): number {
+  if (!Number.isFinite(days)) return 0;
+  return Math.min(AUTO_UPDATE_COOLDOWN_MAX_DAYS, Math.max(0, Math.round(days)));
 }
 
 /** A busy-deferred apply retries this soon (capped by the configured interval when it's shorter). */
@@ -108,6 +127,7 @@ export function setAutoUpdateHooks(h: Partial<AutoUpdateHooks>): void {
 let enabled = false; // auto-APPLY: OFF by default — it restarts the daemon → opt-in
 let notifyEnabled = true; // auto-NOTIFY: ON by default — it only tells you, and never acts
 let intervalSecs = AUTO_UPDATE_INTERVAL_DEFAULT_S;
+let cooldownDays = 0; // update cooldown, see AUTO_UPDATE_COOLDOWN_MAX_DAYS; 0 = off
 let started = false; // true only after the daemon finishes booting (startAutoUpdate)
 let timer: ReturnType<typeof setTimeout> | null = null;
 let ticking = false;
@@ -144,6 +164,15 @@ export function setUpdateNotifyEnabled(on: boolean): void {
 export function getAutoUpdateIntervalSecs(): number {
   return intervalSecs;
 }
+export function getAutoUpdateCooldownDays(): number {
+  return cooldownDays;
+}
+/** Set the update cooldown in days (clamped; config at boot + PUT /api/settings). Takes effect at
+ *  the next check; the cadence is untouched. Returns the clamped value. */
+export function setAutoUpdateCooldownDays(days: number): number {
+  cooldownDays = clampAutoUpdateCooldownDays(days);
+  return cooldownDays;
+}
 
 /** Outcome of one check→apply→relaunch pass. Returned (not just logged) so it's unit-testable. */
 export interface AutoUpdateRunResult {
@@ -169,6 +198,16 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
   }
   if (!status.ok) return { checked: true, applied: false, relaunched: false, reason: status.reason ?? "check-error" };
   if (!status.updateAvailable) return { checked: true, applied: false, relaunched: false, reason: "up-to-date" };
+
+  // Update cooldown: an update younger than the cutoff is neither announced nor applied, the same
+  // cutoff for both halves (ohmyzsh's availability check shares it too), so the owner is never
+  // nudged toward the install the cooldown is holding back. Unknown age reads as too young: the
+  // gate exists to wait. The apply below carries the cutoff so it cannot install something newer
+  // that landed after this check.
+  const notNewerThan = cooldownDays > 0 ? Date.now() - cooldownDays * DAY_MS : undefined;
+  if (notNewerThan !== undefined && !(status.remoteDate != null && status.remoteDate <= notNewerThan)) {
+    return { checked: true, applied: false, relaunched: false, reason: "cooling-down" };
+  }
 
   // An update exists. Unless the owner opted into silent installs, this is where it stops: say so
   // and let them choose. Announced even when `canApply` is false (dirty tree) — "an update is
@@ -226,7 +265,7 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
   if (!beginUpdateApply()) return { checked: true, applied: false, relaunched: false, reason: "busy" };
   try {
     broadcast("auto_update_applying", { from: status.currentCommit, to: status.remoteCommit });
-    const res = await hooks.apply();
+    const res = await hooks.apply(notNewerThan === undefined ? {} : { notNewerThan });
     if (!res.ok) return { checked: true, applied: false, relaunched: false, reason: "apply-failed" };
     if (res.restartRequired) {
       // The update IS applied on disk either way; only the restart can fail here (lifecycle's

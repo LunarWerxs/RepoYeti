@@ -90,6 +90,15 @@ export interface ReleaseAsset {
 export interface Release {
   tag_name: string;
   assets: ReleaseAsset[];
+  /** GitHub's publication time (ISO 8601). Set by GitHub, not the uploader, which is why the update
+   *  cooldown trusts it; absent when the metadata omits it. */
+  published_at?: string;
+}
+
+/** A release's publication time in epoch ms, or null when absent or unparseable. */
+function releaseDate(release: Release): number | null {
+  const at = release.published_at ? Date.parse(release.published_at) : Number.NaN;
+  return Number.isFinite(at) ? at : null;
 }
 
 export function releaseTarget(
@@ -310,7 +319,7 @@ async function readMetadata(response: Response): Promise<unknown> {
 }
 
 function parseRelease(raw: unknown): Release {
-  const r = raw as { tag_name?: unknown; assets?: unknown } | null;
+  const r = raw as { tag_name?: unknown; assets?: unknown; published_at?: unknown } | null;
   if (!r || typeof r.tag_name !== "string" || !TAG_SHAPE.test(r.tag_name)) {
     throw new Error("release metadata is malformed (tag)");
   }
@@ -328,7 +337,9 @@ function parseRelease(raw: unknown): Release {
       assets.push({ name: x.name, browser_download_url: x.browser_download_url, size: x.size });
     }
   }
-  return { tag_name: r.tag_name, assets };
+  return typeof r.published_at === "string"
+    ? { tag_name: r.tag_name, assets, published_at: r.published_at }
+    : { tag_name: r.tag_name, assets };
 }
 
 /**
@@ -415,6 +426,7 @@ async function discover(): Promise<{ status: UpdateStatus; release: Release | nu
     const asset = available ? assetForPlatform(release.assets) : null;
     const status = baseStatus({
       remoteCommit: release.tag_name,
+      remoteDate: releaseDate(release),
       updateAvailable: available,
       canApply: available && !!asset,
       reason:
@@ -755,6 +767,8 @@ export interface ApplyUpdateOptions {
   downloadTimeoutMs?: number;
   manifestTimeoutMs?: number;
   extractTimeoutMs?: number;
+  /** Update cooldown (src/auto-update.ts): refuse a release published after this instant. */
+  notNewerThan?: number;
 }
 
 export async function applyUpdate(options: ApplyUpdateOptions = {}): Promise<UpdateApplyResult> {
@@ -762,6 +776,14 @@ export async function applyUpdate(options: ApplyUpdateOptions = {}): Promise<Upd
   const { status, release } = await discover();
   if (!status.ok || !release) return failure(status.reason ?? "update check failed");
   if (!status.updateAvailable) return failure("already up to date");
+  // The timer judged a release old enough, but this discovery can see a newer one published since,
+  // which has had no cooldown at all. Unknown age is refused too: the gate exists to wait.
+  if (options.notNewerThan !== undefined) {
+    const published = releaseDate(release);
+    if (published === null || published > options.notNewerThan) {
+      return failure(`${release.tag_name} is younger than the update cooldown`);
+    }
+  }
   const remoteVersion = release.tag_name.replace(/^v/, "");
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
