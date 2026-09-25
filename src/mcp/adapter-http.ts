@@ -119,6 +119,14 @@ export function httpBackend(): McpBackend {
       return get(`/api/repos/${repo.id}/search?q=${encodeURIComponent(query)}`);
     },
 
+    async fixupBase(idOrName, paths) {
+      const repo = await resolveRepo(idOrName);
+      const params = new URLSearchParams();
+      for (const p of paths ?? []) params.append("path", p);
+      const qs = params.toString();
+      return get(`/api/repos/${repo.id}/fixup-base${qs ? `?${qs}` : ""}`);
+    },
+
     async drift() {
       const { repos } = await get<{ repos: RepoView[] }>("/api/repos");
       const drifted = repos.filter(

@@ -4,6 +4,18 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Smart Commit offers fixup commits for unpushed work.** When every line a changed file rewrites
+  was written by one commit that is still unpushed, the plan editor offers "Make a fixup commit",
+  which commits those files as `fixup! <that subject>` instead of a new commit, ready for your own
+  `git rebase --autosquash` (RepoYeti itself still never rebases). Files that touch pushed lines or
+  lines from two unpushed commits are never offered, so each fixup stays atomic. The same check is
+  `GET /api/repos/:id/fixup-base` and the read-only MCP tool `fixup_base`, so an agent can commit
+  review feedback as a fixup too. The approach follows lazygit's base-commit finder.
+
 ## [1.1.0] - 2026-09-22
 
 ### Fixed

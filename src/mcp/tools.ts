@@ -155,6 +155,37 @@ export const TOOLS: McpTool[] = [
     run: (b, a) => b.search(reqString(a, "repo"), reqString(a, "query")),
   },
   {
+    // WHY: lets an agent turn review-feedback edits into `fixup! <subject>` commits (pass the
+    // returned `message` to git_commit) instead of stacking a new commit on unpushed work.
+    name: "fixup_base",
+    description:
+      "Find which unpushed commit a working-tree change fixes, by blaming the lines each changed " +
+      "file rewrites. Returns `targets` (each: commit hash, subject, the `fixup! <subject>` message " +
+      "to commit with, and the files that fix only that commit), `single` when the whole change " +
+      "maps to exactly one commit, and `unresolved` files (touching pushed lines, several commits, " +
+      "new, binary). Never rebases; autosquash is left to the owner.",
+    readOnly: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: "Repository id, name, or folder basename." },
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Repo-relative changed paths to check; omit for every changed file.",
+        },
+      },
+      required: ["repo"],
+      additionalProperties: false,
+    },
+    run: (b, a) => {
+      const paths = Array.isArray(a.paths)
+        ? a.paths.filter((p): p is string => typeof p === "string" && p.trim() !== "").map((p) => p.trim())
+        : [];
+      return b.fixupBase(reqString(a, "repo"), paths.length ? paths : undefined);
+    },
+  },
+  {
     name: "list_stashes",
     description: "List a repository's stash entries.",
     readOnly: true,

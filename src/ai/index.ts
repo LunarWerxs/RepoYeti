@@ -46,13 +46,14 @@ export {
   rateGateRemainingMs,
 } from "./commit-message.ts";
 
-export type { PlanInputFile, CommitPlanInput, CommitPlanGroup, CommitPlan } from "./commit-plan.ts";
+export type { PlanInputFile, CommitPlanInput, CommitPlanGroup, CommitPlan, CommitPlanFixup } from "./commit-plan.ts";
 export {
   planSystemPrompt,
   planUserPrompt,
   parseCommitPlan,
   heuristicPlan,
   generateCommitPlan,
+  withFixups,
 } from "./commit-plan.ts";
 
 export type {

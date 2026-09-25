@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
-import { getLog, getActivity, getCommit, getIncoming, fetchRepo } from "../../service/index.ts";
+import { getLog, getActivity, getCommit, getIncoming, getFixupBases, fetchRepo } from "../../service/index.ts";
 import { normalizeActivityScale } from "../../read/activity.ts";
 import { incomingError } from "../../read/incoming.ts";
 import { withRepo } from "../respond.ts";
@@ -79,6 +79,17 @@ export function register(app: Hono, _deps: Deps): void {
         }
       }
       return c.json(await getIncoming(id));
+    }),
+  );
+
+  // ── "which unpushed commit does this change fix?" (read-only) ────────────────
+  // Blames the lines each changed file rewrites and names the ONE unpushed commit they came
+  // from, so the change can be committed as `fixup! <subject>` instead of a new noise commit.
+  // ?path= (repeatable) scopes it to a selection; absent means every changed file.
+  app.get("/api/repos/:id/fixup-base", (c) =>
+    withRepo(c, async (id) => {
+      const paths = (c.req.queries("path") ?? []).filter((p) => p.trim() !== "");
+      return c.json(await getFixupBases(id, paths.length ? paths : undefined));
     }),
   );
 }

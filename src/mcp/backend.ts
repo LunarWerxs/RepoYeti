@@ -53,6 +53,8 @@ export interface McpBackend {
   listStashes(idOrName: string): Promise<unknown>;
   /** Paths of changed files whose content matches `query`. */
   search(idOrName: string, query: string): Promise<unknown>;
+  /** Per changed file, the ONE unpushed commit its rewritten lines blame to (fixup targets). */
+  fixupBase(idOrName: string, paths?: string[]): Promise<unknown>;
   /** Every repo currently ahead of or behind its remote. */
   drift(): Promise<unknown>;
   /** One compact "what needs attention across all repos" snapshot: conflicted/mid-op repos,

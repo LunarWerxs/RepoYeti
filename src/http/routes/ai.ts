@@ -22,6 +22,7 @@ import {
   generateCommitPlan,
   generateConflictResolution,
   heuristicPlan,
+  withFixups,
   clearRateGate,
   looksSmallTierModel,
   normalizeCompatibleBaseUrl,
@@ -31,6 +32,7 @@ import {
   AiError,
   type AiModel,
   type AiCode,
+  type CommitPlanFixup,
 } from "../../ai.ts";
 import { jsonError, type ApiErrorCode } from "../../contract.ts";
 import { setSecret, deleteSecret, aiKeyName, aiKeyPoolName } from "../../secrets.ts";
@@ -47,6 +49,7 @@ import {
 import {
   collectRepoDiff,
   collectRepoPathsDiff,
+  getFixupBases,
   planCommitInput,
   readConflictFile,
 } from "../../service/index.ts";
@@ -615,6 +618,25 @@ function commitPlanFallbackReason(
   };
 }
 
+// Fixup offers for a commit plan: the files whose changed lines all blame to one unpushed commit
+// (service getFixupBases). Best-effort by design: it only ADDS an option, so any failure yields
+// none and the plan is served exactly as before.
+async function planFixups(id: string, paths: string[] | undefined): Promise<CommitPlanFixup[]> {
+  try {
+    const r = await getFixupBases(id, paths);
+    if (!r.ok) return [];
+    return r.targets.map((t) => ({
+      hash: t.hash,
+      shortHash: t.shortHash,
+      subject: t.subject,
+      message: t.message,
+      files: t.files.map((f) => f.path),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 // Propose a multi-commit plan from the repo's working tree (read-only — commits NOTHING).
 // On an AI failure other than a bad key we fall back to a deterministic grouping so Smart
 // Commit always yields an editable plan; a rejected key surfaces so the owner can fix it.
@@ -647,11 +669,18 @@ async function postCommitPlan(c: Context, cfg: RepoYetiConfig, guestAiUsage: Map
   const style = cfg.ai?.style ?? "conventional";
   const admission = enterGuestAi(c, cfg, guestAiUsage);
   if (admission instanceof Response) return admission;
+  // Owner-only: fixup offers name the owner's unpushed commits (their subjects and hashes), which
+  // a share-link guest is never shown (GET /api/repos/:id/fixup-base is OWNER_ONLY too). Started
+  // now so the blame runs while the model thinks; it never rejects (planFixups swallows).
+  const fixupsP = guest
+    ? Promise.resolve<CommitPlanFixup[]>([])
+    : planFixups(id, p.data.paths?.length ? p.data.paths : undefined);
   try {
     // Rotates to the next pool key on a rate-limit/auth rejection - see credential-pool.ts.
-    const plan = await withKeyRotation(provider, apiKeys, (apiKey) =>
+    const drafted = await withKeyRotation(provider, apiKeys, (apiKey) =>
       generateCommitPlan(provider, apiKey, model, collected.input!, style, undefined, runtimeFor(cfg, provider)),
     );
+    const plan = withFixups(drafted, await fixupsP);
     return c.json(guest ? { ok: true, plan } : { ok: true, plan, provider, model });
   } catch (e) {
     // A bad/rejected key is worth surfacing (the owner must fix it); anything else
@@ -662,7 +691,7 @@ async function postCommitPlan(c: Context, cfg: RepoYetiConfig, guestAiUsage: Map
     // actually act on ("your daily token cap is spent; retry at X / switch provider").
     if (e instanceof AiError && e.code === "AI_AUTH_FAILED") return aiErr(c, cfg, e, provider);
     const reason = commitPlanFallbackReason(e, guest);
-    const plan = heuristicPlan(collected.input!, reason);
+    const plan = withFixups(heuristicPlan(collected.input!, reason), await fixupsP);
     return c.json(
       guest
         ? { ok: true, plan, fallback: true }

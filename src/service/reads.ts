@@ -33,6 +33,7 @@ import {
   type ActivityResult,
 } from "../read/activity.ts";
 import { readIncoming, type IncomingResult } from "../read/incoming.ts";
+import { readFixupBases, type FixupBaseResult } from "../read/fixup-base.ts";
 import { guardRepo } from "./guards.ts";
 
 // ── read-only inspection (branches / log / stashes) ───────────────────────────────
@@ -360,4 +361,30 @@ async function planInputFor(
     binary: false,
   }));
   return { files, diff, truncated: false };
+}
+
+// ── fixup base finder (which unpushed commit does this change fix?) ───────────────────
+
+const FIXUP_EMPTY = (code: FixupBaseResult["code"], message?: string): FixupBaseResult => ({
+  ok: code === "OK",
+  code,
+  ...(message ? { message } : {}),
+  unpushed: 0,
+  targets: [],
+  single: null,
+  unresolved: [],
+  truncated: false,
+});
+
+/**
+ * Per changed file, the one unpushed commit whose lines it rewrites (see read/fixup-base.ts).
+ * Read-only and, like the pull preview, NOT behind the op-queue: it is advisory, and a commit
+ * racing it only makes the suggestion stale, never wrong on disk. Git-only: blame is a git
+ * concept, so other backends get an empty OK rather than an error.
+ */
+export function getFixupBases(repoId: string, onlyPaths?: string[]): Promise<FixupBaseResult> {
+  const repo = getRepo(repoId);
+  if (!repo) return Promise.resolve(FIXUP_EMPTY("NOT_FOUND", "repo not found"));
+  if (repo.vcs !== "git") return Promise.resolve(FIXUP_EMPTY("OK", "fixup lookup needs a git repository"));
+  return readFixupBases(repo.absPath, onlyPaths?.length ? onlyPaths : undefined);
 }
