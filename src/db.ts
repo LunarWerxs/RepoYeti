@@ -41,6 +41,7 @@ export * from "./db/errors.ts";
 export * from "./db/identities.ts";
 export * from "./db/shares.ts";
 export * from "./db/automation.ts";
+export { sqliteReceiptStore } from "./db/approval-receipts.ts";
 export {
   backupDatabase,
   backupDir,
@@ -317,6 +318,29 @@ export function initDb(): Database {
       acked_at   INTEGER
     );
     CREATE INDEX IF NOT EXISTS auto_commit_incidents_at ON auto_commit_incidents (at DESC);
+  `);
+  // Signed MCP approval receipts (src/approvals.ts "Receipts", src/db/approval-receipts.ts). The
+  // pending approval queue is in memory, so before this table a restart erased who approved which
+  // exact action from a phone. `digest` is the sha256 of the canonical {tool, args}; `sig` covers
+  // every column except consumed_at/refusal, the two that change when the gate uses the receipt.
+  // Not WITHOUT ROWID: the cap prune orders by rowid.
+  handle.exec(`
+    CREATE TABLE IF NOT EXISTS approval_receipts (
+      id             TEXT PRIMARY KEY,
+      tool           TEXT NOT NULL,
+      repo           TEXT,
+      digest         TEXT NOT NULL,
+      outcome        TEXT NOT NULL,
+      decided_by     TEXT NOT NULL,
+      policy_version TEXT NOT NULL,
+      key_id         TEXT NOT NULL,
+      requested_at   INTEGER NOT NULL,
+      decided_at     INTEGER NOT NULL,
+      valid_until    INTEGER NOT NULL,
+      sig            TEXT NOT NULL,
+      consumed_at    INTEGER,
+      refusal        TEXT
+    );
   `);
   // Durable automation run history (1.0 audit, item 23). A DIFFERENT model from the incidents
   // table above, and the distinction is the whole point of having two.

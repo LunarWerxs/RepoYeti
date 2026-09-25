@@ -49,8 +49,10 @@ import {
   setAutoDenyEnabled,
   setAutoApproveEnabled,
   setApproveTimeoutSecs,
+  setReceiptStore,
   APPROVAL_TIMEOUT_DEFAULT_S,
 } from "../approvals.ts";
+import { sqliteReceiptStore } from "../db.ts";
 import { setIdentityRulesConfig } from "../identity.ts";
 import * as health from "./routes/health.ts";
 import * as errors from "./routes/errors.ts";
@@ -177,6 +179,9 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   setAutoDenyEnabled(autoDeny);
   setAutoApproveEnabled(autoApprove);
   setApproveTimeoutSecs(cfg.mcpAutoApproveTimeoutSecs ?? APPROVAL_TIMEOUT_DEFAULT_S);
+  // Approval decisions are signed receipts; persist them so the audit of who approved which exact
+  // action (GET /api/approvals/receipts) survives a restart. See src/db/approval-receipts.ts.
+  setReceiptStore(sqliteReceiptStore);
   // ⭐ Identity Firewall: hand the module the live config so every preflight check
   // (runAction / smartCommitRepo / commitSelectedRepo) reads the current `identityRules`.
   setIdentityRulesConfig(cfg);

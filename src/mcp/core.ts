@@ -13,14 +13,15 @@
  *
  * Boundary: imports ONLY the engine, ./tools.ts, ./backend.ts, ../config.ts (VERSION), and
  * ../approvals.ts. It MUST NOT import service/read/db/git-actions/vcs — the backend is injected
- * (the guard still holds; approvals.ts itself only imports ../bus.ts).
+ * (the guard still holds; approvals.ts itself only imports ../bus.ts and ../signing.ts, and its
+ * receipt store is injected at boot rather than imported).
  */
 import { VERSION } from "../config.ts";
 import { handleRpc as engineHandleRpc, parseErrorResponse as engineParseError } from "./mcp-stdio.mjs";
 import type { McpServerContext, McpEngineTool } from "./mcp-stdio.mjs";
 import type { McpBackend } from "./backend.ts";
 import { TOOLS } from "./tools.ts";
-import { approvalGateEnabled, requestApproval, summarizeArgs } from "../approvals.ts";
+import { approvalGateEnabled, consumeApproval, requestApproval, summarizeArgs } from "../approvals.ts";
 
 const SERVER_INFO = { name: "repoyeti", version: VERSION };
 
@@ -50,10 +51,14 @@ export function contextFor(backend: McpBackend): McpServerContext {
 
       // `args` is the exact object handed to `t.run` below once approved, so the stored request the
       // owner inspects (GET /api/approvals/:id) is the request that executes.
-      const { result } = requestApproval(t.name, repoArg(args), summarizeArgs(args), undefined, args);
+      const { id, result } = requestApproval(t.name, repoArg(args), summarizeArgs(args), undefined, args);
       const outcome = await result;
       if (outcome === "denied") throw new Error(`${t.name} was denied by owner`);
       if (outcome === "timeout") throw new Error(`${t.name} approval timed out`);
+      // An "approved" outcome is not enough on its own: the signed receipt must match the digest of
+      // the arguments about to run, under the same policy and key, and be used exactly once.
+      const verdict = consumeApproval(id, t.name, args);
+      if (!verdict.ok) throw new Error(`${t.name} approval refused: ${verdict.reason}`);
       return t.run(backend, args);
     },
   }));

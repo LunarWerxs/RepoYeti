@@ -6,7 +6,7 @@
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
-import { requestApproval, clearAllPending, setApprovalGateEnabled } from "../src/approvals.ts";
+import { requestApproval, clearAllPending, setApprovalGateEnabled, actionDigest } from "../src/approvals.ts";
 
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
@@ -125,4 +125,24 @@ test("GET /api/approvals/:id returns the full bounded request, and 404s once the
   expect((await app.request(`/api/approvals/${id}/approve`, { method: "POST" })).status).toBe(200);
   expect((await app.request(`/api/approvals/${id}`)).status).toBe(404);
   expect((await app.request("/api/approvals/never-existed")).status).toBe(404);
+});
+
+test("GET /api/approvals/receipts serves the signed decision for the exact action, not a 404 for id 'receipts'", async () => {
+  const app = createApp(localCfg());
+  const args = { repo: "my-repo", message: "fix: x" };
+  const { id, result } = requestApproval("git_commit", "my-repo", "message: fix: x", 5_000, args);
+  expect((await app.request(`/api/approvals/${id}/approve`, { method: "POST" })).status).toBe(200);
+  expect(await result).toBe("approved");
+
+  const res = await app.request("/api/approvals/receipts?limit=5");
+  expect(res.status).toBe(200);
+  const { receipts } = (await res.json()) as { receipts: Array<Record<string, unknown>> };
+  expect(receipts.find((r) => r.id === id)).toMatchObject({
+    tool: "git_commit",
+    digest: actionDigest("git_commit", args),
+    outcome: "approved",
+    decidedBy: "owner",
+    consumedAt: null,
+    verified: "ok",
+  });
 });

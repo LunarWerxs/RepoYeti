@@ -130,6 +130,10 @@ async function onDeny(id: string): Promise<void> {
               </span>
             </div>
             <div class="mono truncate text-[11px] text-muted-foreground">{{ req.argsSummary }}</div>
+            <!-- The fingerprint of the exact action this tap approves; the receipt carries the full value. -->
+            <div v-if="req.digest" class="mono truncate text-[10px] text-muted-foreground/70" :title="req.digest">
+              {{ $t("approvals.digest", { digest: req.digest.slice(0, 12) }) }}
+            </div>
             <div v-if="req.autoAction === 'approve'" class="text-[11px] text-primary/80">
               {{ $t("approvals.countdownApprove", { seconds: secondsLeft(req.expiresAt) }) }}
             </div>

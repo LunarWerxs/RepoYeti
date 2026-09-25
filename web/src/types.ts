@@ -986,6 +986,9 @@ export interface PendingApproval {
   expiresAt: number;
   /** What the countdown will do at expiry — "deny", "approve", or null (no timer, hide the countdown). */
   autoAction: "approve" | "deny" | null;
+  /** sha256 (hex) of the canonical {tool, args} this call will run with. The owner's decision is
+   *  bound to it: if the arguments change before execution the daemon refuses the call. */
+  digest?: string;
 }
 
 /** Full request behind a pending approval's clipped `argsSummary` (mirrors the daemon's on-demand

@@ -3,15 +3,23 @@
  * approve/deny one. These are ordinary owner-facing HTTP routes (gated by the normal /api/* auth
  * middleware, same as every other route) — they are NOT the MCP gate itself (that's
  * src/mcp/core.ts's contextFor wrapping src/approvals.ts's requestApproval). This module only ever
- * reads or resolves an ALREADY-pending request.
+ * reads or resolves an ALREADY-pending request, or reads the receipts past decisions left behind.
  */
 import type { Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import { jsonError } from "../../contract.ts";
-import { listPending, pendingRequest, approve, deny } from "../../approvals.ts";
+import { listPending, pendingRequest, approve, deny, listReceipts } from "../../approvals.ts";
 
 export function register(app: Hono, _deps: Deps): void {
   app.get("/api/approvals", (c) => c.json({ approvals: listPending() }));
+
+  // The signed decision ledger: every approve/deny/timeout with the digest of the exact
+  // {tool, args} it decided on, whether the gate used or refused it (and why), and whether the
+  // signature still verifies. Registered before /:id so "receipts" is never read as an id.
+  app.get("/api/approvals/receipts", (c) => {
+    const limit = Number(c.req.query("limit") ?? 100);
+    return c.json({ receipts: listReceipts(limit) });
+  });
 
   // The full request behind one pending approval: tool + arguments, bounded and with
   // secret-looking fields hidden (approvals.ts boundedArgs). The list and SSE carry only an
