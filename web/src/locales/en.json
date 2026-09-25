@@ -547,7 +547,21 @@
       "nothingToStash": "Nothing to stash: the working tree is clean.",
       "stashConflict": "Stash applied with conflicts. Resolve at your desk (the stash was kept).",
       "stashEmpty": "No such stash.",
+      "nothingToUndo": "Nothing to undo here.",
       "discardFailed": "Could not discard the changes."
+    },
+    "gitUndo": {
+      "undoAction": "Undo last git action",
+      "redoAction": "Redo git action",
+      "undoTitle": "Undo the last git action?",
+      "redoTitle": "Redo the undone git action?",
+      "description": "RepoYeti reads this repository's reflog, so this also covers commits and pulls made outside the app. Uncommitted work is never discarded: an undone commit's changes stay staged.",
+      "loading": "Reading the reflog…",
+      "step": "Last action: {subject}",
+      "confirmUndo": "Undo",
+      "confirmRedo": "Redo",
+      "undone": "Undone",
+      "redone": "Redone"
     },
     "branches": {
       "switchLabel": "Switch branch",

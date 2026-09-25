@@ -42,6 +42,9 @@ export function useRepoFeedback(): {
       NOTHING_TO_STASH: t("repo.err.nothingToStash"),
       STASH_CONFLICT: t("repo.err.stashConflict"),
       STASH_EMPTY: t("repo.err.stashEmpty"),
+      // UNDO_REFUSED is left out on purpose: its reason (already pushed, a rebase, HEAD moved)
+      // is specific to the step, so the daemon's own message is the useful one.
+      NOTHING_TO_UNDO: t("repo.err.nothingToUndo"),
       DISCARD_FAILED: t("repo.err.discardFailed"),
     };
     return map[code] ?? "";

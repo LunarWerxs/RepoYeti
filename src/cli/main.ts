@@ -24,6 +24,8 @@ const GIT_VERBS = new Set([
   "diff",
   "drift",
   "stash",
+  "undo",
+  "redo",
   "push",
   "pull",
   "fetch",
@@ -100,6 +102,7 @@ Drive a running daemon:
   repoyeti drift                                            List repos ahead/behind their remote
   repoyeti stash <repo> [list|pop|drop]                    Stash (no sub = save)
   repoyeti push|pull|fetch <repo>                          Sync with the remote
+  repoyeti undo|redo <repo> [--dry-run]                    Undo/redo the last git action (reflog)
   repoyeti token [new|revoke|show]                         Manage the optional API Bearer token
   repoyeti mcp                                              Run an MCP server (stdio) for AI agents
 `);

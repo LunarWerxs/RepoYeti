@@ -298,6 +298,8 @@ Some key is required, since RepoYeti ships none (Groq revokes any key committed 
 
 By design. Force-push, `reset --hard` and rebase are not implemented at all - a phone is a bad place to rewrite history, and an accidental tap there is unrecoverable. Pulls are fast-forward-only and stop rather than merge when a branch has diverged. None of this limits your desktop git client; RepoYeti just will not run those commands remotely.
 
+What it does offer for a wrong tap is **Undo last git action** (the repo card's ⋮ menu, or `repoyeti undo|redo <repo> [--dry-run]`). It reads the repository's reflog, so it also covers a commit or pull made outside the app: a branch switch is switched back, a commit is stepped back with its changes left staged, and a pull is stepped back only when no uncommitted edit would be touched. A commit that is already on a remote, or a rebase or cherry-pick, is refused rather than undone.
+
 </details>
 
 <details>

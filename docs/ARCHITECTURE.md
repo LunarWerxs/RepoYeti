@@ -116,7 +116,7 @@ If that loop works over HTTPS from a cellular connection with no port forwarding
 - **PWA:** flat repo list sorted by name; per-repo card = branch badge + dirty count + ahead/behind
   (with fetch timestamp) + identity selector + fetch/pull/push buttons; dark terminal theme;
   Add-to-Home-Screen manifest.
-- **CLI:** `repoyeti start | stop | status | add-root <path> | set-owner <sub|email>` (`set-owner` sets the trusted Connections identity; OAuth `client_id`/redirect come from config, see §13). _Since v1 the CLI has grown beyond lifecycle: it now also has **git verbs** (`repos`/`status <repo>`/`log`/`branches`/`branch`/`checkout`/`commit`/`diff`/`drift`/`stash`/`push`/`pull`/`fetch`) that drive the running daemon over its loopback HTTP API, plus **`repoyeti mcp`** (an MCP stdio server for AI agents) and **`repoyeti token`** (mint/revoke the optional API token). See the new "Agent & CLI surfaces" note under §4._
+- **CLI:** `repoyeti start | stop | status | add-root <path> | set-owner <sub|email>` (`set-owner` sets the trusted Connections identity; OAuth `client_id`/redirect come from config, see §13). _Since v1 the CLI has grown beyond lifecycle: it now also has **git verbs** (`repos`/`status <repo>`/`log`/`branches`/`branch`/`checkout`/`commit`/`diff`/`drift`/`stash`/`undo`/`redo`/`push`/`pull`/`fetch`) that drive the running daemon over its loopback HTTP API, plus **`repoyeti mcp`** (an MCP stdio server for AI agents) and **`repoyeti token`** (mint/revoke the optional API token). See the new "Agent & CLI surfaces" note under §4._
 - **Robustness:** port-conflict auto-increment; 30s op timeout; structured error codes.
 
 ### OUT (explicitly deferred, do not build in v1)

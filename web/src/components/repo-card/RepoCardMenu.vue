@@ -17,15 +17,18 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Redo2,
   Star,
   StarOff,
   Timer,
   TimerOff,
   Trash2,
+  Undo2,
 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
-import { ApiError } from "@/api";
+import { ApiError, api } from "@/api";
+import { useRepoFeedback } from "@/lib/repo-feedback";
 import RepoManage from "../RepoManage.vue";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,7 +51,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { VCS_CAPABILITIES } from "../../types";
-import type { Repo } from "../../types";
+import type { Repo, UndoPreview } from "../../types";
 
 const props = defineProps<{ repo: Repo }>();
 const store = useStore();
@@ -191,6 +194,32 @@ async function copyPath(): Promise<void> {
 
 // ── remote & tags management (self-contained dialog) ─────────────────────────
 const manageOpen = ref(false);
+
+// ── undo / redo the last git action, read from the reflog (git repos only) ─────
+// A confirm dialog, not a one-tap toast action like pin/star: this moves HEAD, so the owner sees
+// the exact reflog step first. The daemon re-plans inside its op-queue slot on the real run.
+const { friendly, toastResult } = useRepoFeedback();
+const undoOpen = ref(false);
+const undoDirection = ref<"undo" | "redo">("undo");
+const undoPreview = ref<UndoPreview | null>(null);
+const undoPlan = computed(() => undoPreview.value?.[undoDirection.value] ?? null);
+async function openUndo(direction: "undo" | "redo"): Promise<void> {
+  undoDirection.value = direction;
+  undoPreview.value = null;
+  undoOpen.value = true;
+  try {
+    undoPreview.value = await api.undoPreview(props.repo.id);
+  } catch (e) {
+    undoOpen.value = false;
+    toast.error(e instanceof ApiError ? e.message : t("repo.actions.failed", { action: "git" }));
+  }
+}
+async function confirmUndo(): Promise<void> {
+  const direction = undoDirection.value;
+  undoOpen.value = false;
+  const r = await store.undoGit(props.repo.id, direction);
+  toastResult(r, direction === "undo" ? t("repo.gitUndo.undone") : t("repo.gitUndo.redone"));
+}
 </script>
 
 <template>
@@ -234,6 +263,14 @@ const manageOpen = ref(false);
           <TimerOff v-if="repo.autoCommit" :size="15" />
           <Timer v-else :size="15" />
           <span>{{ repo.autoCommit ? $t("repo.autoCommitStop") : $t("repo.autoCommitStart") }}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem v-if="repo.vcs === 'git'" :disabled="!!store.gitOpBusy[repo.id]" @select="openUndo('undo')">
+          <Undo2 :size="15" />
+          <span>{{ $t("repo.gitUndo.undoAction") }}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem v-if="repo.vcs === 'git'" :disabled="!!store.gitOpBusy[repo.id]" @select="openUndo('redo')">
+          <Redo2 :size="15" />
+          <span>{{ $t("repo.gitUndo.redoAction") }}</span>
         </DropdownMenuItem>
       </template>
       <DropdownMenuSeparator />
@@ -317,6 +354,29 @@ const manageOpen = ref(false);
       <DialogFooter>
         <Button variant="ghost" @click="removeOpen = false">{{ $t("common.cancel") }}</Button>
         <Button variant="destructive" @click="confirmRemove">{{ $t("repo.remove.confirm") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <!-- reflog undo/redo: shows the step (or why it is refused) before anything moves -->
+  <Dialog v-model:open="undoOpen">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader class="min-w-0">
+        <DialogTitle>{{ undoDirection === "undo" ? $t("repo.gitUndo.undoTitle") : $t("repo.gitUndo.redoTitle") }}</DialogTitle>
+        <DialogDescription>{{ $t("repo.gitUndo.description") }}</DialogDescription>
+      </DialogHeader>
+      <p v-if="!undoPlan" class="text-sm text-muted-foreground">{{ $t("repo.gitUndo.loading") }}</p>
+      <div v-else class="min-w-0 space-y-1 text-sm">
+        <p v-if="undoPlan.step" class="mono break-words text-[12px]">{{ $t("repo.gitUndo.step", { subject: undoPlan.step.subject }) }}</p>
+        <p :class="undoPlan.ok ? 'text-muted-foreground' : 'text-destructive'" class="break-words">
+          {{ undoPlan.ok ? undoPlan.message : friendly(undoPlan.code) || undoPlan.message }}
+        </p>
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" @click="undoOpen = false">{{ $t("common.cancel") }}</Button>
+        <Button :disabled="!undoPlan?.ok" @click="confirmUndo">
+          {{ undoDirection === "undo" ? $t("repo.gitUndo.confirmUndo") : $t("repo.gitUndo.confirmRedo") }}
+        </Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

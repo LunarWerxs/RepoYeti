@@ -50,6 +50,11 @@ export type ApiErrorCode =
   | "NOTHING_TO_STASH"
   | "STASH_CONFLICT"
   | "STASH_EMPTY"
+  // ── reflog undo / redo (mirror git-actions/undo.ts) ──
+  /** The reflog holds no step to undo, or nothing undone to redo. */
+  | "NOTHING_TO_UNDO"
+  /** The step exists but reversing it is unsafe here (pushed, a rebase, HEAD moved since). */
+  | "UNDO_REFUSED"
   | "DISCARD_FAILED"
   | "STAGE_FAILED"
   | "DELETE_FAILED"
@@ -195,6 +200,8 @@ const STATUS_BY_CODE: Partial<Record<ApiCode, ContentfulStatusCode>> = {
   NOTHING_TO_STASH: 409,
   STASH_CONFLICT: 409,
   STASH_EMPTY: 409,
+  NOTHING_TO_UNDO: 409,
+  UNDO_REFUSED: 409,
   // The git action itself failed (discard/stage/delete aborted); the tree is unchanged and the
   // owner must resolve it. Without an entry these fell through to 500, unlike every sibling.
   DISCARD_FAILED: 409,
