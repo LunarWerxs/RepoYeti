@@ -228,7 +228,7 @@ interface PeerSource {
  * route test drives the app). Never read from a header: this is the one signal a caller cannot
  * forge, which is why remoteness is derived from it first.
  */
-export function socketPeer(c: Context): string | null {
+function socketPeer(c: Context): string | null {
   const env = c.env as PeerSource | undefined;
   if (typeof env?.requestIP !== "function") return null;
   try {
@@ -239,9 +239,15 @@ export function socketPeer(c: Context): string | null {
 }
 
 /** Loopback in any spelling the socket may report: 127.0.0.0/8, ::1, or IPv4-mapped 127.x. */
-export function isLoopbackAddress(addr: string): boolean {
+function isLoopbackAddress(addr: string): boolean {
   const a = addr.toLowerCase().replace(/^::ffff:/, "");
   return a === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(a);
+}
+
+/** True when the socket reports a peer and it is not this machine. */
+function nonLoopbackPeer(c: Context): boolean {
+  const peer = socketPeer(c);
+  return peer !== null && !isLoopbackAddress(peer);
 }
 
 /**
@@ -259,15 +265,16 @@ export function isLoopbackAddress(addr: string): boolean {
  * whenever nothing in front of the daemon added a proxy header, which hands it the "continue
  * local" bypass and skips owner auth. The daemon binds 127.0.0.1 today, so every real peer is
  * loopback and this changes nothing in the shipped build; it makes a future LAN bind (or any
- * path that lets a non-loopback socket reach the daemon) fail closed instead of open.
+ * path that lets a non-loopback socket reach the daemon) fail closed instead of open. Being
+ * remote also skips the loopback guard, so authMiddleware refuses such a peer outright when no
+ * OIDC client is configured (otherwise it would reach an open /api/*).
  *
  * ⚠️ Still true: a proxy running ON this machine that forwards remote traffic without adding any
  * of these headers is indistinguishable from a local caller (its peer is loopback). Only front
  * the daemon with a proxy that sets `cf-connecting-ip` / `x-forwarded-*`.
  */
 export function isRemoteRequest(c: Context): boolean {
-  const peer = socketPeer(c);
-  if (peer !== null && !isLoopbackAddress(peer)) return true;
+  if (nonLoopbackPeer(c)) return true;
   return !!(
     c.req.header("cf-connecting-ip") ||
     c.req.header("x-forwarded-for") ||
@@ -698,7 +705,8 @@ async function guestGate(
 }
 
 /** Middleware gating /api/*. The invariants:
- *  - No OIDC client at all (bare test configs) → fully open.
+ *  - No OIDC client at all (bare test configs) → open to this machine; a non-loopback socket
+ *    peer is refused (401), since nothing else would authenticate it.
  *  - A request over the tunnel ALWAYS requires a signed-in owner (or a valid API Bearer token),
  *    in any mode — or, failing that, a live share-link cookie limited to that share's policy.
  *  - A local (loopback) request: open in "local" mode; in "remote" mode it needs either an
@@ -714,7 +722,10 @@ async function guestGate(
 export function authMiddleware(cfg: RepoYetiConfig) {
   // biome-ignore lint/suspicious/noConfusingVoidType: `void` is load-bearing — the pass-through branches `return next()` (Promise<void>); narrowing to `undefined` breaks that.
   return async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
-    if (!authEnforced(cfg)) return next();
+    // WHY: with no OIDC client there is no owner to sign in, so a non-loopback peer would be
+    // remote (skipping the loopback guard) AND unauthenticated - a fully open /api/*. Nothing but
+    // this machine may use an unauthenticated daemon.
+    if (!authEnforced(cfg)) return nonLoopbackPeer(c) ? c.body(null, 401) : next();
     const path = new URL(c.req.url).pathname;
     // Public: health + the probes the gate itself relies on. continue-local is here too —
     // it self-guards on loopback, so it must be reachable from the (otherwise-gated) gate.

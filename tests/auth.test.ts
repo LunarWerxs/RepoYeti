@@ -77,16 +77,21 @@ const peer = (address: string) => ({ requestIP: () => ({ address, family: "IPv4"
 test("local mode → a NON-loopback socket peer is remote even with no proxy headers", async () => {
   // The header-only rule read this as local and let it skip the login: nothing in front of the
   // daemon added cf-connecting-ip / x-forwarded-*. The socket peer is the unforgeable signal.
-  const res = await appWith(localMode).request("/api/repos", {}, peer("192.168.1.20"));
-  expect(res.status).toBe(401);
-});
-
-test("local mode → a loopback socket peer stays local, and its tunnel headers are honoured", async () => {
   const app = appWith(localMode);
+  expect((await app.request("/api/repos", {}, peer("192.168.1.20"))).status).toBe(401);
+  // Contrast (guards isLoopbackAddress, incl. the IPv4-mapped spelling): a loopback peer stays
+  // local, and cloudflared's injected cf-connecting-ip from loopback still marks the tunnel.
   expect((await app.request("/api/repos", {}, peer("127.0.0.1"))).status).toBe(200);
   expect((await app.request("/api/repos", {}, peer("::ffff:127.0.0.1"))).status).toBe(200);
-  // cloudflared connects from loopback and injects cf-connecting-ip: still a tunnel request.
   expect((await app.request("/api/repos", REMOTE, peer("127.0.0.1"))).status).toBe(401);
+});
+
+test("no OIDC client → a NON-loopback socket peer is refused, not waved through", async () => {
+  // Remote peers skip the loopback guard, and with no OIDC client nothing else would check them:
+  // an unauthenticated daemon must answer only this machine.
+  const app = appWith(base);
+  expect((await app.request("/api/repos", {}, peer("192.168.1.20"))).status).toBe(401);
+  expect((await app.request("/api/repos", {}, peer("127.0.0.1"))).status).toBe(200);
 });
 
 test("remote mode → a tunnel request without a session is 401 (empty body, no leak)", async () => {
