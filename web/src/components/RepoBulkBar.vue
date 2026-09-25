@@ -3,6 +3,10 @@
 // Sticks to the bottom of the viewport so it stays reachable however far the list is scrolled,
 // and offers the same per-repo actions the card's ⋮ menu does, applied across the selection:
 // pin, star, hide, and remove-from-RepoYeti (confirm-gated, index-only — never deletes a folder).
+// It also pulls and pushes the selection, so a Shift-range or Ctrl+A over the repos Fetch all
+// showed as behind or ahead syncs them in one go instead of one card at a time. Both go through
+// the same per-repo action as the card's buttons, so the daemon's guards still apply to each repo:
+// pull is fast-forward only and push is never forced.
 //
 // Bulk ops run SEQUENTIALLY, not via Promise.all: each one is a daemon write against the shared
 // repo index, and firing 40 concurrent writes is how you get partial-apply races. The bar reports
@@ -12,7 +16,7 @@
 // Shift-tap on a card ranges over (see @/lib/multi-select for the request model).
 import { computed, onBeforeUnmount, onMounted, ref, watch, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
-import { EyeOff, Loader2, Pin, Star, Trash2, X } from "@lucide/vue";
+import { ArrowDownToLine, ArrowUpFromLine, EyeOff, Loader2, Pin, Star, Trash2, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useEventListener } from "@vueuse/core";
 import { useStore } from "../store";
@@ -24,7 +28,6 @@ import {
   clearSelection,
   provideRangeOrder,
   pruneSelection,
-  selectAll,
   selectionCount,
   selectionIds,
   stopSelecting,
@@ -87,9 +90,9 @@ watch(
   () => pruneSelection(store.repos.map((r) => r.id)),
 );
 
+// The button is one more source of the same "set all" request Ctrl+A and Escape send.
 function toggleAll(): void {
-  if (allSelected.value) clearSelection();
-  else selectAll(visibleIds.value);
+  applyRequests([{ type: "setAll", selected: !allSelected.value }], visibleIds.value);
 }
 
 /**
@@ -143,20 +146,27 @@ async function runBulk(
   if (busy.value || !selectionCount.value) return;
   busy.value = true;
   const ids = selectionIds.value;
-  let ok = 0;
+  const failed: string[] = [];
   try {
     for (const id of ids) {
       try {
         await op(id);
-        ok += 1;
       } catch {
         /* keep going — one failure shouldn't strand the rest */
+        failed.push(id);
       }
     }
-    if (ok === ids.length) {
+    const ok = ids.length - failed.length;
+    if (!failed.length) {
       if (revert) undoableToast(done(ok), revert);
       else toast.success(done(ok));
-    } else toast.warning(t("bulk.partial", { ok, failed: ids.length - ok }));
+    } else {
+      // Name the repos that failed: after a bulk pull or push, "3 failed" alone leaves the owner
+      // opening every card to find which ones still need a hand.
+      toast.warning(t("bulk.partial", { ok, failed: failed.length }), {
+        description: t("bulk.failedList", { names: failed.map(repoName).join(", ") }),
+      });
+    }
   } finally {
     busy.value = false;
   }
@@ -199,6 +209,36 @@ async function bulkStar(): Promise<void> {
 }
 async function bulkHide(): Promise<void> {
   await bulkFlag((r) => !!r.hidden, (id, v) => store.setHidden(id, v), (n) => t("bulk.hidden", { count: n }, n));
+}
+
+/** The name a card shows for a repo id, for naming failures in a toast. */
+function repoName(id: string): string {
+  const repo = store.repos.find((r) => r.id === id);
+  return repo ? repo.displayName || repo.name : id;
+}
+
+// Which git action the bar is running, so only that button spins.
+const running = ref<"pull" | "push" | null>(null);
+
+/**
+ * Pull or push every selected repo, one at a time, through the same per-repo action the card's
+ * buttons use. A repo the daemon refuses (diverged, no upstream, identity rule, already busy) counts
+ * as failed and is named in the toast; nothing is forced and there is nothing to undo.
+ */
+async function bulkGit(name: "pull" | "push"): Promise<void> {
+  if (busy.value) return;
+  running.value = name;
+  try {
+    await runBulk(
+      async (id) => {
+        const r = await store.doAction(id, name);
+        if (!r.ok) throw new Error(r.code);
+      },
+      (n) => (name === "pull" ? t("bulk.pulled", { count: n }, n) : t("bulk.pushed", { count: n }, n)),
+    );
+  } finally {
+    running.value = null;
+  }
 }
 
 /**
@@ -269,6 +309,50 @@ async function bulkRemove(): Promise<void> {
 
       <span class="flex-1" />
 
+      <template v-if="store.canControl">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <span class="inline-flex">
+              <Button
+                variant="secondary"
+                size="sm"
+                class="h-7 relative before:absolute before:-inset-y-1.5 before:content-['']"
+                data-testid="bulk-pull"
+                :aria-label="$t('repo.actions.pull')"
+                :disabled="busy || !selectionCount"
+                @click="bulkGit('pull')"
+              >
+                <Loader2 v-if="running === 'pull'" class="animate-spin" />
+                <ArrowDownToLine v-else />
+                <span class="hidden sm:inline">{{ $t("repo.actions.pull") }}</span>
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("bulk.pullTooltip") }}</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <span class="inline-flex">
+              <Button
+                variant="secondary"
+                size="sm"
+                class="h-7 relative before:absolute before:-inset-y-1.5 before:content-['']"
+                data-testid="bulk-push"
+                :aria-label="$t('repo.actions.push')"
+                :disabled="busy || !selectionCount"
+                @click="bulkGit('push')"
+              >
+                <Loader2 v-if="running === 'push'" class="animate-spin" />
+                <ArrowUpFromLine v-else />
+                <span class="hidden sm:inline">{{ $t("repo.actions.push") }}</span>
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{{ $t("bulk.pushTooltip") }}</TooltipContent>
+        </Tooltip>
+      </template>
+
       <Tooltip>
         <TooltipTrigger as-child>
           <span class="inline-flex">
@@ -280,7 +364,7 @@ async function bulkRemove(): Promise<void> {
               :disabled="busy || !selectionCount"
               @click="bulkPin"
             >
-              <Loader2 v-if="busy" class="animate-spin" />
+              <Loader2 v-if="busy && !running" class="animate-spin" />
               <Pin v-else />
               <span class="hidden sm:inline">{{ $t("repo.pin") }}</span>
             </Button>

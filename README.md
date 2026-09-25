@@ -69,7 +69,7 @@ A self-hosted git dashboard: one small daemon on your computer, a live status gr
 | 🔍 **Monaco diffs** | The real VS Code editor, not a re-implementation: syntax highlighting for everything it knows, side-by-side or inline, HEAD-↔-working-tree, and an editor you can save from |
 | 👀 **Preview a pull** | See the incoming commits, the files they touch, and any conflicts they would cause **before** you pull. Nothing is fetched, nothing is merged, nothing is written by looking |
 | 🤖 **Smart Commit (AI)** | Hands a messy working tree to your chosen model and gets back scoped commits with written messages, which you approve, edit or throw away. Also writes single commit messages and resolves conflicts. Groq, OpenAI, Claude, Gemini, OpenRouter and DeepSeek, under your own key |
-| ☑️ **Bulk actions** | Select any number of repos and pin, star, hide or remove them at once. Every action undoes |
+| ☑️ **Bulk actions** | Select any number of repos (Shift-click a range, Ctrl+A for all) and pin, star, hide, remove, pull or push them at once. Pin, star, hide and remove undo |
 | 🪪 **Per-repo identities** | The right name and email per repository, applied at commit time, with rules that match by path. No more `--amend --author` the next morning |
 | 🔐 **Per-repo accounts** | Multiple GitHub accounts, pinned per repository, so a push from the work repo uses the work credential and never silently uses the other one |
 | 📱 **A real PWA** | Install it to the home screen. It reconnects after the phone sleeps, survives a backgrounded tab mid-operation, and asks the daemon what happened rather than spinning forever |

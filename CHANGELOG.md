@@ -8,6 +8,11 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Added
 
+- **Pull or push every selected repository at once.** After Fetch all shows which repos are behind
+  or ahead, select them (a Shift-range or Ctrl+A works) and press Pull or Push in the bulk bar
+  instead of opening each card. Each repo goes through the same action as its card's button, so
+  pull stays fast-forward only and push is never forced; a repo the daemon refuses is named in the
+  toast rather than folded into a bare failure count.
 - **Shift-select a range of repositories, and Ctrl+A / Escape, in select mode.** Picking ten repos
   for a bulk action used to take ten taps. In select mode, Shift-click (or Shift+Enter/Space on a
   focused row) now sets every repo between the last one you picked and this one to that repo's

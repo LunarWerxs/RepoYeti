@@ -80,11 +80,6 @@ export function activateRepo(repoId: string, mods: SelectModifiers): void {
   applyRequests(r.requests);
 }
 
-/** Tick an explicit list (used by the bulk bar's "select all visible"). */
-export function selectAll(repoIds: string[]): void {
-  selected.value = new Set(repoIds);
-}
-
 export function clearSelection(): void {
   selected.value = new Set();
 }

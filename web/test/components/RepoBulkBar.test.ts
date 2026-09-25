@@ -5,8 +5,9 @@
 // following Remove would take repos the owner never saw), and Ctrl+A in a text field must stay the
 // field's own "select this text".
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
+import { toast } from "vue-sonner";
 import { i18n } from "@/i18n";
 import { useStore } from "@/store";
 import { resetSectionCollapse, toggleSection } from "@/lib/repo-sections";
@@ -102,6 +103,29 @@ describe("RepoBulkBar selection scope", () => {
 
     press(document.body, "Escape");
     expect(selectionIds.value).toEqual([]);
+  });
+
+  // Contract: bulk Pull runs the card's own per-repo pull for exactly the selected repos, and a repo
+  // the daemon refuses is named rather than silently counted. Seam: RepoBulkBar -> store.doAction.
+  it("Pull runs the per-repo pull for each selected repo and names the ones refused", async () => {
+    const store = useStore();
+    const doAction = vi
+      .spyOn(store, "doAction")
+      .mockImplementation(async (id) =>
+        id === "o2" ? { ok: false, code: "NOT_FAST_FORWARD", message: "diverged" } : { ok: true, code: "OK", message: "" },
+      );
+    const wrapper = mountBar();
+    activateRepo("o1", { shift: false, ctrl: false });
+    activateRepo("o3", { shift: true, ctrl: false });
+
+    await wrapper.get('[data-testid="bulk-pull"]').trigger("click");
+    await flushPromises();
+
+    expect(doAction.mock.calls.map(([id, name]) => `${id}:${name}`).sort()).toEqual(["o1:pull", "o2:pull", "o3:pull"]);
+    expect(toast.warning).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ description: expect.stringContaining("o2") }),
+    );
   });
 
   it("leaves Ctrl+A to a focused text field", () => {
