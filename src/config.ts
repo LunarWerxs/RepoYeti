@@ -398,6 +398,13 @@ export interface RepoYetiConfig {
    */
   remoteBrowse?: boolean;
   /**
+   * The port proxy: `/proxy/<port>/` opens a server listening on that local port through this
+   * daemon, behind the owner sign-in (src/http/routes/port-proxy.ts). Absent/false = OFF: a proxied
+   * page runs on the dashboard's own origin, so it is for the owner's own dev servers and has to be
+   * switched on deliberately. Owner-only either way; a share-link guest never reaches it.
+   */
+  portProxy?: boolean;
+  /**
    * File-viewer Diff-tab threshold (bytes): a changed file larger than this on either side
    * ships as a compact server-computed `git diff` patch instead of both whole copies for a
    * side-by-side view. Owner setting (the Settings UI writes it); clamped on read. See

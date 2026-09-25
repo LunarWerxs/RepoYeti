@@ -181,6 +181,7 @@ function getStatus(c: Context, cfg: RepoYetiConfig) {
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
       remoteBrowse: cfg.remoteBrowse !== false,
+      portProxy: cfg.portProxy === true,
       // Work-tree display knobs — see the guest branch above for why these are safe to share.
       // Absent-key defaults live here (single source of truth, matches the config.ts doc comment).
       changesStatDisplay: cfg.changesStatDisplay ?? "numbers",
@@ -309,6 +310,11 @@ function applyRemoteAccessFields(
   if (typeof b.remoteBrowse === "boolean") {
     cfg.remoteBrowse = b.remoteBrowse;
     Object.assign(changed, { remoteBrowse: cfg.remoteBrowse });
+  }
+  if (typeof b.portProxy === "boolean") {
+    // Read per request by routes/port-proxy.ts, so flipping it needs no runtime setter.
+    cfg.portProxy = b.portProxy;
+    Object.assign(changed, { portProxy: cfg.portProxy });
   }
 }
 
@@ -564,6 +570,7 @@ async function putSettings(c: Context, cfg: RepoYetiConfig) {
       diffStats: diffStatsEnabled(),
       remoteEditing: cfg.remoteEditing !== false,
       remoteBrowse: cfg.remoteBrowse !== false,
+      portProxy: cfg.portProxy === true,
       changesStatDisplay: cfg.changesStatDisplay ?? "numbers",
       changesChars: cfg.changesChars !== false,
       diffPatchBytes: getDiffPatchBytes(),

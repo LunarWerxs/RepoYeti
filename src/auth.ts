@@ -716,3 +716,23 @@ export function authMiddleware(cfg: RepoYetiConfig) {
     return c.body(null, 401);
   };
 }
+
+/** The daemon's own cookies. A surface that forwards requests elsewhere (the port proxy) strips
+ *  these so an owner credential never reaches a third-party process on this machine. */
+export const DAEMON_COOKIE_NAMES: readonly string[] = [COOKIE, LOCAL_COOKIE, GUEST_COOKIE];
+
+/**
+ * True when this request carries the OWNER's authority, by the same rules authMiddleware applies
+ * to /api/* minus the guest arm: a share-link holder is never the owner here.
+ *
+ * WHY a separate predicate: the port proxy (routes/port-proxy.ts) lives outside /api/* so a proxied
+ * app's own absolute paths still resolve, and it must be stricter than the API gate in one place.
+ * With no OIDC client configured the API is open to everyone who reaches it; the proxy stays
+ * loopback-only then, because a tunnel with no sign-in would otherwise publish every local port.
+ */
+export function isOwnerRequest(c: Context, cfg: RepoYetiConfig): boolean {
+  if (!authEnforced(cfg)) return !isRemoteRequest(c);
+  if (readSession(c, cfg.oauth!) || validBearerToken(c, cfg.apiToken)) return true;
+  if (isRemoteRequest(c)) return false;
+  return accessMode(cfg) !== "remote" || hasLocalBypass(c);
+}

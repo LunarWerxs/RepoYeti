@@ -225,6 +225,7 @@ If you use AI Smart Commit, AI commit messages or AI conflict resolution, the ch
 
 - **AI agents (MCP):** `repoyeti mcp` exposes local repos plus accepted collaboration status/diffs and guarded remote commit+sync; the full HTTP surface is at `GET /api/openapi.json`.
 - **Buzz (experimental, Advanced):** opt-in Git Smart HTTP compatibility, saved communities, and daemon-safe preflight diagnostics. [Setup and security boundaries](docs/BUZZ.md).
+- **Open a local dev server from your phone (opt-in):** turn on `portProxy` and `/proxy/<port>/` opens whatever is listening on that port through the dashboard's own sign-in, owner only. [How it is fenced](docs/ARCHITECTURE.md#opening-a-local-dev-server-the-port-proxy).
 - **Architecture, remote access, config:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **Contributing & tests:** [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 - **Working here with an AI agent:** [AGENTS.md](AGENTS.md) - repo map, the enforced guardrails, and the traps that have cost a release.
