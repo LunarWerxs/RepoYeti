@@ -116,6 +116,17 @@ All notable changes to RepoYeti are documented here. The format is based on
   push then has that long to be caught before unattended installs run it. The apply re-checks the
   age, so a release published between the check and the install is refused rather than taken. A
   manual check or install is unaffected. Idea from Oh My Zsh's update cooldown.
+### Security
+
+- **The file viewer and editor refuse Windows alias paths and, over remote access, secret files.**
+  Every file route (read, diff, save, discard, delete, stage, move, conflicts, the tree browser)
+  now checks the requested path before the daemon touches disk. On Windows it refuses an 8.3 short
+  name (`GIT~1` is `.git`), an NTFS alternate data stream (`notes.txt:hidden`) and a segment ending
+  in a dot or space (`.git.` is `.git`): each names a file the repository guards never inspected.
+  Over a tunnel or any other remote session, `.env` files (not `.env.example`), private keys
+  (`.pem`, `.key`, `.p12`, `.pfx`, `id_rsa` and friends) and credential stores are refused by name
+  with a 403, so they never leave the machine; at the desk the owner reads and edits them as before.
+  The idea comes from vite's `isFileLoadingAllowed`.
 
 ## [1.1.0] - 2026-09-22
 

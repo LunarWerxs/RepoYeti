@@ -102,6 +102,59 @@ export function pathTouchesVcsMarker(clean: string, marker: string): boolean {
   return clean.split("/").some((segment) => segment.toLowerCase() === needle);
 }
 
+// An 8.3 short name: up to six base characters, `~N`, and an optional extension of up to three.
+// `GIT~1` is the short name NTFS gives `.git`, `PROGRA~1` the one it gives `Program Files`.
+const SHORT_NAME_SEGMENT = /^[^.\s]{1,6}~\d{1,6}(\.[^.\s]{0,3})?$/;
+
+/**
+ * Why a repo-relative path is a Windows ALIAS for some other file, or null when it is not.
+ *
+ * Every guard in this module compares the path as spelled (`pathTouchesVcsMarker`) or after
+ * `resolve()`/`realpath()`, and on Windows three spellings slip past both while naming a file the
+ * guard never saw: an 8.3 short name (`GIT~1/config` is `.git/config`), an NTFS alternate data
+ * stream (`notes.txt:hidden` writes a stream no diff, status or editor shows; a relative path has
+ * no drive letter, so any `:` is one), and a segment ending in a dot or space (Win32 strips it, so
+ * `.git./config` is `.git/config`). None of them is a spelling a real file in a repo needs.
+ *
+ * The idea is vite's `isFileLoadingAllowed` (vitejs/vite, MIT); written fresh for RepoYeti.
+ * `platform` is a parameter only so the tests can exercise the win32 rules on any host; the
+ * checks are no-ops elsewhere, where `~1`, `:` and a trailing dot are just characters.
+ * `clean` must already be normalized (see `normalizeRelPath`).
+ */
+export function windowsPathAlias(clean: string, platform: string = process.platform): string | null {
+  if (platform !== "win32") return null;
+  if (clean.includes(":")) return "alternate data streams and drive-qualified paths are not allowed";
+  for (const segment of clean.split("/")) {
+    if (SHORT_NAME_SEGMENT.test(segment)) return "Windows short (8.3) names are not allowed; use the full name";
+    if (segment !== "." && segment !== ".." && /[.\s]$/.test(segment)) {
+      return "a path segment may not end in a dot or a space";
+    }
+  }
+  return null;
+}
+
+// Secret-shaped file names, matched on the last segment only (a Python venv called `.env/` is a
+// folder of ordinary files). `.env.example` and friends are the shareable template, not the secret.
+const SECRET_FILE_NAMES = [
+  /^\.env(\..+)?$/i,
+  /\.(pem|key|p12|pfx)$/i,
+  /^id_(rsa|dsa|ecdsa|ed25519)(_sk)?$/i,
+  /^\.(netrc|git-credentials)$/i,
+];
+const SECRET_TEMPLATE = /^\.env\.(example|sample|template|dist)$/i;
+
+/**
+ * True when a repo-relative path names a file that holds secrets by convention: `.env` files,
+ * private keys (`.pem`, `.key`, `.p12`, `.pfx`, `id_rsa`), credential stores. The deny list vite
+ * applies before its allow-list of roots; here the route layer refuses such a file over remote access
+ * (routes/files.ts), because a tunnel session is the one place it would leave the machine.
+ */
+export function isSecretFileName(clean: string): boolean {
+  const base = clean.slice(clean.lastIndexOf("/") + 1);
+  if (SECRET_TEMPLATE.test(base)) return false;
+  return SECRET_FILE_NAMES.some((re) => re.test(base));
+}
+
 /**
  * The confinement check for a path AFTER symlinks are resolved: inside the real repo root, and not
  * inside its `.git` or `.lore`.
