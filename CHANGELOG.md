@@ -4,6 +4,20 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **"Local" is now decided by who is on the other end of the socket, not by which headers are
+  missing.** The daemon told a local caller from a remote one only by the absence of
+  `cf-connecting-ip` / `x-forwarded-*`, so any remote request that reached it with none of those
+  headers counted as local and could take the "Continue local for now" bypass past owner sign-in.
+  A comment in the code already flagged the gap. It was never exploitable in a shipped build, because the
+  daemon binds 127.0.0.1 and every real peer is this machine, but it meant a future LAN bind would
+  fail open. Now a socket peer that is not loopback is always remote, and the proxy headers are
+  honoured only from a loopback peer (where cloudflared connects from), the peer-first rule
+  gin-gonic/gin applies to `X-Forwarded-For`.
+
 ## [1.1.0] - 2026-09-22
 
 ### Fixed

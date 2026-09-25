@@ -1338,8 +1338,9 @@ plain commit is additive and recoverable, an amend is neither.
 - **Owner always wins.** A browser holding both an owner session and a guest cookie is the owner. The
   practical consequence: to preview what a guest sees, open the link in a private window, **over the
   tunnel**. A private window pointed at `http://127.0.0.1:<port>/s/<token>` does *not* work and is a
-  standing trap: `authMiddleware` branches on `isRemoteRequest()` (src/auth.ts), which is true only
-  when `cf-connecting-ip` / `x-forwarded-*` is present, and in local mode the loopback branch returns
+  standing trap: `authMiddleware` branches on `isRemoteRequest()` (src/auth.ts), which for a
+  loopback socket peer is true only when `cf-connecting-ip` / `x-forwarded-*` is present (a
+  non-loopback peer is always remote, headers or not), and in local mode the loopback branch returns
   `next()` before it ever reads the guest cookie. The share is redeemed, the cookie is set, and the
   page still renders the owner's dashboard. To reproduce the guest gate locally without a tunnel,
   front the daemon with a proxy that injects `cf-connecting-ip`, which is the one thing the tunnel
