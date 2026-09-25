@@ -1348,6 +1348,7 @@
     "deny": "Deny",
     "denyAria": "Deny {tool}",
     "showRequest": "Show full request",
+    "digest": "Action sha256:{digest}",
     "hideRequest": "Hide request",
     "hiddenValue": "hidden (secret-like field)",
     "truncated": "Some values were shortened for display; the tool receives the full arguments.",
