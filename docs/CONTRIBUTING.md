@@ -145,6 +145,30 @@ directory so their imports resolve as `../src/...`.
 Model access is also tier-gated: some accounts get `AI_AUTH_FAILED` for models like
 `openai/gpt-oss-120b` and `qwen/qwen3-32b` even though `/models` lists them as available.
 
+## Black-box API conformance (Hurl)
+
+`tests/hurl/*.hurl` is the HTTP API written down as plain-text requests and the responses they
+must get, one file per resource. Unlike the route tests, it runs against a real daemon over a real
+socket, so it answers "does this host still speak the documented API" for a client author, an
+agent, or a smoke check after an update.
+
+```sh
+bun run conformance                      # the running local daemon
+bun run conformance --host http://127.0.0.1:7171
+REPOYETI_TOKEN=... bun run conformance --host https://<your-tunnel>   # remote mode, Bearer auth
+```
+
+It needs the [`hurl`](https://hurl.dev) binary, installed separately; extra arguments pass through
+to it (for example `--report-html out/`). Each run gets its own `uid`: anything the suite creates
+is named `hurl-<uid>` and deleted again, and everything else it calls is a read, so it is safe
+against a daemon you use every day. It never registers, clones or changes a repository.
+
+`bun run check:hurl` (part of `bun run check`) is the static half and needs neither hurl nor a
+daemon: every request must be host-relative (`{{base}}/...`) and must name a route documented in
+`src/http/openapi.ts`, so renaming a route fails CI instead of the suite failing on somebody's
+host later. It also prints how many documented operations the suite exercises. When you add a
+route that is safe to call against a live host, add it to the matching `.hurl` file.
+
 ## Benchmarking against a worktree
 
 When comparing old-vs-new behavior (for example, benchmarking a code change), use `git worktree`

@@ -71,6 +71,12 @@ All notable changes to RepoYeti are documented here. The format is based on
   because `open -a` cannot pass a line through. `POST /api/repos/:id/open` takes optional `line`/`column`, and anything but a positive integer is
   refused with `BAD_LINE` before an editor is launched. With no editor picked and no default saved,
   the editor you already have running is chosen over the first one installed.
+- **A black-box conformance suite for the HTTP API.** `tests/hurl/` describes the API as
+  plain-text [Hurl](https://hurl.dev) requests and the responses they must get, and
+  `bun run conformance` runs it against the local daemon or any host you name (with
+  `REPOYETI_TOKEN` for remote mode). Every run is namespaced by its own id and cleans up after
+  itself, so it is safe against a daemon in daily use. `bun run check:hurl`, now part of
+  `bun run check`, fails when the suite calls a route the API no longer documents.
 
 ## [1.1.0] - 2026-09-22
 
