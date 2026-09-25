@@ -13,8 +13,9 @@ All notable changes to RepoYeti are documented here. The format is based on
   approves it, denies it with a reason, or approves it with rewritten arguments (a rewrite can
   never retarget the repo). No answer, a non-200 or a malformed reply denies the call. Each call
   carries a request id in `X-RepoYeti-Reqid` that also appears in the daemon log and the agent's
-  error. Contract: [docs/APPROVAL_WEBHOOK.md](docs/APPROVAL_WEBHOOK.md). Dashboard settings for it
-  are not built yet: set it in config.json or with `PUT /api/settings`.
+  error. It covers `repoyeti mcp` too: the stdio server reads the URL from the daemon before each
+  mutating call. Contract: [docs/APPROVAL_WEBHOOK.md](docs/APPROVAL_WEBHOOK.md). Dashboard settings
+  for it are not built yet: set it in config.json or with `PUT /api/settings`.
 
 ## [1.1.0] - 2026-09-22
 

@@ -36,6 +36,19 @@ interface RepoView {
   } | null;
 }
 
+/**
+ * The daemon's approval-webhook URL (null = webhook mode off), read from GET /api/status.
+ * WHY: `repoyeti mcp` is its own process, so its copy of approvals.ts never sees the URL the daemon
+ * loaded from config or PUT /api/settings. Read per mutating call, so a settings change applies to
+ * an agent session that is already running. A failed read throws, and the call does not run.
+ */
+export async function daemonApprovalWebhookUrl(): Promise<string | null> {
+  const status = await get<{ mcpApprovalWebhookUrl?: string | null }>("/api/status");
+  return typeof status.mcpApprovalWebhookUrl === "string" && status.mcpApprovalWebhookUrl !== ""
+    ? status.mcpApprovalWebhookUrl
+    : null;
+}
+
 export function httpBackend(): McpBackend {
   return {
     async listRepos() {

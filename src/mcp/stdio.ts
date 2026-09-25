@@ -10,15 +10,16 @@
  */
 import { processLine as engineProcessLine, runMcpStdio } from "./mcp-stdio.mjs";
 import { contextFor } from "./core.ts";
-import { httpBackend } from "./adapter-http.ts";
+import { daemonApprovalWebhookUrl, httpBackend } from "./adapter-http.ts";
 
 /** Process one already-trimmed line; return the JSON string to write (or null for a notification).
  *  Dispatches against the http-backed context (kept as a named export for the stdio unit tests). */
 export function processLine(line: string): Promise<string | null> {
-  return engineProcessLine(line, contextFor(httpBackend()));
+  return engineProcessLine(line, contextFor(httpBackend(), daemonApprovalWebhookUrl));
 }
 
 /** Run the stdio server loop until stdin closes, proxying tool calls to the daemon over HTTP. */
 export function runStdioMcp(): Promise<void> {
-  return runMcpStdio(contextFor(httpBackend()));
+  // The webhook URL lives in the daemon, not in this process: ask it on each mutating call.
+  return runMcpStdio(contextFor(httpBackend(), daemonApprovalWebhookUrl));
 }

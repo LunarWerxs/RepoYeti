@@ -14,6 +14,7 @@ import {
   APPROVAL_WEBHOOK_REQID_HEADER,
 } from "../src/approvals.ts";
 import { contextFor } from "../src/mcp/core.ts";
+import { processLine } from "../src/mcp/stdio.ts";
 import type { McpBackend } from "../src/mcp/backend.ts";
 
 // The policy service under test: each test sets what it answers and reads what it was sent.
@@ -114,7 +115,64 @@ test("the gate fails closed on a non-200, a non-JSON reply, an unknown decision,
   setApprovalWebhookUrl(deadUrl);
   await expect(Promise.resolve(commitTool().run({ repo: "r1", message: "m" }))).rejects.toThrow(/unreachable/);
   expect(commits).toEqual([]);
-});
+  // Explicit timeout: on Windows a refused loopback connection takes about 2s, and this test makes
+  // four calls, which would brush bun's 5s default.
+}, 20_000);
+
+// `repoyeti mcp` runs in its own process, where approvals.ts never loaded the URL: the stdio server
+// must ask the daemon (GET /api/status) or a stdio agent's call would skip the policy service.
+test("the stdio server asks the daemon for the webhook URL, so a stdio agent's call reaches the policy service", async () => {
+  const daemonCommits: Array<{ message: string }> = [];
+  const daemon = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const path = new URL(req.url).pathname;
+      if (path === "/api/status") {
+        return Response.json({ ok: true, mcpApprovalWebhookUrl: `http://127.0.0.1:${server.port}/policy` });
+      }
+      if (path === "/api/repos") {
+        return Response.json({ ok: true, repos: [{ id: "r1", name: "r1", absPath: "/w/r1", vcs: "git", status: null }] });
+      }
+      if (path === "/api/repos/r1/commit") {
+        daemonCommits.push((await req.json()) as { message: string });
+        return Response.json({ ok: true });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+  const prevBase = process.env.REPOYETI_BASE_URL;
+  process.env.REPOYETI_BASE_URL = `http://127.0.0.1:${daemon.port}`;
+  // This process holds no URL, like a real `repoyeti mcp` process: only the daemon knows it.
+  setApprovalWebhookUrl(null);
+  const call = (message: string) =>
+    processLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "git_commit", arguments: { repo: "r1", message } },
+      }),
+    ).then((out) => JSON.parse(out!) as { result: { isError?: boolean; content: Array<{ text: string }> } });
+  try {
+    reply = () => Response.json({ decision: "deny", reason: "no agent commits today" });
+    const denied = await call("fix: thing");
+    expect(denied.result.isError).toBe(true);
+    expect(denied.result.content[0]!.text).toMatch(/denied by the approval webhook: no agent commits today/);
+    expect(daemonCommits).toEqual([]);
+
+    reply = () => Response.json({ decision: "rewrite", args: { message: "agent: fix: thing" } });
+    const rewritten = await call("fix: thing");
+    expect(rewritten.result.isError).toBeFalsy();
+    expect(daemonCommits.map((c) => c.message)).toEqual(["agent: fix: thing"]);
+    expect(received.length).toBe(2);
+    expect(listPending().length).toBe(0);
+  } finally {
+    if (prevBase === undefined) delete process.env.REPOYETI_BASE_URL;
+    else process.env.REPOYETI_BASE_URL = prevBase;
+    daemon.stop(true);
+  }
+}, 20_000);
 
 test("normalizeApprovalWebhookUrl accepts http(s), clears on empty, and refuses the rest", () => {
   expect(normalizeApprovalWebhookUrl("https://policy.example/hook")).toBe("https://policy.example/hook");

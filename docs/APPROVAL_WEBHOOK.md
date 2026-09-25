@@ -14,6 +14,16 @@ turns it off again. The gate itself must be on (`mcpApprovalGate`, on by default
 set, the dashboard queue and the auto-deny and auto-approve timers are not used. The URL is never
 synced to your other machines.
 
+It applies to every agent path: `repoyeti mcp` (the stdio server an MCP client spawns) runs in its
+own process, so before each mutating call it reads the URL from the running daemon's
+`GET /api/status`. A settings change therefore reaches an agent session that is already open, and
+if that read fails the call does not run.
+
+Keep secrets out of the URL. `GET /api/status` and the `PUT /api/settings` reply show it back in
+full, so a `?token=...` query string would be visible to anything that can read your settings.
+Credentials in the userinfo part (`user:pass@`) are refused outright; a service on loopback needs
+no secret at all.
+
 ## The request
 
 For each mutating call RepoYeti sends one `POST` with a JSON body, and the same request id in the
@@ -36,6 +46,10 @@ For each mutating call RepoYeti sends one `POST` with a JSON body, and the same 
 
 `args` is what the dashboard would show you: long values are clipped (`truncated` says so) and
 secret-looking fields read `"[hidden]"` (their names are listed in `hidden`).
+
+Because of that clipping, a service that builds a rewrite from a value it was sent (say, prefixing
+a long commit message) may be building on a shortened copy: the rewritten value replaces the
+agent's full one. When `truncated` is true, deny or approve rather than rewrite a clipped field.
 
 ## The three answers
 

@@ -46,7 +46,15 @@ function repoArg(args: Record<string, unknown>): string | null {
  * throws a plain Error (the engine turns it into an MCP `isError` result) naming the reason, so
  * the calling agent sees "denied by owner" / "approval timed out" instead of a silent hang.
  */
-export function contextFor(backend: McpBackend): McpServerContext {
+/** Where the gate learns the webhook URL. In-process (the daemon's POST /api/mcp) it is the
+ *  daemon's own live setting; `repoyeti mcp` runs in a separate process, so stdio.ts passes a
+ *  reader that asks the daemon instead (see daemonApprovalWebhookUrl in adapter-http.ts). */
+export type WebhookUrlSource = () => string | null | Promise<string | null>;
+
+export function contextFor(
+  backend: McpBackend,
+  webhookUrl: WebhookUrlSource = getApprovalWebhookUrl,
+): McpServerContext {
   const tools: McpEngineTool[] = TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
@@ -57,12 +65,14 @@ export function contextFor(backend: McpBackend): McpServerContext {
       // Webhook mode: the owner's policy service decides instead of the dashboard, and may hand
       // back rewritten arguments; those (never the agent's originals) are what runs. The reqId in
       // the error lets the agent's transcript be matched to the service's log and ours.
-      if (getApprovalWebhookUrl()) {
+      const url = await webhookUrl();
+      if (url) {
         const verdict = await requestWebhookVerdict(
           t.name,
           repoArg(args),
           args,
           Object.keys(t.inputSchema.properties),
+          url,
         );
         if (verdict.outcome === "denied") {
           throw new Error(`${t.name} was denied by the approval webhook: ${verdict.reason} (request ${verdict.reqId})`);
