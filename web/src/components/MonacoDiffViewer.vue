@@ -161,6 +161,21 @@ watch(
   (on) => editor?.updateOptions({ wordWrap: on ? "on" : "off" }),
 );
 
+/**
+ * Where "Open with" should land in the working-tree file. WHY: opening a changed file at its top
+ * makes the owner hunt for the hunk they were just reading. A click in the modified side wins;
+ * with the cursor untouched (still 1:1) it is the first changed hunk's line. null = no hint.
+ */
+function getJumpPosition(): { line: number; column: number } | null {
+  if (!editor) return null;
+  const pos = editor.getModifiedEditor().getPosition();
+  if (pos && (pos.lineNumber > 1 || pos.column > 1)) return { line: pos.lineNumber, column: pos.column };
+  const first = editor.getLineChanges()?.[0];
+  return first ? { line: Math.max(1, first.modifiedStartLineNumber), column: 1 } : null;
+}
+
+defineExpose({ getJumpPosition });
+
 onBeforeUnmount(() => {
   diffListener?.dispose();
   if (revealTimer != null) clearTimeout(revealTimer);

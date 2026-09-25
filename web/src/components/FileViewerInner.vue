@@ -129,10 +129,26 @@ const statusColor = computed(() =>
 // repo FOLDER + the current file, so the editor shows the whole file tree (the "see the file list"
 // intent). Only the editors detected as installed are offered.
 const openableEditors = computed(() => store.editorsCatalog.filter((e) => e.available));
+// The line to open at, so the external editor lands on the hunk being read rather than the top.
+// Only when the viewer shows the working-tree file's own line numbers: a historical commit view
+// and the compact patch view (patch lines, not file lines) send no position, nor does a deleted
+// file shown from HEAD (its line numbers are HEAD's, and the file is gone from disk).
+const diffViewer = ref<{ getJumpPosition: () => { line: number; column: number } | null } | null>(null);
+function jumpPosition(): { line: number; column: number } | null {
+  if (props.target?.commit || fromHead.value) return null;
+  if (diffEditable.value && !editing.value) return diffViewer.value?.getJumpPosition() ?? null;
+  if (viewerMode.value === "diff" && patchMode.value) return null;
+  return editorViewer.value?.getJumpPosition() ?? null;
+}
 async function openWith(editor?: string): Promise<void> {
   if (!props.target) return;
   try {
-    const r = await store.openInEditor(props.target.repoId, { editor, path: props.target.path });
+    const pos = jumpPosition();
+    const r = await store.openInEditor(props.target.repoId, {
+      editor,
+      path: props.target.path,
+      ...(pos ? { line: pos.line, column: pos.column } : {}),
+    });
     const label = store.editorsCatalog.find((e) => e.id === r.editor)?.label;
     toast.success(label ? t("fileViewer.openingIn", { editor: label }) : t("fileViewer.openingEditor"));
   } catch (e) {
@@ -162,6 +178,7 @@ const draft = ref(""); // seeded on edit; refreshed from Monaco exactly once whe
 const dirty = ref(false);
 const saving = ref(false);
 interface MonacoViewerHandle {
+  getJumpPosition: () => { line: number; column: number } | null;
   getValue: () => string;
   getSnapshot: () => { value: string; alternativeVersionId: number };
   markClean: (alternativeVersionId?: number) => boolean;
@@ -843,6 +860,7 @@ onBeforeUnmount(() => {
                editable editor Content mode uses, seeded from the working-tree (`modified`) text. -->
           <MonacoDiffViewer
             v-else-if="diffEditable && !editing"
+            ref="diffViewer"
             :original="original"
             :modified="modified"
             :filename="target?.path ?? ''"

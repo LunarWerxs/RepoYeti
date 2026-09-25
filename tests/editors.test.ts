@@ -7,6 +7,8 @@ import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import {
   buildEditorArgs,
+  launchEditorArgs,
+  defaultLaunchEditor,
   wrapForPlatform,
   cmdReparseHazard,
   cmdShimHazard,
@@ -15,7 +17,9 @@ import {
   detectEditors,
   isKnownEditor,
   effectiveDefaultEditor,
+  guessRunningEditor,
   openInEditor,
+  parseEditorPosition,
   type EditorInfo,
 } from "../src/service/index.ts";
 
@@ -36,6 +40,53 @@ test("buildEditorArgs: folder editors get [folder, file?]; file-only editors get
   expect(buildEditorArgs(fileOnly, "/repo", "/repo/a.ts")).toEqual(["/repo/a.ts"]);
   // A single-file editor can't open a folder with no file → null.
   expect(buildEditorArgs(fileOnly, "/repo")).toBeNull();
+});
+
+// Open at a line: each editor's own flag. A wrong form opens a nonexistent `file:12:3` (or, for
+// Notepad++, ignores the line), so the table is pinned per style.
+test("buildEditorArgs: a position uses the editor's own goto form; no goto form drops it", () => {
+  const pos = { line: 12, column: 3 };
+  const vscode = { id: "vscode", label: "VS Code", folder: true, goto: "vscode" as const };
+  const zed = { id: "zed", label: "Zed", folder: true, goto: "path-suffix" as const };
+  const npp = { id: "notepad++", label: "Notepad++", folder: false, goto: "notepad++" as const };
+  const notepad = { id: "notepad", label: "Notepad", folder: false };
+  expect(buildEditorArgs(vscode, "/repo", "/repo/a.ts", pos)).toEqual(["/repo", "-g", "/repo/a.ts:12:3"]);
+  expect(buildEditorArgs(zed, "/repo", "/repo/a.ts", pos)).toEqual(["/repo", "/repo/a.ts:12:3"]);
+  expect(buildEditorArgs(npp, "/repo", "/repo/a.ts", pos)).toEqual(["-n12", "-c3", "/repo/a.ts"]);
+  expect(buildEditorArgs(notepad, "/repo", "/repo/a.ts", pos)).toEqual(["/repo/a.ts"]);
+  // No file: the position has nothing to apply to.
+  expect(buildEditorArgs(vscode, "/repo", undefined, pos)).toEqual(["/repo"]);
+});
+
+test("parseEditorPosition: only positive integers reach an argv", () => {
+  expect(parseEditorPosition(undefined, undefined)).toEqual({});
+  expect(parseEditorPosition(7, undefined)).toEqual({ position: { line: 7, column: 1 } });
+  expect(parseEditorPosition(7, 4)).toEqual({ position: { line: 7, column: 4 } });
+  for (const bad of ["7", "7 & calc", 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 1e12]) {
+    expect("error" in parseEditorPosition(bad, undefined)).toBe(true);
+    expect("error" in parseEditorPosition(7, bad)).toBe(true);
+  }
+  expect("error" in parseEditorPosition(undefined, 4)).toBe(true); // a column needs a line
+});
+
+test("guessRunningEditor: the running, installed, line-capable editor wins; catalog order breaks ties", () => {
+  const all = (ids: string[]): EditorInfo[] => ids.map((id) => ({ id, label: id, folder: true, available: true }));
+  const editors = all(["vscode", "cursor", "zed", "sublime", "notepad++", "notepad"]);
+  // win32 tasklist image names: Cursor is running, VS Code is not, so Cursor wins over VS Code.
+  expect(guessRunningEditor(["svchost.exe", "Cursor.exe", "explorer.exe"], "win32", editors)).toBe("cursor");
+  // Both running: catalog order (VS Code first).
+  expect(guessRunningEditor(["Cursor.exe", "Code.exe"], "win32", editors)).toBe("vscode");
+  // Notepad has no goto form, so a running Notepad is never the guess.
+  expect(guessRunningEditor(["notepad.exe"], "win32", editors)).toBeNull();
+  expect(guessRunningEditor(["notepad++.exe"], "win32", editors)).toBe("notepad++");
+  // Running but not detected as installed: not launchable through the catalog, so no guess.
+  expect(guessRunningEditor(["Cursor.exe"], "win32", all(["vscode"]))).toBeNull();
+  // Linux ps comm names and macOS bundle paths.
+  expect(guessRunningEditor(["bash", "sublime_text"], "linux", editors)).toBe("sublime");
+  expect(
+    guessRunningEditor(["/Applications/Visual Studio Code.app/Contents/MacOS/Electron"], "darwin", editors),
+  ).toBe("vscode");
+  expect(guessRunningEditor([], "linux", editors)).toBeNull();
 });
 
 test("wrapForPlatform: direct exe vs cmd shim vs macOS open -a", () => {
@@ -59,6 +110,35 @@ test("wrapForPlatform: direct exe vs cmd shim vs macOS open -a", () => {
     "/r/a.ts",
   ]);
   expect(wrapForPlatform("linux", { kind: "exe", exe: "/usr/bin/code" }, ["/r"])).toEqual(["/usr/bin/code", "/r"]);
+});
+
+// `open -a` parses the editor args itself: `-g` is its background flag and `a.ts:12:3` a missing
+// document, so a positioned macApp launch opened nothing. The bundle launch must drop the position.
+test("launchEditorArgs: a macOS app-bundle launch drops the position; a real exe keeps it", () => {
+  const pos = { line: 12, column: 3 };
+  const vscode = { id: "vscode", label: "VS Code", folder: true, goto: "vscode" as const };
+  const zed = { id: "zed", label: "Zed", folder: true, goto: "path-suffix" as const };
+  const app = { kind: "macApp" as const, app: "Visual Studio Code" };
+  const vsArgs = launchEditorArgs(vscode, app, "/repo", "/repo/a.ts", pos)!;
+  expect(wrapForPlatform("darwin", app, vsArgs)).toEqual(["open", "-a", "Visual Studio Code", "/repo", "/repo/a.ts"]);
+  expect(launchEditorArgs(zed, { kind: "macApp", app: "Zed" }, "/repo", "/repo/a.ts", pos)).toEqual([
+    "/repo",
+    "/repo/a.ts",
+  ]);
+  const exe = { kind: "exe" as const, exe: "/usr/local/bin/code" };
+  expect(launchEditorArgs(vscode, exe, "/repo", "/repo/a.ts", pos)).toEqual(["/repo", "-g", "/repo/a.ts:12:3"]);
+});
+
+// The running-editor guess must beat the first-installed fallback, and an owner default must beat
+// the guess; reverting defaultLaunchEditor to effectiveDefaultEditor would fail the first case.
+test("defaultLaunchEditor: saved default, else the running editor, else the first installed", async () => {
+  const editors: EditorInfo[] = ["vscode", "cursor", "zed"].map((id) => ({ id, label: id, folder: true, available: true }));
+  expect(await defaultLaunchEditor({ processes: ["Cursor.exe"] }, "win32", editors)).toBe("cursor");
+  expect(await defaultLaunchEditor({ processes: ["bash", "zed-editor"] }, "linux", editors)).toBe("zed");
+  expect(await defaultLaunchEditor({ defaultEditor: "vscode", processes: ["Cursor.exe"] }, "win32", editors)).toBe(
+    "vscode",
+  );
+  expect(await defaultLaunchEditor({ processes: [] }, "win32", editors)).toBe("vscode");
 });
 
 test("cmdReparseHazard: %VAR% / ^ in an arg is unsafe on EVERY win32 launch (all go through cmd /c start)", () => {
@@ -283,6 +363,20 @@ test("POST /api/repos/:id/open opens locally (dry-run) but is 403 over the tunne
   });
   expect(remote.status).toBe(403);
   expect((await remote.json()).code).toBe("REMOTE_FORBIDDEN");
+});
+
+test("POST /api/repos/:id/open refuses a non-integer line (400 BAD_LINE) before any launch", async () => {
+  const dir = plainRepo();
+  writeFileSync(join(dir, "a.txt"), "hi\n");
+  const id = mustUpsertRepo(dir, "open-bad-line", "auto", false);
+  const app = createApp(localCfg());
+  const res = await app.request(`/api/repos/${id}/open`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ editor: "system", path: "a.txt", line: "3 & calc" }),
+  });
+  expect(res.status).toBe(400);
+  expect((await res.json()).code).toBe("BAD_LINE");
 });
 
 test("POST /api/repos/:id/open 404s an unknown repo", async () => {

@@ -15,6 +15,12 @@
  * buildDetachedSpawn) so the editor escapes the daemon's process tree and survives a tray Quit; cmd
  * re-parses each arg and would expand `%…%` / strip `^` in the path AFTER confinement, so such a
  * path is refused up front (see cmdReparseHazard) to keep the confinement guarantee intact.
+ *
+ * Open at a line: a caller may pass a line (and column) so the file opens AT that spot instead of
+ * the top, using each editor's own flag (GotoStyle). The position must be a positive integer before
+ * it reaches an argv (parseEditorPosition), so it can never smuggle text into a launch. With no
+ * explicit editor and no owner default, the editor already RUNNING on the desktop is preferred over
+ * the first installed one (guessRunningEditor), because that is the window the owner is working in.
  */
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -47,6 +53,28 @@ interface EditorDef {
   macApp?: string;
   /** Restrict to these platforms; omitted ⇒ offered on all three. */
   platforms?: EditorPlatform[];
+  /** How this editor is told to open a file AT a line:column (see GotoStyle); omitted means it
+   *  has no such flag, so a requested position is dropped and the file opens at the top. */
+  goto?: GotoStyle;
+  /** Extra POSIX process names the running GUI shows under, when that differs from every launcher
+   *  (Zed's `zed` CLI hands off to a `zed-editor` process on Linux). Used only by guessRunningEditor. */
+  processNames?: string[];
+}
+
+/**
+ * Each editor's own "open at line:column" convention. WHY a table: there is no shared flag, and
+ * guessing wrong opens a file literally named `a.ts:12:3`. The conventions follow
+ * react-dev-utils launchEditor's getArgumentsForLineNumber (MIT), written fresh here.
+ *   - vscode       VS Code and its forks: `-g <file>:<line>:<col>` (--goto)
+ *   - path-suffix  Zed, Sublime Text: a bare `<file>:<line>:<col>` argument
+ *   - notepad++    `-n<line> -c<col> <file>`
+ */
+export type GotoStyle = "vscode" | "path-suffix" | "notepad++";
+
+/** A 1-based position inside a file, validated by parseEditorPosition. */
+export interface EditorPosition {
+  line: number;
+  column: number;
 }
 
 /** The pseudo-editor id that reveals the folder in the OS file manager (always available). */
@@ -64,6 +92,7 @@ const CATALOG: readonly EditorDef[] = [
     folder: true,
     commands: ["code"],
     winExe: "Code.exe",
+    goto: "vscode",
     winPaths: [
       "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe",
       "%PROGRAMFILES%\\Microsoft VS Code\\Code.exe",
@@ -77,6 +106,7 @@ const CATALOG: readonly EditorDef[] = [
     folder: true,
     commands: ["cursor"],
     winExe: "Cursor.exe",
+    goto: "vscode",
     winPaths: ["%LOCALAPPDATA%\\Programs\\Cursor\\Cursor.exe"],
     macApp: "Cursor",
     linuxPaths: ["/usr/bin/cursor", "/opt/Cursor/cursor"],
@@ -87,6 +117,7 @@ const CATALOG: readonly EditorDef[] = [
     folder: true,
     commands: ["windsurf"],
     winExe: "Windsurf.exe",
+    goto: "vscode",
     winPaths: ["%LOCALAPPDATA%\\Programs\\Windsurf\\Windsurf.exe"],
     macApp: "Windsurf",
     linuxPaths: ["/usr/bin/windsurf", "/opt/Windsurf/windsurf"],
@@ -97,6 +128,7 @@ const CATALOG: readonly EditorDef[] = [
     folder: true,
     commands: ["codium"],
     winExe: "VSCodium.exe",
+    goto: "vscode",
     winPaths: [
       "%LOCALAPPDATA%\\Programs\\VSCodium\\VSCodium.exe",
       "%PROGRAMFILES%\\VSCodium\\VSCodium.exe",
@@ -110,6 +142,7 @@ const CATALOG: readonly EditorDef[] = [
     folder: true,
     commands: ["code-insiders"],
     winExe: "Code - Insiders.exe",
+    goto: "vscode",
     winPaths: [
       "%LOCALAPPDATA%\\Programs\\Microsoft VS Code Insiders\\Code - Insiders.exe",
       "%PROGRAMFILES%\\Microsoft VS Code Insiders\\Code - Insiders.exe",
@@ -122,15 +155,18 @@ const CATALOG: readonly EditorDef[] = [
     label: "Zed",
     folder: true,
     commands: ["zed", "zeditor"],
+    goto: "path-suffix",
     winPaths: ["%LOCALAPPDATA%\\Programs\\Zed\\Zed.exe"],
     macApp: "Zed",
     linuxPaths: ["/usr/bin/zed", "/usr/bin/zeditor"],
+    processNames: ["zed-editor"],
   },
   {
     id: "sublime",
     label: "Sublime Text",
     folder: true,
     commands: ["subl"],
+    goto: "path-suffix",
     winPaths: [
       "%PROGRAMFILES%\\Sublime Text\\sublime_text.exe",
       "%PROGRAMFILES%\\Sublime Text 3\\sublime_text.exe",
@@ -143,6 +179,7 @@ const CATALOG: readonly EditorDef[] = [
     label: "Notepad++",
     folder: false,
     commands: ["notepad++"],
+    goto: "notepad++",
     winPaths: [
       "%PROGRAMFILES%\\Notepad++\\notepad++.exe",
       "%PROGRAMFILES(X86)%\\Notepad++\\notepad++.exe",
@@ -229,12 +266,72 @@ export function probeEditor(
  * Editor-level arguments (the paths handed to the editor), before any platform wrapper. Returns
  * null when a single-file editor is asked to open a folder with no file (it can't). Folder-capable
  * editors get `[folder, file?]` — VS Code & friends open the folder as a workspace AND focus the
- * file, which is exactly the "see the whole file list" intent.
+ * file, which is exactly the "see the whole file list" intent. With a `pos` and a file, the file
+ * argument becomes the editor's own line:column form (GotoStyle); an editor without one just gets
+ * the file, since a wrong guess would open a nonexistent `file:12:3`.
  */
-export function buildEditorArgs(def: EditorDef, folderAbs: string, fileAbs?: string): string[] | null {
-  if (def.folder) return fileAbs ? [folderAbs, fileAbs] : [folderAbs];
+export function buildEditorArgs(
+  def: EditorDef,
+  folderAbs: string,
+  fileAbs?: string,
+  pos?: EditorPosition,
+): string[] | null {
+  const fileArgs = fileAbs ? gotoArgs(def.goto, fileAbs, pos) : [];
+  if (def.folder) return [folderAbs, ...fileArgs];
   if (!fileAbs) return null; // a file-only editor with nothing to open
-  return [fileAbs];
+  return fileArgs;
+}
+
+/**
+ * buildEditorArgs for a resolved launch. WHY: a macOS app found only as its bundle is launched as
+ * `open -a <App> <args>`, and `open` parses those args itself: it reads VS Code's `-g` as its own
+ * background flag and treats `file:12:3` as a document that does not exist, so it opens nothing.
+ * (`open --args` is no fix either: it reaches only a NEW instance, not the window already open.)
+ * So that launch drops the position and opens the plain folder + file, which `open` does handle.
+ */
+export function launchEditorArgs(
+  def: EditorDef,
+  res: Resolution,
+  folderAbs: string,
+  fileAbs?: string,
+  pos?: EditorPosition,
+): string[] | null {
+  return buildEditorArgs(def, folderAbs, fileAbs, res.kind === "macApp" ? undefined : pos);
+}
+
+/** The argv fragment that opens `fileAbs`, at `pos` when the editor has a GotoStyle for it. */
+function gotoArgs(style: GotoStyle | undefined, fileAbs: string, pos: EditorPosition | undefined): string[] {
+  if (!pos || !style) return [fileAbs];
+  const { line, column } = pos;
+  if (style === "vscode") return ["-g", `${fileAbs}:${line}:${column}`];
+  if (style === "path-suffix") return [`${fileAbs}:${line}:${column}`];
+  return [`-n${line}`, `-c${column}`, fileAbs];
+}
+
+/** Largest line/column accepted: far past any real file, small enough to stay a plain integer. */
+const MAX_POSITION = 10_000_000;
+
+function isPositionNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= MAX_POSITION;
+}
+
+/**
+ * Validate a caller-supplied line/column. WHY strict: the value is spliced into an editor argv, so
+ * only a positive integer may pass (react-dev-utils launchEditor refuses non-integer lines for the
+ * same reason). No line means no position; a column without a line is refused as a malformed
+ * request rather than silently dropped; a line without a column opens at column 1.
+ */
+export function parseEditorPosition(
+  line: unknown,
+  column: unknown,
+): { position?: EditorPosition } | { error: string } {
+  if (line === undefined || line === null) {
+    return column === undefined || column === null ? {} : { error: "column needs a line" };
+  }
+  if (!isPositionNumber(line)) return { error: "line must be a positive integer" };
+  if (column === undefined || column === null) return { position: { line, column: 1 } };
+  if (!isPositionNumber(column)) return { error: "column must be a positive integer" };
+  return { position: { line, column } };
 }
 
 /** Wrap the resolved editor + its args into a full spawn argv for `platform`. */
@@ -366,10 +463,82 @@ export function effectiveDefaultEditor(chosen: string | undefined, editors: Edit
   return firstReal?.id ?? SYSTEM_FILE_MANAGER;
 }
 
+/** Last path segment, lower-cased: `C:\...\Code.exe` and `/usr/bin/code` both reduce to a name. */
+function baseNameLower(p: string): string {
+  return (p.split(/[\\/]/).pop() ?? "").toLowerCase();
+}
+
+/** True when one process-list entry is `def`'s editor on `platform`. */
+function processMatches(def: EditorDef, platform: EditorPlatform, proc: string): boolean {
+  // macOS `ps -o comm=` prints the full binary path inside the bundle, and the bundle name is the
+  // only stable part (the binary may be called Electron, Code or Cursor across versions).
+  if (platform === "darwin" && def.macApp && proc.includes(`/${def.macApp}.app/`)) return true;
+  const name = baseNameLower(proc);
+  if (!name) return false;
+  const names =
+    platform === "win32"
+      ? [def.winExe, ...(def.winPaths ?? [])].filter((n): n is string => !!n).map(baseNameLower)
+      : [...(def.commands ?? []), ...(def.linuxPaths ?? []), ...(def.processNames ?? [])].map(baseNameLower);
+  return names.includes(name);
+}
+
+/**
+ * Which catalog editor is already running, given the process list, or null. WHY: with no owner
+ * choice, "the first installed editor" can be one the owner never uses; the one with a window open
+ * right now is the one they mean (the react-dev-utils guessEditor idea, written fresh here). Only an
+ * editor that is also detected as installed and can jump to a line counts, so the launch still goes
+ * through the vetted catalog path (never the raw process path) and a stray Notepad never wins.
+ * Catalog order breaks ties when several are running.
+ */
+export function guessRunningEditor(
+  processes: string[],
+  platform: EditorPlatform,
+  editors: EditorInfo[],
+): string | null {
+  for (const def of CATALOG) {
+    if (!def.goto || (def.platforms && !def.platforms.includes(platform))) continue;
+    if (!editors.some((e) => e.id === def.id && e.available)) continue;
+    if (processes.some((p) => processMatches(def, platform, p))) return def.id;
+  }
+  return null;
+}
+
+/** Bound on the process-list read: a hung `ps`/`tasklist` must not stall an Open click. */
+const PROCESS_LIST_TIMEOUT_MS = 2000;
+
+/**
+ * The running processes' image names (win32, from `tasklist /FO CSV /NH`) or binary paths (POSIX,
+ * from `ps -eo comm=`). Best-effort: any failure or timeout yields [], which just means "no guess".
+ */
+async function listProcesses(platform: EditorPlatform): Promise<string[]> {
+  const argv = platform === "win32" ? ["tasklist", "/FO", "CSV", "/NH"] : ["ps", "-eo", "comm="];
+  try {
+    const proc = Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", windowsHide: true });
+    const timer = setTimeout(() => {
+      try {
+        proc.kill();
+      } catch {
+        /* already exited */
+      }
+    }, PROCESS_LIST_TIMEOUT_MS);
+    try {
+      const [text, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+      if (code !== 0) return [];
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      // tasklist CSV: the image name is the first quoted field.
+      return platform === "win32" ? lines.map((l) => /^"([^"]*)"/.exec(l)?.[1] ?? "") : lines;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return [];
+  }
+}
+
 /** Result of an "Open with" launch. */
 export interface OpenResult {
   ok: boolean;
-  code: "OK" | "NOT_FOUND" | "ERROR" | "NO_EDITOR" | "BAD_PATH";
+  code: "OK" | "NOT_FOUND" | "ERROR" | "NO_EDITOR" | "BAD_PATH" | "BAD_LINE";
   message?: string;
   /** The editor id actually launched (after default resolution). */
   editor?: string;
@@ -396,7 +565,13 @@ type LaunchPlan = { ok: true; argv: string[]; detached: boolean } | { ok: false;
  * Work out how (and whether) `wanted` can be launched on `platform`. Pure decision: nothing is
  * spawned here.
  */
-function planLaunch(wanted: string, platform: EditorPlatform, folderAbs: string, fileAbs: string | undefined): LaunchPlan {
+function planLaunch(
+  wanted: string,
+  platform: EditorPlatform,
+  folderAbs: string,
+  fileAbs: string | undefined,
+  pos?: EditorPosition,
+): LaunchPlan {
   if (wanted === SYSTEM_FILE_MANAGER) {
     // The OS file manager (explorer / open / xdg-open) hands the request to the existing shell
     // singleton and exits; it is never a lasting child of the daemon, so it needs no detach
@@ -408,7 +583,7 @@ function planLaunch(wanted: string, platform: EditorPlatform, folderAbs: string,
   const def = CATALOG.find((e) => e.id === wanted)!;
   const res = probeEditor(def, platform, realDeps());
   if (!res) return { ok: false, result: { ok: false, code: "NO_EDITOR", message: `${def.label} isn't installed`, editor: wanted } };
-  const editorArgs = buildEditorArgs(def, folderAbs, fileAbs);
+  const editorArgs = launchEditorArgs(def, res, folderAbs, fileAbs, pos);
   if (!editorArgs) {
     return { ok: false, result: { ok: false, code: "BAD_PATH", message: `${def.label} can't open a folder`, editor: wanted } };
   }
@@ -475,16 +650,44 @@ function spawnEditor(editor: string, argv: string[], detached: boolean): OpenRes
 }
 
 /**
+ * The editor an Open with no explicit choice launches: the owner's saved default when there is one
+ * (their word beats any guess), else the one already running, else the first installed. The
+ * process list is read only on that last path, so a configured default costs no spawn. Exported so
+ * a test can pin this wiring with an injected process list and editor list.
+ */
+export async function defaultLaunchEditor(
+  opts: { defaultEditor?: string; processes?: string[] },
+  platform: EditorPlatform,
+  editors: EditorInfo[],
+): Promise<string> {
+  if (!opts.defaultEditor?.trim()) {
+    const running = guessRunningEditor(opts.processes ?? (await listProcesses(platform)), platform, editors);
+    if (running) return running;
+  }
+  return effectiveDefaultEditor(opts.defaultEditor, editors);
+}
+
+/**
  * Launch an editor on a repo (and optionally one changed file within it). `editorId` omitted /
  * empty ⇒ the effective default is used. The file path is confined to the repo before it reaches
  * an argv. Set `REPOYETI_EDITOR_DRYRUN=1` (or pass `dryRun`) to resolve the argv WITHOUT spawning
- * — used by the tests so they never pop a real window.
+ * (used by the tests so they never pop a real window). `line`/`column` (validated by
+ * parseEditorPosition) open the file at that spot in editors that support it. With no explicit
+ * editor and no owner default, a running editor wins over the first installed one; `processes`
+ * injects the process list for tests (omitted: read from the OS).
  */
 export async function openInEditor(
   repoId: string,
   editorId: string | undefined,
   relPath: string | undefined,
-  opts: { defaultEditor?: string; dryRun?: boolean; platform?: EditorPlatform } = {},
+  opts: {
+    defaultEditor?: string;
+    dryRun?: boolean;
+    platform?: EditorPlatform;
+    line?: unknown;
+    column?: unknown;
+    processes?: string[];
+  } = {},
 ): Promise<OpenResult> {
   const repo = getRepo(repoId);
   if (!repo) return { ok: false, code: "NOT_FOUND", message: "repo not found" };
@@ -492,15 +695,18 @@ export async function openInEditor(
   const platform = opts.platform ?? (process.platform as EditorPlatform);
   const folderAbs = resolve(repo.absPath);
 
+  const parsedPos = parseEditorPosition(opts.line, opts.column);
+  if ("error" in parsedPos) return { ok: false, code: "BAD_LINE", message: parsedPos.error };
+
   const resolvedFile = resolveEditorFile(repo.absPath, relPath);
   if ("ok" in resolvedFile) return resolvedFile;
 
-  // Resolve which editor to launch (explicit choice → owner default → first available).
+  // Resolve which editor to launch (explicit choice → owner default → running → first available).
   const editors = detectEditors(platform);
-  const wanted = editorId?.trim() ? editorId : effectiveDefaultEditor(opts.defaultEditor, editors);
+  const wanted = editorId?.trim() ? editorId : await defaultLaunchEditor(opts, platform, editors);
   if (!isKnownEditor(wanted)) return { ok: false, code: "NO_EDITOR", message: `unknown editor: ${wanted}` };
 
-  const plan = planLaunch(wanted, platform, folderAbs, resolvedFile.fileAbs);
+  const plan = planLaunch(wanted, platform, folderAbs, resolvedFile.fileAbs, parsedPos.position);
   if (!plan.ok) return plan.result;
 
   if (opts.dryRun || process.env.REPOYETI_EDITOR_DRYRUN === "1") {
