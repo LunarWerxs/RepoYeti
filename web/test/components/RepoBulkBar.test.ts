@@ -117,6 +117,9 @@ describe("RepoBulkBar selection scope", () => {
     const wrapper = mountBar();
     activateRepo("o1", { shift: false, ctrl: false });
     activateRepo("o3", { shift: true, ctrl: false });
+    // The bar mounted with nothing ticked, so Pull is still rendered disabled until the selection
+    // re-renders it, and trigger() on a disabled button dispatches nothing.
+    await flushPromises();
 
     await wrapper.get('[data-testid="bulk-pull"]').trigger("click");
     await flushPromises();
