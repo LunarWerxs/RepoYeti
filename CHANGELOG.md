@@ -88,6 +88,14 @@ All notable changes to RepoYeti are documented here. The format is based on
   when something is wrong with it; activity is read from HEAD's reflog, so a daemon restart or
   rescan does not make every repo look freshly changed. Ranking idea
   adapted from Z4nzu/hackingtool (MIT).
+- **Smart Commit offers fixup commits for unpushed work.** When every line a changed file rewrites
+  was written by one commit that is still unpushed, the plan editor offers "Make a fixup commit",
+  which commits those files as `fixup! <that subject>` instead of a new commit, ready for your own
+  `git rebase --autosquash` (RepoYeti itself still never rebases). Files that touch pushed lines or
+  lines from two unpushed commits are never offered, so each fixup stays atomic. The same check is
+  `GET /api/repos/:id/fixup-base` and the read-only MCP tool `fixup_base`, so an agent can commit
+  review feedback as a fixup too, through `git_commit` only when the whole tree (untracked files
+  included) fixes one commit. The approach follows lazygit's base-commit finder.
 
 ## [1.1.0] - 2026-09-22
 

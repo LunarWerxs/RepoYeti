@@ -806,6 +806,18 @@ export interface CommitPlan {
    *  always blaming the model. `degradedMessage` is the provider's own text. */
   degradedCode?: AiCode;
   degradedMessage?: string;
+  /** Planned files whose changed lines all blame to ONE unpushed commit (owner only). */
+  fixups?: CommitPlanFixup[];
+}
+
+/** An offer to commit some planned files as `fixup! <subject>` of an unpushed commit. */
+export interface CommitPlanFixup {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  /** Ready-to-use message, `fixup! <subject>`. */
+  message: string;
+  files: string[];
 }
 
 export interface CommitPlanResponse {

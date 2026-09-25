@@ -21,7 +21,7 @@ import {
 import { toast } from "vue-sonner";
 import { useStore } from "../store";
 import { ApiError } from "../api";
-import type { AiCode, CommitPlan, CommitStyle, DiffStat as DiffStatT } from "../types";
+import type { AiCode, CommitPlan, CommitPlanFixup, CommitStyle, DiffStat as DiffStatT } from "../types";
 import CommitCard from "./smart-commit-plan/CommitCard.vue";
 import UnassignedFiles from "./smart-commit-plan/UnassignedFiles.vue";
 import { cn } from "@/lib/utils";
@@ -81,6 +81,9 @@ const degradedMessage = ref("");
 const truncated = ref(false);
 const groups = ref<EditableGroup[]>([]);
 const leftovers = ref<string[]>([]);
+/** Blame-found offers: files whose changed lines all come from ONE unpushed commit. Accepting one
+ *  moves those files into a leading `fixup! <subject>` commit (see applyFixup). */
+const fixups = ref<CommitPlanFixup[]>([]);
 /** Signature of the plan as the AI last drafted it (set in applyPlan). `isDirty` compares the live
  *  plan against this so re-drafting actions (style change, Regenerate) can warn before discarding
  *  hand edits — subject/body rewrites, files dragged between commits, merges/reorders/removals. */
@@ -189,6 +192,7 @@ function applyPlan(plan: CommitPlan): void {
     files: [...g.files],
   }));
   leftovers.value = [...plan.leftovers];
+  fixups.value = plan.fixups ?? [];
   degraded.value = plan.degraded;
   degradedCode.value = plan.degradedCode ?? null;
   degradedMessage.value = plan.degradedMessage ?? "";
@@ -196,6 +200,31 @@ function applyPlan(plan: CommitPlan): void {
   planBaseline.value = planSignature(groups.value, leftovers.value); // fresh plan → clean slate
   openDiff.value = null; // a fresh plan → collapse any open preview
   openAll.value = null;
+}
+
+/** Offers still worth showing: the files the owner has not since removed from the plan. */
+const liveFixups = computed(() => {
+  const planned = new Set([...groups.value.flatMap((g) => g.files), ...leftovers.value]);
+  return fixups.value
+    .map((f) => ({ ...f, files: f.files.filter((p) => planned.has(p)) }))
+    .filter((f) => f.files.length > 0);
+});
+
+/** Accept a fixup offer: pull its files out of whatever commit (or Unassigned) holds them, drop
+ *  commits left empty, and put one `fixup! <subject>` commit first. The message is the whole
+ *  point (a later `git rebase --autosquash` matches on it), so it carries no body. */
+function applyFixup(f: CommitPlanFixup): void {
+  const moving = new Set(f.files);
+  const kept = groups.value
+    .map((g) => ({ ...g, files: g.files.filter((p) => !moving.has(p)) }))
+    .filter((g) => g.files.length > 0);
+  const files = [...moving].filter(
+    (p) => groups.value.some((g) => g.files.includes(p)) || leftovers.value.includes(p),
+  );
+  if (files.length === 0) return;
+  leftovers.value = leftovers.value.filter((p) => !moving.has(p));
+  groups.value = [{ key: nextKey(), subjectLine: f.message, body: "", showBody: false, files }, ...kept];
+  fixups.value = fixups.value.filter((x) => x.hash !== f.hash);
 }
 
 /** The degraded banner's headline. The plan still fell back to a folder-based grouping either
@@ -509,6 +538,20 @@ async function execute(sync: boolean): Promise<void> {
           >
             <AlertTriangle :size="15" class="mt-0.5 shrink-0" />
             <span>{{ $t("repo.smartCommit.truncated") }}</span>
+          </div>
+          <div
+            v-for="f in liveFixups"
+            :key="f.hash"
+            class="mb-3 flex items-start gap-2 rounded-md border border-info/25 bg-info/10 px-3 py-2 text-[12.5px] text-info"
+          >
+            <GitCommitHorizontal :size="15" class="mt-0.5 shrink-0" />
+            <div class="min-w-0 flex-1">
+              <span>{{ $t("repo.smartCommit.fixupFound", { count: f.files.length, hash: f.shortHash, subject: f.subject }, f.files.length) }}</span>
+              <p class="mt-1 break-words text-[11.5px] opacity-80">{{ $t("repo.smartCommit.fixupHint") }}</p>
+            </div>
+            <Button variant="secondary" size="sm" class="shrink-0" @click="applyFixup(f)">
+              {{ $t("repo.smartCommit.fixupApply") }}
+            </Button>
           </div>
 
           <!-- commit cards (drag the grip to reorder) -->

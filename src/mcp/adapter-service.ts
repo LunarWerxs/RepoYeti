@@ -16,6 +16,7 @@ import {
   getBranches,
   getStashes,
   searchChangedContent,
+  getFixupBases,
   readFileDiff,
   fetchRepo,
   pullRepo,
@@ -143,6 +144,11 @@ export function serviceBackend(): McpBackend {
     async search(idOrName, query) {
       const repo = resolveRepoView(idOrName);
       return ensureOk(await searchChangedContent(repo.id, query));
+    },
+
+    async fixupBase(idOrName, paths) {
+      const repo = resolveRepoView(idOrName);
+      return ensureOk(await getFixupBases(repo.id, paths));
     },
 
     async drift() {

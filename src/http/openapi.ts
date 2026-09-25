@@ -219,6 +219,11 @@ export const META: Record<string, RouteMeta> = {
 
   // ── files / changes ──────────────────────────────────────────────────────────────
   "GET /api/repos/:id/changes": { summary: "List a repo's changed files.", tags: ["files"] },
+  "GET /api/repos/:id/fixup-base": {
+    summary: "Name the one unpushed commit each changed file fixes, by blame (read-only).",
+    tags: ["files"],
+    query: [{ name: "path", description: "Repo-relative changed path to check (repeatable); absent means every changed file." }],
+  },
   "GET /api/repos/:id/tree": {
     summary: "List one directory level of a repo's working tree (?path= — absent means the root).",
     tags: ["files"],

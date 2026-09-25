@@ -77,6 +77,19 @@ export interface CommitPlan {
    *  which is the actionable part (which limit, and when it resets). */
   degradedCode?: AiCode;
   degradedMessage?: string;
+  /** Planned files whose changed lines all blame to ONE unpushed commit (owner-only; see
+   *  withFixups). The UI offers to commit each set as `fixup! <subject>` instead. */
+  fixups?: CommitPlanFixup[];
+}
+
+/** An offer to commit some planned files as a fixup of an unpushed commit, not a new commit. */
+export interface CommitPlanFixup {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  /** The ready-to-use message, `fixup! <subject>`. */
+  message: string;
+  files: string[];
 }
 
 /** The conventional-commits types we accept; anything else is coerced to `chore`. */
@@ -347,6 +360,20 @@ export function heuristicPlan(input: CommitPlanInput, reason?: { code: AiCode; m
     truncated: input.truncated,
     ...(reason ? { degradedCode: reason.code, degradedMessage: reason.message } : {}),
   };
+}
+
+/**
+ * Attach fixup offers to a plan, keeping only files the plan actually covers (a group or the
+ * leftovers). WHY here and not in the planner: the model splits NEW commits and cannot see
+ * history, while blame can; the two answers meet on the plan so the owner chooses per file set.
+ * Pure. Offers left with no planned file are dropped, and a plan with none carries no field.
+ */
+export function withFixups(plan: CommitPlan, fixups: readonly CommitPlanFixup[]): CommitPlan {
+  const planned = new Set([...plan.groups.flatMap((g) => g.files), ...plan.leftovers]);
+  const kept = fixups
+    .map((f) => ({ ...f, files: f.files.filter((p) => planned.has(p)) }))
+    .filter((f) => f.files.length > 0);
+  return kept.length > 0 ? { ...plan, fixups: kept } : plan;
 }
 
 /**

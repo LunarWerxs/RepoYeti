@@ -252,6 +252,9 @@ export const OWNER_ONLY: readonly string[] = [
   // tests/share-policy.test.ts) — a control guest can already pull, they just don't get the
   // preview. Move it to GUEST_ROUTES at `control` if that's ever wanted.
   "GET /api/repos/:id/incoming",
+  // Fixup-base finder. Read-only, but it reports the subjects and hashes of the owner's unpushed
+  // commits by blaming their lines; owner-only so the guest surface stays the size it was sized.
+  "GET /api/repos/:id/fixup-base",
   // Working-tree BROWSING ("All files" mode). Deliberately not a guest route, even though
   // `GET /api/repos/:id/file` is: reading a path you were given is a different capability from
   // enumerating the repository. This lists ignored paths too — which is the whole point of the

@@ -980,6 +980,24 @@ for (const c of commits) {
     409 on `NOTHING_TO_COMMIT`.
   - `git-ops.ts`: `POST /api/repos/:id/smart-commit` → `parseBody(SmartCommitSchema)` → `smartCommitRepo`
     → map result via `statusForCode`.
+- **Fixup offers (blame-based base-commit finder)**: the planner only ever proposes NEW commits,
+  so a change that corrects work still unpushed on the branch would land as noise. For the owner
+  (never a share-link guest), `commit-plan` also runs `src/read/fixup-base.ts` and attaches
+  `plan.fixups` via `withFixups`: per changed tracked file, `git diff -U0 HEAD` finds the rewritten
+  lines, `git blame HEAD` names who wrote them (a file with no deleted line falls back to the lines
+  bordering its insertions, flagged `evidence: "context"`), and the file joins an offer only when
+  every blamed line is ONE commit from `git log HEAD --not --remotes`. Touching pushed lines or two
+  unpushed commits leaves the file unresolved, so each fixup stays atomic (the rule lazygit's
+  "find base commit for fixup" uses; the idea is theirs, MIT, the code is written fresh). Accepting
+  an offer in the plan editor moves those files into a leading `fixup! <subject>` commit. RepoYeti
+  never autosquashes: that is a rebase, and rebase stays out of scope (§3); the message is for the
+  owner's own `git rebase --autosquash` on a desktop. The same check is `GET
+  /api/repos/:id/fixup-base` (owner-only, `?path=` repeatable) and the read-only MCP tool
+  `fixup_base`. Untracked files count as unresolved `new-file`, so `single` is non-null only when
+  every change in scope, untracked included, fixes that one commit. `git_commit` stages the whole
+  tree (`git add -A`, no paths), so an agent may commit review feedback as a fixup through it only
+  when `single` is non-null for an UNSCOPED query (no `path`); any other answer would fold
+  unrelated changes into the target, and the tool description says so.
 
 ### 9. Web (`web/`)
 
