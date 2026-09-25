@@ -99,6 +99,9 @@ export const SettingsUpdateSchema = z.object({
   mcpAutoDeny: z.boolean().optional().catch(undefined),
   mcpAutoApprove: z.boolean().optional().catch(undefined),
   mcpAutoApproveTimeoutSecs: z.number().finite().optional().catch(undefined),
+  // "" clears webhook mode; a value must be an absolute http(s) URL, checked in the handler so a
+  // bad one gets its own 400 instead of silently collapsing to "absent".
+  mcpApprovalWebhookUrl: z.string().optional().catch(undefined),
   // "" clears the preference; a value must match the live editor catalog (isKnownEditor) — that
   // lookup can't happen at parse time, so it stays a domain check in the handler.
   defaultEditor: z.string().optional().catch(undefined),

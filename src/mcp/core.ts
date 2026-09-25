@@ -21,7 +21,14 @@ import { handleRpc as engineHandleRpc, parseErrorResponse as engineParseError } 
 import type { McpServerContext, McpEngineTool } from "./mcp-stdio.mjs";
 import type { McpBackend } from "./backend.ts";
 import { TOOLS } from "./tools.ts";
-import { approvalGateEnabled, consumeApproval, requestApproval, summarizeArgs } from "../approvals.ts";
+import {
+  approvalGateEnabled,
+  consumeApproval,
+  getApprovalWebhookUrl,
+  requestApproval,
+  requestWebhookVerdict,
+  summarizeArgs,
+} from "../approvals.ts";
 
 const SERVER_INFO = { name: "repoyeti", version: VERSION };
 
@@ -41,13 +48,39 @@ function repoArg(args: Record<string, unknown>): string | null {
  * throws a plain Error (the engine turns it into an MCP `isError` result) naming the reason, so
  * the calling agent sees "denied by owner" / "approval timed out" instead of a silent hang.
  */
-export function contextFor(backend: McpBackend): McpServerContext {
+/** Where the gate learns the webhook URL. In-process (the daemon's POST /api/mcp) it is the
+ *  daemon's own live setting; `repoyeti mcp` runs in a separate process, so stdio.ts passes a
+ *  reader that asks the daemon instead (see daemonApprovalWebhookUrl in adapter-http.ts). */
+export type WebhookUrlSource = () => string | null | Promise<string | null>;
+
+export function contextFor(
+  backend: McpBackend,
+  webhookUrl: WebhookUrlSource = getApprovalWebhookUrl,
+): McpServerContext {
   const tools: McpEngineTool[] = TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
     inputSchema: t.inputSchema,
     run: async (args) => {
       if (t.readOnly || !approvalGateEnabled()) return t.run(backend, args);
+
+      // Webhook mode: the owner's policy service decides instead of the dashboard, and may hand
+      // back rewritten arguments; those (never the agent's originals) are what runs. The reqId in
+      // the error lets the agent's transcript be matched to the service's log and ours.
+      const url = await webhookUrl();
+      if (url) {
+        const verdict = await requestWebhookVerdict(
+          t.name,
+          repoArg(args),
+          args,
+          Object.keys(t.inputSchema.properties),
+          url,
+        );
+        if (verdict.outcome === "denied") {
+          throw new Error(`${t.name} was denied by the approval webhook: ${verdict.reason} (request ${verdict.reqId})`);
+        }
+        return t.run(backend, verdict.args);
+      }
 
       // `args` is the exact object handed to `t.run` below once approved, so the stored request the
       // owner inspects (GET /api/approvals/:id) is the request that executes.

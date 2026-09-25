@@ -74,7 +74,7 @@ A self-hosted git dashboard: one small daemon on your computer, a live status gr
 | 🔐 **Per-repo accounts** | Multiple GitHub accounts, pinned per repository, so a push from the work repo uses the work credential and never silently uses the other one |
 | 📱 **A real PWA** | Install it to the home screen. It reconnects after the phone sleeps, survives a backgrounded tab mid-operation, and asks the daemon what happened rather than spinning forever |
 | 🌐 **Private tunnel** | `--tunnel` opens a Cloudflare tunnel and prints a QR code. Your dashboard and git traffic go through your own tunnel, not through us |
-| 🤝 **Agents (MCP)** | `repoyeti mcp` exposes your repos to an AI agent with an approval gate on anything that mutates, so the agent asks before it commits. The full HTTP surface is at `GET /api/openapi.json` |
+| 🤝 **Agents (MCP)** | `repoyeti mcp` exposes your repos to an AI agent with an approval gate on anything that mutates, so the agent asks before it commits (or asks [your own policy service](docs/APPROVAL_WEBHOOK.md), which can approve, deny or rewrite the call). The full HTTP surface is at `GET /api/openapi.json` |
 | 🛡️ **Safe by construction** | Force-push, `reset --hard` and rebase are not implemented, not hidden. Pulls are fast-forward-only and stop rather than merge when a branch has diverged |
 | 🏠 **Self-hosted** | A single compiled binary with the dashboard inside it. Local state lives in `~/.repoyeti/`; your repositories are never written to except by the git commands you ask for |
 

@@ -134,6 +134,7 @@ const NEVER_SYNCED = [
   "mcpAutoApprove", // likewise fail-open
   // Opens this machine's local ports through the daemon: security posture, decided per machine.
   "portProxy",
+  "mcpApprovalWebhookUrl", // hands the gate's verdict to a service, often on this machine's loopback
   // Secrets and per-install infrastructure identity.
   "oauth",
   "tunnel",

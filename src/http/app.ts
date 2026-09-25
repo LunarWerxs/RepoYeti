@@ -51,6 +51,8 @@ import {
   setAutoApproveEnabled,
   setApproveTimeoutSecs,
   setReceiptStore,
+  setApprovalWebhookUrl,
+  normalizeApprovalWebhookUrl,
   APPROVAL_TIMEOUT_DEFAULT_S,
 } from "../approvals.ts";
 import { sqliteReceiptStore } from "../db.ts";
@@ -184,6 +186,9 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   // Approval decisions are signed receipts; persist them so the audit of who approved which exact
   // action (GET /api/approvals/receipts) survives a restart. See src/db/approval-receipts.ts.
   setReceiptStore(sqliteReceiptStore);
+  // Webhook mode: a hand-edited config.json URL that fails validation is ignored (dashboard modes
+  // apply) rather than half-armed, the same shape the settings route refuses.
+  setApprovalWebhookUrl(normalizeApprovalWebhookUrl(cfg.mcpApprovalWebhookUrl ?? "") ?? null);
   // ⭐ Identity Firewall: hand the module the live config so every preflight check
   // (runAction / smartCommitRepo / commitSelectedRepo) reads the current `identityRules`.
   setIdentityRulesConfig(cfg);

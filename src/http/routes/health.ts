@@ -73,6 +73,9 @@ import {
   setAutoDenyEnabled,
   setAutoApproveEnabled,
   setApproveTimeoutSecs,
+  getApprovalWebhookUrl,
+  setApprovalWebhookUrl,
+  normalizeApprovalWebhookUrl,
 } from "../../approvals.ts";
 import { isKnownEditor } from "../../service/index.ts";
 import { invalidAiKeys } from "../../ai-keycheck.ts";
@@ -237,6 +240,8 @@ function getStatus(c: Context, cfg: RepoYetiConfig) {
       mcpAutoDeny: autoDenyIsEnabled(),
       mcpAutoApprove: autoApproveIsEnabled(),
       mcpAutoApproveTimeoutSecs: getApproveTimeoutSecs(),
+      // Webhook mode's policy-service URL (null = off). Owner-only, like every rail above.
+      mcpApprovalWebhookUrl: getApprovalWebhookUrl(),
       // Providers whose AI key the boot-time liveness check found dead — so a dashboard that opens
       // AFTER boot still raises the "AI key problem" notification, not just one connected at boot.
       aiKeyInvalid: invalidAiKeys(),
@@ -462,7 +467,7 @@ function applyAgentSafetyRailFields(
   cfg: RepoYetiConfig,
   b: SettingsUpdateBody,
   changed: Record<string, unknown>,
-) {
+): boolean {
   if (typeof b.mcpApprovalGate === "boolean") {
     cfg.mcpApprovalGate = b.mcpApprovalGate;
     setApprovalGateEnabled(b.mcpApprovalGate);
@@ -508,6 +513,17 @@ function applyAgentSafetyRailFields(
     cfg.mcpAutoApproveTimeoutSecs = setApproveTimeoutSecs(b.mcpAutoApproveTimeoutSecs);
     Object.assign(changed, { mcpAutoApproveTimeoutSecs: cfg.mcpAutoApproveTimeoutSecs });
   }
+  // Webhook mode: "" clears it; anything else must be an absolute http(s) URL without credentials.
+  // A bad value is flagged, not applied, and the handler answers 400 after the other fields land
+  // (same convention as changesStatDisplay).
+  if (typeof b.mcpApprovalWebhookUrl === "string") {
+    const url = normalizeApprovalWebhookUrl(b.mcpApprovalWebhookUrl);
+    if (url === undefined) return true;
+    cfg.mcpApprovalWebhookUrl = url ?? undefined;
+    setApprovalWebhookUrl(url);
+    changed.mcpApprovalWebhookUrl = url;
+  }
+  return false;
 }
 
 // "Open with…" default editor. An empty string clears the preference (auto-pick the first
@@ -551,7 +567,7 @@ async function putSettings(c: Context, cfg: RepoYetiConfig) {
     applyAutoCommitFields(cfg, b, changed);
     applyAutoUpdateFields(cfg, b, changed);
     applyMiscFlagFields(cfg, b, changed);
-    applyAgentSafetyRailFields(cfg, b, changed);
+    const badWebhookUrl = applyAgentSafetyRailFields(cfg, b, changed);
     applyDefaultEditorField(cfg, b, changed);
     // One save + one broadcast for the whole request (see the block comment above) — only if
     // at least one field was actually accepted; a request with nothing to apply does nothing.
@@ -564,6 +580,9 @@ async function putSettings(c: Context, cfg: RepoYetiConfig) {
     // "this one value was rejected", not "nothing happened".
     if (badStatDisplay) {
       return jsonError(c, "BAD_REQUEST", 'changesStatDisplay must be "numbers" or "bars"');
+    }
+    if (badWebhookUrl) {
+      return jsonError(c, "BAD_REQUEST", "mcpApprovalWebhookUrl must be an absolute http(s) URL without credentials, or \"\" to clear it");
     }
     return c.json({
       ok: true,
@@ -597,6 +616,7 @@ async function putSettings(c: Context, cfg: RepoYetiConfig) {
       mcpAutoDeny: autoDenyIsEnabled(),
       mcpAutoApprove: autoApproveIsEnabled(),
       mcpAutoApproveTimeoutSecs: getApproveTimeoutSecs(),
+      mcpApprovalWebhookUrl: getApprovalWebhookUrl(),
       defaultEditor: cfg.defaultEditor ?? null,
     });
 }
