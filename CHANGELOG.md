@@ -22,6 +22,19 @@ All notable changes to RepoYeti are documented here. The format is based on
   `GET /api/approvals/receipts`, with whether each one ran or was refused and whether its signature
   still verifies. The pending card and its SSE event also carry the digest. Idea from
   microsoft/ai-agents-for-beginners' human authorization receipts (MIT).
+- **Pull or push every selected repository at once.** After Fetch all shows which repos are behind
+  or ahead, select them (a Shift-range or Ctrl+A works) and press Pull or Push in the bulk bar
+  instead of opening each card. Each repo goes through the same action as its card's button, so
+  pull stays fast-forward only and push is never forced; a repo the daemon refuses is named in the
+  toast rather than folded into a bare failure count.
+- **Shift-select a range of repositories, and Ctrl+A / Escape, in select mode.** Picking ten repos
+  for a bulk action used to take ten taps. In select mode, Shift-click (or Shift+Enter/Space on a
+  focused row) now sets every repo between the last one you picked and this one to that repo's
+  state, Ctrl+A (Cmd+A on macOS) ticks every repo on screen and Escape clears the selection (both
+  are listed in Settings and follow its shortcuts switch; Escape closes an open file viewer first).
+  A range, Ctrl+A and Select all follow the order the cards are drawn in and skip a collapsed
+  section, so they never tick a repo you cannot see. Underneath, gestures become "set all" and "set range" requests that the selection
+  applies to its own store, an idea adapted from Dear ImGui's multi-select API.
 
 ## [1.1.0] - 2026-09-22
 

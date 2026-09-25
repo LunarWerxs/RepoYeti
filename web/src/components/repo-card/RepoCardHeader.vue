@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 import { fromNow } from "@/lib/util";
 import { identityInitials, identityTint } from "@/lib/identity-display";
 import { repoViolatesIdentityRule } from "@/lib/identity-firewall";
-import { isSelected, selectionActive, toggleSelected } from "@/lib/repo-selection";
+import { activateRepo, isSelected, selectionActive } from "@/lib/repo-selection";
 import DiffStat from "../DiffStat.vue";
 import {
   DropdownMenu,
@@ -72,9 +72,15 @@ const rowLabel = computed(() => {
   if (selecting.value) return t("repo.selectToggle", { name: props.repo.displayName || props.repo.name });
   return props.expanded ? t("repo.collapse") : t("repo.expand");
 });
-function onRowActivate(): void {
-  if (selecting.value) toggleSelected(props.repo.id);
+// Shift extends a range from the last plain pick and Ctrl/Cmd toggles, the same whether it came
+// from a click or from Enter/Space on the focused row (see @/lib/multi-select).
+function onRowActivate(e: MouseEvent | KeyboardEvent): void {
+  if (selecting.value) activateRepo(props.repo.id, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
   else emit("toggle");
+}
+// Shift-click otherwise paints a text selection across every card between the two clicks.
+function onRowMousedown(e: MouseEvent): void {
+  if (selecting.value && e.shiftKey) e.preventDefault();
 }
 // Keys aimed at a nested control belong to that control. The drag handle, the identity/sync
 // menu trigger and the expand chevron are all real <button>s that handle Enter/Space themselves,
@@ -84,7 +90,7 @@ function onRowActivate(): void {
 function onRowKeydown(e: KeyboardEvent): void {
   if ((e.target as HTMLElement).closest("button,[role='button']") !== e.currentTarget) return;
   e.preventDefault();
-  onRowActivate();
+  onRowActivate(e);
 }
 
 const st = computed(() => props.repo.status);
@@ -204,6 +210,7 @@ const detectedReason = computed(() => {
     class="group flex cursor-pointer items-center gap-1 rounded-md p-2 outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring/40 sm:gap-1.5 sm:p-2.5"
     :class="selecting && picked && 'bg-primary/10'"
     @click="onRowActivate"
+    @mousedown="onRowMousedown"
     @keydown.enter="onRowKeydown"
     @keydown.space="onRowKeydown"
   >

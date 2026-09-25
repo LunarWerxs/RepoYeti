@@ -28,6 +28,8 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "viewerClose", keys: ["Esc"] },
   { id: "viewerSave", keys: ["Ctrl/⌘", "S"] },
   { id: "treeResize", keys: ["↑", "↓", "Del"] },
+  { id: "selectAll", keys: ["Ctrl/⌘", "A"] },
+  { id: "selectClear", keys: ["Esc"] },
 ];
 
 /** Whether shortcuts should fire right now (the one master switch). */

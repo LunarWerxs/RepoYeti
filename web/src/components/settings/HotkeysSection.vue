@@ -20,6 +20,8 @@ const shortcutDesc = computed<Record<string, string>>(() => ({
   viewerClose: t("settings.hotkeysList.viewerClose"),
   viewerSave: t("settings.hotkeysList.viewerSave"),
   treeResize: t("settings.hotkeysList.treeResize"),
+  selectAll: t("settings.hotkeysList.selectAll"),
+  selectClear: t("settings.hotkeysList.selectClear"),
 }));
 </script>
 

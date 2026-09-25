@@ -5,10 +5,24 @@
 // menu turns the mode on, every RepoCardHeader renders a checkbox and toggles membership, and
 // RepoBulkBar acts on the result. Deliberately NOT persisted: a selection is a momentary
 // intent, and finding the dashboard still in select mode after a reload would be a trap.
+//
+// Gestures go through the request model in @/lib/multi-select: a tap, Shift-tap, Ctrl+A or Escape
+// becomes set-all / set-range requests that this module applies to its own ID-keyed Set.
 import { computed, nextTick, ref } from "vue";
+import {
+  applySelectionRequests,
+  itemRequests,
+  type SelectModifiers,
+  type SelectionRequest,
+} from "@/lib/multi-select";
 
 const active = ref(false);
 const selected = ref<Set<string>>(new Set());
+// The last repo picked by a plain tap: where a Shift-tap ranges from.
+let anchor: string | null = null;
+// The repo ids in on-screen order, supplied by whoever renders the list (RepoBulkBar, which knows
+// the filters and the collapsed sections). The selection can't derive it: order is the list's.
+let rangeOrder: () => readonly string[] = () => [];
 // Whatever opened select mode (the header's ⋮ button). Leaving the mode unmounts the bulk bar,
 // which destroys the very control the user just activated — without this, focus would fall to
 // <body> and a keyboard/screen-reader user would lose their place entirely.
@@ -43,9 +57,27 @@ export function toggleSelected(repoId: string): void {
   selected.value = next;
 }
 
-/** Tick an explicit list (used by the bulk bar's "select all visible"). */
-export function selectAll(repoIds: string[]): void {
-  selected.value = new Set(repoIds);
+/** Publish the on-screen order Shift-ranges resolve against; returns an unregister function. */
+export function provideRangeOrder(order: () => readonly string[]): () => void {
+  rangeOrder = order;
+  return () => {
+    if (rangeOrder === order) rangeOrder = () => [];
+  };
+}
+
+/** Apply selection requests; `order` defaults to the published on-screen order. */
+export function applyRequests(requests: readonly SelectionRequest[], order = rangeOrder()): void {
+  selected.value = applySelectionRequests(selected.value, requests, order);
+}
+
+/**
+ * A card row was tapped (or Enter/Space pressed on it) in select mode. A plain tap toggles that
+ * repo; with Shift it sets every repo between the anchor and this one to the anchor's state.
+ */
+export function activateRepo(repoId: string, mods: SelectModifiers): void {
+  const r = itemRequests(repoId, mods, anchor, isSelected);
+  anchor = r.anchor;
+  applyRequests(r.requests);
 }
 
 export function clearSelection(): void {
@@ -58,6 +90,7 @@ export function clearSelection(): void {
  */
 export function startSelecting(trigger?: HTMLElement | null): void {
   returnFocusTo = trigger ?? null;
+  anchor = null;
   selected.value = new Set();
   active.value = true;
 }
@@ -65,6 +98,7 @@ export function startSelecting(trigger?: HTMLElement | null): void {
 /** Leave select mode, drop the selection, and hand focus back to whatever opened it. */
 export function stopSelecting(): void {
   active.value = false;
+  anchor = null;
   selected.value = new Set();
   const el = returnFocusTo;
   returnFocusTo = null;
