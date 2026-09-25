@@ -26,6 +26,10 @@ process.env.GIT_TERMINAL_PROMPT = "0";
 // and silently replaced the live daemon's signing key. No test may touch an OS credential store.
 process.env.REPOYETI_KEYCHAIN_MEMORY = "1";
 process.env.REPOYETI_KEYCHAIN_SERVICE = `repoyeti-test-${process.pid}`;
+// Every route test is also a contract test for /api/openapi.json: with this set, createApp()
+// validates each handler's JSON answer against the response schema the doc declares for it and
+// turns a mismatch into a 500 naming the route and the field (src/http/response-check.ts).
+process.env.REPOYETI_RESPONSE_CHECK = "1";
 
 // ── the blast door ────────────────────────────────────────────────────────────────
 // Stop git from ever walking OUT of the scratch root and into this repository.

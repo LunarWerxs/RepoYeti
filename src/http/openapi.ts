@@ -468,8 +468,11 @@ export const META: Record<string, RouteMeta> = {
  * The declared schema for one real response, or null when the doc makes no claim about it.
  * A non-2xx answer is always the `default` ErrorResponse; a 2xx is whatever META declares. Keyed
  * like META (`"<METHOD> <hono-path>"`), so response-check.ts asks with the route Hono matched.
+ * Only paths buildOpenApiDoc publishes are held to it: the collaborator ingress (/c/...) and the
+ * share redemption (/s/...) sit outside the doc and keep their own deliberately terse bodies.
  */
 export function declaredResponseSchema(method: string, honoPath: string, status: number): z.ZodType | null {
+  if (!honoPath.startsWith("/api/") && !honoPath.startsWith("/oauth/")) return null;
   if (status < 200 || status >= 300) return ErrorResponse;
   return META[`${method} ${honoPath}`]?.response ?? null;
 }

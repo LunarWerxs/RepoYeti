@@ -281,7 +281,7 @@ async function getCommitFileRoute(c: Context<BlankEnv, "/api/repos/:id/commit/:h
 // file); the dashboard always sends it.
 async function putFileRoute(c: Context<BlankEnv, "/api/repos/:id/file">, cfg: Deps["cfg"]) {
   const id = c.req.param("id");
-  if (!id) return c.json({ error: "missing repo id" }, 400);
+  if (!id) return jsonError(c, "BAD_REQUEST", "missing repo id");
   const blocked = remoteEditingBlocked(c, cfg);
   if (blocked) return blocked;
   const path = c.req.query("path") ?? "";
