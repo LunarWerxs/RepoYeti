@@ -72,7 +72,16 @@ function getSnapshot(): { value: string; alternativeVersionId: number } {
   };
 }
 
-defineExpose({ getValue, getSnapshot, markClean });
+/** Where "Open with" should land: the cursor once the owner has moved it, else the first
+ *  dirty-diff change, else null (open at the top). Same WHY as MonacoDiffViewer's getJumpPosition. */
+function getJumpPosition(): { line: number; column: number } | null {
+  const pos = editor?.getPosition();
+  if (pos && (pos.lineNumber > 1 || pos.column > 1)) return { line: pos.lineNumber, column: pos.column };
+  const first = props.changedLines?.[0];
+  return first ? { line: Math.max(1, first.startLine), column: 1 } : null;
+}
+
+defineExpose({ getValue, getSnapshot, markClean, getJumpPosition });
 
 /** Paint the dirty-diff gutter markers from `changedLines`. Re-applied whenever the model or the
  *  ranges change; cleared when there are none (or the editor is editable — a live edit's line

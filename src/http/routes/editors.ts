@@ -25,8 +25,9 @@ export function register(app: Hono, { cfg }: Deps): void {
   // Launch a repo folder (and optionally one changed file) in an external editor. The editor runs
   // on the DAEMON'S machine, so this is loopback-only — a request over the tunnel can't pop a
   // window on the desktop and shouldn't be able to spawn a process there. `editor` omitted ⇒ the
-  // owner's default; `path` omitted ⇒ open the folder alone. Path is confined to the repo inside
-  // openInEditor.
+  // owner's default (or, with none saved, the editor already running); `path` omitted ⇒ open the
+  // folder alone. Path is confined to the repo inside openInEditor. Optional `line`/`column`
+  // (positive integers, else 400 BAD_LINE) open the file at that spot in editors with a goto flag.
   app.post("/api/repos/:id/open", async (c) => {
     const id = requireId(c);
     if (id instanceof Response) return id;
@@ -39,12 +40,16 @@ export function register(app: Hono, { cfg }: Deps): void {
     const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     const editor = typeof b.editor === "string" ? b.editor : undefined;
     const path = typeof b.path === "string" ? b.path : undefined;
-    const result = await openInEditor(id, editor, path, { defaultEditor: cfg.defaultEditor });
+    const result = await openInEditor(id, editor, path, {
+      defaultEditor: cfg.defaultEditor,
+      line: b.line,
+      column: b.column,
+    });
     if (result.ok) return c.json(result);
     const status: ContentfulStatusCode =
       result.code === "NOT_FOUND"
         ? 404
-        : result.code === "BAD_PATH" || result.code === "NO_EDITOR"
+        : result.code === "BAD_PATH" || result.code === "NO_EDITOR" || result.code === "BAD_LINE"
           ? 400
           : 500;
     return c.json(result, status);

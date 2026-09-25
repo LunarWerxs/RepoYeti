@@ -4,6 +4,18 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **"Open with" lands on the line you were reading.** Opening a file from the viewer used to put
+  your editor at the top of the file, so you had to find the hunk again. It now opens at the line
+  you clicked, or at the first changed hunk, using each editor's own flag (`-g file:line:col` for
+  VS Code and its forks, `file:line:col` for Zed and Sublime Text, `-n`/`-c` for Notepad++).
+  `POST /api/repos/:id/open` takes optional `line`/`column`, and anything but a positive integer is
+  refused with `BAD_LINE` before an editor is launched. With no editor picked and no default saved,
+  the editor you already have running is chosen over the first one installed.
+
 ## [1.1.0] - 2026-09-22
 
 ### Fixed

@@ -569,8 +569,9 @@ export const api = {
   setDefaultEditor: (id: string) =>
     req<{ ok: boolean; defaultEditor: string | null }>("PUT", "/api/settings", { defaultEditor: id }),
   /** Launch a repo folder (and optional changed file) in an external editor. `editor` omitted ⇒
-   *  the owner's default; `path` omitted ⇒ the folder alone. Loopback-only (403 over the tunnel). */
-  openInEditor: (repoId: string, body: { editor?: string; path?: string }) =>
+   *  the owner's default; `path` omitted ⇒ the folder alone; `line`/`column` open the file at that
+   *  spot in editors with a goto flag. Loopback-only (403 over the tunnel). */
+  openInEditor: (repoId: string, body: { editor?: string; path?: string; line?: number; column?: number }) =>
     req<OpenResult>("POST", `/api/repos/${repoId}/open`, body),
 
   // ── ⭐ Agent Safety Rail — pending MCP tool-call approvals ────────────────────

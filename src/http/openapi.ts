@@ -260,7 +260,7 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/repos/:id/discard": { summary: "Discard one changed file's working-tree changes.", body: DiscardSchema, tags: ["files"] },
   "POST /api/repos/:id/stage": { summary: "Stage one changed file's working-tree change into the index.", body: StageSchema, tags: ["files"] },
   "GET /api/editors": { summary: "List detected \"Open with…\" editors + the effective default (loopback convenience).", tags: ["files"] },
-  "POST /api/repos/:id/open": { summary: "Open a repo folder (and optional file) in an external editor. Loopback-only.", tags: ["files"] },
+  "POST /api/repos/:id/open": { summary: "Open a repo folder (and optional file, at an optional line/column) in an external editor; with no editor or saved default, prefers the one already running. Loopback-only (body: { editor?, path?, line?, column? }).", tags: ["files"] },
 
   // ── repo display flags / identity ──────────────────────────────────────────────────
   "POST /api/repos/:id/identity": { summary: "Assign (or clear) a commit identity for a repo.", body: AssignIdentitySchema, tags: ["repos"] },

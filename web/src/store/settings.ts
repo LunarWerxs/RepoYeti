@@ -601,7 +601,10 @@ export function useSettings(deps: {
 
   /** Launch a repo folder (and optional changed file) in an editor. Throws ApiError on failure
    *  (the caller toasts); resolves with the OpenResult on success. */
-  async function openInEditor(repoId: string, opts: { editor?: string; path?: string } = {}): Promise<OpenResult> {
+  async function openInEditor(
+    repoId: string,
+    opts: { editor?: string; path?: string; line?: number; column?: number } = {},
+  ): Promise<OpenResult> {
     return api.openInEditor(repoId, opts);
   }
 
