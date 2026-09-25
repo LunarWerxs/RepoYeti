@@ -1178,6 +1178,28 @@ owner can mint an **optional API token** and the agent authenticates with a Bear
   byte-for-byte the OIDC-only behavior described above; a request over the tunnel still requires a
   signed-in owner *or* the explicit token. The token is purely additive, for the headless case.
 
+### Opening a local dev server: the port proxy
+`/proxy/<port>/...` forwards HTTP and WebSocket traffic to `127.0.0.1:<port>`, so the owner can open
+a repo's running dev server from the phone through the tunnel that already has a login in front of it
+(`src/http/routes/port-proxy.ts`; the idea is code-server's path proxy).
+- **Off by default.** `portProxy: true` in config.json, or `PUT /api/settings {"portProxy": true}`.
+  A proxied page is served from the dashboard's own origin, so its scripts can call `/api/*` as the
+  owner: meant for your own dev servers, not for a port serving someone else's content. It never
+  syncs to another machine (connections-sync `NEVER_SYNCED`).
+- **Owner only.** `isOwnerRequest` (auth.ts) is the `/api/*` gate minus the guest arm: a share link
+  never opens a port, and with no OIDC client configured the proxy answers loopback only. An
+  anonymous page load is redirected to `/` (the sign-in); anything else gets a bare 401. Loopback
+  requests also pass the same loopback guard as `/api/*`.
+- **Never the daemon itself.** The daemon's own port is refused: the forwarded hop arrives from
+  127.0.0.1 without the caller's cookies and would be judged by the local-mode rules instead.
+- **No credential crosses over.** The daemon's cookies and a matching Bearer token are stripped from
+  the forwarded request, and an upstream `Set-Cookie` for one of those names is dropped. `Origin` is
+  rewritten to the upstream's own loopback origin (dev servers such as Vite refuse a foreign one on
+  their hot-reload socket), after the daemon has done its own auth and CSRF checks.
+- **Paths.** The `/proxy/<port>` prefix is stripped, so the app should use relative asset paths or a
+  base of `/proxy/<port>/`; redirects back to the app are rewritten to keep the prefix, and
+  `X-Forwarded-Prefix` says where it is mounted.
+
 ### To bring it fully live
 1. Run RepoYeti with **remote access on** using the RepoYeti address, direct Cloudflare address, or a
    configured named tunnel.

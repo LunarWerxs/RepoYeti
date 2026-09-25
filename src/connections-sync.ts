@@ -132,6 +132,8 @@ const NEVER_SYNCED = [
   "autoUpdate",
   "mcpApprovalGate", // turning the gate OFF is fail-open; that must be a per-machine choice
   "mcpAutoApprove", // likewise fail-open
+  // Opens this machine's local ports through the daemon: security posture, decided per machine.
+  "portProxy",
   // Secrets and per-install infrastructure identity.
   "oauth",
   "tunnel",

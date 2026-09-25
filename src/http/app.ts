@@ -89,6 +89,7 @@ import * as automation from "./routes/automation.ts";
 import * as database from "./routes/database.ts";
 import * as shares from "./routes/shares.ts";
 import * as collaborations from "./routes/collaborations.ts";
+import * as portProxy from "./routes/port-proxy.ts";
 
 export interface AppHooks {
   requestShutdown?: () => void;
@@ -202,6 +203,9 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   // BEFORE the auth gate so the cheap provenance check fronts it. See src/loopback-guard.mjs.
   const guard = createLoopbackGuard({ allowedOrigins: () => trustedLocalOrigins(cfg) });
   app.use("/api/*", (c, next) => (isRemoteRequest(c) ? next() : guard(c, next)));
+  // The port proxy (routes/port-proxy.ts) lives outside /api/* but is just as able to act on this
+  // machine, so a loopback request to it passes the same provenance check.
+  app.use("/proxy/*", (c, next) => (isRemoteRequest(c) ? next() : guard(c, next)));
   // Auth gate — applies to /api/* only; no-op when OIDC isn't configured (local mode).
   // MUST be registered first so it fronts every /api/* route below.
   app.use("/api/*", authMiddleware(cfg));
@@ -277,6 +281,9 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   // Share links: /api/shares/* (owner-gated like everything under /api/*) plus the public
   // GET /s/:token redemption. Registered before mountWeb so /s/... isn't eaten by the SPA fallback.
   shares.register(app, deps);
+  // Port proxy: /proxy/<port>/* to a local dev server, owner-only and off unless `portProxy` is set.
+  // Before mountWeb for the same reason as /s/... above.
+  portProxy.register(app, deps);
 
   // Static PWA — LAST, so the /* catch-all only catches non-API routes.
   mountWeb(app);

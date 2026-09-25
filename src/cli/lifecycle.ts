@@ -42,6 +42,7 @@ import { discoverStream } from "../discovery.ts";
 import { findFreePort } from "../find-free-port.mjs";
 import { checkForUpdate as checkGithubReleasePing } from "../github-updater.ts";
 import { createApp } from "../http/app.ts";
+import { portProxyWebSocket } from "../http/routes/port-proxy.ts";
 import {
   clearInstanceInfo,
   clearShutdownRequest,
@@ -644,5 +645,7 @@ async function listen(app: ReturnType<typeof createApp>, startPort: number) {
     hostname: "127.0.0.1",
     idleTimeout: 0, // long-lived SSE; we send our own keepalive
     fetch: app.fetch,
+    // The only sockets this server accepts are the port proxy's (routes/port-proxy.ts).
+    websocket: portProxyWebSocket,
   });
 }
