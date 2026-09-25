@@ -55,7 +55,9 @@ beforeAll(async () => {
   writeFileSync(join(dir, "app.ts"), "export const x = 1;\n");
   await $`git -C ${dir} add -A`.quiet();
   await $`git -C ${dir} commit -q -m init`.quiet();
-  writeFileSync(join(dir, ".env"), "API_KEY=do-not-leak\n"); // ignored
+  // Ignored but not secret-shaped: over remote access a `.env` is refused by name before the ignore
+  // guard runs (tests/file-access-guard.test.ts), so it could not show this guard at work.
+  writeFileSync(join(dir, "debug.log"), "API_KEY=do-not-leak\n"); // ignored
   writeFileSync(join(dir, "notes.txt"), "a new file the guest can see in Changes\n"); // untracked, visible
   writeFileSync(join(dir, "app.ts"), "export const x = 2;\n"); // a tracked, changed file
   repoId = mustUpsertRepo(dir, "ignored-read", "pinned", false);
@@ -74,9 +76,9 @@ async function asGuest(path: string): Promise<Response> {
 
 test("a guest cannot read an ignored file from the working tree, by /file or by /diff", async () => {
   for (const url of [
-    `/api/repos/${repoId}/file?path=.env`,
-    `/api/repos/${repoId}/file?path=.env&preview=pdf`,
-    `/api/repos/${repoId}/diff?path=.env`,
+    `/api/repos/${repoId}/file?path=debug.log`,
+    `/api/repos/${repoId}/file?path=debug.log&preview=pdf`,
+    `/api/repos/${repoId}/diff?path=debug.log`,
   ]) {
     const res = await asGuest(url);
     expect(res.status).toBe(404);
@@ -95,7 +97,7 @@ test("a guest still reads what the dashboard shows them: changed, untracked and 
 });
 
 test("the owner is untouched: an ignored file is theirs to read", async () => {
-  const res = await createApp(cfg()).request(`/api/repos/${repoId}/file?path=.env`, {
+  const res = await createApp(cfg()).request(`/api/repos/${repoId}/file?path=debug.log`, {
     headers: { ...REMOTE, cookie: ownerCookie() },
   });
   expect(res.status).toBe(200);
