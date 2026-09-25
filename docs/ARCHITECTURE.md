@@ -983,7 +983,11 @@ for (const c of commits) {
   never autosquashes: that is a rebase, and rebase stays out of scope (§3); the message is for the
   owner's own `git rebase --autosquash` on a desktop. The same check is `GET
   /api/repos/:id/fixup-base` (owner-only, `?path=` repeatable) and the read-only MCP tool
-  `fixup_base`, so an agent can commit review feedback as a fixup through `git_commit`.
+  `fixup_base`. Untracked files count as unresolved `new-file`, so `single` is non-null only when
+  every change in scope, untracked included, fixes that one commit. `git_commit` stages the whole
+  tree (`git add -A`, no paths), so an agent may commit review feedback as a fixup through it only
+  when `single` is non-null for an UNSCOPED query (no `path`); any other answer would fold
+  unrelated changes into the target, and the tool description says so.
 
 ### 9. Web (`web/`)
 

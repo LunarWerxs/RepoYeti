@@ -155,15 +155,20 @@ export const TOOLS: McpTool[] = [
     run: (b, a) => b.search(reqString(a, "repo"), reqString(a, "query")),
   },
   {
-    // WHY: lets an agent turn review-feedback edits into `fixup! <subject>` commits (pass the
-    // returned `message` to git_commit) instead of stacking a new commit on unpushed work.
+    // WHY: lets an agent turn review-feedback edits into `fixup! <subject>` commits instead of
+    // stacking a new commit on unpushed work. git_commit stages the WHOLE tree, so the description
+    // limits it to an unscoped `single` answer: anything else would fold unrelated changes into X.
     name: "fixup_base",
     description:
       "Find which unpushed commit a working-tree change fixes, by blaming the lines each changed " +
       "file rewrites. Returns `targets` (each: commit hash, subject, the `fixup! <subject>` message " +
       "to commit with, and the files that fix only that commit), `single` when the whole change " +
       "maps to exactly one commit, and `unresolved` files (touching pushed lines, several commits, " +
-      "new, binary). Never rebases; autosquash is left to the owner.",
+      "new or untracked, binary). Never rebases; autosquash is left to the owner. git_commit " +
+      "stages EVERY change in the tree (git add -A, no paths), so pass it the `message` only when " +
+      "`single` is non-null for a call WITHOUT `paths` (every change, untracked files included, then " +
+      "fixes that one commit) and nothing has changed since; in any other case do not commit a " +
+      "fixup through git_commit, or unrelated changes are folded into that commit.",
     readOnly: true,
     inputSchema: {
       type: "object",
@@ -276,7 +281,9 @@ export const TOOLS: McpTool[] = [
   },
   {
     name: "git_commit",
-    description: "MUTATES: commit a repository's working tree with the given message (optionally amend).",
+    description:
+      "MUTATES: stage every change in a repository's working tree (git add -A, untracked files " +
+      "included) and commit it with the given message (optionally amend).",
     readOnly: false,
     inputSchema: {
       type: "object",

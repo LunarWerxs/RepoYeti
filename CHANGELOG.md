@@ -14,7 +14,8 @@ All notable changes to RepoYeti are documented here. The format is based on
   `git rebase --autosquash` (RepoYeti itself still never rebases). Files that touch pushed lines or
   lines from two unpushed commits are never offered, so each fixup stays atomic. The same check is
   `GET /api/repos/:id/fixup-base` and the read-only MCP tool `fixup_base`, so an agent can commit
-  review feedback as a fixup too. The approach follows lazygit's base-commit finder.
+  review feedback as a fixup too, through `git_commit` only when the whole tree (untracked files
+  included) fixes one commit. The approach follows lazygit's base-commit finder.
 
 ## [1.1.0] - 2026-09-22
 

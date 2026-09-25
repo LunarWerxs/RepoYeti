@@ -30,7 +30,7 @@ interface Fixture {
  *   a.txt  line 3 rewritten           -> pushed lines, unresolved
  *   n.txt  line 2 (U1) and 4 (U2)     -> two commits, unresolved
  *   t.txt  line 2 rewritten (U2)      -> U2, by deleted lines
- *   u.txt  a line appended at EOF     -> U1, by the bordering line (the EOF clip path)
+ *   u.txt  a line appended at EOF     -> U1, by the bordering line (git clips the range end)
  *   new.txt staged, not in HEAD       -> new file, unresolved
  */
 async function fixture(): Promise<Fixture> {
@@ -94,6 +94,20 @@ test("scoping to paths that fix one commit yields the single atomic answer", asy
   expect(r.single?.hash).toBe(u2);
   expect(r.single?.files.map((f) => f.path)).toEqual(["t.txt"]);
   expect(r.unresolved).toEqual([]);
+});
+
+// Regression: `diff HEAD` never lists untracked files, so `single` once named a target while an
+// untracked file sat in the tree, and git_commit's `add -A` would have folded it into the fixup.
+test("an untracked file is unresolved and withholds the single answer", async () => {
+  const { work } = await fixture();
+  const W = git(work);
+  // Leave only t.txt (fixes U2) changed, plus new.txt untracked rather than staged.
+  await W("checkout", "--", "a.txt", "n.txt", "u.txt");
+  await W("rm", "-q", "--cached", "new.txt");
+  const r = await readFixupBases(work);
+  expect(r.targets.map((t) => t.files.map((f) => f.path))).toEqual([["t.txt"]]);
+  expect(r.unresolved).toEqual([{ path: "new.txt", reason: "new-file" }]);
+  expect(r.single).toBeNull();
 });
 
 test("withFixups keeps only offers for files the plan covers", () => {

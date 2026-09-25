@@ -620,18 +620,21 @@ function commitPlanFallbackReason(
 
 // Fixup offers for a commit plan: the files whose changed lines all blame to one unpushed commit
 // (service getFixupBases). Best-effort by design: it only ADDS an option, so any failure yields
-// none and the plan is served exactly as before.
+// none and the plan is served exactly as before. Only `deleted` evidence is offered: a pure
+// insertion (`context`) does not change the target's lines, so the banner's claim would be false.
 async function planFixups(id: string, paths: string[] | undefined): Promise<CommitPlanFixup[]> {
   try {
     const r = await getFixupBases(id, paths);
     if (!r.ok) return [];
-    return r.targets.map((t) => ({
-      hash: t.hash,
-      shortHash: t.shortHash,
-      subject: t.subject,
-      message: t.message,
-      files: t.files.map((f) => f.path),
-    }));
+    return r.targets
+      .map((t) => ({
+        hash: t.hash,
+        shortHash: t.shortHash,
+        subject: t.subject,
+        message: t.message,
+        files: t.files.filter((f) => f.evidence === "deleted").map((f) => f.path),
+      }))
+      .filter((t) => t.files.length > 0);
   } catch {
     return [];
   }

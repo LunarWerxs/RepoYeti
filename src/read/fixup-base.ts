@@ -23,6 +23,7 @@
  *                                                 ref; with no remote at all, local history is all
  *                                                 unpublished), capped at MAX_UNPUSHED_COMMITS
  *   · `diff --numstat -z --no-renames HEAD`     - which tracked files changed, and how much
+ *   · `ls-files --others --exclude-standard`    - untracked files (always unresolved `new-file`)
  *   · `diff -U0 HEAD -- <file>`                 - that file's hunk headers
  *   · `blame --porcelain -L … HEAD -- <file>`   - who last wrote the touched lines
  */
@@ -48,7 +49,7 @@ export type FixupUnresolvedReason =
   | "multiple"
   /** At least one touched line comes from a commit already pushed (or older than the cap). */
   | "pushed"
-  /** Not in HEAD at all: a brand-new file has no earlier commit to fix. */
+  /** Not in HEAD at all (staged or untracked): a brand-new file has no earlier commit to fix. */
   | "new-file"
   | "binary"
   | "too-large"
@@ -88,7 +89,8 @@ export interface FixupBaseResult {
   /** The whole checked change resolves to exactly one commit (lazygit's atomic answer), else null. */
   single: FixupTarget | null;
   unresolved: FixupUnresolved[];
-  /** True when more than MAX_FIXUP_FILES changed files matched and the rest were not examined. */
+  /** True when more than MAX_FIXUP_FILES changed (or untracked) files matched and the rest were
+   *  not examined. */
   truncated: boolean;
 }
 
@@ -126,7 +128,9 @@ export function parseZeroContextHunks(diff: string): ZeroContextHunk[] {
  * Deleted or rewritten lines win outright: they were written by exactly the commit being fixed.
  * Only a file with no deleted line at all falls back to the lines around each insertion: for
  * `-a,0` the new text sits after old line `a`, so lines `a` and `a + 1` border it (just line 1
- * for an insertion at the top). `a + 1` can be past the end of the file; the blame call clips it.
+ * for an insertion at the top). `a + 1` can be past the end of the file; git clips a range END
+ * itself, and blameCommits retries only when a START is past the end (an insertion into a file
+ * that is empty in HEAD).
  */
 export function blameRanges(
   hunks: readonly ZeroContextHunk[],
@@ -212,7 +216,8 @@ export function resolveFixupTargets(
   return { targets, unresolved };
 }
 
-function emptyResult(code: FixupBaseResult["code"], message?: string): FixupBaseResult {
+/** A result with no targets: the shape every early exit (and the service's non-git guard) returns. */
+export function emptyFixupResult(code: FixupBaseResult["code"], message?: string): FixupBaseResult {
   return {
     ok: code === "OK",
     code,
@@ -264,8 +269,9 @@ async function blameCommits(
   } catch (e) {
     const msg = errorMessage(e);
     if (/no such path/i.test(msg)) return "new-file";
-    // The line after an append at end-of-file does not exist; git names the real length, so
-    // clip to it and blame once more rather than reading the whole file to count its lines.
+    // git clips a range END past end-of-file by itself, but rejects a START past it (an insertion
+    // into a file that is empty in HEAD); it names the real length, so clip to it and blame once
+    // more rather than reading the whole file to count its lines.
     const only = /has only (\d+) lines?/i.exec(msg);
     if (!only) throw e;
     const clipped = clipRanges(ranges, Number(only[1]));
@@ -307,18 +313,23 @@ export async function readFixupBases(absPath: string, onlyPaths?: readonly strin
       } catch {
         head = "";
       }
-      if (!head) return emptyResult("OK", "no commits yet");
+      if (!head) return emptyFixupResult("OK", "no commits yet");
       const unpushed = await readUnpushed(git);
-      if (unpushed.size === 0) return emptyResult("OK", "no unpushed commits");
+      if (unpushed.size === 0) return emptyFixupResult("OK", "no unpushed commits");
 
       const pathspec = onlyPaths?.length ? ["--", ...onlyPaths.map((p) => `:(literal)${p}`)] : [];
       const changed = parseNumstatZ(
         splitZ(await git.raw(["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD", ...pathspec])),
       );
-      const truncated = changed.length > MAX_FIXUP_FILES;
+      // Untracked files are invisible to `diff HEAD`, yet a whole-tree commit (`git add -A`) sweeps
+      // them in: count each as an unresolved new file so `single` can never hide one.
+      const untracked = splitZ(await git.raw(["ls-files", "--others", "--exclude-standard", "-z", ...pathspec]));
+      const truncated = changed.length > MAX_FIXUP_FILES || untracked.length > MAX_FIXUP_FILES;
 
       const blamed: BlamedFile[] = [];
-      const skipped: FixupUnresolved[] = [];
+      const skipped: FixupUnresolved[] = untracked
+        .slice(0, MAX_FIXUP_FILES)
+        .map((path): FixupUnresolved => ({ path, reason: "new-file" }));
       for (const rec of changed.slice(0, MAX_FIXUP_FILES)) {
         if (rec.binary) {
           skipped.push({ path: rec.path, reason: "binary" });
@@ -346,6 +357,6 @@ export async function readFixupBases(absPath: string, onlyPaths?: readonly strin
       };
     });
   } catch (e) {
-    return emptyResult("ERROR", errorMessage(e));
+    return emptyFixupResult("ERROR", errorMessage(e));
   }
 }
