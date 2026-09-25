@@ -22,6 +22,7 @@ import {
   Timer,
   EyeOff,
   ShieldAlert,
+  Gauge,
 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { fromNow } from "@/lib/util";
 import { identityInitials, identityTint } from "@/lib/identity-display";
 import { repoViolatesIdentityRule } from "@/lib/identity-firewall";
+import { rankRepo, type RankReason } from "@/lib/repo-rank";
 import { isSelected, selectionActive, toggleSelected } from "@/lib/repo-selection";
 import DiffStat from "../DiffStat.vue";
 import {
@@ -132,6 +134,45 @@ const statusWord = computed(() =>
     props.expanded && "sm:max-w-[7rem] sm:opacity-100",
   ),
 );
+
+// ── attention rank (only while the grid is sorted by "Needs attention") ─────────
+// That order is an additive score (@/lib/repo-rank). Showing each card's points and the reason
+// behind every point is what makes the order explainable rather than a black box, and it is why a
+// stale repo reads "lowered, not hidden" instead of just sinking without comment.
+const rank = computed(() => (store.sortMode === "attention" ? rankRepo(props.repo, Date.now()) : null));
+function rankReasonText(r: RankReason): string {
+  switch (r.key) {
+    case "conflicted":
+      return t("repo.rank.conflicted");
+    case "midOperation":
+      return t("repo.rank.midOperation");
+    case "error":
+      return t("repo.rank.error");
+    case "behind":
+      return t("repo.rank.behind", { count: r.count ?? 0 }, r.count ?? 0);
+    case "ahead":
+      return t("repo.rank.ahead", { count: r.count ?? 0 }, r.count ?? 0);
+    case "dirty":
+      return t("repo.rank.dirty", { count: r.count ?? 0 }, r.count ?? 0);
+    case "detached":
+      return t("repo.rank.detached");
+    case "unfetched":
+      return r.days == null ? t("repo.rank.unfetched") : t("repo.rank.unfetchedDays", { days: r.days });
+    case "active":
+      return t("repo.rank.active");
+    case "stale":
+      return t("repo.rank.stale", { days: r.days ?? 0 });
+  }
+}
+function rankPoints(points: number): string {
+  return points > 0 ? `+${points}` : String(points);
+}
+const rankLabel = computed(() => {
+  const r = rank.value;
+  if (!r) return "";
+  const why = r.reasons.map((reason) => `${rankReasonText(reason)} ${rankPoints(reason.points)}`).join(", ");
+  return `${t("repo.rank.label", { score: r.score })}: ${why}`;
+});
 
 // ── identity (avatar dropdown) ────────────────────────────────────────────────
 const identity = computed(() =>
@@ -323,6 +364,21 @@ const detectedReason = computed(() => {
          touch they keep the default press-and-hold. -->
 
     <div class="flex shrink-0 items-center gap-1.5 text-[12px] font-medium">
+      <!-- attention score: only in the "Needs attention" sort; the tooltip lists every term -->
+      <Tooltip v-if="rank && rank.reasons.length">
+        <TooltipTrigger as-child>
+          <span :class="statusChip('muted')" :aria-label="rankLabel">
+            <Gauge :size="12" /><span class="ms-0.5">{{ rank.score }}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          <div class="flex flex-col gap-0.5">
+            <span v-for="r in rank.reasons" :key="r.key" class="flex justify-between gap-3">
+              <span>{{ rankReasonText(r) }}</span><span class="mono">{{ rankPoints(r.points) }}</span>
+            </span>
+          </div>
+        </TooltipContent>
+      </Tooltip>
       <Tooltip v-if="st && st.behind > 0">
         <TooltipTrigger as-child>
           <!-- `info` (blue), NOT warning: "behind" was previously the same amber as "changed",

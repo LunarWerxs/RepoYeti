@@ -4,6 +4,19 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **"Needs attention" sort that explains itself.** The Sort by menu gains a fourth order: every
+  repo gets an additive score (merge conflict, operation in progress, unreadable status, commits
+  behind or unpushed, changed files, detached HEAD, a stale fetch, recent activity) and its card
+  shows the score with a tooltip listing each reason and its points, which always add up to the
+  number shown. Commit counts weigh more than changed-file counts, all three are log-scaled and
+  share one cap, so a flood of generated files cannot outrank a conflict. A repo untouched for 90
+  days is lowered, never hidden, and still rises when something is wrong with it. Ranking idea
+  adapted from Z4nzu/hackingtool (MIT).
+
 ## [1.1.0] - 2026-09-22
 
 ### Fixed
