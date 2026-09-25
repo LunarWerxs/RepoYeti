@@ -4,6 +4,25 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **An agent's approved action is the exact action that runs, once.** The MCP approval gate used
+  to approve a request: a promise resolved "approved" and the tool then ran whatever arguments it
+  was holding at that moment, so nothing tied the owner's tap to the bytes they had read, nothing
+  stopped one approval from being used twice, and the in-memory queue meant a daemon restart
+  erased any record of who approved which push from a phone. Each decision is now a receipt
+  signed with a key derived from the daemon's own, carrying the sha256 of the canonical
+  `{tool, args}` (JCS-style: sorted keys, no whitespace). The gate checks it once, at execution,
+  and refuses with a reason the agent sees: `digest-mismatch` (arguments changed after approval),
+  `replayed`, `expired` (30 s after the decision), `stale-policy` (gate settings changed in
+  between), `rotated-key` (after "sign out everywhere"), `bad-signature` (the stored row was
+  edited) or `not-approved`. Receipts are kept in SQLite (newest 500) and served at
+  `GET /api/approvals/receipts`, with whether each one ran or was refused and whether its signature
+  still verifies. The pending card and its SSE event also carry the digest. Idea from
+  microsoft/ai-agents-for-beginners' human authorization receipts (MIT).
+
 ## [1.1.0] - 2026-09-22
 
 ### Fixed
