@@ -13,6 +13,10 @@
  * timeout — broadcasts `approval_resolved` and rejects/resolves the waiting MCP call with a
  * structured Error the engine turns into an MCP `isError` result (see mcp-stdio.mjs tools/call).
  *
+ * Webhook mode (cfg.mcpApprovalWebhookUrl set): instead of queueing, the gate POSTs the call to the
+ * owner's policy service, which approves it, denies it, or approves a rewritten copy of its
+ * arguments (requestWebhookVerdict below; wire contract in docs/APPROVAL_WEBHOOK.md).
+ *
  * Nothing here persists across a daemon restart — an in-flight approval simply times out (the
  * agent gets the timeout error, same as it would if the owner never looked at the dashboard).
  */
@@ -94,6 +98,52 @@ export function setApprovalTimeoutSecs(secs: number): number {
 export function setApproveTimeoutSecs(secs: number): number {
   approveTimeoutSecs = clampApprovalTimeoutSecs(secs);
   return approveTimeoutSecs;
+}
+
+// ── webhook mode ──
+// WHY: the manual/auto modes all end at a person or a timer. Webhook mode hands the decision to an
+// owner-run policy service instead (a script that says "never push to main after 18:00", "prefix
+// every agent commit message", ...), so the owner gets rules without RepoYeti growing a rules
+// engine. Absent URL = the dashboard modes above apply unchanged. Contract: docs/APPROVAL_WEBHOOK.md.
+let webhookUrl: string | null = null;
+
+/** How long the policy service has to answer before the call is denied (fail closed). */
+export const APPROVAL_WEBHOOK_TIMEOUT_MS = 10_000;
+/** Largest reply body read from the policy service; anything bigger is a denial, not a parse. */
+export const APPROVAL_WEBHOOK_REPLY_MAX = 65_536;
+/** Wire-contract version sent with every request, so a service can refuse one it doesn't know. */
+export const APPROVAL_WEBHOOK_VERSION = 1;
+/** Request header carrying the per-call id the service can log and trace against ours. */
+export const APPROVAL_WEBHOOK_REQID_HEADER = "X-RepoYeti-Reqid";
+
+/** The configured policy-service URL, or null when webhook mode is off. */
+export function getApprovalWebhookUrl(): string | null {
+  return webhookUrl;
+}
+
+/** Set (or clear with null) the policy-service URL at runtime (app.ts boot + PUT /api/settings). */
+export function setApprovalWebhookUrl(url: string | null): void {
+  webhookUrl = url;
+}
+
+/**
+ * Validate an owner-supplied webhook URL. Returns the normalized URL, null for "" (clear), or
+ * undefined when the value is not an absolute http(s) URL (the caller refuses it). Credentials in
+ * the URL are refused too: settings echo this value back, and userinfo would ride along with it.
+ */
+export function normalizeApprovalWebhookUrl(raw: unknown): string | null | undefined {
+  if (typeof raw !== "string") return undefined;
+  const s = raw.trim();
+  if (s === "") return null;
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return undefined;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
+  if (u.username || u.password) return undefined;
+  return u.toString();
 }
 
 /** One pending (or just-resolved) approval request. Kept minimal + JSON-serialisable so it can
@@ -318,4 +368,138 @@ export function clearAllPending(): void {
     if (entry.approveTimer) clearTimeout(entry.approveTimer);
   }
   pending.clear();
+}
+
+// ── webhook mode: the policy service's verdict ──
+
+/** What the policy service decided. `args` is what runs: the original object, or the rewritten copy. */
+export type WebhookVerdict =
+  | { outcome: "approved"; reqId: string; args: Record<string, unknown>; rewritten: boolean }
+  | { outcome: "denied"; reqId: string; reason: string };
+
+/** Argument keys a policy service may never rewrite: they choose WHICH repo the call acts on, and
+ *  sending an agent's push to a different repository is a different action, not an edit of this one. */
+const TARGET_ARGS = new Set(["repo", "collaboration"]);
+
+/** Clip a service-supplied string for the agent's error and the daemon log: one line, bounded. */
+function oneLine(s: string, max = 200): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point - a reply must not forge extra daemon log lines.
+  const flat = s.replace(/[\x00-\x1f\x7f]+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
+}
+
+/** Read a reply body up to `max` bytes; null when it is larger (the rest is never buffered). */
+async function readCapped(res: Response, max: number): Promise<string | null> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function askWebhook(
+  url: string,
+  reqId: string,
+  tool: string,
+  repo: string | null,
+  args: Record<string, unknown>,
+  rewritable: readonly string[],
+): Promise<WebhookVerdict> {
+  const deny = (reason: string): WebhookVerdict => ({ outcome: "denied", reqId, reason });
+  // The service sees what the dashboard card would: bounded, with secret-looking values hidden.
+  const content = { tool, repo, ...boundedArgs(args) };
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", [APPROVAL_WEBHOOK_REQID_HEADER]: reqId },
+      body: JSON.stringify({ version: APPROVAL_WEBHOOK_VERSION, op: "mcp_tool_call", reqId, content }),
+      // A redirect is not an answer: following it would send the request somewhere the owner
+      // never configured. It lands in the non-200 branch below and denies.
+      redirect: "manual",
+      signal: AbortSignal.timeout(APPROVAL_WEBHOOK_TIMEOUT_MS),
+    });
+  } catch (e) {
+    const why = e instanceof Error && e.name === "TimeoutError" ? "did not answer in time" : "was unreachable";
+    return deny(`approval webhook ${why}`);
+  }
+  if (res.status !== 200) {
+    await res.body?.cancel().catch(() => {});
+    return deny(`approval webhook answered HTTP ${res.status}`);
+  }
+  let text: string | null;
+  try {
+    text = await readCapped(res, APPROVAL_WEBHOOK_REPLY_MAX);
+  } catch {
+    return deny("approval webhook reply could not be read");
+  }
+  if (text === null) return deny("approval webhook reply was too large");
+  let reply: unknown;
+  try {
+    reply = JSON.parse(text);
+  } catch {
+    return deny("approval webhook reply was not JSON");
+  }
+  if (!reply || typeof reply !== "object" || Array.isArray(reply)) {
+    return deny("approval webhook reply was not a JSON object");
+  }
+  const { decision, reason, args: patch } = reply as { decision?: unknown; reason?: unknown; args?: unknown };
+  if (decision === "approve") return { outcome: "approved", reqId, args, rewritten: false };
+  if (decision === "deny") {
+    return deny(typeof reason === "string" && reason.trim() !== "" ? oneLine(reason) : "denied by approval webhook");
+  }
+  if (decision === "rewrite") {
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+      return deny("approval webhook rewrite carried no args object");
+    }
+    for (const key of Object.keys(patch)) {
+      if (!rewritable.includes(key) || TARGET_ARGS.has(key) || HIDDEN_ARG.test(key)) {
+        return deny(`approval webhook may not rewrite "${oneLine(key, 60)}"`);
+      }
+    }
+    return { outcome: "approved", reqId, args: { ...args, ...(patch as Record<string, unknown>) }, rewritten: true };
+  }
+  return deny("approval webhook gave no valid decision");
+}
+
+/**
+ * Webhook mode: ask the owner's policy service to decide one mutating call. POSTs
+ * `{version, op: "mcp_tool_call", reqId, content: {tool, repo, args, truncated, hidden}}` with the
+ * reqId also in the X-RepoYeti-Reqid header, and accepts exactly three answers:
+ * `{decision: "approve"}`, `{decision: "deny", reason?}`, or `{decision: "rewrite", args: {...}}`
+ * whose keys replace the originals before the call runs. Everything else fails CLOSED: a network
+ * error, a timeout, a redirect, a non-200 status, an oversized or non-JSON reply, an unknown
+ * decision, or a rewrite of a key the tool does not declare (`rewritable`), a target key, or a
+ * hidden one. Never throws. Every verdict is broadcast as `approval_resolved` (via "webhook") and
+ * logged with its reqId, so the daemon's record can be matched against the service's own log.
+ */
+export async function requestWebhookVerdict(
+  tool: string,
+  repo: string | null,
+  args: Record<string, unknown>,
+  rewritable: readonly string[],
+  url: string | null = webhookUrl,
+): Promise<WebhookVerdict> {
+  const reqId = randomUUID();
+  const verdict: WebhookVerdict = url
+    ? await askWebhook(url, reqId, tool, repo, args, rewritable)
+    : { outcome: "denied", reqId, reason: "no approval webhook is configured" };
+  if (verdict.outcome === "denied") {
+    broadcast("approval_resolved", { id: reqId, tool, repo, outcome: "denied", via: "webhook", reason: verdict.reason });
+    console.log(`[repoyeti] approval webhook ${reqId}: ${tool} denied (${verdict.reason})`);
+  } else {
+    broadcast("approval_resolved", { id: reqId, tool, repo, outcome: "approved", via: "webhook", rewritten: verdict.rewritten });
+    console.log(`[repoyeti] approval webhook ${reqId}: ${tool} ${verdict.rewritten ? "approved with rewritten arguments" : "approved"}`);
+  }
+  return verdict;
 }

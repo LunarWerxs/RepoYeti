@@ -4,6 +4,18 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **The agent approval gate can ask your own policy service.** Set `mcpApprovalWebhookUrl` and
+  each mutating MCP call is POSTed to that URL instead of waiting in the dashboard. The service
+  approves it, denies it with a reason, or approves it with rewritten arguments (a rewrite can
+  never retarget the repo). No answer, a non-200 or a malformed reply denies the call. Each call
+  carries a request id in `X-RepoYeti-Reqid` that also appears in the daemon log and the agent's
+  error. Contract: [docs/APPROVAL_WEBHOOK.md](docs/APPROVAL_WEBHOOK.md). Dashboard settings for it
+  are not built yet: set it in config.json or with `PUT /api/settings`.
+
 ## [1.1.0] - 2026-09-22
 
 ### Fixed

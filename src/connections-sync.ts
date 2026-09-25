@@ -132,6 +132,7 @@ const NEVER_SYNCED = [
   "autoUpdate",
   "mcpApprovalGate", // turning the gate OFF is fail-open; that must be a per-machine choice
   "mcpAutoApprove", // likewise fail-open
+  "mcpApprovalWebhookUrl", // hands the gate's verdict to a service, often on this machine's loopback
   // Secrets and per-install infrastructure identity.
   "oauth",
   "tunnel",

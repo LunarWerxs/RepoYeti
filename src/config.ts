@@ -581,6 +581,14 @@ export interface RepoYetiConfig {
    */
   mcpAutoApproveTimeoutSecs?: number;
   /**
+   * Webhook mode for the approval gate. When set (an absolute http(s) URL, no credentials) and the
+   * gate is on, a mutating MCP call is POSTed to this owner-run policy service instead of waiting
+   * in the dashboard queue; the service approves it, denies it, or approves rewritten arguments,
+   * and any failure to answer denies (fail closed). The auto-deny/-approve timers do not apply.
+   * Absent = the dashboard modes above. See src/approvals.ts + docs/APPROVAL_WEBHOOK.md.
+   */
+  mcpApprovalWebhookUrl?: string;
+  /**
    * Identity Firewall (default v1, kept dead simple): a list of rules pinning which saved
    * identity MUST be used to commit/push in repos matching a filesystem-path glob. Every
    * mutating action that resolves a commit identity (fetch/pull/push/commit/checkout/

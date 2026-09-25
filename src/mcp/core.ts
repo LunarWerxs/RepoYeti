@@ -20,7 +20,13 @@ import { handleRpc as engineHandleRpc, parseErrorResponse as engineParseError } 
 import type { McpServerContext, McpEngineTool } from "./mcp-stdio.mjs";
 import type { McpBackend } from "./backend.ts";
 import { TOOLS } from "./tools.ts";
-import { approvalGateEnabled, requestApproval, summarizeArgs } from "../approvals.ts";
+import {
+  approvalGateEnabled,
+  getApprovalWebhookUrl,
+  requestApproval,
+  requestWebhookVerdict,
+  summarizeArgs,
+} from "../approvals.ts";
 
 const SERVER_INFO = { name: "repoyeti", version: VERSION };
 
@@ -47,6 +53,22 @@ export function contextFor(backend: McpBackend): McpServerContext {
     inputSchema: t.inputSchema,
     run: async (args) => {
       if (t.readOnly || !approvalGateEnabled()) return t.run(backend, args);
+
+      // Webhook mode: the owner's policy service decides instead of the dashboard, and may hand
+      // back rewritten arguments; those (never the agent's originals) are what runs. The reqId in
+      // the error lets the agent's transcript be matched to the service's log and ours.
+      if (getApprovalWebhookUrl()) {
+        const verdict = await requestWebhookVerdict(
+          t.name,
+          repoArg(args),
+          args,
+          Object.keys(t.inputSchema.properties),
+        );
+        if (verdict.outcome === "denied") {
+          throw new Error(`${t.name} was denied by the approval webhook: ${verdict.reason} (request ${verdict.reqId})`);
+        }
+        return t.run(backend, verdict.args);
+      }
 
       // `args` is the exact object handed to `t.run` below once approved, so the stored request the
       // owner inspects (GET /api/approvals/:id) is the request that executes.
