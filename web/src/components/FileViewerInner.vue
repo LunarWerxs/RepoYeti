@@ -131,10 +131,11 @@ const statusColor = computed(() =>
 const openableEditors = computed(() => store.editorsCatalog.filter((e) => e.available));
 // The line to open at, so the external editor lands on the hunk being read rather than the top.
 // Only when the viewer shows the working-tree file's own line numbers: a historical commit view
-// and the compact patch view (patch lines, not file lines) send no position.
+// and the compact patch view (patch lines, not file lines) send no position, nor does a deleted
+// file shown from HEAD (its line numbers are HEAD's, and the file is gone from disk).
 const diffViewer = ref<{ getJumpPosition: () => { line: number; column: number } | null } | null>(null);
 function jumpPosition(): { line: number; column: number } | null {
-  if (props.target?.commit) return null;
+  if (props.target?.commit || fromHead.value) return null;
   if (diffEditable.value && !editing.value) return diffViewer.value?.getJumpPosition() ?? null;
   if (viewerMode.value === "diff" && patchMode.value) return null;
   return editorViewer.value?.getJumpPosition() ?? null;

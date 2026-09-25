@@ -11,8 +11,9 @@ All notable changes to RepoYeti are documented here. The format is based on
 - **"Open with" lands on the line you were reading.** Opening a file from the viewer used to put
   your editor at the top of the file, so you had to find the hunk again. It now opens at the line
   you clicked, or at the first changed hunk, using each editor's own flag (`-g file:line:col` for
-  VS Code and its forks, `file:line:col` for Zed and Sublime Text, `-n`/`-c` for Notepad++).
-  `POST /api/repos/:id/open` takes optional `line`/`column`, and anything but a positive integer is
+  VS Code and its forks, `file:line:col` for Zed and Sublime Text, `-n`/`-c` for Notepad++). On
+  macOS, an editor found only as its app bundle (no CLI on PATH) still opens the file, at the top,
+  because `open -a` cannot pass a line through. `POST /api/repos/:id/open` takes optional `line`/`column`, and anything but a positive integer is
   refused with `BAD_LINE` before an editor is launched. With no editor picked and no default saved,
   the editor you already have running is chosen over the first one installed.
 

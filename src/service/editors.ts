@@ -56,6 +56,9 @@ interface EditorDef {
   /** How this editor is told to open a file AT a line:column (see GotoStyle); omitted means it
    *  has no such flag, so a requested position is dropped and the file opens at the top. */
   goto?: GotoStyle;
+  /** Extra POSIX process names the running GUI shows under, when that differs from every launcher
+   *  (Zed's `zed` CLI hands off to a `zed-editor` process on Linux). Used only by guessRunningEditor. */
+  processNames?: string[];
 }
 
 /**
@@ -156,6 +159,7 @@ const CATALOG: readonly EditorDef[] = [
     winPaths: ["%LOCALAPPDATA%\\Programs\\Zed\\Zed.exe"],
     macApp: "Zed",
     linuxPaths: ["/usr/bin/zed", "/usr/bin/zeditor"],
+    processNames: ["zed-editor"],
   },
   {
     id: "sublime",
@@ -276,6 +280,23 @@ export function buildEditorArgs(
   if (def.folder) return [folderAbs, ...fileArgs];
   if (!fileAbs) return null; // a file-only editor with nothing to open
   return fileArgs;
+}
+
+/**
+ * buildEditorArgs for a resolved launch. WHY: a macOS app found only as its bundle is launched as
+ * `open -a <App> <args>`, and `open` parses those args itself: it reads VS Code's `-g` as its own
+ * background flag and treats `file:12:3` as a document that does not exist, so it opens nothing.
+ * (`open --args` is no fix either: it reaches only a NEW instance, not the window already open.)
+ * So that launch drops the position and opens the plain folder + file, which `open` does handle.
+ */
+export function launchEditorArgs(
+  def: EditorDef,
+  res: Resolution,
+  folderAbs: string,
+  fileAbs?: string,
+  pos?: EditorPosition,
+): string[] | null {
+  return buildEditorArgs(def, folderAbs, fileAbs, res.kind === "macApp" ? undefined : pos);
 }
 
 /** The argv fragment that opens `fileAbs`, at `pos` when the editor has a GotoStyle for it. */
@@ -457,7 +478,7 @@ function processMatches(def: EditorDef, platform: EditorPlatform, proc: string):
   const names =
     platform === "win32"
       ? [def.winExe, ...(def.winPaths ?? [])].filter((n): n is string => !!n).map(baseNameLower)
-      : [...(def.commands ?? []), ...(def.linuxPaths ?? [])].map(baseNameLower);
+      : [...(def.commands ?? []), ...(def.linuxPaths ?? []), ...(def.processNames ?? [])].map(baseNameLower);
   return names.includes(name);
 }
 
@@ -562,7 +583,7 @@ function planLaunch(
   const def = CATALOG.find((e) => e.id === wanted)!;
   const res = probeEditor(def, platform, realDeps());
   if (!res) return { ok: false, result: { ok: false, code: "NO_EDITOR", message: `${def.label} isn't installed`, editor: wanted } };
-  const editorArgs = buildEditorArgs(def, folderAbs, fileAbs, pos);
+  const editorArgs = launchEditorArgs(def, res, folderAbs, fileAbs, pos);
   if (!editorArgs) {
     return { ok: false, result: { ok: false, code: "BAD_PATH", message: `${def.label} can't open a folder`, editor: wanted } };
   }
@@ -631,9 +652,10 @@ function spawnEditor(editor: string, argv: string[], detached: boolean): OpenRes
 /**
  * The editor an Open with no explicit choice launches: the owner's saved default when there is one
  * (their word beats any guess), else the one already running, else the first installed. The
- * process list is read only on that last path, so a configured default costs no spawn.
+ * process list is read only on that last path, so a configured default costs no spawn. Exported so
+ * a test can pin this wiring with an injected process list and editor list.
  */
-async function defaultLaunchEditor(
+export async function defaultLaunchEditor(
   opts: { defaultEditor?: string; processes?: string[] },
   platform: EditorPlatform,
   editors: EditorInfo[],

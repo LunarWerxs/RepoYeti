@@ -7,6 +7,8 @@ import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
 import {
   buildEditorArgs,
+  launchEditorArgs,
+  defaultLaunchEditor,
   wrapForPlatform,
   cmdReparseHazard,
   cmdShimHazard,
@@ -108,6 +110,35 @@ test("wrapForPlatform: direct exe vs cmd shim vs macOS open -a", () => {
     "/r/a.ts",
   ]);
   expect(wrapForPlatform("linux", { kind: "exe", exe: "/usr/bin/code" }, ["/r"])).toEqual(["/usr/bin/code", "/r"]);
+});
+
+// `open -a` parses the editor args itself: `-g` is its background flag and `a.ts:12:3` a missing
+// document, so a positioned macApp launch opened nothing. The bundle launch must drop the position.
+test("launchEditorArgs: a macOS app-bundle launch drops the position; a real exe keeps it", () => {
+  const pos = { line: 12, column: 3 };
+  const vscode = { id: "vscode", label: "VS Code", folder: true, goto: "vscode" as const };
+  const zed = { id: "zed", label: "Zed", folder: true, goto: "path-suffix" as const };
+  const app = { kind: "macApp" as const, app: "Visual Studio Code" };
+  const vsArgs = launchEditorArgs(vscode, app, "/repo", "/repo/a.ts", pos)!;
+  expect(wrapForPlatform("darwin", app, vsArgs)).toEqual(["open", "-a", "Visual Studio Code", "/repo", "/repo/a.ts"]);
+  expect(launchEditorArgs(zed, { kind: "macApp", app: "Zed" }, "/repo", "/repo/a.ts", pos)).toEqual([
+    "/repo",
+    "/repo/a.ts",
+  ]);
+  const exe = { kind: "exe" as const, exe: "/usr/local/bin/code" };
+  expect(launchEditorArgs(vscode, exe, "/repo", "/repo/a.ts", pos)).toEqual(["/repo", "-g", "/repo/a.ts:12:3"]);
+});
+
+// The running-editor guess must beat the first-installed fallback, and an owner default must beat
+// the guess; reverting defaultLaunchEditor to effectiveDefaultEditor would fail the first case.
+test("defaultLaunchEditor: saved default, else the running editor, else the first installed", async () => {
+  const editors: EditorInfo[] = ["vscode", "cursor", "zed"].map((id) => ({ id, label: id, folder: true, available: true }));
+  expect(await defaultLaunchEditor({ processes: ["Cursor.exe"] }, "win32", editors)).toBe("cursor");
+  expect(await defaultLaunchEditor({ processes: ["bash", "zed-editor"] }, "linux", editors)).toBe("zed");
+  expect(await defaultLaunchEditor({ defaultEditor: "vscode", processes: ["Cursor.exe"] }, "win32", editors)).toBe(
+    "vscode",
+  );
+  expect(await defaultLaunchEditor({ processes: [] }, "win32", editors)).toBe("vscode");
 });
 
 test("cmdReparseHazard: %VAR% / ^ in an arg is unsafe on EVERY win32 launch (all go through cmd /c start)", () => {
