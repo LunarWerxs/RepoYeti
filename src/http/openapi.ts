@@ -59,12 +59,34 @@ import {
   CollaborationCommitSyncSchema,
   AutomationCancelSchema,
 } from "../schemas.ts";
+import {
+  ErrorResponse,
+  ActionResponse,
+  HealthResponse,
+  OpenApiDocResponse,
+  RepoListResponse,
+  RootsResponse,
+  RootsChangedResponse,
+  ScanStateResponse,
+  ScanStartResponse,
+  CancelResponse,
+  FetchAllStateResponse,
+  TokenStateResponse,
+  BranchListResponse,
+  StashListResponse,
+  TagListResponse,
+} from "./response-schemas.ts";
 
 /** One curated entry per route, keyed by `"<METHOD> <hono-path>"` exactly as Hono registers it. */
 interface RouteMeta {
   summary: string;
   /** The Zod schema the handler parses for this route's JSON body (mutating routes only). */
   body?: z.ZodType;
+  /**
+   * The shape of this route's 2xx JSON body. Documented in the spec AND enforced on every real
+   * response under REPOYETI_RESPONSE_CHECK=1 (see response-check.ts), so it cannot quietly rot.
+   */
+  response?: z.ZodType;
   tags?: string[];
   /** Query-string parameters the handler reads (e.g. ?limit, ?path, ?merges). */
   query?: Array<{ name: string; description?: string; required?: boolean; enum?: string[] }>;
@@ -77,7 +99,7 @@ interface RouteMeta {
  */
 export const META: Record<string, RouteMeta> = {
   // ── health / status ──────────────────────────────────────────────────────────
-  "GET /api/health": { summary: "Liveness probe (service name + version).", tags: ["system"] },
+  "GET /api/health": { summary: "Liveness probe (service name + version).", response: HealthResponse, tags: ["system"] },
   "GET /api/status": {
     summary: "Runtime status: access mode, tunnel URL, and owner UI settings.",
     tags: ["system"],
@@ -88,7 +110,7 @@ export const META: Record<string, RouteMeta> = {
   "GET /api/updates": { summary: "Check the configured public Git remote for a source update.", tags: ["system"] },
   "POST /api/updates/apply": { summary: "Apply an available source update with git pull --ff-only, then rebuild the web UI.", tags: ["system"] },
   "POST /api/updates/restart": { summary: "Relaunch the daemon so an installed update takes over. 409 BUSY while work is in flight.", tags: ["system"] },
-  "GET /api/openapi.json": { summary: "This OpenAPI 3.1 document (public, unauthenticated).", tags: ["system"] },
+  "GET /api/openapi.json": { summary: "This OpenAPI 3.1 document (public, unauthenticated).", response: OpenApiDocResponse, tags: ["system"] },
 
   // ── grouped operational-error history (next to /api/status above) ────────────
   "GET /api/errors": {
@@ -112,7 +134,7 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/auth/continue-local": { summary: "Grant a loopback-only bypass (refused over the tunnel).", tags: ["auth"] },
   "POST /api/auth/token": { summary: "Mint (or overwrite) the optional API Bearer token; returns the value ONCE (the only time it's returned).", tags: ["auth"] },
   "DELETE /api/auth/token": { summary: "Revoke the optional API Bearer token (back to OIDC-only).", tags: ["auth"] },
-  "GET /api/auth/token": { summary: "Whether an API Bearer token is configured (never returns the value).", tags: ["auth"] },
+  "GET /api/auth/token": { summary: "Whether an API Bearer token is configured (never returns the value).", response: TokenStateResponse, tags: ["auth"] },
   "GET /oauth/login": { summary: "Begin the OIDC sign-in (PKCE) — redirects to the IdP.", tags: ["auth"] },
   "GET /oauth/finish": { summary: "OIDC completion via the redirect shim bounce.", tags: ["auth"] },
   "GET /oauth/callback": { summary: "OIDC completion via the loopback redirect.", tags: ["auth"] },
@@ -123,29 +145,29 @@ export const META: Record<string, RouteMeta> = {
   "PUT /api/relay": { summary: "Turn the share-link relay on/off and choose which relay to use.", body: RelaySettingsSchema, tags: ["system"] },
 
   // ── repos ─────────────────────────────────────────────────────────────────────
-  "GET /api/repos": { summary: "List all known repositories.", tags: ["repos"] },
+  "GET /api/repos": { summary: "List all known repositories.", response: RepoListResponse, tags: ["repos"] },
   "POST /api/repos/register": { summary: "Register an existing repository folder.", body: RootPathSchema, tags: ["repos"] },
   "POST /api/repos/create": { summary: "Create a new repository (git init) at a folder.", body: RootPathSchema, tags: ["repos"] },
   "POST /api/repos/clone": { summary: "Clone a remote git URL into a folder under a scan root.", body: CloneSchema, tags: ["repos"] },
   "POST /api/repos/reorder": { summary: "Persist a drag-to-reorder of the repo list.", body: ReorderSchema, tags: ["repos"] },
   "POST /api/repos/fetch-all": { summary: "Start a fetch of every repo that has a remote (fire-and-forget; progress over SSE).", tags: ["repos"] },
-  "POST /api/repos/fetch-all/cancel": { summary: "Stop the in-flight fetch-all after the repository it is on.", tags: ["repos"] },
-  "GET /api/repos/fetch-all": { summary: "Live counters for the fetch-all in flight, or the last one (reconnect reconciliation).", tags: ["repos"] },
+  "POST /api/repos/fetch-all/cancel": { summary: "Stop the in-flight fetch-all after the repository it is on.", response: CancelResponse, tags: ["repos"] },
+  "GET /api/repos/fetch-all": { summary: "Live counters for the fetch-all in flight, or the last one (reconnect reconciliation).", response: FetchAllStateResponse, tags: ["repos"] },
   "POST /api/repos/:id/refresh": { summary: "Force a fresh status read of one repo.", tags: ["repos"] },
 
   // ── git actions ─────────────────────────────────────────────────────────────────
-  "POST /api/repos/:id/fetch": { summary: "git fetch for one repo.", tags: ["git"] },
-  "POST /api/repos/:id/pull": { summary: "git pull (fast-forward) for one repo.", tags: ["git"] },
-  "POST /api/repos/:id/push": { summary: "git push for one repo.", tags: ["git"] },
-  "POST /api/repos/:id/commit": { summary: "Commit the working tree (optionally amend).", body: CommitSchema, tags: ["git"] },
-  "POST /api/repos/:id/commit-selected": { summary: "Commit only a selected subset of changed files.", body: CommitSelectedSchema, tags: ["git"] },
-  "POST /api/repos/:id/smart-commit": { summary: "Execute an owner-edited multi-commit plan.", body: SmartCommitSchema, tags: ["git"] },
+  "POST /api/repos/:id/fetch": { summary: "git fetch for one repo.", response: ActionResponse, tags: ["git"] },
+  "POST /api/repos/:id/pull": { summary: "git pull (fast-forward) for one repo.", response: ActionResponse, tags: ["git"] },
+  "POST /api/repos/:id/push": { summary: "git push for one repo.", response: ActionResponse, tags: ["git"] },
+  "POST /api/repos/:id/commit": { summary: "Commit the working tree (optionally amend).", response: ActionResponse, body: CommitSchema, tags: ["git"] },
+  "POST /api/repos/:id/commit-selected": { summary: "Commit only a selected subset of changed files.", response: ActionResponse, body: CommitSelectedSchema, tags: ["git"] },
+  "POST /api/repos/:id/smart-commit": { summary: "Execute an owner-edited multi-commit plan.", response: ActionResponse, body: SmartCommitSchema, tags: ["git"] },
 
   // ── branches ──────────────────────────────────────────────────────────────────
-  "GET /api/repos/:id/branches": { summary: "List a repo's branches.", tags: ["branches"] },
-  "POST /api/repos/:id/checkout": { summary: "Switch to a branch.", body: CheckoutSchema, tags: ["branches"] },
-  "POST /api/repos/:id/branch": { summary: "Create a branch (optionally switch to it).", body: CreateBranchSchema, tags: ["branches"] },
-  "DELETE /api/repos/:id/branch": { summary: "Delete a branch.", body: DeleteBranchSchema, tags: ["branches"] },
+  "GET /api/repos/:id/branches": { summary: "List a repo's branches.", response: BranchListResponse, tags: ["branches"] },
+  "POST /api/repos/:id/checkout": { summary: "Switch to a branch.", response: ActionResponse, body: CheckoutSchema, tags: ["branches"] },
+  "POST /api/repos/:id/branch": { summary: "Create a branch (optionally switch to it).", response: ActionResponse, body: CreateBranchSchema, tags: ["branches"] },
+  "DELETE /api/repos/:id/branch": { summary: "Delete a branch.", response: ActionResponse, body: DeleteBranchSchema, tags: ["branches"] },
 
   // ── history ─────────────────────────────────────────────────────────────────────
   "GET /api/repos/:id/log": {
@@ -181,19 +203,19 @@ export const META: Record<string, RouteMeta> = {
   "GET /api/repos/:id/commit/:hash": { summary: "One commit's detail (changed files with per-file line counts; capped list + filesTotal).", tags: ["history"] },
 
   // ── stash ───────────────────────────────────────────────────────────────────────
-  "GET /api/repos/:id/stashes": { summary: "List a repo's stashes.", tags: ["stash"] },
-  "POST /api/repos/:id/stash": { summary: "Stash the working tree (optional message).", body: StashSaveSchema, tags: ["stash"] },
-  "POST /api/repos/:id/stash/pop": { summary: "Pop a stash by index.", body: StashRefSchema, tags: ["stash"] },
-  "POST /api/repos/:id/stash/drop": { summary: "Drop a stash by index.", body: StashRefSchema, tags: ["stash"] },
+  "GET /api/repos/:id/stashes": { summary: "List a repo's stashes.", response: StashListResponse, tags: ["stash"] },
+  "POST /api/repos/:id/stash": { summary: "Stash the working tree (optional message).", response: ActionResponse, body: StashSaveSchema, tags: ["stash"] },
+  "POST /api/repos/:id/stash/pop": { summary: "Pop a stash by index.", response: ActionResponse, body: StashRefSchema, tags: ["stash"] },
+  "POST /api/repos/:id/stash/drop": { summary: "Drop a stash by index.", response: ActionResponse, body: StashRefSchema, tags: ["stash"] },
 
   // ── tags ───────────────────────────────────────────────────────────────────────
-  "GET /api/repos/:id/tags": { summary: "List a repo's tags.", tags: ["tags"] },
-  "POST /api/repos/:id/tag": { summary: "Create a tag (annotated when a message is given; optional push).", body: TagCreateSchema, tags: ["tags"] },
-  "POST /api/repos/:id/tag/push": { summary: "Push an existing local tag to origin (the retry after a create whose push failed).", body: TagPushSchema, tags: ["tags"] },
+  "GET /api/repos/:id/tags": { summary: "List a repo's tags.", response: TagListResponse, tags: ["tags"] },
+  "POST /api/repos/:id/tag": { summary: "Create a tag (annotated when a message is given; optional push).", response: ActionResponse, body: TagCreateSchema, tags: ["tags"] },
+  "POST /api/repos/:id/tag/push": { summary: "Push an existing local tag to origin (the retry after a create whose push failed).", response: ActionResponse, body: TagPushSchema, tags: ["tags"] },
 
   // ── remotes ─────────────────────────────────────────────────────────────────────
-  "POST /api/repos/:id/remote": { summary: "Set/add a remote URL (defaults to origin).", body: RemoteSetSchema, tags: ["remotes"] },
-  "DELETE /api/repos/:id/remote": { summary: "Remove a remote (defaults to origin).", body: RemoteDeleteSchema, tags: ["remotes"] },
+  "POST /api/repos/:id/remote": { summary: "Set/add a remote URL (defaults to origin).", response: ActionResponse, body: RemoteSetSchema, tags: ["remotes"] },
+  "DELETE /api/repos/:id/remote": { summary: "Remove a remote (defaults to origin).", response: ActionResponse, body: RemoteDeleteSchema, tags: ["remotes"] },
 
   // ── files / changes ──────────────────────────────────────────────────────────────
   "GET /api/repos/:id/changes": { summary: "List a repo's changed files.", tags: ["files"] },
@@ -270,12 +292,12 @@ export const META: Record<string, RouteMeta> = {
   "POST /api/repos/:id/auto-commit": { summary: "Opt a repo in/out of the auto-commit timer.", tags: ["repos"] },
 
   // ── scan roots ──────────────────────────────────────────────────────────────────
-  "GET /api/roots": { summary: "List the discovery scan roots.", tags: ["roots"] },
-  "POST /api/roots": { summary: "Add a discovery scan root.", body: RootPathSchema, tags: ["roots"] },
-  "DELETE /api/roots": { summary: "Remove a discovery scan root.", body: RootPathSchema, tags: ["roots"] },
-  "POST /api/scan": { summary: "Rescan all configured scan roots for new repositories.", tags: ["roots"] },
-  "POST /api/scan/cancel": { summary: "Cancel the in-flight project scan.", tags: ["roots"] },
-  "GET /api/scan": { summary: "Whether a project scan is in flight right now (reconnect reconciliation).", tags: ["roots"] },
+  "GET /api/roots": { summary: "List the discovery scan roots.", response: RootsResponse, tags: ["roots"] },
+  "POST /api/roots": { summary: "Add a discovery scan root.", response: RootsChangedResponse, body: RootPathSchema, tags: ["roots"] },
+  "DELETE /api/roots": { summary: "Remove a discovery scan root.", response: RootsChangedResponse, body: RootPathSchema, tags: ["roots"] },
+  "POST /api/scan": { summary: "Rescan all configured scan roots for new repositories.", response: ScanStartResponse, tags: ["roots"] },
+  "POST /api/scan/cancel": { summary: "Cancel the in-flight project scan.", response: CancelResponse, tags: ["roots"] },
+  "GET /api/scan": { summary: "Whether a project scan is in flight right now (reconnect reconciliation).", response: ScanStateResponse, tags: ["roots"] },
 
   // ── lore servers ───────────────────────────────────────────────────────────────
   "GET /api/servers": { summary: "List registered Lore servers.", tags: ["servers"] },
@@ -443,6 +465,19 @@ export const META: Record<string, RouteMeta> = {
   },
 };
 
+/**
+ * The declared schema for one real response, or null when the doc makes no claim about it.
+ * A non-2xx answer is always the `default` ErrorResponse; a 2xx is whatever META declares. Keyed
+ * like META (`"<METHOD> <hono-path>"`), so response-check.ts asks with the route Hono matched.
+ * Only paths buildOpenApiDoc publishes are held to it: the collaborator ingress (/c/...) and the
+ * share redemption (/s/...) sit outside the doc and keep their own deliberately terse bodies.
+ */
+export function declaredResponseSchema(method: string, honoPath: string, status: number): z.ZodType | null {
+  if (!honoPath.startsWith("/api/") && !honoPath.startsWith("/oauth/")) return null;
+  if (status < 200 || status >= 300) return ErrorResponse;
+  return META[`${method} ${honoPath}`]?.response ?? null;
+}
+
 /** Hono path params (`:id`) → OpenAPI template params (`{id}`). */
 function toOpenApiPath(honoPath: string): string {
   return honoPath.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
@@ -469,7 +504,9 @@ function buildOpenApiOperation(
   const operation: Record<string, unknown> = {
     summary: meta?.summary ?? fallbackSummary(method, openApiPath),
     responses: {
-      "200": { description: "Success" },
+      "200": meta?.response
+        ? { description: "Success", content: { "application/json": { schema: z.toJSONSchema(meta.response) } } }
+        : { description: "Success" },
       default: {
         description: "Error",
         content: { "application/json": { schema: { $ref: errorRef } } },
@@ -551,15 +588,8 @@ export function buildOpenApiDoc(app: Hono): object {
     paths,
     components: {
       schemas: {
-        ErrorResponse: {
-          type: "object",
-          properties: {
-            ok: { const: false },
-            code: { type: "string" },
-            message: { type: "string" },
-          },
-          required: ["ok", "code", "message"],
-        },
+        // Rendered from the same Zod schema response-check.ts enforces on every error body.
+        ErrorResponse: z.toJSONSchema(ErrorResponse),
       },
     },
   };

@@ -35,6 +35,18 @@ All notable changes to RepoYeti are documented here. The format is based on
   A range, Ctrl+A and Select all follow the order the cards are drawn in and skip a collapsed
   section, so they never tick a repo you cannot see. Underneath, gestures become "set all" and "set range" requests that the selection
   applies to its own store, an idea adapted from Dear ImGui's multi-select API.
+- **`/api/openapi.json` now documents response bodies, and the test suite holds routes to them.**
+  The health, repo list, scan roots, scan and fetch-all state, token state, git action, branch,
+  stash and tag routes declare their 2xx body shape, and every error is documented as the shared
+  `ErrorResponse` envelope. With `REPOYETI_RESPONSE_CHECK=1` (always on in the daemon test suite)
+  each real JSON answer is validated against its declaration, and a mismatch fails as a 500 naming
+  the route and the field, so a renamed or dropped field can no longer ship while the doc promises
+  the old shape. Off by default, with no production cost.
+
+### Fixed
+
+- `PUT /api/repos/:id/file` with no repo id answered `{ error }` instead of the standard
+  `{ ok, code, message }` error envelope.
 
 ## [1.1.0] - 2026-09-22
 

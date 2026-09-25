@@ -15,6 +15,7 @@ import { createLoopbackGuard } from "../loopback-guard.mjs";
 import { getServerPort } from "../runtime.ts";
 import { asForeground } from "../gitgate.ts";
 import { mountWeb } from "./web.ts";
+import { responseCheck, responseCheckEnabled } from "./response-check.ts";
 import type { Deps } from "./deps.ts";
 import { setDiffStatsEnabled } from "../read/diffstat.ts";
 import { setDiffPatchBytes, setDiffPatchEnabled } from "../service/index.ts";
@@ -229,6 +230,13 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   // coalesced refreshes and the remote-sync check — none of which reach Hono, so nothing that
   // isn't user-initiated can pick up the marker by accident. See src/gitgate.ts for the lanes.
   app.use("/api/*", (_c, next) => asForeground(next));
+
+  // Test-mode contract check: every handler's JSON answer is validated against the response schema
+  // /api/openapi.json declares for it (see response-check.ts). Off, and not even registered, unless
+  // REPOYETI_RESPONSE_CHECK=1, which tests/setup.ts sets for the whole daemon suite. Registered
+  // AFTER the guards above so it judges what a route handler returns, not the loopback guard's or
+  // the body limit's short-circuit answers.
+  if (responseCheckEnabled()) app.use("*", responseCheck());
 
   const deps: Deps = { cfg, requestShutdown: hooks.requestShutdown };
 

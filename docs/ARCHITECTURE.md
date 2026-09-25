@@ -300,6 +300,16 @@ UI can render the right state.
 > (`POST`/`DELETE`/`GET /api/auth/token`); it's off by default and never weakens the OIDC posture
 > (see §7 and §15, Remote access).
 
+> **Response schemas are checked, not just documented.** A route's `META` entry in
+> `src/http/openapi.ts` may declare a `response` Zod schema (kept in `src/http/response-schemas.ts`);
+> the doc renders it as the route's 2xx body, and every non-2xx answer is documented as
+> `ErrorResponse`. With `REPOYETI_RESPONSE_CHECK=1`, which `tests/setup.ts` sets for the whole
+> daemon suite, `src/http/response-check.ts` validates each handler's real JSON answer against that
+> declaration and replaces a mismatch with a 500 naming the route and the offending field (the idea
+> behind Bitcoin Core's `-rpcdoccheck`). The middleware is not registered at all without the flag,
+> so production pays nothing. When you change what a route returns, change its declared schema in
+> the same commit; when you add one, declaring its `response` makes every route test a contract test.
+
 ---
 
 ## 7. Security model: "Sign in with Connections" (public OIDC), non-negotiable
