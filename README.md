@@ -158,6 +158,8 @@ bun run src/index.ts start
 
 The repo has **two** dependency sets and the dashboard is compiled into the release rather than committed, so a fresh clone has to build it once. Without that step the daemon starts and serves `web app not built`.
 
+**Update cooldown.** Set `autoUpdateCooldownDays` (0 to 30, through `PUT /api/settings` or `~/.repoyeti/config.json`) and the auto-update timer only announces or installs an update at least that many days old: a release's GitHub publication date, or a clone's newest remote commit date. A bad or compromised release then has that long to be caught before your machine takes it. A manual check or install ignores it. A clone waits for the branch tip itself to age, so a branch that moves every day never clears a long cooldown.
+
 ---
 
 ## AI setup: a free Groq key in 3 clicks

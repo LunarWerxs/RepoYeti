@@ -61,6 +61,8 @@ import {
   getAutoUpdateIntervalSecs,
   setAutoUpdateEnabled,
   setAutoUpdateIntervalSecs,
+  getAutoUpdateCooldownDays,
+  setAutoUpdateCooldownDays,
 } from "../../auto-update.ts";
 import {
   approvalGateEnabled,
@@ -212,6 +214,7 @@ function getStatus(c: Context, cfg: RepoYetiConfig) {
       autoUpdate: autoUpdateEnabled(),
       updateNotify: updateNotifyEnabled(),
       autoUpdateIntervalSecs: getAutoUpdateIntervalSecs(),
+      autoUpdateCooldownDays: getAutoUpdateCooldownDays(),
       // Auto-scan the whole machine on every app start (owner setting; off by default). A pure
       // stored flag — the web client acts on it at boot; the daemon has no runtime side effect.
       autoScan: cfg.autoScan === true,
@@ -418,6 +421,11 @@ function applyAutoUpdateFields(
     cfg.autoUpdateIntervalSecs = setAutoUpdateIntervalSecs(b.autoUpdateIntervalSecs);
     Object.assign(changed, { autoUpdateIntervalSecs: cfg.autoUpdateIntervalSecs });
   }
+  if (typeof b.autoUpdateCooldownDays === "number" && Number.isFinite(b.autoUpdateCooldownDays)) {
+    // setAutoUpdateCooldownDays clamps to [0, 30] whole days → persist the clamped value.
+    cfg.autoUpdateCooldownDays = setAutoUpdateCooldownDays(b.autoUpdateCooldownDays);
+    Object.assign(changed, { autoUpdateCooldownDays: cfg.autoUpdateCooldownDays });
+  }
 }
 
 function applyMiscFlagFields(
@@ -581,6 +589,7 @@ async function putSettings(c: Context, cfg: RepoYetiConfig) {
       autoUpdate: autoUpdateEnabled(),
       updateNotify: updateNotifyEnabled(),
       autoUpdateIntervalSecs: getAutoUpdateIntervalSecs(),
+      autoUpdateCooldownDays: getAutoUpdateCooldownDays(),
       autoScan: cfg.autoScan === true,
       loreServersEnabled: resolveLoreServersEnabled(cfg),
       portableMode: cfg.portableMode === true,

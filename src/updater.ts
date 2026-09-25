@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { gitFor } from "./git.ts";
 import {
   applyUpdate as applyReleaseUpdate,
   checkForUpdate as checkReleaseUpdate,
@@ -25,6 +26,18 @@ export interface UpdateStatus {
   /** Source checkouts only: a newer remote commit exists but HEAD is not its ancestor, so a
    *  fast-forward cannot apply it; `canApply` is false and `reason` explains. */
   diverged?: boolean;
+  /** When the offered update was made, epoch ms: the remote commit's committer time on a source
+   *  checkout, the release's `published_at` on a compiled build. Null or absent when unknown. The
+   *  auto-update cooldown (src/auto-update.ts) reads it and treats unknown as too young. */
+  remoteDate?: number | null;
+}
+
+/** Options an unattended apply passes (src/auto-update.ts). A manual apply passes none. */
+export interface UpdateApplyOptions {
+  /** Update cooldown: refuse to install anything made after this instant (epoch ms). The apply
+   *  re-reads the remote, so this pins it to what the timer judged old enough rather than to
+   *  whatever was published in the seconds since. */
+  notNewerThan?: number;
 }
 
 export interface UpdateApplyResult {
@@ -40,8 +53,9 @@ export interface UpdateApplyResult {
 // only RepoYeti's checkout root, update-remote env var, install/build commands, and
 // service identity are local. The engine's UpdateStatus.service is `string`; it is
 // narrowed back to the "repoyeti" literal here (the runtime value already is).
+const APP_ROOT = resolve(import.meta.dir, "..");
 const gitEngine = createUpdater({
-  appRoot: resolve(import.meta.dir, ".."),
+  appRoot: APP_ROOT,
   serviceName: "repoyeti",
   appLabel: "RepoYeti",
   updateRepoEnvVar: "REPOYETI_UPDATE_REPO",
@@ -61,16 +75,51 @@ function isCompiledRelease(): boolean {
   );
 }
 
-export function checkForUpdate(): Promise<UpdateStatus> {
-  return isCompiledRelease()
-    ? (checkReleaseUpdate() as Promise<UpdateStatus>)
-    : (gitEngine.checkForUpdate() as Promise<UpdateStatus>);
+/**
+ * The committer time of `sha` in epoch ms, or null. Read here rather than in the shared kit engine
+ * because only RepoYeti's update cooldown needs it. The object is local by now: the engine's check
+ * fetched the remote branch into FETCH_HEAD to prove the fast-forward before calling it an update.
+ * Committer time is set by whoever made the commit, so a push that lies about its date can slip
+ * the cooldown; a release's `published_at` is set by GitHub and cannot.
+ */
+async function commitTime(sha: string): Promise<number | null> {
+  try {
+    const secs = Number.parseInt((await gitFor(APP_ROOT).raw(["log", "-1", "--format=%ct", sha])).trim(), 10);
+    return Number.isFinite(secs) && secs > 0 ? secs * 1000 : null;
+  } catch {
+    return null;
+  }
 }
 
-export function applyUpdate(): Promise<UpdateApplyResult> {
-  return isCompiledRelease()
-    ? (applyReleaseUpdate() as Promise<UpdateApplyResult>)
-    : (gitEngine.applyUpdate() as Promise<UpdateApplyResult>);
+async function checkSourceUpdate(): Promise<UpdateStatus> {
+  const status = (await gitEngine.checkForUpdate()) as UpdateStatus;
+  if (status.updateAvailable && status.remoteCommit) status.remoteDate = await commitTime(status.remoteCommit);
+  return status;
+}
+
+export function checkForUpdate(): Promise<UpdateStatus> {
+  return isCompiledRelease() ? (checkReleaseUpdate() as Promise<UpdateStatus>) : checkSourceUpdate();
+}
+
+export async function applyUpdate(options: UpdateApplyOptions = {}): Promise<UpdateApplyResult> {
+  if (isCompiledRelease()) {
+    return (await applyReleaseUpdate({ notNewerThan: options.notNewerThan })) as UpdateApplyResult;
+  }
+  if (options.notNewerThan !== undefined) {
+    // The engine pulls the remote tip as it finds it, so re-check the tip's age just before
+    // handing over: a push since the timer's check has had no cooldown at all.
+    const status = await checkSourceUpdate();
+    if (status.updateAvailable && !(status.remoteDate != null && status.remoteDate <= options.notNewerThan)) {
+      return {
+        ok: false,
+        message: "The newest remote commit is younger than the update cooldown.",
+        restartRequired: false,
+        status,
+        output: [],
+      };
+    }
+  }
+  return (await gitEngine.applyUpdate()) as UpdateApplyResult;
 }
 
 /** Most characters of transcript a failure hands back. A build log can be long, and the failing

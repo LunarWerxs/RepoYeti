@@ -89,6 +89,7 @@ export const SettingsUpdateSchema = z.object({
   autoUpdate: z.boolean().optional().catch(undefined),
   updateNotify: z.boolean().optional().catch(undefined),
   autoUpdateIntervalSecs: z.number().finite().optional().catch(undefined),
+  autoUpdateCooldownDays: z.number().finite().optional().catch(undefined),
   autoScan: z.boolean().optional().catch(undefined),
   loreServersEnabled: z.boolean().optional().catch(undefined),
   portableMode: z.boolean().optional().catch(undefined),

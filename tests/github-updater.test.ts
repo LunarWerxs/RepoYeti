@@ -400,6 +400,26 @@ test("apply stages from the release record the check returned: one metadata requ
   );
 });
 
+test("an unattended apply under a cooldown refuses a release published after the cutoff, before downloading", async () => {
+  // The timer judged some release old enough; this apply re-reads "latest", and a release published
+  // since has had no cooldown at all. It must be refused before a single archive byte is fetched.
+  const DAY = 86_400_000;
+  await withFetch(
+    (url) => {
+      if (isMetadata(url)) return json({ ...release(), published_at: new Date(Date.now() - DAY).toISOString() });
+      if (url.endsWith("/SHA256SUMS.txt")) return bytes(manifestBytes);
+      if (url === `${BASE}/${ZIP}`) return bytes(zipBytes);
+      return new Response("?", { status: 404 });
+    },
+    async (seen) => {
+      const r = await applyUpdate({ ...applyOpts(), notNewerThan: Date.now() - 3 * DAY });
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain("younger than the update cooldown");
+      expect(seen).not.toContain(`${BASE}/${ZIP}`);
+    },
+  );
+});
+
 test("malformed release metadata is refused rather than interpolated into a download URL", async () => {
   await withFetch(
     () => json({ tag_name: "../../evil", assets: [] }),

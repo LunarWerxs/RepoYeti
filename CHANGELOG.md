@@ -4,6 +4,17 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Update cooldown.** A new `autoUpdateCooldownDays` setting (0 to 30, off by default) makes the
+  auto-update timer announce and install only an update at least that many days old: a release's
+  GitHub `published_at`, or the remote commit's date on a source checkout. A bad or compromised
+  push then has that long to be caught before unattended installs run it. The apply re-checks the
+  age, so a release published between the check and the install is refused rather than taken. A
+  manual check or install is unaffected. Idea from Oh My Zsh's update cooldown.
+
 ## [1.1.0] - 2026-09-22
 
 ### Fixed

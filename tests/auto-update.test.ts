@@ -12,6 +12,7 @@ import {
   AUTO_UPDATE_INTERVAL_MAX_S,
   AUTO_UPDATE_INTERVAL_DEFAULT_S,
   AUTO_UPDATE_MAX_OPS_DEFERRALS,
+  setAutoUpdateCooldownDays,
 } from "../src/auto-update.ts";
 
 // The auto-update orchestrator's decision logic, driven through injected hooks so nothing actually
@@ -27,6 +28,7 @@ import {
 afterEach(() => {
   setAutoUpdateEnabled(false);
   setUpdateNotifyEnabled(true); // module default
+  setAutoUpdateCooldownDays(0); // module default: off
   stopAutoUpdate();
   setAutoUpdateHooks({}); // restore the real hooks
 });
@@ -532,4 +534,55 @@ test("reports a failed spawn rather than announcing a restart that never happens
   });
 
   expect(events).not.toContain("auto_update_restarting");
+});
+
+// ── update cooldown ─────────────────────────────────────────────────────────────────────────────
+// The point of a cooldown is that a bad or compromised push gets N days to be caught before every
+// unattended install runs it. So an update younger than the cutoff (or of unknown age) must be
+// neither announced nor applied, and an aged one must be applied with the cutoff handed down, so
+// the apply's own re-read of the remote cannot swap in something newer.
+
+test("the cooldown holds back a young or undated update and applies an aged one with the cutoff", async () => {
+  const DAY = 86_400_000;
+  const seen: string[] = [];
+  const listener: BusListener = (event) => {
+    seen.push(event);
+  };
+  const applyArgs: unknown[] = [];
+  let remoteDate: number | null = Date.now() - DAY; // one day old
+  setAutoUpdateHooks({
+    check: async () => status({ updateAvailable: true, canApply: true, remoteDate }),
+    apply: async (opts?: unknown) => {
+      applyArgs.push(opts);
+      return applyResult({ restartRequired: false });
+    },
+    relaunch: () => true,
+    hasPendingApprovals: () => false,
+    hasActiveOperations: () => false,
+  });
+  setAutoUpdateCooldownDays(3);
+  addListener(listener);
+  try {
+    // Notify-only: a young update is not even announced.
+    expect((await runAutoUpdateOnce()).reason).toBe("cooling-down");
+    expect(seen).not.toContain("update_available");
+
+    // Apply mode: still held back, and an unknown age reads as too young.
+    setAutoUpdateEnabled(true);
+    expect((await runAutoUpdateOnce()).reason).toBe("cooling-down");
+    remoteDate = null;
+    expect((await runAutoUpdateOnce()).reason).toBe("cooling-down");
+    expect(applyArgs).toHaveLength(0);
+
+    // Four days old clears a three-day cooldown, and the apply carries the cutoff.
+    remoteDate = Date.now() - 4 * DAY;
+    const before = Date.now();
+    expect((await runAutoUpdateOnce()).applied).toBe(true);
+    expect(applyArgs).toHaveLength(1);
+    const cutoff = (applyArgs[0] as { notNewerThan?: number }).notNewerThan;
+    expect(cutoff).toBeGreaterThanOrEqual(before - 3 * DAY);
+    expect(cutoff).toBeLessThanOrEqual(Date.now() - 3 * DAY);
+  } finally {
+    removeListener(listener);
+  }
 });
