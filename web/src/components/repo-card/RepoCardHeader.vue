@@ -33,6 +33,7 @@ import { fromNow } from "@/lib/util";
 import { identityInitials, identityTint } from "@/lib/identity-display";
 import { repoViolatesIdentityRule } from "@/lib/identity-firewall";
 import { rankRepo, type RankReason } from "@/lib/repo-rank";
+import { minuteClock } from "@/lib/minute-clock";
 import { isSelected, selectionActive, toggleSelected } from "@/lib/repo-selection";
 import DiffStat from "../DiffStat.vue";
 import {
@@ -139,7 +140,8 @@ const statusWord = computed(() =>
 // That order is an additive score (@/lib/repo-rank). Showing each card's points and the reason
 // behind every point is what makes the order explainable rather than a black box, and it is why a
 // stale repo reads "lowered, not hidden" instead of just sinking without comment.
-const rank = computed(() => (store.sortMode === "attention" ? rankRepo(props.repo, Date.now()) : null));
+const clock = minuteClock();
+const rank = computed(() => (store.sortMode === "attention" ? rankRepo(props.repo, clock.value) : null));
 function rankReasonText(r: RankReason): string {
   switch (r.key) {
     case "conflicted":

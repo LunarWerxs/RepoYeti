@@ -11,7 +11,7 @@ import { stat, readFile } from "node:fs/promises";
 import { join, dirname, resolve, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import type { SimpleGit } from "simple-git";
-import { gitFor, currentGitOperation } from "../git.ts";
+import { gitFor, currentGitOperation, headMovedAt } from "../git.ts";
 import { readGate } from "../gitgate.ts";
 import { computeDiffStats, type DiffStat } from "./diffstat.ts";
 import type { RepoStatus } from "../db.ts";
@@ -543,6 +543,7 @@ export async function readStatus(absPath: string, withDiff = false): Promise<Rep
       // on normal checkouts/worktrees, shared with the auto-commit gate via currentGitOperation).
       const conflicted = status.files.some((f) => isConflictPair(f.index ?? " ", f.working_dir ?? " "));
       const gitOperation = await currentGitOperation(absPath);
+      const headMoved = await headMovedAt(absPath);
       return {
         branch: status.branch,
         detached: status.detached,
@@ -559,6 +560,7 @@ export async function readStatus(absPath: string, withDiff = false): Promise<Rep
         diff,
         conflicted,
         gitOperation,
+        headMovedAt: headMoved,
         updatedAt,
       };
     });

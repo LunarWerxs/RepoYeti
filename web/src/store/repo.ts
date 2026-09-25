@@ -2,6 +2,7 @@ import { ref, reactive, computed, watch, type Ref } from "vue";
 import { api } from "../api";
 import type { ActionName, ActionResult, ChangedFile, Repo, RepoStatus } from "../types";
 import { sortByAttention } from "@/lib/repo-rank";
+import { minuteClock } from "@/lib/minute-clock";
 
 /** Sync-status filter keys (multi-select; OR semantics). */
 export type StatusKey = "dirty" | "ahead" | "behind" | "clean" | "error";
@@ -67,7 +68,9 @@ export function useRepoActions(
       case "recent":
         return [...list].sort((a, b) => b.updatedAt - a.updatedAt);
       case "attention":
-        return sortByAttention(list, Date.now());
+        // The minute clock (not Date.now()) so a caller's computed re-sorts when a time-based
+        // term such as "stale" or "unfetched" crosses its threshold.
+        return sortByAttention(list, minuteClock().value);
       default:
         return list; // "manual": today's server-derived order, untouched
     }

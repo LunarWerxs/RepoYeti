@@ -24,7 +24,10 @@ function status(over: Partial<RepoStatus> = {}): RepoStatus {
   };
 }
 
-function repo(id: string, st: Partial<RepoStatus> | null, updatedAt = NOW - 10 * DAY): Repo {
+// `headMovedAt` (HEAD's reflog time) is the activity signal. The row's `updatedAt` is pinned to NOW
+// because that is what production holds right after a daemon restart or rescan: a ranking that
+// read it would call every repo "active" and the zero-score and stale cases below would fail.
+function repo(id: string, st: Partial<RepoStatus> | null, headMovedAt = NOW - 10 * DAY): Repo {
   return {
     id,
     name: id,
@@ -41,8 +44,8 @@ function repo(id: string, st: Partial<RepoStatus> | null, updatedAt = NOW - 10 *
     starred: false,
     autoCommit: false,
     sortOrder: null,
-    status: st ? status(st) : null,
-    updatedAt,
+    status: st ? status({ headMovedAt, ...st }) : null,
+    updatedAt: NOW,
   };
 }
 

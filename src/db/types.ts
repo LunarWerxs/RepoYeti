@@ -61,6 +61,11 @@ export interface RepoStatus {
    *  src/git.ts currentGitOperation (shared with the auto-commit safety gate). Optional/git-only
    *  like `conflicted`. */
   gitOperation?: string | null;
+  /** When HEAD last moved (commit, checkout, pull, reset), from HEAD's reflog mtime; see
+   *  src/git.ts headMovedAt. The "Needs attention" sort's activity/staleness signal, because
+   *  the repo row's `updated_at` is rewritten by discovery and toggles. Optional/git-only; null
+   *  when there is no reflog. */
+  headMovedAt?: number | null;
   updatedAt: number;
 }
 

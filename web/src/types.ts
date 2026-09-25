@@ -33,6 +33,9 @@ export interface RepoStatus {
   /** Which mid-git-operation marker is present ("MERGE_HEAD" | "rebase-merge" | "rebase-apply" |
    *  "CHERRY_PICK_HEAD" | "REVERT_HEAD"), or null/absent when not mid-operation. */
   gitOperation?: string | null;
+  /** When HEAD last moved (commit, checkout, pull, reset); null/absent without a reflog or for
+   *  Lore repos. Mirrors RepoStatus in src/db/types.ts. */
+  headMovedAt?: number | null;
   updatedAt: number;
 }
 

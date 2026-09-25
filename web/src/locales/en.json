@@ -355,8 +355,8 @@
       "detached": "Detached HEAD",
       "unfetched": "Never fetched by RepoYeti",
       "unfetchedDays": "Last fetched {days} days ago",
-      "active": "Changed in the last day",
-      "stale": "No change in {days} days (lowered, not hidden)"
+      "active": "Committed or checked out in the last day",
+      "stale": "No commit or checkout in {days} days (lowered, not hidden)"
     },
     "changes": {
       "collapseAll": "Collapse all",

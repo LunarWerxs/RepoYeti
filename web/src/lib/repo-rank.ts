@@ -32,7 +32,7 @@ export interface RankReason {
   points: number;
   /** The count behind a volume signal (commits behind/ahead, changed files). */
   count?: number;
-  /** Whole days behind a time signal (since last fetch, since last change). */
+  /** Whole days behind a time signal (since last fetch, since HEAD last moved). */
   days?: number;
 }
 
@@ -113,22 +113,28 @@ export function rankRepo(repo: Repo, now: number): RepoRank {
     }
   }
 
-  const idle = now - repo.updatedAt;
-  if (idle <= ACTIVE_WITHIN_MS) add({ key: "active", points: RANK_WEIGHTS.active });
-  else if (idle > STALE_AFTER_DAYS * DAY_MS) {
-    add({ key: "stale", points: RANK_WEIGHTS.stale, days: Math.floor(idle / DAY_MS) });
+  // Activity is when HEAD last moved (its reflog), never `repo.updatedAt`: the daemon rewrites
+  // that on every discovery pass, rescan and hide/pin toggle, so after a restart it would call
+  // every repo "changed in the last day" and nothing would ever go stale. No reflog, no term.
+  const moved = st?.headMovedAt;
+  if (moved != null) {
+    const idle = now - moved;
+    if (idle <= ACTIVE_WITHIN_MS) add({ key: "active", points: RANK_WEIGHTS.active });
+    else if (idle > STALE_AFTER_DAYS * DAY_MS) {
+      add({ key: "stale", points: RANK_WEIGHTS.stale, days: Math.floor(idle / DAY_MS) });
+    }
   }
 
   return { score: round(reasons.reduce((sum, r) => sum + r.points, 0)), reasons };
 }
 
-/** Highest score first; ties fall back to most recently changed, then to the shown name. */
+/** Highest score first; ties fall back to HEAD moved most recently, then to the shown name. */
 export function sortByAttention(list: Repo[], now: number): Repo[] {
   const scores = new Map(list.map((r) => [r.id, rankRepo(r, now).score]));
   return [...list].sort(
     (a, b) =>
       (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0) ||
-      b.updatedAt - a.updatedAt ||
+      (b.status?.headMovedAt ?? 0) - (a.status?.headMovedAt ?? 0) ||
       (a.displayName || a.name).localeCompare(b.displayName || b.name, undefined, { sensitivity: "base" }),
   );
 }
