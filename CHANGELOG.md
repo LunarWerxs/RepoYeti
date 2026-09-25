@@ -4,6 +4,18 @@ All notable changes to RepoYeti are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Shift-select a range of repositories, and Ctrl+A / Escape, in select mode.** Picking ten repos
+  for a bulk action used to take ten taps. In select mode, Shift-click (or Shift+Enter/Space on a
+  focused row) now sets every repo between the last one you picked and this one to that repo's
+  state, Ctrl+A (Cmd+A on macOS) ticks every repo on screen and Escape clears the selection. A range
+  follows the order the cards are drawn in and skips a collapsed section, so it never ticks a repo
+  you cannot see. Underneath, gestures become "set all" and "set range" requests that the selection
+  applies to its own store, an idea adapted from Dear ImGui's multi-select API.
+
 ## [1.1.0] - 2026-09-22
 
 ### Fixed

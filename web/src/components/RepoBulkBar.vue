@@ -7,14 +7,22 @@
 // Bulk ops run SEQUENTIALLY, not via Promise.all: each one is a daemon write against the shared
 // repo index, and firing 40 concurrent writes is how you get partial-apply races. The bar reports
 // how many actually succeeded rather than assuming.
+//
+// While mounted the bar also owns the selection's keyboard scope and the on-screen order that a
+// Shift-tap on a card ranges over (see @/lib/multi-select for the request model).
 import { computed, onBeforeUnmount, onMounted, ref, watch, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
 import { EyeOff, Loader2, Pin, Star, Trash2, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
+import { useEventListener } from "@vueuse/core";
 import { useStore } from "../store";
+import { keyRequests } from "@/lib/multi-select";
+import { isSectionCollapsed } from "@/lib/repo-sections";
 import {
+  applyRequests,
   bulkBarHeight,
   clearSelection,
+  provideRangeOrder,
   pruneSelection,
   selectAll,
   selectionCount,
@@ -83,6 +91,36 @@ function toggleAll(): void {
   if (allSelected.value) clearSelection();
   else selectAll(visibleIds.value);
 }
+
+/**
+ * The repos a Shift-range may sweep, in the order the cards are drawn: the filtered list, or
+ * Pinned, Starred, then the rest. A collapsed section is left out because its cards are off screen,
+ * and a range must never tick a repo the owner cannot see (a following Remove would take it). The
+ * catch-all section is only collapsible while a section sits above it, the same rule RepoList uses.
+ */
+const rangeIds = computed(() => {
+  if (store.filtersActive) return store.filteredRepos.map((r) => r.id);
+  const hasSections = store.pinnedRepos.length > 0 || store.starredRepos.length > 0;
+  const shown = [
+    ...(isSectionCollapsed("pinned") ? [] : store.pinnedRepos),
+    ...(isSectionCollapsed("starred") ? [] : store.starredRepos),
+    ...(hasSections && isSectionCollapsed("other") ? [] : store.otherRepos),
+  ];
+  return shown.map((r) => r.id);
+});
+onBeforeUnmount(provideRangeOrder(() => rangeIds.value));
+
+// Ctrl/Cmd+A ticks every visible repo and Escape clears, from anywhere on the dashboard except a
+// field (where Ctrl+A means "select this text") or an open dialog/menu (which owns its own Escape).
+useEventListener(document, "keydown", (e: KeyboardEvent) => {
+  if (e.defaultPrevented || busy.value) return;
+  const target = e.target as HTMLElement | null;
+  if (target?.closest?.("input,textarea,select,[contenteditable='true'],[role='dialog'],[role='menu']")) return;
+  const requests = keyRequests(e, selectionCount.value > 0);
+  if (!requests) return;
+  e.preventDefault();
+  applyRequests(requests, visibleIds.value);
+});
 
 /** Success toast carrying an Undo, matching the per-repo toggles' convention. */
 function undoableToast(message: string, revert: () => Promise<unknown>): void {

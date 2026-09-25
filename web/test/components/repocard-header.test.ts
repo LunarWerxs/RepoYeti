@@ -12,6 +12,13 @@ import { toast } from "vue-sonner";
 import { i18n } from "@/i18n";
 import { useStore } from "@/store";
 import RepoCardHeader from "@/components/repo-card/RepoCardHeader.vue";
+import {
+  activateRepo,
+  provideRangeOrder,
+  selectionIds,
+  startSelecting,
+  stopSelecting,
+} from "@/lib/repo-selection";
 import type { Repo } from "@/types";
 
 vi.mock("vue-sonner", () => ({
@@ -154,6 +161,47 @@ describe("RepoCardHeader keyboard activation", () => {
 
     await chevron.trigger("click");
     expect(wrapper.emitted("toggle")).toHaveLength(1);
+  });
+});
+
+// The row reads the click/keydown modifiers and hands them to the selection's request model; with
+// the modifiers dropped every Shift-tap would degrade to a single toggle.
+describe("RepoCardHeader in select mode", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+    startSelecting();
+  });
+
+  afterEach(() => {
+    activeWrapper?.unmount();
+    activeWrapper = undefined;
+    stopSelecting();
+  });
+
+  it("Shift-click on the row ranges from the last picked repo", async () => {
+    const release = provideRangeOrder(() => ["first", "middle", "header-repo"]);
+    const wrapper = mountHeader();
+    activateRepo("first", { shift: false, ctrl: false });
+
+    await wrapper.get('[role="button"]').trigger("click", { shiftKey: true });
+
+    expect([...selectionIds.value].sort()).toEqual(["first", "header-repo", "middle"]);
+    expect(wrapper.emitted("toggle")).toBeUndefined();
+    release();
+  });
+
+  it("Shift+Space on the focused row ranges the same way", () => {
+    const release = provideRangeOrder(() => ["first", "middle", "header-repo"]);
+    const wrapper = mountHeader();
+    activateRepo("first", { shift: false, ctrl: false });
+
+    wrapper.get('[role="button"]').element.dispatchEvent(
+      new KeyboardEvent("keydown", { key: " ", shiftKey: true, bubbles: true, cancelable: true }),
+    );
+
+    expect([...selectionIds.value].sort()).toEqual(["first", "header-repo", "middle"]);
+    release();
   });
 });
 
