@@ -1,6 +1,6 @@
 /**
- * The port proxy: `/proxy/<port>/...` forwards to `http://127.0.0.1:<port>/...` (HTTP and WebSocket),
- * behind the same owner sign-in as the dashboard.
+ * The port proxy: `/proxy/<port>/...` forwards to `http://127.0.0.1:<port>/...`, or `[::1]` when that
+ * is where the port answers (HTTP and WebSocket), behind the same owner sign-in as the dashboard.
  *
  * WHY: the daemon is often the only thing on this machine reachable from the phone (the tunnel), and
  * the repo you are looking at usually has a dev server running on some local port. This lets the
@@ -16,6 +16,8 @@
  *  - Owner only (auth.ts isOwnerRequest): a share-link guest never reaches another port, and with no
  *    OIDC client configured the proxy stays loopback-only. An anonymous browser page load is sent to
  *    the dashboard (which shows the sign-in); anything else gets a bare 401, like /api/*.
+ *  - A request whose Origin is not the daemon's own is refused, because the upstream is shown a
+ *    loopback Origin and would otherwise lose its own cross-origin check.
  *  - The daemon's own port is refused: a forwarded request arrives from 127.0.0.1 without the
  *    daemon's cookies and would be judged by the local-mode rules, not the caller's.
  *  - The daemon's cookies and the owner's API token are stripped before forwarding, and an upstream
@@ -27,7 +29,7 @@
 import type { Context, Hono } from "hono";
 import type { Deps } from "../deps.ts";
 import type { RepoYetiConfig } from "../../config.ts";
-import { DAEMON_COOKIE_NAMES, isOwnerRequest, validBearerToken } from "../../auth.ts";
+import { DAEMON_COOKIE_NAMES, isOwnerRequest, publicOrigin, validBearerToken } from "../../auth.ts";
 import { getServerPort } from "../../runtime.ts";
 
 /** Headers that describe one connection, not the message: never forwarded in either direction. */
@@ -48,13 +50,31 @@ const WS_HANDSHAKE = ["sec-websocket-key", "sec-websocket-version", "sec-websock
 /** Frames a client may send before the upstream socket opens; past this the proxy gives up. */
 const MAX_PENDING_FRAMES = 1000;
 
+/** The loopback addresses a proxied port is tried on, in order. */
+const LOOPBACK_HOSTS = ["127.0.0.1", "[::1]"];
+
+/**
+ * The loopback address each port last answered on, tried first next time.
+ *
+ * WHY: a dev server that binds `localhost` often listens on ::1 only (Vite does by default on
+ * Windows), so dialling 127.0.0.1 alone would answer 502 for the most common case.
+ */
+const answeredOn = new Map<number, string>();
+
+function hostsFor(port: number): string[] {
+  const known = answeredOn.get(port);
+  return known ? [known, ...LOOPBACK_HOSTS.filter((h) => h !== known)] : LOOPBACK_HOSTS;
+}
+
 /** What Bun keeps on each proxied browser socket (see portProxyWebSocket below). */
 export interface PortProxySocketData {
-  target: string;
+  port: number;
+  path: string;
+  hosts: string[];
   protocols: string[];
   headers: Record<string, string>;
   upstream?: WebSocket;
-  pending: (string | Buffer)[];
+  pending: (string | Buffer<ArrayBuffer>)[];
 }
 
 type ProxyServer = Bun.Server<PortProxySocketData>;
@@ -108,9 +128,10 @@ function upstreamHeaders(c: Context, cfg: RepoYetiConfig, port: number): Headers
   if (cookie) h.set("cookie", cookie);
   else h.delete("cookie");
   if (validBearerToken(c, cfg.apiToken)) h.delete("authorization");
-  // The caller is already authenticated as the owner and CSRF-checked here, so the upstream sees the
-  // origin it would see if the owner opened the port directly. Dev servers such as Vite refuse a
-  // WebSocket whose Origin is not loopback, which would otherwise break hot reload over the tunnel.
+  // proxy() has already refused any Origin other than the daemon's own, so a present Origin is the
+  // proxied page itself: the upstream sees the origin it would see if the owner opened the port
+  // directly. Dev servers such as Vite refuse a WebSocket whose Origin is not loopback, which would
+  // otherwise break hot reload over the tunnel.
   if (h.has("origin")) h.set("origin", `http://127.0.0.1:${port}`);
   h.set("x-forwarded-prefix", `/proxy/${port}`);
   return h;
@@ -143,6 +164,12 @@ async function proxy(c: Context, cfg: RepoYetiConfig): Promise<Response> {
   const port = parseProxyPort(c.req.param("port"));
   if (port === null) return c.text("Not a TCP port.", 400);
   if (port === (getServerPort() || cfg.port)) return c.text("The port proxy cannot open RepoYeti itself.", 403);
+  // WHY: the upstream is shown a loopback Origin (upstreamHeaders), which would erase its own
+  // Origin/CSRF check. Only a page served from this daemon's origin may earn that; a same-site but
+  // cross-origin caller (which SameSite=Lax lets through with the owner's cookie) is refused,
+  // WebSocket upgrades included. The loopback guard does this for local calls, not tunnel ones.
+  const origin = c.req.header("origin");
+  if (origin && origin !== publicOrigin(c)) return c.text("Cross-origin requests are not proxied.", 403);
 
   const url = new URL(c.req.url);
   const prefix = `/proxy/${port}`;
@@ -161,7 +188,9 @@ async function proxy(c: Context, cfg: RepoYetiConfig): Promise<Response> {
       .filter(Boolean);
     for (const name of WS_HANDSHAKE) headers.delete(name);
     const data: PortProxySocketData = {
-      target: `ws://127.0.0.1:${port}${path}`,
+      port,
+      path,
+      hosts: hostsFor(port),
       protocols,
       headers: Object.fromEntries(headers.entries()),
       pending: [],
@@ -176,21 +205,71 @@ async function proxy(c: Context, cfg: RepoYetiConfig): Promise<Response> {
     return upgraded ? new Response(null) : c.text("WebSocket upgrade failed.", 400);
   }
 
-  let res: Response;
-  try {
-    res = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method: c.req.method,
-      headers,
-      body: c.req.method === "GET" || c.req.method === "HEAD" ? undefined : c.req.raw.body,
-      redirect: "manual",
-      // Pass the upstream's bytes through as they are: decompressing would leave Content-Encoding
-      // and Content-Length describing a body the browser no longer receives.
-      decompress: false,
-    });
-  } catch {
-    return c.text(`Nothing answered on port ${port}.`, 502);
+  const body = c.req.method === "GET" || c.req.method === "HEAD" ? undefined : c.req.raw.body;
+  // A streamed body can be sent only once, so a request carrying one tries just the address this
+  // port last answered on (the page load before it has usually found the right one).
+  const hosts = body ? hostsFor(port).slice(0, 1) : hostsFor(port);
+  let res: Response | undefined;
+  for (const host of hosts) {
+    try {
+      res = await fetch(`http://${host}:${port}${path}`, {
+        method: c.req.method,
+        headers,
+        body,
+        redirect: "manual",
+        // Pass the upstream's bytes through as they are: decompressing would leave Content-Encoding
+        // and Content-Length describing a body the browser no longer receives.
+        decompress: false,
+      });
+      answeredOn.set(port, host);
+      break;
+    } catch {
+      // Nothing on this address: try the next loopback address.
+    }
   }
+  if (!res) return c.text(`Nothing answered on port ${port}.`, 502);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: downstreamHeaders(res, port) });
+}
+
+/** Bun's client WebSocket, which takes request headers as a constructor option the DOM typing lacks. */
+const BunWebSocket = WebSocket as unknown as new (
+  url: string,
+  options: { headers: Record<string, string>; protocols: string[] },
+) => WebSocket;
+
+/**
+ * Opens the upstream socket for one browser socket on d.hosts[attempt]. A socket that fails before it
+ * opens moves on to the next loopback address (see answeredOn); events from a superseded attempt are
+ * ignored so they cannot close the browser socket.
+ */
+function connectUpstream(ws: Bun.ServerWebSocket<PortProxySocketData>, attempt: number): void {
+  const d = ws.data;
+  const host = d.hosts[attempt]!;
+  const upstream = new BunWebSocket(`ws://${host}:${d.port}${d.path}`, { headers: d.headers, protocols: d.protocols });
+  upstream.binaryType = "arraybuffer";
+  d.upstream = upstream;
+  let opened = false;
+  upstream.onopen = () => {
+    opened = true;
+    answeredOn.set(d.port, host);
+    for (const frame of d.pending.splice(0)) upstream.send(frame);
+  };
+  upstream.onmessage = (e) => {
+    ws.send(e.data as string | ArrayBuffer);
+  };
+  // 1005 and 1006 describe a close without a frame and may not be sent; pass anything else on.
+  upstream.onclose = (e) => {
+    if (d.upstream !== upstream) return;
+    ws.close(e.code === 1005 || e.code === 1006 ? 1000 : e.code, e.reason);
+  };
+  upstream.onerror = () => {
+    if (d.upstream !== upstream) return;
+    if (!opened && attempt + 1 < d.hosts.length && ws.readyState === WebSocket.OPEN) {
+      connectUpstream(ws, attempt + 1);
+      return;
+    }
+    ws.close(1011, "upstream error");
+  };
 }
 
 /**
@@ -200,19 +279,7 @@ async function proxy(c: Context, cfg: RepoYetiConfig): Promise<Response> {
 export const portProxyWebSocket: Bun.WebSocketHandler<PortProxySocketData> = {
   data: {} as PortProxySocketData,
   open(ws) {
-    const d = ws.data;
-    const upstream = new WebSocket(d.target, { headers: d.headers, protocols: d.protocols });
-    upstream.binaryType = "arraybuffer";
-    d.upstream = upstream;
-    upstream.onopen = () => {
-      for (const frame of d.pending.splice(0)) upstream.send(frame);
-    };
-    upstream.onmessage = (e) => {
-      ws.send(e.data as string | ArrayBuffer);
-    };
-    // 1005 and 1006 describe a close without a frame and may not be sent; pass anything else on.
-    upstream.onclose = (e) => ws.close(e.code === 1005 || e.code === 1006 ? 1000 : e.code, e.reason);
-    upstream.onerror = () => ws.close(1011, "upstream error");
+    connectUpstream(ws, 0);
   },
   message(ws, message) {
     const d = ws.data;

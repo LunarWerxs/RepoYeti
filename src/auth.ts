@@ -27,7 +27,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
 import { authEnforced, accessMode, type RepoYetiConfig, type OAuthConfig } from "./config.ts";
 import { sign, unsign, rotateKey } from "./signing.ts";
-import { readGuestShare } from "./share/index.ts";
+import { GUEST_COOKIE, readGuestShare } from "./share/index.ts";
 import { policyFor, permSatisfies } from "./share/policy.ts";
 import { shareCoversRepo, logShareEvent, type Share } from "./db.ts";
 
@@ -181,7 +181,7 @@ function isHttps(c: Context): boolean {
 }
 /** The daemon's public origin as the browser reached it (https over a tunnel). This is signed into
  * state so the relay return and the final post-login navigation stay bound to the initiating host. */
-function publicOrigin(c: Context): string {
+export function publicOrigin(c: Context): string {
   const u = new URL(c.req.url);
   u.protocol = `${clientProto(c)}:`;
   return u.origin;

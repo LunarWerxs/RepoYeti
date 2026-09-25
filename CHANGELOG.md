@@ -12,9 +12,10 @@ All notable changes to RepoYeti are documented here. The format is based on
   (`PUT /api/settings {"portProxy": true}`, off by default), `/proxy/<port>/` forwards HTTP and
   WebSocket traffic to whatever is listening on that port on the daemon's machine, so a repo's
   running dev server opens over the tunnel without exposing its port. Only the owner gets through
-  (a share-link guest never does, and with no sign-in configured it stays loopback-only); the
-  daemon's own port is refused, and the daemon's cookies and API token never reach the proxied
-  process. Idea from code-server's path proxy.
+  (a share-link guest never does, and with no sign-in configured it stays loopback-only); a
+  cross-origin caller and the daemon's own port are refused, and the daemon's cookies and API token
+  never reach the proxied process. A dev server listening only on `::1` (`localhost` on Windows)
+  is reached too. Idea from code-server's path proxy.
 
 ## [1.1.0] - 2026-09-22
 
