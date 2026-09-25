@@ -299,6 +299,8 @@ const sortOptions: { mode: SortMode; label: () => string }[] = [
   { mode: "manual", label: () => t("header.sortManual") },
   { mode: "name", label: () => t("header.sortName") },
   { mode: "recent", label: () => t("header.sortRecent") },
+  // Explainable additive score (@/lib/repo-rank); each card then shows its points and reasons.
+  { mode: "attention", label: () => t("header.sortAttention") },
 ];
 function setSort(mode: SortMode): void {
   store.setSortMode(mode);

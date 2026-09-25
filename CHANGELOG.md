@@ -77,6 +77,17 @@ All notable changes to RepoYeti are documented here. The format is based on
   `REPOYETI_TOKEN` for remote mode). Every run is namespaced by its own id and cleans up after
   itself, so it is safe against a daemon in daily use. `bun run check:hurl`, now part of
   `bun run check`, fails when the suite calls a route the API no longer documents.
+- **"Needs attention" sort that explains itself.** The Sort by menu gains a fourth order: every
+  repo gets an additive score (merge conflict, operation in progress, unreadable status, commits
+  behind or unpushed, changed files, detached HEAD, a stale fetch, a commit or checkout in the
+  last day) and its card
+  shows the score with a tooltip listing each reason and its points, which always add up to the
+  number shown. Commit counts weigh more than changed-file counts, all three are log-scaled and
+  share one cap, so a flood of generated files cannot outrank a conflict. A repo whose HEAD has
+  not moved (no commit, checkout or pull) for 90 days is lowered, never hidden, and still rises
+  when something is wrong with it; activity is read from HEAD's reflog, so a daemon restart or
+  rescan does not make every repo look freshly changed. Ranking idea
+  adapted from Z4nzu/hackingtool (MIT).
 
 ## [1.1.0] - 2026-09-22
 

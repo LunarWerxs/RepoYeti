@@ -1,15 +1,18 @@
 import { ref, reactive, computed, watch, type Ref } from "vue";
 import { api } from "../api";
 import type { ActionName, ActionResult, ChangedFile, Repo, RepoStatus } from "../types";
+import { sortByAttention } from "@/lib/repo-rank";
+import { minuteClock } from "@/lib/minute-clock";
 
 /** Sync-status filter keys (multi-select; OR semantics). */
 export type StatusKey = "dirty" | "ahead" | "behind" | "clean" | "error";
 
 /** Display-only list ordering. "manual" is the daemon's own stored order (`sort_order`, the
- *  setting's long-standing default); "name" and "recent" re-sort purely client-side
+ *  setting's long-standing default); "name", "recent" and "attention" (the explainable additive
+ *  score in @/lib/repo-rank, whose reasons each card shows) re-sort purely client-side
  *  and never touch `sort_order`, so switching back to "manual" always restores the owner's
  *  last drag arrangement. */
-export type SortMode = "manual" | "name" | "recent";
+export type SortMode = "manual" | "name" | "recent" | "attention";
 export const MAX_RETAINED_CHANGE_REPOS = 12;
 
 // Client-only display preference (like desktopNotify); no daemon/API involvement, so
@@ -18,7 +21,7 @@ const SORT_MODE_KEY = "repoyeti.sortMode";
 function loadSortModePref(): SortMode {
   try {
     const v = localStorage.getItem(SORT_MODE_KEY);
-    if (v === "manual" || v === "name" || v === "recent") return v;
+    if (v === "manual" || v === "name" || v === "recent" || v === "attention") return v;
   } catch {
     /* private mode / storage disabled: fall through to the default */
   }
@@ -64,6 +67,10 @@ export function useRepoActions(
         );
       case "recent":
         return [...list].sort((a, b) => b.updatedAt - a.updatedAt);
+      case "attention":
+        // The minute clock (not Date.now()) so a caller's computed re-sorts when a time-based
+        // term such as "stale" or "unfetched" crosses its threshold.
+        return sortByAttention(list, minuteClock().value);
       default:
         return list; // "manual": today's server-derived order, untouched
     }

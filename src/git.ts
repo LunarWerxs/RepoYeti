@@ -396,3 +396,18 @@ export async function currentGitOperation(absPath: string): Promise<string | nul
     return null; // can't tell here; auto-commit's inGitOperation() treats a throw as "yes" itself
   }
 }
+
+/** When HEAD last moved (commit, checkout, pull, reset, rebase), from the mtime of HEAD's reflog.
+ *  WHY: the repo row's `updated_at` is rewritten by every discovery pass, rescan and hide/pin
+ *  toggle, so it says nothing about git activity. The reflog is written only when HEAD moves,
+ *  survives daemon restarts, and costs one stat (no git subprocess on the hot status path).
+ *  Null when there is no reflog (reflogs disabled, bare repo) or it can't be read. */
+export async function headMovedAt(absPath: string): Promise<number | null> {
+  try {
+    const base = await gitDirFor(absPath);
+    if (!base) return null;
+    return Math.round((await stat(join(base, "logs", "HEAD"))).mtimeMs);
+  } catch {
+    return null;
+  }
+}
