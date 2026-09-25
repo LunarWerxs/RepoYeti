@@ -42,11 +42,6 @@ All notable changes to RepoYeti are documented here. The format is based on
   each real JSON answer is validated against its declaration, and a mismatch fails as a 500 naming
   the route and the field, so a renamed or dropped field can no longer ship while the doc promises
   the old shape. Off by default, with no production cost.
-
-### Fixed
-
-- `PUT /api/repos/:id/file` with no repo id answered `{ error }` instead of the standard
-  `{ ok, code, message }` error envelope.
 - **Open a local dev server from your phone, through the same sign-in.** With `portProxy` on
   (`PUT /api/settings {"portProxy": true}`, off by default), `/proxy/<port>/` forwards HTTP and
   WebSocket traffic to whatever is listening on that port on the daemon's machine, so a repo's
@@ -116,6 +111,12 @@ All notable changes to RepoYeti are documented here. The format is based on
   push then has that long to be caught before unattended installs run it. The apply re-checks the
   age, so a release published between the check and the install is refused rather than taken. A
   manual check or install is unaffected. Idea from Oh My Zsh's update cooldown.
+
+### Fixed
+
+- `PUT /api/repos/:id/file` with no repo id answered `{ error }` instead of the standard
+  `{ ok, code, message }` error envelope.
+
 ### Security
 
 - **The file viewer and editor refuse Windows alias paths and, over remote access, secret files.**
@@ -127,8 +128,6 @@ All notable changes to RepoYeti are documented here. The format is based on
   (`.pem`, `.key`, `.p12`, `.pfx`, `id_rsa` and friends) and credential stores are refused by name
   with a 403, so they never leave the machine; at the desk the owner reads and edits them as before.
   The idea comes from vite's `isFileLoadingAllowed`.
-### Security
-
 - **Defence in depth for a non-loopback bind: a socket peer that is not this machine is always
   remote, and an unauthenticated daemon refuses it.** The daemon told a local caller from a remote
   one only by the absence of `cf-connecting-ip` / `x-forwarded-*`, so a remote request that
