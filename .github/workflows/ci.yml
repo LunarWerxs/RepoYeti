@@ -10,8 +10,13 @@ on:
   # main and produced no run at all, leaving nothing to gate a release on.
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   daemon:
+    timeout-minutes: 30
     name: daemon (test + typecheck)
     # The shipped artifact is a per-OS `bun --compile` binary, so run the suite on all three.
     strategy:
@@ -50,6 +55,7 @@ jobs:
         run: bun audit || true
 
   web:
+    timeout-minutes: 60
     name: web (i18n + build)
     runs-on: ubuntu-latest
     defaults:
@@ -102,6 +108,7 @@ jobs:
   # needs nothing running and touches nothing of the developer's. Kept deliberately small: a broad
   # end-to-end suite nobody trusts is worse than three facts that are actually checked.
   browser:
+    timeout-minutes: 60
     name: browser gate (loopback origin + reconnect + menus)
     # One OS is enough: what this covers is Chromium's own behaviour and the dashboard's layout,
     # neither of which is per-platform. The daemon's platform coverage is the daemon job's matrix.

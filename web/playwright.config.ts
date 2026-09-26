@@ -7,6 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
 // test/e2e). No npm-script alias on purpose: it can only run against a developer's own daemon, so
 // no CI gate could ever reach one (package.json's `//test` note has the longer version).
 export default defineConfig({
+  workers: process.env.CI ? undefined : 4,
   testDir: "./test/e2e",
   timeout: 30_000,
   expect: { timeout: 15_000 },

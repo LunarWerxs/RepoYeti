@@ -19,6 +19,8 @@ export default defineConfig({
     },
   },
   test: {
+    pool: 'forks',
+    maxWorkers: 4,
     environment: "happy-dom",
     globals: true,
     setupFiles: ["./test/setup.ts"],

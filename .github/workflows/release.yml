@@ -45,6 +45,7 @@ jobs:
   # red on it, and the tag built green regardless. Tagging is precisely the moment nobody is
   # watching a run, so the gate belongs here rather than resting on someone noticing a red badge.
   preflight:
+    timeout-minutes: 60
     name: preflight (${{ matrix.os }})
     # The SAME three OSes the build matrix ships, because a release that tests on one of them is a
     # release that tests the wrong one: this is a Windows-first app, and the Windows-only code
@@ -111,6 +112,7 @@ jobs:
   # by a build or by the unit suites. Linux only: it tests Chromium's behaviour and the dashboard's
   # layout, not the daemon's platform coverage, which is preflight's matrix.
   browser:
+    timeout-minutes: 60
     name: browser gate (loopback origin + reconnect + menus)
     runs-on: ubuntu-latest
     steps:
@@ -140,6 +142,7 @@ jobs:
           retention-days: 7
 
   build:
+    timeout-minutes: 60
     name: build (${{ matrix.os }})
     # Both gates, not just the suite: a release that publishes past a red browser gate is exactly
     # the case the gate exists for.
@@ -300,6 +303,7 @@ jobs:
           path: out/*
 
   release:
+    timeout-minutes: 60
     name: publish release
     # Only a TAG publishes. A workflow_dispatch on a branch is a build + smoke validation
     # of the pipeline; dispatching on a tag ref still lands here and publishes for real.
