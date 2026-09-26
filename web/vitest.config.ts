@@ -20,7 +20,9 @@ export default defineConfig({
   },
   test: {
     pool: 'forks',
-    maxWorkers: 4,
+    // 104 happy-dom files, most of their time in environment setup: paired on the shared box, 8 workers ran 40 s
+    // at 2.2 GB peak where 4 ran 55 s at 1.7 GB and an unbounded pool 21-42 s at 4.8 GB with a timing flake.
+    maxWorkers: 8,
     environment: "happy-dom",
     globals: true,
     setupFiles: ["./test/setup.ts"],
