@@ -104,7 +104,7 @@ Nothing is mirrored, uploaded, or re-hosted. RepoYeti shells out to the same `gi
 
 ## ⭐ Like it? Help it grow
 
-Built in the open, free for personal use, no ads and no telemetry beyond a once-a-day version check you can switch off. If RepoYeti earns a place on your machine, a few seconds goes a long way:
+Built in the open, free for personal use, no ads, and a once-a-day version check you can switch off. If RepoYeti earns a place on your machine, a few seconds goes a long way:
 
 - ⭐ **[Star the repo](https://github.com/LunarWerxs/RepoYeti)** - the clearest signal that this is worth maintaining.
 - 💬 **[Join the Discord](https://discord.gg/PsWpeNUzhk)** - feature arguments, early builds, and somewhere to shout when something breaks.
