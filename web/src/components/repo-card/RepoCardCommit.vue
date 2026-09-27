@@ -442,8 +442,8 @@ defineExpose({ loadRecentMsgs, recentMsgs });
           <TooltipTrigger as-child>
             <span class="inline-flex">
               <Button
-                variant="outline"
-                class="gemini-auto h-9"
+                variant="gemini"
+                class="h-9"
                 :disabled="smartBusy || committing"
                 :aria-label="$t('repo.smartCommit.button')"
                 @click="runSmart()"
@@ -459,9 +459,9 @@ defineExpose({ loadRecentMsgs, recentMsgs });
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <Button
-              variant="outline"
+              variant="gemini"
               size="icon"
-              class="gemini-auto h-9"
+              class="h-9"
               :disabled="smartBusy || committing"
               :aria-label="$t('repo.smartCommit.menuLabel')"
             >
@@ -507,30 +507,5 @@ defineExpose({ loadRecentMsgs, recentMsgs });
    color-scheme-conformance check wants every color consumed through the token layer. */
 :root {
   --color-white: #fff;
-}
-
-
-/* The "Auto" (Smart Commit) split button — a Gemini-style animated rainbow so it reads as the
-   special AI action, distinct from the solid-accent plain Commit button beside it. Overrides the
-   outline variant's neutral fill; both halves share the same animation so they shimmer in sync. */
-.gemini-auto {
-  color: var(--color-white);
-  border-color: transparent;
-  background-image: linear-gradient(110deg, #4285f4 0%, #9b72cb 28%, #d96570 50%, #9b72cb 72%, #4285f4 100%);
-  background-size: 200% 100%;
-  animation: gemini-pan 6s linear infinite;
-}
-.gemini-auto:hover {
-  filter: brightness(1.08) saturate(1.08);
-}
-@keyframes gemini-pan {
-  to {
-    background-position: -200% 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .gemini-auto {
-    animation: none;
-  }
 }
 </style>
