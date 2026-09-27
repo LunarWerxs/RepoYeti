@@ -49,7 +49,7 @@ const Harness = defineComponent({
 
 const mounted: Array<{ unmount: () => void }> = [];
 
-function mountHarness(props: Record<string, unknown> = {}) {
+function mountHarness(props: InstanceType<typeof Harness>["$props"] = {}) {
   const wrapper = mount(Harness, { props, attachTo: document.body });
   mounted.push(wrapper);
   return { wrapper, trigger: wrapper.get('[data-testid="trigger"]') };

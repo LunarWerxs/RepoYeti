@@ -150,7 +150,7 @@ async function ack(id: string): Promise<void> {
              opted in per-card. Show the current opt-in count (or a nudge when it's zero). -->
         <p
           :class="[
-            'px-3.5 pt-3 text-[12px] leading-relaxed',
+            'px-3.5 pt-3 text-xs leading-relaxed',
             optedInCount === 0 ? 'text-warning' : 'text-muted-foreground',
           ]"
         >
@@ -163,7 +163,7 @@ async function ack(id: string): Promise<void> {
 
         <!-- schedule mode: every N vs daily at a set time -->
         <div class="flex flex-col gap-1.5 px-3.5 py-3">
-          <span class="text-[12px] text-muted-foreground">{{ $t("settings.autoCommitSchedule") }}</span>
+          <span class="text-xs text-muted-foreground">{{ $t("settings.autoCommitSchedule") }}</span>
           <Select v-model="modeChoice">
             <SelectTrigger class="w-full" :aria-label="$t('settings.autoCommitSchedule')"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -222,7 +222,7 @@ async function ack(id: string): Promise<void> {
 
         <!-- what an unattended run does when a CONFIGURED AI provider fails -->
         <div class="flex flex-col gap-1.5 px-3.5 py-3">
-          <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
             {{ $t("settings.autoCommitAiFallback") }}
             <InfoHint :text="$t('settings.autoCommitAiFallbackHint')" />
           </span>
@@ -245,8 +245,8 @@ async function ack(id: string): Promise<void> {
          owner may have turned it off precisely BECAUSE of one of these. -->
     <div v-if="store.autoCommitIncidents.length" class="flex flex-col gap-2 px-3.5 py-3">
       <div class="flex items-center gap-1.5">
-        <span class="text-[12px] text-muted-foreground">{{ $t("settings.autoCommitIncidents") }}</span>
-        <Badge v-if="unackedIncidents.length" variant="warning" class="px-1.5 py-0 text-[10px]">
+        <span class="text-xs text-muted-foreground">{{ $t("settings.autoCommitIncidents") }}</span>
+        <Badge v-if="unackedIncidents.length" variant="warning" size="sm">
           {{ unackedIncidents.length }}
         </Badge>
         <InfoHint :text="$t('settings.autoCommitIncidentsHint')" />
@@ -260,8 +260,8 @@ async function ack(id: string): Promise<void> {
         >
           <CircleAlert :size="14" class="mt-0.5 shrink-0 text-warning" />
           <div class="min-w-0 flex-1">
-            <p class="truncate text-[12.5px] font-medium">{{ incident.repoName }}</p>
-            <p class="text-[11.5px] text-muted-foreground">{{ incident.reason }} · {{ fromNow(incident.at) }}</p>
+            <p class="truncate text-ui font-medium">{{ incident.repoName }}</p>
+            <p class="text-xs text-muted-foreground">{{ incident.reason }} · {{ fromNow(incident.at) }}</p>
           </div>
           <Button size="sm" variant="outline" class="shrink-0" @click="ack(incident.id)">
             <Check />
@@ -277,8 +277,8 @@ async function ack(id: string): Promise<void> {
         >
           <Check :size="14" class="mt-0.5 shrink-0 text-muted-foreground" />
           <div class="min-w-0 flex-1">
-            <p class="truncate text-[12.5px] font-medium">{{ incident.repoName }}</p>
-            <p class="text-[11.5px] text-muted-foreground">{{ incident.reason }} · {{ fromNow(incident.at) }}</p>
+            <p class="truncate text-ui font-medium">{{ incident.repoName }}</p>
+            <p class="text-xs text-muted-foreground">{{ incident.reason }} · {{ fromNow(incident.at) }}</p>
           </div>
         </div>
       </div>

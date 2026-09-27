@@ -31,7 +31,7 @@ const Spinner = (): ReturnType<typeof h> =>
 const EditorFailed = (): ReturnType<typeof h> =>
   h(
     "div",
-    { class: "flex h-full items-center justify-center p-4 text-center text-[12px] text-muted-foreground" },
+    { class: "flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground" },
     t("fileViewer.editorFailed"),
   );
 const MonacoDiffViewer = defineAsyncComponent({
@@ -110,7 +110,7 @@ watch(
     <!-- large-file / compact-diff notice, same wording as the full viewer -->
     <div
       v-if="!loading && !errorMsg && !binary && (patchMode || truncated)"
-      class="border-b border-border/60 bg-secondary/40 px-3 py-1 text-[11px] text-muted-foreground"
+      class="border-b border-border/60 bg-secondary/40 px-3 py-1 text-2xs text-muted-foreground"
     >
       <span v-if="patchMode">{{ $t("fileViewer.compactDiff") }}</span>
       <span v-else>{{ $t("fileViewer.truncated") }}</span>
@@ -126,7 +126,7 @@ watch(
         class="flex h-full flex-col items-center justify-center gap-1.5 p-4 text-center"
       >
         <FileWarning :size="18" class="text-destructive" />
-        <div class="mono max-w-full text-[11.5px] break-words text-muted-foreground">{{ errorMsg }}</div>
+        <div class="mono max-w-full text-xs wrap-break-word text-muted-foreground">{{ errorMsg }}</div>
       </div>
 
       <div
@@ -134,7 +134,7 @@ watch(
         class="flex h-full flex-col items-center justify-center gap-1.5 p-4 text-center text-muted-foreground"
       >
         <FileWarning :size="18" />
-        <div class="text-[12px]">{{ $t("fileViewer.binary") }}</div>
+        <div class="text-xs">{{ $t("fileViewer.binary") }}</div>
       </div>
 
       <!-- Large modified files arrive as a unified patch, rendered read-only with `diff`

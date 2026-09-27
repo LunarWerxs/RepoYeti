@@ -507,13 +507,9 @@ watch(activityDataKey, () => {
 const activeBucket = computed(() =>
   activeIndex.value == null ? null : (renderBuckets.value[activeIndex.value] ?? null),
 );
-const tooltipStyle = computed(() => {
-  return {
-    left: `${tooltipPosition.value.left}px`,
-    top: `${tooltipPosition.value.top}px`,
-    maxWidth: `min(calc(100% - ${TOOLTIP_PANEL_MARGIN * 2}px), calc(100vw - ${TOOLTIP_VIEWPORT_MARGIN * 2}px))`,
-  };
-});
+// The tooltip's width cap, fed to its max-w-(--tooltip-max-w) class; left/top are fed the same
+// way (as --tooltip-left / --tooltip-top) straight from tooltipPosition in the template.
+const tooltipMaxWidth = `min(calc(100% - ${TOOLTIP_PANEL_MARGIN * 2}px), calc(100vw - ${TOOLTIP_VIEWPORT_MARGIN * 2}px))`;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
@@ -670,8 +666,8 @@ onBeforeUnmount(() => {
           <div class="mx-auto mt-1 h-2 w-12 animate-pulse rounded bg-muted/70" />
         </div>
       </div>
-      <div class="rounded-md border border-border/50 bg-secondary/15 px-1.5 pb-1 pt-1">
-        <div class="flex min-h-5 items-center gap-2 px-0.5 text-[9px] leading-none text-muted-foreground/65">
+      <div class="rounded-md border border-border/50 bg-secondary/15 px-1.5 py-1">
+        <div class="flex min-h-5 items-center gap-2 px-0.5 text-3xs leading-none text-muted-foreground/65">
           <span class="font-medium text-muted-foreground">{{ chartTitle }}</span>
           <span class="inline-flex items-center gap-1 text-info">
             <i class="block size-1.5 animate-pulse rounded-full bg-info" aria-hidden="true" />
@@ -689,7 +685,7 @@ onBeforeUnmount(() => {
               role="tab"
               :aria-selected="scale === option"
               :data-activity-scale="option"
-              class="rounded-sm px-1.5 py-0.5 text-[8.5px] font-medium leading-none outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring/60"
+              class="rounded-sm px-1.5 py-0.5 text-3xs font-medium leading-none outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring/60"
               :class="scale === option
                 ? 'bg-primary/15 text-primary shadow-sm'
                 : 'text-muted-foreground/75 hover:bg-accent/45 hover:text-foreground'"
@@ -699,15 +695,15 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <div class="h-[74px] animate-pulse rounded bg-muted/30" />
+        <div class="h-18.5 animate-pulse rounded bg-muted/30" />
       </div>
     </div>
 
     <div
       v-else-if="!activity"
-      class="rounded-md border border-dashed border-border/60 bg-secondary/15 px-1.5 pb-1 pt-1 text-[11.5px] text-muted-foreground"
+      class="rounded-md border border-dashed border-border/60 bg-secondary/15 px-1.5 py-1 text-xs text-muted-foreground"
     >
-      <div class="flex min-h-5 items-center gap-2 px-0.5 text-[9px] leading-none">
+      <div class="flex min-h-5 items-center gap-2 px-0.5 text-3xs leading-none">
         <span class="font-medium text-muted-foreground">{{ chartTitle }}</span>
         <div
           class="ms-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
@@ -722,7 +718,7 @@ onBeforeUnmount(() => {
             role="tab"
             :aria-selected="scale === option"
             :data-activity-scale="option"
-            class="rounded-sm px-1.5 py-0.5 text-[8.5px] font-medium leading-none outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring/60"
+            class="rounded-sm px-1.5 py-0.5 text-3xs font-medium leading-none outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring/60"
             :class="scale === option
               ? 'bg-primary/15 text-primary shadow-sm'
               : 'text-muted-foreground/75 hover:bg-accent/45 hover:text-foreground'"
@@ -732,17 +728,17 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <div role="status" class="flex h-[74px] items-center justify-center px-3">
+      <div role="status" class="flex h-18.5 items-center justify-center px-3">
         {{ emptyLabel }}
       </div>
     </div>
 
     <div
       v-else-if="!activity.ok"
-      class="rounded-md border border-destructive/25 bg-destructive/5 px-1.5 pb-1 pt-1 text-[11.5px] text-destructive"
+      class="rounded-md border border-destructive/25 bg-destructive/5 px-1.5 py-1 text-xs text-destructive"
       :title="activity.message"
     >
-      <div class="flex min-h-5 items-center gap-2 px-0.5 text-[9px] leading-none">
+      <div class="flex min-h-5 items-center gap-2 px-0.5 text-3xs leading-none">
         <span class="font-medium text-destructive/80">{{ chartTitle }}</span>
         <div
           class="ms-auto inline-flex shrink-0 items-center rounded border border-border/60 bg-background/55 p-0.5"
@@ -757,7 +753,7 @@ onBeforeUnmount(() => {
             role="tab"
             :aria-selected="scale === option"
             :data-activity-scale="option"
-            class="rounded-sm px-1.5 py-0.5 text-[8.5px] font-medium leading-none outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring/60"
+            class="rounded-sm px-1.5 py-0.5 text-3xs font-medium leading-none outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring/60"
             :class="scale === option
               ? 'bg-primary/15 text-primary shadow-sm'
               : 'text-muted-foreground/75 hover:bg-accent/45 hover:text-foreground'"
@@ -779,7 +775,7 @@ onBeforeUnmount(() => {
         <div
           v-for="metric in metrics"
           :key="metric.id"
-          class="activity-kpi min-w-0 px-1.5 py-1.5 text-center"
+          class="activity-kpi min-w-0 p-1.5 text-center"
           :data-activity-kpi="metric.id"
           :title="metric.exact"
           :style="{ '--metric-color': metric.color }"
@@ -799,7 +795,7 @@ onBeforeUnmount(() => {
               <Transition name="activity-value">
                 <span
                   :key="metric.value"
-                  class="mono activity-kpi-value truncate text-[13px] font-semibold leading-none tabular-nums"
+                  class="mono activity-kpi-value truncate text-ui font-semibold leading-none tabular-nums"
                 >
                   {{ metric.value }}
                 </span>
@@ -807,7 +803,7 @@ onBeforeUnmount(() => {
             </span>
             <span
               v-if="metric.partial"
-              class="inline-flex size-3 shrink-0 items-center justify-center rounded-full bg-warning/12 text-[8px] font-bold text-warning"
+              class="inline-flex size-3 shrink-0 items-center justify-center rounded-full bg-warning/12 text-3xs font-bold text-warning"
               :title="truncationMessage"
               :aria-label="truncationMessage"
             >
@@ -821,7 +817,7 @@ onBeforeUnmount(() => {
             <Transition name="activity-label">
               <div
                 :key="metric.label"
-                class="truncate text-[9px] font-medium leading-none tracking-wide uppercase text-muted-foreground/70"
+                class="truncate text-3xs font-medium leading-none tracking-wide uppercase text-muted-foreground/70"
               >
                 {{ metric.label }}
               </div>
@@ -836,7 +832,7 @@ onBeforeUnmount(() => {
         v-if="shownAuthors.length"
         name="activity-author"
         tag="div"
-        class="activity-authors relative flex min-w-0 items-center gap-1 overflow-hidden text-[10px]"
+        class="activity-authors relative flex min-w-0 items-center gap-1 overflow-hidden text-3xs"
         data-testid="history-activity-authors"
         data-activity-transition="authors"
       >
@@ -850,7 +846,7 @@ onBeforeUnmount(() => {
           v-for="author in shownAuthors"
           :key="`${author.email}\u0000${author.name}`"
           type="button"
-          class="inline-flex min-w-0 shrink items-center gap-1 rounded-full border py-0.5 ps-0.5 pe-1.5 outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring/45"
+          class="inline-flex min-w-0 shrink items-center gap-1 rounded-full border py-0.5 ps-0.5 pe-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45"
           :class="isAuthorSelected(author)
             ? 'border-info/45 bg-info/14 text-info ring-1 ring-inset ring-info/15'
             : 'border-border/50 bg-secondary/45 text-muted-foreground hover:border-info/30 hover:bg-info/8 hover:text-foreground'"
@@ -862,7 +858,7 @@ onBeforeUnmount(() => {
           @click="emit('selectAuthor', author)"
         >
           <span
-            class="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold transition-colors"
+            class="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-3xs font-semibold transition-colors"
             :class="isAuthorSelected(author)
               ? 'bg-info/20 text-info'
               : 'bg-primary/10 text-primary'"
@@ -894,10 +890,10 @@ onBeforeUnmount(() => {
 
       <div
         ref="chartPanelEl"
-        class="relative overflow-visible rounded-md border border-border/50 bg-secondary/15 px-1.5 pb-1 pt-1"
+        class="relative overflow-visible rounded-md border border-border/50 bg-secondary/15 px-1.5 py-1"
         data-testid="history-activity-chart-panel"
       >
-        <div class="flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 px-0.5 text-[9px] leading-none text-muted-foreground/65">
+        <div class="flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 px-0.5 text-3xs leading-none text-muted-foreground/65">
           <span class="font-medium text-muted-foreground">{{ chartTitle }}</span>
           <span class="inline-flex items-center gap-1">
             <i class="block size-1.5 rounded-sm bg-success" aria-hidden="true" />
@@ -937,7 +933,7 @@ onBeforeUnmount(() => {
               role="tab"
               :aria-selected="scale === option"
               :data-activity-scale="option"
-              class="rounded-sm px-1.5 py-0.5 text-[8.5px] font-medium leading-none outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring/60"
+              class="rounded-sm px-1.5 py-0.5 text-3xs font-medium leading-none outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring/60"
               :class="scale === option
                 ? 'bg-primary/15 text-primary shadow-sm'
                 : 'text-muted-foreground/75 hover:bg-accent/45 hover:text-foreground'"
@@ -957,7 +953,7 @@ onBeforeUnmount(() => {
               v-if="!activity.commits"
               :key="`empty:${activityDataKey}`"
               role="status"
-              class="flex h-[74px] items-center justify-center text-[11px] text-muted-foreground"
+              class="flex h-18.5 items-center justify-center text-2xs text-muted-foreground"
             >
               {{ emptyLabel }}
             </div>
@@ -966,7 +962,7 @@ onBeforeUnmount(() => {
               v-else
               ref="chartSvgEl"
               :key="`chart:${activityDataKey}`"
-              class="block h-[74px] w-full overflow-visible"
+              class="block h-18.5 w-full overflow-visible"
               :viewBox="`0 0 ${CHART_W} ${CHART_H}`"
               preserveAspectRatio="none"
               role="group"
@@ -1085,9 +1081,13 @@ onBeforeUnmount(() => {
           :id="tooltipId"
           ref="tooltipEl"
           role="tooltip"
-          class="activity-tooltip pointer-events-none absolute z-10 w-max rounded-md border border-border/80 bg-popover/95 px-2 py-1.5 text-[10.5px] leading-snug text-popover-foreground shadow-lg backdrop-blur"
+          class="activity-tooltip pointer-events-none absolute top-(--tooltip-top) left-(--tooltip-left) z-10 w-max max-w-(--tooltip-max-w) rounded-md border border-border/80 bg-popover/95 px-2 py-1.5 text-2xs leading-snug text-popover-foreground shadow-lg backdrop-blur"
           :class="tooltipReady ? 'activity-tooltip-ready' : 'activity-tooltip-pending'"
-          :style="tooltipStyle"
+          :style="{
+            '--tooltip-left': `${tooltipPosition.left}px`,
+            '--tooltip-top': `${tooltipPosition.top}px`,
+            '--tooltip-max-w': tooltipMaxWidth,
+          }"
           :data-placement="tooltipPosition.placement"
           data-testid="history-activity-tooltip"
         >
@@ -1161,7 +1161,7 @@ onBeforeUnmount(() => {
           </div>
           <div
             v-if="safeCount(activeBucket.bucket.changeStatsCommits ?? activeBucket.bucket.commits) < safeCount(activeBucket.bucket.commits)"
-            class="mt-1 border-t border-border/70 pt-1 text-[9px] text-muted-foreground"
+            class="mt-1 border-t border-border/70 pt-1 text-3xs text-muted-foreground"
             data-activity-tooltip-coverage
           >
             {{

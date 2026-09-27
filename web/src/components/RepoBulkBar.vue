@@ -294,14 +294,13 @@ async function bulkRemove(): Promise<void> {
        un-pushed region via --content-inset-right (the same variable the dialogs re-centre on),
        and it sits one layer above the drawer's z-40. Modals (z-50) still win, which is right. -->
   <div
-    class="safe-bottom pointer-events-none fixed bottom-0 left-0 z-[45] px-4 pb-4"
-    :style="{ right: 'var(--content-inset-right, 0px)' }"
+    class="safe-bottom pointer-events-none fixed bottom-0 left-0 right-(--content-inset-right,0px) z-45 px-4 pb-4"
   >
     <div
       ref="bar"
       class="pointer-events-auto mx-auto flex max-w-(--container-max) flex-wrap items-center gap-2 rounded-xl border border-border bg-popover/95 px-3 py-2 shadow-xl shadow-black/40 backdrop-blur"
     >
-      <span class="text-[13px] font-medium">
+      <span class="text-ui font-medium">
         {{ $t("bulk.selected", { count: selectionCount }, selectionCount) }}
       </span>
 

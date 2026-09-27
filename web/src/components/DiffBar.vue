@@ -53,20 +53,20 @@ const total = (): number => churn(props.added, props.removed);
       <!-- A zero-churn row (a merge commit, a mode-only change, a new empty file) still draws a
            stub, in neutral grey, so the column never has a silently empty cell. -->
       <span
-        class="flex h-full min-w-px overflow-hidden rounded-full"
-        :style="{ width: total() ? barWidth(total(), max) : '7%' }"
+        class="flex h-full w-(--bar-w) min-w-px overflow-hidden rounded-full"
+        :style="{ '--bar-w': total() ? barWidth(total(), max) : '7%' }"
       >
         <span
           v-if="added"
-          class="h-full bg-success/80"
-          :style="{ width: barShare(added, removed, 'added') }"
+          class="h-full w-(--share-w) bg-success/80"
+          :style="{ '--share-w': barShare(added, removed, 'added') }"
         />
         <span
           v-if="removed"
-          class="h-full bg-destructive/75"
-          :style="{ width: barShare(added, removed, 'removed') }"
+          class="h-full w-(--share-w) bg-destructive/75"
+          :style="{ '--share-w': barShare(added, removed, 'removed') }"
         />
-        <span v-if="!total()" class="h-full w-full bg-muted-foreground/35" />
+        <span v-if="!total()" class="size-full bg-muted-foreground/35" />
       </span>
     </span>
   </span>

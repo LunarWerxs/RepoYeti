@@ -23,7 +23,11 @@ const stat = (addedLines: number, removedLines: number): DiffStatT => ({
   removedChars: removedLines * 30,
 });
 
-function mountTree(nodes: TreeNode[], props: Record<string, unknown> = {}) {
+// Typed from the component itself, so a renamed or newly-required prop breaks this file instead of
+// leaving every case mounting the tree wrong and still green.
+type TreeExtraProps = Omit<InstanceType<typeof ChangesTree>["$props"], "nodes" | "repoId">;
+
+function mountTree(nodes: TreeNode[], props: TreeExtraProps = {}) {
   return mount(ChangesTree, {
     props: { nodes, repoId: "repo-1", ...props },
     global: { plugins: [i18n] },

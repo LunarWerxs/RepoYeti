@@ -28,6 +28,7 @@ import {
 } from "../src/auto-update.ts";
 import { createApp } from "../src/http/app.ts";
 import type { RepoYetiConfig } from "../src/config.ts";
+import type { UpdateApplyResult, UpdateStatus } from "../src/updater.ts";
 
 afterEach(() => {
   setAutoUpdateEnabled(false);
@@ -39,8 +40,7 @@ afterEach(() => {
 
 const localCfg = (): RepoYetiConfig => ({ roots: [], port: 7171, maxDepth: 6, maxRepos: 200 });
 
-// biome-ignore lint/suspicious/noExplicitAny: loose fixture shape so overrides can merge freely
-function status(over: Record<string, unknown>): any {
+function status(over: Partial<UpdateStatus>): UpdateStatus {
   return {
     ok: true,
     service: "repoyeti",
@@ -58,8 +58,7 @@ function status(over: Record<string, unknown>): any {
     ...over,
   };
 }
-// biome-ignore lint/suspicious/noExplicitAny: loose fixture shape so overrides can merge freely
-function applyResult(over: Record<string, unknown>): any {
+function applyResult(over: Partial<UpdateApplyResult>): UpdateApplyResult {
   return { ok: true, message: "updated", restartRequired: true, status: status({}), output: [], ...over };
 }
 

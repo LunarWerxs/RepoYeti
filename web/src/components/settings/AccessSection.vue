@@ -181,7 +181,7 @@ watch(
 
     <div v-if="needsOwner && !isRemote" class="px-3.5 pb-3">
       <div class="flex flex-col gap-2.5 rounded-lg border border-info/30 bg-info/10 p-3">
-        <p class="text-[12.5px] leading-snug text-foreground/90">{{ $t("remote.needsOwner") }}</p>
+        <p class="text-ui leading-snug text-foreground/90">{{ $t("remote.needsOwner") }}</p>
         <Button
           as="a"
           href="/oauth/login"
@@ -202,12 +202,12 @@ watch(
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="flex items-center gap-1.5">
-              <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.addressTitle") }}</span>
+              <span class="text-ui font-medium text-foreground">{{ $t("settings.addressTitle") }}</span>
               <InfoHint :text="$t('settings.addressHint')" />
             </div>
-            <p class="mt-1 text-[12px] font-medium text-foreground/90">{{ addressTitle(addressChoice) }}</p>
+            <p class="mt-1 text-xs font-medium text-foreground/90">{{ addressTitle(addressChoice) }}</p>
             <p
-              class="text-[11px] leading-snug"
+              class="text-2xs leading-snug"
               :class="
                 addressChoice === 'hosted' && store.relayAnnounced
                   ? 'text-success'
@@ -246,7 +246,7 @@ watch(
           class="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-2.5 py-2"
         >
           <Link2 :size="13" class="shrink-0 text-muted-foreground" />
-          <span class="mono min-w-0 flex-1 truncate text-[12px] text-foreground/90">
+          <span class="mono min-w-0 flex-1 truncate text-xs text-foreground/90">
             {{ displayedAddress }}
           </span>
           <Button variant="ghost" size="sm" class="shrink-0" @click="copyAddress">
@@ -258,19 +258,19 @@ watch(
 
         <p
           v-if="addressChoice === 'hosted' && store.relayError"
-          class="text-[11.5px] leading-snug text-destructive"
+          class="text-xs leading-snug text-destructive"
         >
           {{ $t("settings.relayFailed", { error: store.relayError }) }}
         </p>
         <p
           v-else-if="addressChoice === 'hosted' && !store.relayAnnounced"
-          class="text-[11.5px] leading-snug text-warning"
+          class="text-xs leading-snug text-warning"
         >
           {{ $t("settings.relayPending") }}
         </p>
         <p
           v-else-if="addressChoice === 'cloudflare'"
-          class="text-[11.5px] leading-snug text-muted-foreground"
+          class="text-xs leading-snug text-muted-foreground"
         >
           {{ $t("settings.address.cloudflareNotice") }}
         </p>
@@ -290,8 +290,8 @@ watch(
               :disabled="switchingAddress"
               @click="selectAddress(choice)"
             >
-              <p class="text-[12px] font-medium text-foreground">{{ addressTitle(choice) }}</p>
-              <p class="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
+              <p class="text-xs font-medium text-foreground">{{ addressTitle(choice) }}</p>
+              <p class="mt-0.5 text-2xs leading-snug text-muted-foreground">
                 {{ addressHint(choice) }}
               </p>
             </button>
@@ -303,7 +303,8 @@ watch(
           >
             <Input
               v-model="tunnelHost"
-              class="mono text-[12.5px]"
+              variant="mono"
+              text-size="ui"
               :placeholder="$t('settings.tunnelHostPlaceholder')"
               :aria-label="$t('settings.tunnelHostLabel')"
             />
@@ -311,7 +312,7 @@ watch(
               v-if="!store.tunnelConfig.tokenFromEnv"
               v-model="tunnelToken"
               type="password"
-              class="text-[12.5px]"
+              text-size="ui"
               :placeholder="
                 store.tunnelConfig.hasToken
                   ? $t('settings.tunnelTokenSaved')
@@ -319,7 +320,7 @@ watch(
               "
               :aria-label="$t('settings.tunnelTokenLabel')"
             />
-            <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
+            <p v-else class="text-xs text-muted-foreground">{{ $t("settings.tunnelTokenEnv") }}</p>
             <div class="flex flex-wrap items-center gap-2">
               <Button size="sm" :disabled="savingTunnel || !tunnelHost.trim()" @click="saveCustomAddress">
                 <Loader2 v-if="savingTunnel" class="animate-spin" />
@@ -330,7 +331,7 @@ watch(
                 :href="STABLE_ADDRESS_DOCS"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="flex items-center gap-1 text-[11.5px] text-info underline-offset-2 hover:underline"
+                class="flex items-center gap-1 text-xs text-info underline-offset-2 hover:underline"
               >
                 {{ $t("settings.stableAddressDocs") }}
                 <ExternalLink :size="11" class="opacity-70" />
@@ -342,7 +343,7 @@ watch(
 
       <div v-if="store.authEnforced" class="flex items-center justify-between gap-3 px-3.5 py-3">
         <span class="flex items-center gap-1.5">
-          <span class="text-[12.5px] font-medium text-foreground">{{ $t("settings.signOutAll") }}</span>
+          <span class="text-ui font-medium text-foreground">{{ $t("settings.signOutAll") }}</span>
           <InfoHint :text="$t('settings.signOutAllHint')" />
         </span>
         <Button

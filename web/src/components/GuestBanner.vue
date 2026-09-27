@@ -32,16 +32,16 @@ async function leave(): Promise<void> {
         :size="13"
         class="shrink-0 text-primary/80"
       />
-      <span class="truncate text-[11.5px] text-foreground/90">
+      <span class="truncate text-xs text-foreground/90">
         {{ $t("share.guestBanner") }}
         <span class="text-muted-foreground">
           · {{ store.canControl ? $t("share.guestControl") : $t("share.guestView") }}
         </span>
       </span>
     </div>
-    <Button variant="ghost" size="sm" class="h-6 shrink-0 px-2 text-[11px]" @click="leave">
+    <Button variant="ghost" size="sm" class="h-6 shrink-0" @click="leave">
       <LogOut :size="12" />
-      {{ $t("share.guestLeave") }}
+      <span class="text-2xs">{{ $t("share.guestLeave") }}</span>
     </Button>
   </div>
 </template>

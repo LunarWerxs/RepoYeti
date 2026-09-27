@@ -411,7 +411,12 @@ const resized = computed(() => hasChangesOverride(props.repo.id));
 // does this, but a capped overflow viewport can occasionally keep its former smaller used height
 // when a live tree gains rows. Observing the inner content makes both directions deterministic.
 const autoContentHeight = ref<number | null>(null);
-const treeStyle = computed(() => {
+// Both tree viewports are sized through `--tree-height` / `--tree-max-height`, read by their
+// h-/max-h-(--tree-*) classes; an absent key leaves the property unset (auto / none).
+const browserTreeStyle = computed<{ height?: string; maxHeight?: string }>(() =>
+  changesTreeStyle(props.repo.id),
+);
+const treeStyle = computed<{ height?: string; maxHeight?: string }>(() => {
   // A live drag is a bare height: the preset must NOT come along as a max-height, or the grip
   // would refuse to travel past it on a card that has no override yet.
   if (dragHeight.value != null) return { height: `${dragHeight.value}px` };
@@ -663,7 +668,7 @@ async function onCopyPath(path: string): Promise<void> {
   <!-- path (location) + remote-presence cloud, kept on one line -->
   <div class="flex items-center gap-2">
     <div
-      class="mono min-w-0 flex-1 truncate text-start text-[11.5px] text-muted-foreground"
+      class="mono min-w-0 flex-1 truncate text-start text-xs text-muted-foreground"
       dir="rtl"
       :title="repo.absPath"
     >
@@ -742,10 +747,10 @@ async function onCopyPath(path: string): Promise<void> {
   <!-- error line -->
   <div
     v-if="st?.error"
-    class="flex items-center gap-1.5 rounded-lg bg-destructive/10 px-2.5 py-2 text-[12.5px] text-destructive"
+    class="flex items-center gap-1.5 rounded-lg bg-destructive/10 px-2.5 py-2 text-ui text-destructive"
   >
     <AlertTriangle :size="14" class="shrink-0" />
-    <span class="min-w-0 break-words">{{ st.error }}</span>
+    <span class="min-w-0 wrap-break-word">{{ st.error }}</span>
   </div>
 
   <!-- ALL FILES: the whole working tree, ignored paths included, one folder fetched per open.
@@ -763,7 +768,7 @@ async function onCopyPath(path: string): Promise<void> {
             type="text"
             :placeholder="$t('repo.files.searchPlaceholder')"
             :aria-label="$t('repo.files.searchPlaceholder')"
-            class="h-6 w-full rounded bg-transparent pe-8 ps-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
+            class="h-6 w-full rounded bg-transparent pe-8 ps-7 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
           />
           <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">
             <Loader2 v-if="fileSearchLoading" :size="13" class="me-1 animate-spin text-muted-foreground" />
@@ -819,13 +824,16 @@ async function onCopyPath(path: string): Promise<void> {
           <TooltipContent>{{ $t("repo.files.reload") }}</TooltipContent>
         </Tooltip>
       </div>
-      <div class="changes-tree-viewport scroll-slim overflow-y-auto" :style="changesTreeStyle(repo.id)">
+      <div
+        class="changes-tree-viewport scroll-slim h-(--tree-height) max-h-(--tree-max-height) overflow-y-auto"
+        :style="{ '--tree-height': browserTreeStyle.height, '--tree-max-height': browserTreeStyle.maxHeight }"
+      >
         <div class="px-1 pt-0.5 pb-2.5">
           <!-- A search that found nothing is its own state: the tree below would otherwise render
                an empty list that reads like a broken panel. -->
           <div
             v-if="fileResults && !fileResults.length && !fileSearchLoading"
-            class="px-2.5 py-2 text-[12px] text-muted-foreground"
+            class="px-2.5 py-2 text-xs text-muted-foreground"
           >
             {{ $t("repo.files.searchNoMatch") }}
             <!-- The likeliest reason a search came back empty here: the thing you wanted is
@@ -849,7 +857,7 @@ async function onCopyPath(path: string): Promise<void> {
                answer is a head rather than letting it look complete. -->
           <div
             v-if="fileSearchTruncated"
-            class="px-2.5 py-1.5 text-[11.5px] text-warning/80"
+            class="px-2.5 py-1.5 text-xs text-warning/80"
           >
             {{ $t("repo.files.searchTruncated", { shown: fileResults?.length ?? 0 }) }}
           </div>
@@ -874,7 +882,7 @@ async function onCopyPath(path: string): Promise<void> {
           type="text"
           :placeholder="$t('repo.changes.searchPlaceholder')"
           :aria-label="$t('repo.changes.searchPlaceholder')"
-          class="h-6 w-full rounded bg-transparent pe-20 ps-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
+          class="h-6 w-full rounded bg-transparent pe-20 ps-7 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:bg-accent/30 focus-visible:ring-1 focus-visible:ring-ring/40"
         />
         <!-- right cluster: clear (only with a query) + the "search inside files" toggle -->
         <div class="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-0.5">
@@ -997,9 +1005,9 @@ async function onCopyPath(path: string): Promise<void> {
     </div>
     <div
       ref="treeScroll"
-      class="changes-tree-viewport scroll-slim overflow-y-auto"
+      class="changes-tree-viewport scroll-slim h-(--tree-height) max-h-(--tree-max-height) overflow-y-auto"
       :class="dragHeight != null && 'changes-tree-viewport--dragging'"
-      :style="treeStyle"
+      :style="{ '--tree-height': treeStyle.height, '--tree-max-height': treeStyle.maxHeight }"
     >
       <!-- The measured inner wrapper lets automatic mode follow rows added or removed. Its 10px
            bottom padding also keeps the resize bar from reading like it hides one more item. -->
@@ -1010,13 +1018,13 @@ async function onCopyPath(path: string): Promise<void> {
            stays up and patches in place when the new list lands. -->
       <div
         v-if="store.changesLoading[repo.id] && !store.changesByRepo[repo.id]"
-        class="flex items-center gap-2 px-2.5 py-2 text-[12.5px] text-muted-foreground"
+        class="flex items-center gap-2 px-2.5 py-2 text-ui text-muted-foreground"
       >
         <Loader2 :size="14" class="animate-spin" /> {{ $t("repo.changes.loading") }}
       </div>
       <div
         v-else-if="searching && !filteredTree.length && !contentLoading"
-        class="px-2.5 py-2 text-[12px] text-muted-foreground"
+        class="px-2.5 py-2 text-xs text-muted-foreground"
       >
         {{ $t("repo.changes.searchNoMatch") }}
       </div>
@@ -1049,7 +1057,7 @@ async function onCopyPath(path: string): Promise<void> {
            list back to the first 2000. -->
       <div
         v-if="store.changesMeta[repo.id]?.truncated"
-        class="flex flex-wrap items-center gap-x-2 gap-y-1 px-2.5 py-1.5 text-[11.5px] text-warning/80"
+        class="flex flex-wrap items-center gap-x-2 gap-y-1 px-2.5 py-1.5 text-xs text-warning/80"
       >
         <span>
           {{
@@ -1107,7 +1115,7 @@ async function onCopyPath(path: string): Promise<void> {
        shows; hidden while status is unknown or in an error state. -->
   <ExpandTransition :open="!!(st && !st.error && st.dirty === 0 && !isBrowsing)">
     <div
-      class="flex items-center gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-2 text-[12.5px] text-muted-foreground"
+      class="flex items-center gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-2 text-ui text-muted-foreground"
     >
       <Check :size="14" class="shrink-0 text-success/80" />
       <span>{{ $t("repo.changes.clean") }}</span>
@@ -1121,7 +1129,7 @@ async function onCopyPath(path: string): Promise<void> {
         <DialogTitle>{{ $t("repo.discard.title") }}</DialogTitle>
         <DialogDescription>{{ $t("repo.discard.body", { file: discardTarget ?? "" }) }}</DialogDescription>
       </DialogHeader>
-      <DialogFooter class="gap-2 sm:gap-2">
+      <DialogFooter>
         <Button variant="secondary" @click="discardOpen = false">{{ $t("common.cancel") }}</Button>
         <Button variant="destructive" @click="confirmDiscard">{{ $t("repo.discard.confirm") }}</Button>
       </DialogFooter>
@@ -1136,7 +1144,7 @@ async function onCopyPath(path: string): Promise<void> {
         <DialogTitle>{{ $t("repo.deleteFile.title") }}</DialogTitle>
         <DialogDescription>{{ $t("repo.deleteFile.body", { file: deleteTarget ?? "" }) }}</DialogDescription>
       </DialogHeader>
-      <DialogFooter class="gap-2 sm:gap-2">
+      <DialogFooter>
         <Button variant="secondary" @click="deleteOpen = false">{{ $t("common.cancel") }}</Button>
         <Button variant="destructive" @click="confirmDelete">{{ $t("repo.deleteFile.confirm") }}</Button>
       </DialogFooter>
@@ -1159,7 +1167,7 @@ async function onCopyPath(path: string): Promise<void> {
           }}
         </DialogDescription>
       </DialogHeader>
-      <DialogFooter class="gap-2 sm:gap-2">
+      <DialogFooter>
         <Button variant="secondary" @click="deleteFolderOpen = false">{{ $t("common.cancel") }}</Button>
         <Button variant="destructive" @click="confirmDeleteFolder">{{ $t("repo.deleteFile.confirm") }}</Button>
       </DialogFooter>

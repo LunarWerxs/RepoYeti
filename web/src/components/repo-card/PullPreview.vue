@@ -145,17 +145,16 @@ function pullFromMenu(): void {
        both colour and height, with a hairline divider against Pull's right edge. Opening a menu
        rather than firing the dialog directly matches every other caret in the app (the commit
        split button, the branch switcher): a caret means "there are choices here".
-       The joining classes live HERE, not on the <PullPreview> tag: this component's root is a
-       renderless <DropdownMenu>, so a class passed in from the parent has no element to land on
-       and is silently dropped — which is exactly how the left side ended up still rounded.
-       `px-1` rather than the `px-1.5` its larger cousins use, because this button is h-6 to
-       Commit's h-9; the same padding on a shorter button reads as a wide stub. -->
+       The joining (squared inner corners, hairline divider) comes from the <ButtonGroup> in
+       RepoCardActions: this component's root is a renderless <DropdownMenu>, so the trigger
+       Button is the group's direct child. `-ms-px` overlaps Pull's right edge; `icon-sm` keeps
+       the caret a compact square beside the h-6 Pull button. -->
   <DropdownMenu>
     <DropdownMenuTrigger as-child>
       <Button
         :variant="variant"
-        size="sm"
-        class="-ms-px rounded-s-none border-s border-s-black/15 px-1 dark:border-s-white/20"
+        size="icon-sm"
+        class="-ms-px"
         :disabled="disabled"
         :aria-label="$t('repo.preview.menuLabel')"
         :title="$t('repo.preview.menuLabel')"
@@ -184,9 +183,11 @@ function pullFromMenu(): void {
   <Dialog v-model:open="open">
     <DialogContent class="sm:max-w-2xl">
       <DialogHeader class="min-w-0">
-        <DialogTitle class="flex items-center gap-2">
-          <ArrowDownToLine :size="16" class="shrink-0 text-muted-foreground" />
-          {{ $t("repo.preview.title") }}
+        <DialogTitle>
+          <span class="flex items-center gap-2">
+            <ArrowDownToLine :size="16" class="shrink-0 text-muted-foreground" />
+            {{ $t("repo.preview.title") }}
+          </span>
         </DialogTitle>
         <DialogDescription>
           <template v-if="loading">{{ $t("repo.preview.checking") }}</template>
@@ -205,7 +206,7 @@ function pullFromMenu(): void {
         </DialogDescription>
       </DialogHeader>
 
-      <div v-if="loading" class="flex items-center gap-2 py-8 text-[13px] text-muted-foreground">
+      <div v-if="loading" class="flex items-center gap-2 py-8 text-ui text-muted-foreground">
         <Loader2 :size="15" class="animate-spin" />{{ $t("repo.preview.checking") }}
       </div>
 
@@ -216,7 +217,7 @@ function pullFromMenu(): void {
         <div
           v-if="disposition === 'blocked_non_fast_forward'"
           data-testid="preview-pull-disposition"
-          class="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive"
+          class="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui text-destructive"
         >
           <AlertTriangle :size="15" class="mt-px shrink-0" />
           <div class="font-medium">{{ $t("repo.preview.blockedDiverged") }}</div>
@@ -224,7 +225,7 @@ function pullFromMenu(): void {
         <div
           v-else-if="disposition === 'blocked_would_overwrite'"
           data-testid="preview-pull-disposition"
-          class="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive"
+          class="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui text-destructive"
         >
           <AlertTriangle :size="15" class="mt-px shrink-0" />
           <div class="font-medium">{{ $t("repo.preview.blockedWouldOverwrite") }}</div>
@@ -232,7 +233,7 @@ function pullFromMenu(): void {
         <div
           v-else-if="disposition === 'ready_fast_forward'"
           data-testid="preview-pull-disposition"
-          class="flex items-center gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-[12.5px] text-success"
+          class="flex items-center gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-ui text-success"
         >
           <CheckCircle2 :size="15" class="shrink-0" />
           {{ $t("repo.preview.cleanFastForward") }}
@@ -240,7 +241,7 @@ function pullFromMenu(): void {
         <div
           v-else
           data-testid="preview-pull-disposition"
-          class="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-[12.5px] text-muted-foreground"
+          class="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-ui text-muted-foreground"
         >
           <FileQuestion :size="15" class="shrink-0" />
           {{ $t("repo.preview.pullCheckUnknown") }}
@@ -252,14 +253,14 @@ function pullFromMenu(): void {
         <div
           v-if="result.relation === 'diverged' && conflicts.length"
           data-testid="preview-manual-merge"
-          class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive"
+          class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-ui text-destructive"
         >
           <AlertTriangle :size="15" class="mt-px shrink-0" />
           <div class="min-w-0">
             <div class="font-medium">
               {{ $t("repo.preview.manualMergeWillConflict", { count: conflicts.length }, conflicts.length) }}
             </div>
-            <ul class="mono mt-1 space-y-0.5 text-[11.5px] opacity-90">
+            <ul class="mono mt-1 space-y-0.5 text-xs opacity-90">
               <li v-for="p in conflicts.slice(0, 8)" :key="p" class="truncate">{{ p }}</li>
               <li v-if="conflicts.length > 8" class="opacity-70">
                 {{ $t("repo.preview.moreConflicts", { count: conflicts.length - 8 }) }}
@@ -270,7 +271,7 @@ function pullFromMenu(): void {
         <div
           v-else-if="result.relation === 'diverged' && !result.conflictCheck"
           data-testid="preview-manual-merge"
-          class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-3 py-2 text-[12.5px] text-muted-foreground"
+          class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-3 py-2 text-ui text-muted-foreground"
         >
           <FileQuestion :size="15" class="shrink-0" />
           {{ $t("repo.preview.manualMergeUnknown") }}
@@ -278,7 +279,7 @@ function pullFromMenu(): void {
         <div
           v-else-if="result.relation === 'diverged'"
           data-testid="preview-manual-merge"
-          class="flex items-center gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-2 text-[12.5px] text-info"
+          class="flex items-center gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-2 text-ui text-info"
         >
           <CheckCircle2 :size="15" class="shrink-0" />
           {{ $t("repo.preview.manualMergeClean") }}
@@ -286,7 +287,7 @@ function pullFromMenu(): void {
 
         <!-- incoming commits -->
         <div class="min-w-0">
-          <div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          <div class="mb-1.5 flex items-center gap-1.5 text-2xs font-medium tracking-wide text-muted-foreground uppercase">
             <GitCommitHorizontal :size="13" />
             {{ $t("repo.preview.commitsHeading", { count: commits.length }, commits.length) }}
           </div>
@@ -294,29 +295,29 @@ function pullFromMenu(): void {
             <div
               v-for="c in commits"
               :key="c.hash"
-              class="flex items-center gap-2 border-b border-border px-2 py-1 text-[12px] last:border-b-0"
+              class="flex items-center gap-2 border-b border-border px-2 py-1 text-xs last:border-b-0"
             >
-              <span class="mono shrink-0 text-[11px] text-info/80">{{ c.shortHash }}</span>
+              <span class="mono shrink-0 text-2xs text-info/80">{{ c.shortHash }}</span>
               <span class="min-w-0 flex-1 truncate" :title="c.subject">{{ c.subject }}</span>
               <!-- a zero half is noise, not information — drop it rather than print "−0" -->
               <span
                 v-if="c.stat && (c.stat.addedLines || c.stat.removedLines)"
-                class="mono shrink-0 text-[10.5px]"
+                class="mono shrink-0 text-2xs"
               >
                 <span v-if="c.stat.addedLines" class="text-success">+{{ c.stat.addedLines }}</span>
                 <span v-if="c.stat.removedLines" class="ms-1 text-destructive">−{{ c.stat.removedLines }}</span>
               </span>
-              <span class="shrink-0 text-[10.5px] whitespace-nowrap text-muted-foreground">{{ fromNow(c.date) }}</span>
+              <span class="shrink-0 text-2xs whitespace-nowrap text-muted-foreground">{{ fromNow(c.date) }}</span>
             </div>
           </div>
-          <p v-if="result!.commitsTruncated" class="mt-1 text-[11px] text-muted-foreground">
+          <p v-if="result!.commitsTruncated" class="mt-1 text-2xs text-muted-foreground">
             {{ $t("repo.preview.commitsTruncated") }}
           </p>
         </div>
 
         <!-- incoming files, in the same tree the source-control panel uses -->
         <div class="min-w-0">
-          <div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          <div class="mb-1.5 flex items-center gap-1.5 text-2xs font-medium tracking-wide text-muted-foreground uppercase">
             {{ $t("repo.preview.filesHeading", { count: result!.stat.filesChanged }, result!.stat.filesChanged) }}
             <span class="mono ms-auto normal-case">
               <span v-if="result!.stat.addedLines" class="text-success">+{{ result!.stat.addedLines }}</span>
@@ -327,7 +328,7 @@ function pullFromMenu(): void {
             <!-- read-only: no discard/stage/open here, these files don't exist locally yet -->
             <ChangesTree :nodes="tree" :repo-id="repoId" :can-control="false" is-guest read-only />
           </div>
-          <p v-if="result!.filesTruncated" class="mt-1 text-[11px] text-muted-foreground">
+          <p v-if="result!.filesTruncated" class="mt-1 text-2xs text-muted-foreground">
             {{ $t("repo.preview.filesTruncated") }}
           </p>
         </div>

@@ -90,11 +90,11 @@ async function disconnect(): Promise<void> {
     <!-- signed out entirely → the primary action is signing in with Connections -->
     <div v-if="!store.owner" class="flex flex-col gap-2.5 px-3.5 py-3">
       <span class="flex flex-col gap-0.5">
-        <span class="flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
-          <Cloud :size="14" class="shrink-0 text-sky-500" />
+        <span class="flex items-center gap-1.5 text-ui font-medium text-foreground">
+          <Cloud :size="14" class="shrink-0 text-info" />
           {{ $t("settings.cloudSync.title") }}
         </span>
-        <span class="text-[12px] text-muted-foreground">{{ $t("settings.cloudSync.enableHint") }}</span>
+        <span class="text-xs text-muted-foreground">{{ $t("settings.cloudSync.enableHint") }}</span>
       </span>
       <Button size="sm" class="self-start" @click="signIn">
         <Cloud />
@@ -109,8 +109,8 @@ async function disconnect(): Promise<void> {
            remote access AND cloud sync, so it lives with the feature that explains why it exists. -->
       <div class="flex items-center justify-between gap-2 px-3.5 py-2.5">
         <div class="min-w-0">
-          <div class="text-[11px] text-primary/80">{{ $t("identity.signedInWith") }}</div>
-          <div class="mono truncate text-[13px] text-foreground/90">{{ store.owner }}</div>
+          <div class="text-2xs text-primary/80">{{ $t("identity.signedInWith") }}</div>
+          <div class="mono truncate text-ui text-foreground/90">{{ store.owner }}</div>
         </div>
         <Button variant="ghost" size="sm" @click="store.logout()">
           <LogOut />
@@ -133,7 +133,7 @@ async function disconnect(): Promise<void> {
       </SettingsRow>
 
       <!-- connecting / loading -->
-      <div v-if="store.syncLoading && !store.syncStatus.enabled" class="flex items-center gap-2 px-3.5 py-3 text-[12.5px] text-muted-foreground">
+      <div v-if="store.syncLoading && !store.syncStatus.enabled" class="flex items-center gap-2 px-3.5 py-3 text-ui text-muted-foreground">
         <Loader2 :size="14" class="animate-spin" />
         {{ $t("settings.cloudSync.connecting") }}
       </div>
@@ -143,8 +143,8 @@ async function disconnect(): Promise<void> {
         <div class="flex items-center justify-between gap-3">
           <img v-if="store.ownerPicture" :src="store.ownerPicture" alt="" class="size-6 rounded-full object-cover shrink-0" />
           <span class="flex flex-col gap-0.5 min-w-0">
-            <span class="truncate text-[12.5px] text-foreground/90">{{ $t("settings.cloudSync.signedInAs", { email: store.owner }) }}</span>
-            <span class="flex items-center gap-1 text-[12px] text-success">
+            <span class="truncate text-ui text-foreground/90">{{ $t("settings.cloudSync.signedInAs", { email: store.owner }) }}</span>
+            <span class="flex items-center gap-1 text-xs text-success">
               <Check :size="12" class="shrink-0" />
               {{ store.syncStatus.lastSyncedAt ? $t("settings.cloudSync.syncedAgo", { time: fromNow(new Date(store.syncStatus.lastSyncedAt).getTime()) }) : $t("settings.cloudSync.neverSynced") }}
             </span>
@@ -171,7 +171,7 @@ async function disconnect(): Promise<void> {
            signed in — the row above says so — so a bare "Sign in with Connections" button here
            read as the app contradicting itself. Name the state and offer the actual remedy. -->
       <div v-else-if="store.syncStatus.enabled" class="flex flex-col gap-2 px-3.5 py-3">
-        <p class="text-[12px] text-muted-foreground">{{ $t("settings.cloudSync.notConnected") }}</p>
+        <p class="text-xs text-muted-foreground">{{ $t("settings.cloudSync.notConnected") }}</p>
         <Button size="sm" variant="outline" class="self-start" @click="signIn">
           <RefreshCw :size="14" />
           {{ $t("settings.cloudSync.reconnect") }}
@@ -179,7 +179,7 @@ async function disconnect(): Promise<void> {
       </div>
 
       <!-- inline, non-blocking error -->
-      <p v-if="store.syncError" class="px-3.5 pb-3 text-[11.5px] text-destructive">
+      <p v-if="store.syncError" class="px-3.5 pb-3 text-xs text-destructive">
         {{ store.syncError }}
         <template v-if="store.syncStatus.retryAfterSeconds">
           — {{ $t("settings.cloudSync.retryHint", { seconds: store.syncStatus.retryAfterSeconds }) }}

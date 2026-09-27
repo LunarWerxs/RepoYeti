@@ -98,27 +98,29 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
   <Dialog v-model:open="open">
     <DialogContent class="sm:max-w-md">
       <DialogHeader>
-        <DialogTitle class="flex items-center gap-1.5">
-          <Tooltip v-if="store.scanReturnToAdd">
-            <TooltipTrigger as-child>
-              <button
-                type="button"
-                class="-ms-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                :aria-label="$t('scan.back')"
-                @click="back"
-              >
-                <ArrowLeft :size="15" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{{ $t("scan.back") }}</TooltipContent>
-          </Tooltip>
-          {{ $t("scan.title") }}
+        <DialogTitle>
+          <span class="flex items-center gap-1.5">
+            <Tooltip v-if="store.scanReturnToAdd">
+              <TooltipTrigger as-child>
+                <button
+                  type="button"
+                  class="-ms-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  :aria-label="$t('scan.back')"
+                  @click="back"
+                >
+                  <ArrowLeft :size="15" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{{ $t("scan.back") }}</TooltipContent>
+            </Tooltip>
+            {{ $t("scan.title") }}
+          </span>
         </DialogTitle>
         <DialogDescription>{{ $t("scan.description") }}</DialogDescription>
       </DialogHeader>
 
       <!-- scope: the whole computer, or one folder -->
-      <div class="inline-flex w-full rounded-lg border border-border/60 bg-secondary/40 p-0.5 text-[12.5px]">
+      <div class="inline-flex w-full rounded-lg border border-border/60 bg-secondary/40 p-0.5 text-ui">
         <button
           type="button"
           class="flex-1 rounded-md px-2.5 py-1.5 font-medium transition-colors"
@@ -140,7 +142,7 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
       <!-- whole computer -->
       <div
         v-if="mode === 'machine'"
-        class="flex items-start gap-2.5 rounded-md border border-border/60 bg-secondary/40 px-3 py-2.5 text-[12.5px] text-muted-foreground"
+        class="flex items-start gap-2.5 rounded-md border border-border/60 bg-secondary/40 px-3 py-2.5 text-ui text-muted-foreground"
       >
         <HardDrive :size="16" class="mt-px shrink-0" />
         <span>{{ $t("scan.machineHint") }}</span>
@@ -148,15 +150,18 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
 
       <!-- specific folder -->
       <div v-else class="flex flex-col gap-1.5">
-        <label class="text-[12px] font-medium text-muted-foreground">{{ $t("scan.folderLabel") }}</label>
-        <Input
-          v-model="folderPath"
-          :placeholder="$t('scan.folderPlaceholder')"
-          class="mono text-[12.5px]"
-          spellcheck="false"
-          @keydown.enter.prevent="start"
-        />
-        <p class="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+        <label class="text-xs font-medium text-muted-foreground">{{ $t("scan.folderLabel") }}</label>
+        <!-- Monospace via a wrapper (Input owns its classes; preflight gives it `font: inherit`),
+             at the Input's own size, the same as the other path fields. -->
+        <div class="mono">
+          <Input
+            v-model="folderPath"
+            :placeholder="$t('scan.folderPlaceholder')"
+            spellcheck="false"
+            @keydown.enter.prevent="start"
+          />
+        </div>
+        <p class="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Folder :size="12" class="shrink-0" /> {{ $t("scan.folderHint") }}
         </p>
       </div>
@@ -166,7 +171,7 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
         v-if="store.scanning"
         class="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-secondary/40 px-3 py-2"
       >
-        <div class="flex min-w-0 items-center gap-2 text-[13px]">
+        <div class="flex min-w-0 items-center gap-2 text-ui">
           <Loader2 :size="15" class="shrink-0 animate-spin text-info" />
           <span>{{ store.scanCancelRequested ? $t("scan.stopping") : $t("scan.scanning") }}</span>
           <span class="truncate text-muted-foreground">{{ $t("scan.foundCount", { count: store.scanFound }) }}</span>
@@ -189,7 +194,7 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
       </div>
       <div
         v-else-if="store.scanDone"
-        class="rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-[13px]"
+        class="rounded-md border border-border/60 bg-secondary/40 px-3 py-2 text-ui"
       >
         <template v-if="store.scanFound > 0">
           {{ $t("scan.doneFound", { count: store.scanFound }, store.scanFound) }}<span
@@ -205,7 +210,7 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
            repo to read its status), so this is the review list rather than a confirmation prompt:
            every find is named, and anything unwanted can be discarded right here. -->
       <div v-if="store.scanNewRepos.length" class="flex min-h-0 flex-col gap-1.5">
-        <p class="text-[12px] font-medium text-muted-foreground">
+        <p class="text-xs font-medium text-muted-foreground">
           {{ $t("scan.newListLabel", { count: store.scanNewRepos.length }, store.scanNewRepos.length) }}
         </p>
         <ul class="flex max-h-44 flex-col gap-px overflow-y-auto rounded-md border border-border/60 bg-secondary/30 p-1">
@@ -215,8 +220,8 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
             class="group flex items-center gap-2 rounded-sm px-2 py-1.5 transition-colors hover:bg-secondary/70"
           >
             <span class="flex min-w-0 flex-col">
-              <span class="truncate text-[12.5px] font-medium text-foreground">{{ repo.name }}</span>
-              <span class="mono truncate text-[11px] text-muted-foreground">{{ repo.absPath }}</span>
+              <span class="truncate text-ui font-medium text-foreground">{{ repo.name }}</span>
+              <span class="mono truncate text-2xs text-muted-foreground">{{ repo.absPath }}</span>
             </span>
             <Tooltip>
               <TooltipTrigger as-child>
@@ -235,7 +240,7 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
             </Tooltip>
           </li>
         </ul>
-        <p class="text-[11.5px] text-muted-foreground">{{ $t("scan.newListHint") }}</p>
+        <p class="text-xs text-muted-foreground">{{ $t("scan.newListHint") }}</p>
       </div>
 
       <DialogFooter>

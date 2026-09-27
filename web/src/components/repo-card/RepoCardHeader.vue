@@ -129,7 +129,7 @@ function statusChip(tone: StatusTone): string {
   return cn(
     "inline-flex items-center rounded-md transition-all duration-200 ease-out",
     STATUS_TEXT[tone],
-    props.expanded ? `${STATUS_BG[tone]} px-1.5 py-0.5` : "bg-transparent px-0 py-0",
+    props.expanded ? `${STATUS_BG[tone]} px-1.5 py-0.5` : "bg-transparent p-0",
   );
 }
 // Trailing word: width-0 + transparent when collapsed (and on mobile, where the pill
@@ -137,8 +137,8 @@ function statusChip(tone: StatusTone): string {
 // (not a grid 1fr track) keeps the reveal animatable on every browser we target.
 const statusWord = computed(() =>
   cn(
-    "overflow-hidden whitespace-nowrap opacity-0 max-w-0 transition-[max-width,opacity] duration-200 ease-out",
-    props.expanded && "sm:max-w-[7rem] sm:opacity-100",
+    "status-word-reveal overflow-hidden whitespace-nowrap opacity-0 max-w-0",
+    props.expanded && "sm:max-w-28 sm:opacity-100",
   ),
 );
 
@@ -267,7 +267,7 @@ const detectedReason = computed(() => {
       aria-hidden="true"
     >
       <span
-        class="flex size-4 items-center justify-center rounded-[4px] border transition-colors"
+        class="flex size-4 items-center justify-center rounded-sm border transition-colors"
         :class="picked ? 'border-primary bg-primary text-primary-foreground' : 'border-border/70 bg-card/70'"
       >
         <Check v-if="picked" :size="12" />
@@ -294,7 +294,7 @@ const detectedReason = computed(() => {
          never hides where it actually lives. -->
     <div class="flex min-w-0 flex-1 items-center gap-2">
       <span
-        class="truncate text-[15px] leading-tight font-semibold text-foreground"
+        class="truncate text-base leading-tight font-semibold text-foreground"
         :title="tooltipsEnabled && repo.displayName ? repo.name : undefined"
       >
         {{ repo.displayName || repo.name }}
@@ -303,7 +303,7 @@ const detectedReason = computed(() => {
         v-if="st?.branch"
         :class="
           cn(
-            'mono hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] sm:inline-flex',
+            'mono hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs sm:inline-flex',
             st.detached ? 'bg-warning/15 text-warning' : 'bg-secondary text-muted-foreground',
           )
         "
@@ -312,7 +312,7 @@ const detectedReason = computed(() => {
       </span>
       <span
         v-if="repo.vcs !== 'git'"
-        class="mono flex shrink-0 items-center rounded-md bg-info/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-info uppercase"
+        class="mono flex shrink-0 items-center rounded-md bg-info/15 px-1.5 py-0.5 text-3xs font-semibold tracking-wide text-info uppercase"
       >
         {{ repo.vcs }}
       </span>
@@ -345,7 +345,7 @@ const detectedReason = computed(() => {
       </span>
       <span
         v-if="repo.hidden"
-        class="flex shrink-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground"
+        class="flex shrink-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-2xs text-muted-foreground"
         :title="$t('repo.badge.hidden')"
         :aria-label="$t('repo.badge.hidden')"
       >
@@ -372,7 +372,7 @@ const detectedReason = computed(() => {
          (@click above), and tap-to-disclose swallows the click that would have expanded it. On
          touch they keep the default press-and-hold. -->
 
-    <div class="flex shrink-0 items-center gap-1.5 text-[12px] font-medium">
+    <div class="flex shrink-0 items-center gap-1.5 text-xs font-medium">
       <!-- attention score: only in the "Needs attention" sort; the tooltip lists every term -->
       <Tooltip v-if="rank && rank.reasons.length">
         <TooltipTrigger as-child>
@@ -456,39 +456,40 @@ const detectedReason = computed(() => {
       v-if="!selecting && !store.isGuest && (store.ghAccounts.length > 0 || store.identitiesRelevant)"
       @update:open="onMenuToggle"
     >
-      <DropdownMenuTrigger
-        :title="tooltipsEnabled ? ([
-          repo.syncAccountLogin ? `Syncs as ${repo.syncAccountLogin}` : null,
-          identity ? `${identity.displayName} · ${identity.gitEmail}` : null,
-        ].filter(Boolean).join(' · ') || triggerLabel) : undefined"
-        :class="
-          cn(
-            'flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50',
+      <DropdownMenuTrigger as-child>
+        <button
+          type="button"
+          :title="tooltipsEnabled ? ([
+            repo.syncAccountLogin ? `Syncs as ${repo.syncAccountLogin}` : null,
+            identity ? `${identity.displayName} · ${identity.gitEmail}` : null,
+          ].filter(Boolean).join(' · ') || triggerLabel) : undefined"
+          class="flex size-7 shrink-0 items-center justify-center rounded-full text-2xs font-semibold outline-none transition-no-ring hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50"
+          :class="
             repo.syncAccountLogin
               ? 'bg-primary/15 text-primary'
               : identity
                 ? identityTint(identity.id)
-                : 'bg-secondary text-muted-foreground hover:bg-accent',
-          )
-        "
-        :aria-label="triggerLabel"
-        @click.stop
-      >
-        <span v-if="repo.syncAccountLogin">{{ identityInitials(repo.syncAccountLogin) }}</span>
-        <span v-else-if="identity">{{ identityInitials(identity.displayName) }}</span>
-        <User v-else :size="15" />
+                : 'bg-secondary text-muted-foreground hover:bg-accent'
+          "
+          :aria-label="triggerLabel"
+          @click.stop
+        >
+          <span v-if="repo.syncAccountLogin">{{ identityInitials(repo.syncAccountLogin) }}</span>
+          <span v-else-if="identity">{{ identityInitials(identity.displayName) }}</span>
+          <User v-else :size="15" />
+        </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" class="max-w-64">
         <!-- which GitHub account this repo pushes / pulls as (auto-switched on sync) -->
         <template v-if="store.ghAccounts.length">
           <DropdownMenuLabel>{{ $t("repo.syncAccount.dropdownLabel") }}</DropdownMenuLabel>
-          <DropdownMenuItem class="text-muted-foreground" @select="onAccount(null)">
-            <AtSign :size="15" />
-            <div class="min-w-0 flex-1">
+          <DropdownMenuItem @select="onAccount(null)">
+            <AtSign :size="15" class="text-muted-foreground" />
+            <div class="min-w-0 flex-1 text-muted-foreground">
               <div class="truncate">{{ $t("repo.syncAccount.machineDefault") }}</div>
               <!-- Not pinned, but not a free-for-all either: name the account this repo resolves
                    to on its own, and why, so "Automatic" isn't read as "syncs as whoever". -->
-              <div v-if="detected" class="truncate text-[11px] text-muted-foreground/80">
+              <div v-if="detected" class="truncate text-2xs text-muted-foreground/80">
                 {{ $t("repo.syncAccount.detected", { login: detected.login }) }} · {{ detectedReason }}
               </div>
             </div>
@@ -499,10 +500,10 @@ const detectedReason = computed(() => {
             :key="`${a.host}/${a.login}`"
             @select="onAccount(a)"
           >
-            <span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-[10px] font-semibold text-muted-foreground">{{ identityInitials(a.login) }}</span>
+            <span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-3xs font-semibold text-muted-foreground">{{ identityInitials(a.login) }}</span>
             <div class="min-w-0 flex-1">
-              <div class="truncate text-[13px]">{{ a.login }}</div>
-              <div class="mono truncate text-[11px] text-muted-foreground">{{ a.host }}</div>
+              <div class="truncate text-ui">{{ a.login }}</div>
+              <div class="mono truncate text-2xs text-muted-foreground">{{ a.host }}</div>
             </div>
             <Check
               v-if="repo.syncAccountLogin === a.login && (repo.syncAccountHost || 'github.com') === a.host"
@@ -519,9 +520,9 @@ const detectedReason = computed(() => {
              choice to make here, only noise on every card. See store's `identitiesRelevant`. -->
         <template v-if="store.identitiesRelevant">
           <DropdownMenuLabel>{{ $t("repo.identity.dropdownLabel") }}</DropdownMenuLabel>
-          <DropdownMenuItem class="text-muted-foreground" @select="onIdentity(null)">
-            <User :size="15" />
-            <span class="flex-1">{{ $t("repo.identity.noIdentity") }}</span>
+          <DropdownMenuItem @select="onIdentity(null)">
+            <User :size="15" class="text-muted-foreground" />
+            <span class="flex-1 text-muted-foreground">{{ $t("repo.identity.noIdentity") }}</span>
             <Check v-if="!repo.identityId" :size="15" class="text-primary" />
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -530,12 +531,12 @@ const detectedReason = computed(() => {
             @select="onIdentity(i.id)"
           >
             <span
-              :class="cn('flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold', identityTint(i.id))"
+              :class="cn('flex size-6 shrink-0 items-center justify-center rounded-full text-3xs font-semibold', identityTint(i.id))"
               >{{ identityInitials(i.displayName) }}</span
             >
             <div class="min-w-0 flex-1">
-              <div class="truncate text-[13px]">{{ i.displayName }}</div>
-              <div class="mono truncate text-[11px] text-muted-foreground">{{ i.gitEmail }}</div>
+              <div class="truncate text-ui">{{ i.displayName }}</div>
+              <div class="mono truncate text-2xs text-muted-foreground">{{ i.gitEmail }}</div>
             </div>
             <Check v-if="repo.identityId === i.id" :size="15" class="ms-1 shrink-0 text-primary" />
           </DropdownMenuItem>
@@ -547,7 +548,7 @@ const detectedReason = computed(() => {
          Hidden while selecting — the row means "pick this one" then, not "open it". -->
     <button
       v-if="!selecting"
-      class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-all hover:bg-accent hover:text-foreground active:scale-90 active:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring/40"
+      class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-no-ring hover:bg-accent hover:text-foreground active:scale-90 active:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring/40"
       :aria-label="expanded ? $t('repo.collapse') : $t('repo.expand')"
       :aria-expanded="expanded"
       @click.stop="emit('toggle')"
@@ -556,3 +557,13 @@ const detectedReason = computed(() => {
     </button>
   </div>
 </template>
+
+<style scoped>
+/* The status pill's trailing word reveal (statusWord). It animates max-width, a layout property,
+   so the transition is spelled out here rather than as an arbitrary transition-[...] utility. */
+.status-word-reveal {
+  transition:
+    max-width 200ms ease-out,
+    opacity 200ms ease-out;
+}
+</style>

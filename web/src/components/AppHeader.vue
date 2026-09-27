@@ -352,8 +352,8 @@ onBeforeUnmount(() => {
         <img :src="'/icon-light.svg'" alt="" width="30" height="30" class="dark:hidden" />
         <img :src="'/icon-dark.svg'" alt="" width="30" height="30" class="hidden dark:block" />
         <div class="leading-tight">
-          <div class="text-[17px] font-bold tracking-tight">{{ $t("app.name") }}</div>
-          <div class="text-[12px] text-muted-foreground">
+          <div class="text-lg font-bold tracking-tight">{{ $t("app.name") }}</div>
+          <div class="text-xs text-muted-foreground">
             {{ $t("header.repoCount", { count: repoCount }, repoCount) }}
           </div>
         </div>
@@ -367,12 +367,13 @@ onBeforeUnmount(() => {
               <Button
                 variant="ghost"
                 size="icon"
-                :class="store.mode === 'remote' ? 'text-info' : 'text-muted-foreground'"
                 :aria-label="$t('header.connection')"
                 @click="$emit('remote')"
               >
-                <Cloud v-if="store.mode === 'remote'" />
-                <CloudOff v-else />
+                <!-- The tint is the glyph's, so it sits on the icon; group-hover keeps the ghost
+                     button's own hover-to-foreground that the colour used to ride along with. -->
+                <Cloud v-if="store.mode === 'remote'" class="text-info group-hover/button:text-foreground" />
+                <CloudOff v-else class="text-muted-foreground group-hover/button:text-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>
@@ -387,7 +388,7 @@ onBeforeUnmount(() => {
           >
             <span
               v-if="connected"
-              class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60"
+              class="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60"
             />
             <span
               class="relative inline-flex size-2 rounded-full ring-2 ring-background"
@@ -403,13 +404,13 @@ onBeforeUnmount(() => {
               <Button
                 variant="ghost"
                 size="icon"
-                class="relative text-muted-foreground"
+                class="relative"
                 :aria-label="$t('header.notifications')"
                 :aria-expanded="notifOpen"
                 aria-haspopup="menu"
                 @click.stop="toggleNotif"
               >
-                <Bell />
+                <Bell class="text-muted-foreground group-hover/button:text-foreground group-aria-expanded/button:text-foreground" />
                 <!-- Blue (info), NOT red. Red is `destructive` everywhere else in this app — the
                      failed-connection dot two rows up, the failing-repo chip, the Shut down
                      button — so spending it on "you have notifications" said ERROR for what is
@@ -421,7 +422,7 @@ onBeforeUnmount(() => {
                      instead of colliding with the glyph. -->
                 <span
                   v-if="store.unreadCount"
-                  class="absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-info px-1 text-[10px] leading-none font-semibold text-white ring-2 ring-background"
+                  class="absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-info px-1 text-3xs leading-none font-semibold text-white ring-2 ring-background"
                 >{{ store.unreadCount > 9 ? "9+" : store.unreadCount }}</span>
               </Button>
             </TooltipTrigger>
@@ -436,7 +437,7 @@ onBeforeUnmount(() => {
             <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">{{ $t("header.notifications") }}</div>
             <div
               v-if="!store.notifications.length"
-              class="px-2 py-6 text-center text-[12.5px] text-muted-foreground"
+              class="px-2 py-6 text-center text-ui text-muted-foreground"
             >
               {{ $t("header.notificationsEmpty") }}
             </div>
@@ -445,11 +446,11 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   role="menuitem"
-                  class="flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-2 text-start outline-hidden transition-colors hover:bg-accent focus:bg-accent"
+                  class="flex w-full flex-col items-start gap-0.5 rounded-sm p-2 text-start outline-hidden transition-colors hover:bg-accent focus:bg-accent"
                   @click="onNotifClick(n)"
                 >
-                  <span class="text-[13px] font-medium text-foreground">{{ n.title }}</span>
-                  <span v-if="n.body" class="text-[12px] text-muted-foreground">{{ n.body }}</span>
+                  <span class="text-ui font-medium text-foreground">{{ n.title }}</span>
+                  <span v-if="n.body" class="text-xs text-muted-foreground">{{ n.body }}</span>
                 </button>
                 <!-- A "behind" entry is actionable right here: pull the repos it names without
                      leaving the flyout. A sibling button, not nested (button-in-button is
@@ -457,21 +458,25 @@ onBeforeUnmount(() => {
                 <div v-if="n.kind === 'behind' && n.behind?.length" class="px-2 pb-2">
                   <Button
                     size="sm"
-                    class="h-7 w-full gap-1.5"
+                    class="h-7 w-full"
                     :disabled="pullingBehind"
                     @click.stop="pullFromNotification(n)"
                   >
-                    <Loader2 v-if="pullingBehind" class="animate-spin" />
-                    <ArrowDownToLine v-else />
-                    {{ n.behind.length === 1 ? $t("notify.behindPull") : $t("notify.behindPullAll") }}
+                    <span class="inline-flex items-center gap-1.5">
+                      <Loader2 v-if="pullingBehind" class="animate-spin" />
+                      <ArrowDownToLine v-else />
+                      {{ n.behind.length === 1 ? $t("notify.behindPull") : $t("notify.behindPullAll") }}
+                    </span>
                   </Button>
                 </div>
                 <!-- An available update: re-open the offer. The prompt owns the install, so the
                      bell entry stays a way back to it after a "Later". -->
                 <div v-else-if="n.kind === 'update'" class="px-2 pb-2">
-                  <Button size="sm" class="h-7 w-full gap-1.5" @click.stop="openUpdatePrompt">
-                    <Download />
-                    {{ $t("notify.updateReview") }}
+                  <Button size="sm" class="h-7 w-full" @click.stop="openUpdatePrompt">
+                    <span class="inline-flex items-center gap-1.5">
+                      <Download />
+                      {{ $t("notify.updateReview") }}
+                    </span>
                   </Button>
                 </div>
               </div>
@@ -495,16 +500,20 @@ onBeforeUnmount(() => {
               <Button
                 variant="ghost"
                 size="sm"
-                class="h-7 gap-1.5 px-2 text-muted-foreground"
+                class="h-7"
                 :aria-label="$t('header.switchAccount')"
                 :aria-expanded="accountsOpen"
                 aria-haspopup="menu"
                 @click.stop="toggleAccounts"
               >
-                <Loader2 v-if="store.switchingAccount" class="animate-spin" />
-                <CircleUser v-else />
-                <span class="hidden max-w-[9rem] truncate sm:inline">
-                  {{ store.activeAccount?.login ?? store.ghAccounts[0]?.login }}
+                <span
+                  class="inline-flex items-center gap-1.5 text-muted-foreground group-hover/button:text-foreground group-aria-expanded/button:text-foreground"
+                >
+                  <Loader2 v-if="store.switchingAccount" class="animate-spin" />
+                  <CircleUser v-else />
+                  <span class="hidden max-w-36 truncate sm:inline">
+                    {{ store.activeAccount?.login ?? store.ghAccounts[0]?.login }}
+                  </span>
                 </span>
               </Button>
             </TooltipTrigger>
@@ -531,7 +540,7 @@ onBeforeUnmount(() => {
               <Check v-else-if="a.active" class="text-success" />
               <CircleUser v-else class="text-muted-foreground" />
               <span class="min-w-0 flex-1 truncate">{{ a.login }}</span>
-              <span v-if="a.active" class="shrink-0 text-[10px] text-muted-foreground">{{ $t("accounts.active") }}</span>
+              <span v-if="a.active" class="shrink-0 text-3xs text-muted-foreground">{{ $t("accounts.active") }}</span>
             </button>
             <div class="-mx-1 my-1 h-px bg-border" />
             <button
@@ -744,14 +753,18 @@ onBeforeUnmount(() => {
         <Button
           v-if="!store.isGuest"
           size="sm"
-          class="group/add ms-1 h-8 gap-0 overflow-hidden transition-all"
+          class="group/add ms-1 h-8 overflow-hidden"
           :aria-label="$t('header.addRepository')"
           @click="$emit('add')"
         >
-          <Plus class="size-4 shrink-0" />
-          <span
-            class="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 ease-out group-hover/add:ms-1.5 group-hover/add:max-w-32 group-hover/add:opacity-100 group-focus-visible/add:ms-1.5 group-focus-visible/add:max-w-32 group-focus-visible/add:opacity-100"
-          >{{ $t("header.addRepository") }}</span>
+          <!-- One flex child, so the button's own gap never opens: the label's spacing is its
+               hover-only ms-1.5, and a collapsed label must add zero width to the square. -->
+          <span class="inline-flex items-center">
+            <Plus class="size-4 shrink-0" />
+            <span
+              class="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 ease-out group-hover/add:ms-1.5 group-hover/add:max-w-32 group-hover/add:opacity-100 group-focus-visible/add:ms-1.5 group-focus-visible/add:max-w-32 group-focus-visible/add:opacity-100"
+            >{{ $t("header.addRepository") }}</span>
+          </span>
         </Button>
       </div>
     </div>
@@ -763,7 +776,7 @@ onBeforeUnmount(() => {
         <DialogTitle>{{ $t("header.shutdownTitle") }}</DialogTitle>
         <DialogDescription>{{ $t("header.shutdownBody") }}</DialogDescription>
       </DialogHeader>
-      <DialogFooter class="gap-2 sm:gap-2">
+      <DialogFooter>
         <Button variant="secondary" :disabled="shuttingDown" @click="confirmShutdownOpen = false">
           {{ $t("common.cancel") }}
         </Button>

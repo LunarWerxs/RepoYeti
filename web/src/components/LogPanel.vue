@@ -238,12 +238,9 @@ const showHistoryGraph = computed(
   () => historyGraphEnabled.value && !selectedAuthor.value,
 );
 const visibleGutterW = computed(() => (showHistoryGraph.value ? gutterW.value : 0));
-// ONE column template, shared verbatim by the wide-mode header and every commit row. The header
-// and each row are SEPARATE grids, so content-sized tracks (auto / minmax) resolve independently
-// per grid — the header sizing to the word "AUTHOR", each row to its own author name — which is
-// why the titles never lined up with the columns under them. Fixed tracks keep the two in
-// lockstep. Order: description · changes · date · author · commit.
-const COLS = "minmax(0,1fr) 112px 88px 116px 64px";
+// The wide-mode column template lives in ONE place, `.history-cols` in this file's stylesheet,
+// shared verbatim by the header and every commit row (see the comment there for why its tracks
+// are fixed).
 
 // ── ref-decoration chips (parse the `refs` string git hands us) ──────────────────────
 interface RefChip { kind: "current" | "head" | "branch" | "remote" | "tag"; label: string }
@@ -484,12 +481,14 @@ const scrollEl = useTemplateRef<HTMLElement>("scrollEl");
 const dragHeight = ref<number | null>(null);
 const glide = useGripGlide();
 const historyResized = computed(() => hasHistoryOverride());
-const historyStyle = computed<Record<string, string>>(() => {
+// The scroller's pinned height, or null for the stylesheet's content-sized max-height cap. Fed to
+// the template as `--history-h` and applied by `.history-scroll--pinned` (which also clears the cap).
+const historyHeight = computed<string | null>(() => {
   // A drag outranks a reset glide (grabbing the grip mid-animation takes over cleanly), and both
   // outrank the stored height, which is already released by the time a glide is holding a number.
   const held = dragHeight.value ?? glide.height.value;
-  if (held != null) return { height: `${held}px`, maxHeight: "none" };
-  return historyScrollStyle();
+  if (held != null) return `${held}px`;
+  return historyScrollStyle().height ?? null;
 });
 
 // All the release/stuck-drag handling (button filtering, capture loss, swallowed pointerup, blur,
@@ -538,6 +537,8 @@ function gripKey(action: () => void): void {
 }
 
 const sentinelEl = useTemplateRef<HTMLElement>("sentinelEl");
+// Immediate: RepoCard lazy-loads this panel, so it can mount with `active` already true and never
+// see a false->true edge. At setup the sentinel is not rendered yet, so the first run only clears.
 watch([sentinelEl, () => props.active], ([el, active]) => {
   io?.disconnect();
   if (!el || !active) return;
@@ -556,7 +557,7 @@ watch([sentinelEl, () => props.active], ([el, active]) => {
     { root: scrollEl.value ?? null, rootMargin: "200px" },
   );
   io.observe(el);
-});
+}, { immediate: true });
 
 // ── per-commit detail (files + bounded diff), lazy + cached by hash ──────────────────
 const expandedCommit = ref<string | null>(null);
@@ -900,6 +901,9 @@ watch(
     // hidden. One refresh on reactivation covers all of them and refreshes the rolling time window.
     if (!previous && showHistory.value) scheduleHistoryReload(0);
   },
+  // Immediate: RepoCard lazy-loads this panel, so it can mount already active. Safe at mount:
+  // History starts collapsed (showHistory false), so the first run schedules nothing.
+  { immediate: true },
 );
 watch(
   () => store.historyRevisionByRepo[props.repoId] ?? 0,
@@ -929,7 +933,7 @@ watch(historyActivityScale, () => {
     <!-- header: expand toggle -->
     <button
       type="button"
-      class="flex w-full items-center gap-1.5 text-[12.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground"
+      class="flex w-full items-center gap-1.5 text-ui text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground"
       :aria-expanded="showHistory"
       @click="toggleHistory"
     >
@@ -962,7 +966,7 @@ watch(historyActivityScale, () => {
             role="tab"
             :aria-selected="scope === opt.v"
             :title="opt.title"
-            class="rounded px-2 py-0.5 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40"
+            class="rounded px-2 py-0.5 text-2xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40"
             :class="scope === opt.v ? 'bg-primary/15 font-medium text-primary' : 'text-muted-foreground hover:text-foreground'"
             @click="setScope(opt.v)"
           >
@@ -982,7 +986,7 @@ watch(historyActivityScale, () => {
           <TooltipTrigger as-child>
             <button
               type="button"
-              class="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+              class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
               :aria-label="$t('repo.history.refresh')"
               :disabled="loadingLog"
               @click="reload()"
@@ -997,7 +1001,7 @@ watch(historyActivityScale, () => {
       <Transition name="history-filter">
         <div
           v-if="selectedAuthor"
-          class="mb-2 flex min-h-7 items-center gap-2 rounded-md border border-info/25 bg-info/8 px-2 py-1 text-[11px] text-foreground/85"
+          class="mb-2 flex min-h-7 items-center gap-2 rounded-md border border-info/25 bg-info/8 px-2 py-1 text-2xs text-foreground/85"
           role="status"
           aria-live="polite"
           data-testid="history-author-filter"
@@ -1023,13 +1027,13 @@ watch(historyActivityScale, () => {
       </Transition>
 
       <!-- loading / error / empty -->
-      <div v-if="loadingLog && !logResult" class="flex items-center gap-2 px-1 py-1.5 text-[12px] text-muted-foreground">
+      <div v-if="loadingLog && !logResult" class="flex items-center gap-2 px-1 py-1.5 text-xs text-muted-foreground">
         <Loader2 :size="13" class="animate-spin" />{{ $t("repo.history.loading") }}
       </div>
-      <div v-else-if="logResult && !logResult.ok" class="px-1 py-1.5 text-[12px] text-destructive">
+      <div v-else-if="logResult && !logResult.ok" class="px-1 py-1.5 text-xs text-destructive">
         {{ logResult.message || $t("repo.history.detailUnavailable") }}
       </div>
-      <div v-else-if="logResult && !logResult.commits.length" class="px-1 py-1.5 text-[12px] text-muted-foreground">
+      <div v-else-if="logResult && !logResult.commits.length" class="px-1 py-1.5 text-xs text-muted-foreground">
         {{
           selectedAuthor
             ? $t("repo.history.authorFilterEmpty", { name: selectedAuthorLabel })
@@ -1042,10 +1046,9 @@ watch(historyActivityScale, () => {
              gutter-width spacer, then the SAME grid template with the SAME per-cell padding and
              alignment — so every title sits over the column it names. -->
         <div v-if="!compact" class="flex items-stretch border-b border-border/40 pb-1">
-          <span :style="{ width: `${visibleGutterW}px` }" class="shrink-0" aria-hidden="true" />
+          <span :style="{ '--gutter-w': `${visibleGutterW}px` }" class="w-(--gutter-w) shrink-0" aria-hidden="true" />
           <div
-            class="grid min-w-0 flex-1 items-center pe-1 text-[10.5px] font-medium tracking-wide uppercase text-muted-foreground/70"
-            :style="{ gridTemplateColumns: COLS }"
+            class="history-cols grid min-w-0 flex-1 items-center pe-1 text-2xs font-medium tracking-wide uppercase text-muted-foreground/70"
           >
             <span class="truncate">{{ $t("repo.history.colDescription") }}</span>
             <span class="truncate px-1 text-center">{{ $t("repo.history.colChanges") }}</span>
@@ -1058,8 +1061,8 @@ watch(historyActivityScale, () => {
         <div
           ref="scrollEl"
           class="scroll-slim history-scroll overflow-y-auto"
-          :class="dragHeight != null && 'history-scroll--dragging'"
-          :style="historyStyle"
+          :class="[dragHeight != null && 'history-scroll--dragging', historyHeight != null && 'history-scroll--pinned']"
+          :style="{ '--history-h': historyHeight ?? undefined }"
           :data-refreshing="loadingLog ? 'true' : 'false'"
           :aria-busy="loadingLog"
           data-history-transition="rows"
@@ -1124,7 +1127,7 @@ watch(historyActivityScale, () => {
                 </svg>
                 <div class="flex min-w-0 flex-1 items-center gap-2 py-1 pe-1">
                   <FileEdit :size="13" class="shrink-0 text-warning" />
-                  <span class="truncate text-[12.5px] font-medium text-foreground">
+                  <span class="truncate text-ui font-medium text-foreground">
                     {{ $t("repo.history.uncommitted", { count: dirtyCount }) }}
                   </span>
                   <ChevronDown
@@ -1139,8 +1142,8 @@ watch(historyActivityScale, () => {
                 <div v-if="wtOpen" class="expand-grid">
                   <div class="min-h-0 overflow-hidden">
                     <div
-                      class="mb-1 border-s-2 border-warning/40 py-1 ps-2 text-[11px]"
-                      :style="{ marginInlineStart: `${visibleGutterW}px` }"
+                      class="mb-1 ms-(--gutter-w) border-s-2 border-warning/40 py-1 ps-2 text-2xs"
+                      :style="{ '--gutter-w': `${visibleGutterW}px` }"
                     >
                       <div v-if="!wtFiles.length" class="text-muted-foreground">{{ $t("repo.history.noUncommitted") }}</div>
                       <template v-else>
@@ -1154,12 +1157,12 @@ watch(historyActivityScale, () => {
                                 :title="f.path"
                                 @click.stop="openWorktreeFile(f)"
                               >
-                                <span class="mono shrink-0 text-[11px] font-bold" :style="{ color: statusColor(f.status) }">{{ f.status }}</span>
-                                <span class="mono min-w-0 flex-1 truncate text-[11.5px]">
+                                <span class="mono shrink-0 text-2xs font-bold text-(--status-color)" :style="{ '--status-color': statusColor(f.status) }">{{ f.status }}</span>
+                                <span class="mono min-w-0 flex-1 truncate text-xs">
                                   <span class="text-foreground">{{ splitPath(f.path).name }}</span><span v-if="splitPath(f.path).dir" class="ms-1.5 text-muted-foreground/55">{{ splitPath(f.path).dir.replace(/\/+$/, "") }}</span>
                                 </span>
-                                <span v-if="f.stat?.addedLines" class="mono shrink-0 text-[10.5px] text-success">+{{ f.stat.addedLines }}</span>
-                                <span v-if="f.stat?.removedLines" class="mono shrink-0 text-[10.5px] text-destructive">−{{ f.stat.removedLines }}</span>
+                                <span v-if="f.stat?.addedLines" class="mono shrink-0 text-2xs text-success">+{{ f.stat.addedLines }}</span>
+                                <span v-if="f.stat?.removedLines" class="mono shrink-0 text-2xs text-destructive">−{{ f.stat.removedLines }}</span>
                               </button>
                             </ContextMenuTrigger>
                             <ContextMenuContent>
@@ -1252,11 +1255,10 @@ watch(historyActivityScale, () => {
                   />
                 </svg>
 
-                <!-- WIDE: aligned columns (same COLS template as the header above) -->
+                <!-- WIDE: aligned columns (same `.history-cols` template as the header above) -->
                 <div
                   v-if="!compact"
-                  class="grid min-w-0 flex-1 items-center py-1 pe-1"
-                  :style="{ gridTemplateColumns: COLS }"
+                  class="history-cols grid min-w-0 flex-1 items-center py-1 pe-1"
                 >
                   <button
                     type="button"
@@ -1276,7 +1278,7 @@ watch(historyActivityScale, () => {
                     <span
                       v-for="(chip, ci) in refChips(item.commit!.refs).slice(0, CHIP_CAP)"
                       :key="ci"
-                      class="inline-flex shrink-0 items-center gap-0.5 rounded border px-1 py-px text-[10px] leading-none"
+                      class="inline-flex shrink-0 items-center gap-0.5 rounded border px-1 py-px text-3xs leading-none"
                       :class="{
                         'border-primary/30 bg-primary/10 text-primary': chip.kind === 'current' || chip.kind === 'head',
                         'border-warning/30 bg-warning/10 text-warning': chip.kind === 'tag',
@@ -1287,15 +1289,15 @@ watch(historyActivityScale, () => {
                       <Tag v-if="chip.kind === 'tag'" :size="9" />
                       <span class="max-w-40 truncate">{{ chip.label }}</span>
                     </span>
-                    <span v-if="refChips(item.commit!.refs).length > CHIP_CAP" class="shrink-0 text-[10px] text-muted-foreground">
+                    <span v-if="refChips(item.commit!.refs).length > CHIP_CAP" class="shrink-0 text-3xs text-muted-foreground">
                       +{{ refChips(item.commit!.refs).length - CHIP_CAP }}
                     </span>
-                    <span class="truncate text-[12.5px] text-foreground" :title="item.commit!.subject">{{ item.commit!.subject }}</span>
+                    <span class="truncate text-ui text-foreground" :title="item.commit!.subject">{{ item.commit!.subject }}</span>
                   </button>
                   <!-- Changes can stay numeric or become a GitKraken-style proportional bar.
                        Both modes keep exact figures available on hover and in accessible text. -->
                   <div
-                    class="mono flex min-w-0 items-center justify-center overflow-hidden px-1 text-[10.5px] whitespace-nowrap"
+                    class="mono flex min-w-0 items-center justify-center overflow-hidden px-1 text-2xs whitespace-nowrap"
                     :data-history-changes="historyChangesDisplay"
                   >
                     <template v-if="historyChangesDisplay === 'bars'">
@@ -1329,11 +1331,11 @@ watch(historyActivityScale, () => {
                       <span v-else class="text-muted-foreground/35">·</span>
                     </span>
                   </div>
-                  <span class="px-1 text-center text-[11px] whitespace-nowrap text-muted-foreground">{{ fromNow(item.commit!.date) }}</span>
-                  <span class="truncate px-1 text-center text-[11.5px] text-muted-foreground" :title="item.commit!.authorEmail">{{ item.commit!.authorName }}</span>
+                  <span class="px-1 text-center text-2xs whitespace-nowrap text-muted-foreground">{{ fromNow(item.commit!.date) }}</span>
+                  <span class="truncate px-1 text-center text-xs text-muted-foreground" :title="item.commit!.authorEmail">{{ item.commit!.authorName }}</span>
                   <button
                     type="button"
-                    class="mono px-1 text-center text-[11px] text-info/80 outline-none hover:underline focus-visible:underline"
+                    class="mono px-1 text-center text-2xs text-info/80 outline-none hover:underline focus-visible:underline"
                     :title="$t('repo.history.copyHash')"
                     @click.stop="copyHash(item.commit!.hash)"
                   >
@@ -1357,7 +1359,7 @@ watch(historyActivityScale, () => {
                     <span
                       v-for="(chip, ci) in refChips(item.commit!.refs).slice(0, 2)"
                       :key="ci"
-                      class="inline-flex shrink-0 items-center gap-0.5 rounded border px-1 py-px text-[9.5px] leading-none"
+                      class="inline-flex shrink-0 items-center gap-0.5 rounded border px-1 py-px text-3xs leading-none"
                       :class="{
                         'border-primary/30 bg-primary/10 text-primary': chip.kind === 'current' || chip.kind === 'head',
                         'border-warning/30 bg-warning/10 text-warning': chip.kind === 'tag',
@@ -1368,9 +1370,9 @@ watch(historyActivityScale, () => {
                       <Tag v-if="chip.kind === 'tag'" :size="8" />
                       <span class="max-w-24 truncate">{{ chip.label }}</span>
                     </span>
-                    <span class="truncate text-[12.5px] text-foreground" :title="item.commit!.subject">{{ item.commit!.subject }}</span>
+                    <span class="truncate text-ui text-foreground" :title="item.commit!.subject">{{ item.commit!.subject }}</span>
                   </div>
-                  <div class="truncate text-[10.5px] text-muted-foreground">
+                  <div class="truncate text-2xs text-muted-foreground">
                     {{ item.commit!.authorName }} · {{ fromNow(item.commit!.date) }} ·
                     <span class="mono text-info/70">{{ item.commit!.shortHash }}</span>
                     <!-- no room for a column here, so the totals ride on the meta line instead —
@@ -1450,24 +1452,24 @@ watch(historyActivityScale, () => {
                 >
                   <div class="min-h-0 overflow-hidden">
                     <div
-                      class="mb-1 mt-0.5 rounded-md border-s-2 py-1.5 ps-2.5 pe-2"
+                      class="mb-1 mt-0.5 ms-(--gutter-w) rounded-md border-s-2 border-(--rail-color) py-1.5 ps-2.5 pe-2"
                       :style="{
-                        marginInlineStart: `${visibleGutterW}px`,
-                        borderColor: showHistoryGraph ? laneColor(item.row.node.color) : 'var(--border)',
+                        '--gutter-w': `${visibleGutterW}px`,
+                        '--rail-color': showHistoryGraph ? laneColor(item.row.node.color) : 'var(--border)',
                       }"
                     >
-                <div v-if="loadingCommit === item.commit!.hash" class="flex items-center gap-2 text-[12px] text-muted-foreground">
+                <div v-if="loadingCommit === item.commit!.hash" class="flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 :size="13" class="animate-spin" />{{ $t("repo.history.loading") }}
                 </div>
                 <template v-else-if="expandedDetail?.ok">
                   <!-- meta: short hash + copy · parents -->
-                  <div class="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <div class="mb-1.5 flex flex-wrap items-center gap-1.5 text-2xs">
                     <span class="mono text-muted-foreground">{{ expandedDetail.shortHash }}</span>
                     <Tooltip>
                       <TooltipTrigger as-child>
                         <button
                           type="button"
-                          class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
                           :aria-label="$t('repo.history.copyHash')"
                           @click.stop="copyHash(expandedDetail.hash)"
                         >
@@ -1482,7 +1484,7 @@ watch(historyActivityScale, () => {
                         v-for="p in expandedDetail.parents"
                         :key="p"
                         type="button"
-                        class="mono inline-flex items-center gap-0.5 rounded bg-secondary px-1 py-px text-[10px] text-info/80 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+                        class="mono inline-flex items-center gap-0.5 rounded bg-secondary px-1 py-px text-3xs text-info/80 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
                         :title="$t('repo.history.jumpToParent')"
                         @click.stop="jumpToParent(p)"
                       >
@@ -1491,7 +1493,7 @@ watch(historyActivityScale, () => {
                     </template>
                     <span v-else class="ms-1 text-muted-foreground/70">{{ $t("repo.history.root") }}</span>
                   </div>
-                  <div class="mb-1.5 text-[11px] text-muted-foreground">
+                  <div class="mb-1.5 text-2xs text-muted-foreground">
                     <div>
                       <span class="text-muted-foreground/70">{{ $t("repo.history.author") }}:</span>
                       {{ expandedDetail.authorName }} · {{ fromNow(expandedDetail.date) }}
@@ -1507,18 +1509,18 @@ watch(historyActivityScale, () => {
                        a Show more toggle: a generated or template-heavy message would otherwise
                        push the changed-files list off the bottom of the card. -->
                   <div class="mb-2 rounded bg-secondary/20 px-2 py-1.5">
-                    <div class="whitespace-pre-wrap text-[12px] font-medium text-foreground">{{ expandedDetail.subject }}</div>
+                    <div class="whitespace-pre-wrap text-xs font-medium text-foreground">{{ expandedDetail.subject }}</div>
                     <template v-if="expandedDetail.body">
                       <div
                         ref="bodyEl"
-                        class="commit-body mt-1 whitespace-pre-wrap text-[11px] leading-snug text-muted-foreground"
+                        class="commit-body mt-1 max-h-(--body-max-h) whitespace-pre-wrap text-2xs leading-snug text-muted-foreground"
                         :class="bodyOverflows && !bodyOpen && 'is-clamped'"
-                        :style="{ maxHeight: bodyMaxHeight }"
+                        :style="{ '--body-max-h': bodyMaxHeight }"
                       >{{ expandedDetail.body }}</div>
                       <button
                         v-if="bodyOverflows"
                         type="button"
-                        class="mt-1 flex items-center gap-1 rounded-sm text-[11px] font-medium text-info outline-none transition-colors hover:text-info/80 focus-visible:ring-2 focus-visible:ring-ring/40"
+                        class="mt-1 flex items-center gap-1 rounded-sm text-2xs font-medium text-info outline-none transition-colors hover:text-info/80 focus-visible:ring-2 focus-visible:ring-ring/40"
                         :aria-expanded="bodyOpen"
                         @click.stop="bodyOpen = !bodyOpen"
                       >
@@ -1553,12 +1555,12 @@ watch(historyActivityScale, () => {
                           :title="f.from ? `${f.from} → ${f.path}` : f.path"
                           @click.stop="openCommitFile(f)"
                         >
-                          <span class="mono shrink-0 text-[11px] font-bold" :style="{ color: statusColor(f.status) }">{{ f.status }}</span>
-                          <span class="mono min-w-0 flex-1 truncate text-[11.5px]">
+                          <span class="mono shrink-0 text-2xs font-bold text-(--status-color)" :style="{ '--status-color': statusColor(f.status) }">{{ f.status }}</span>
+                          <span class="mono min-w-0 flex-1 truncate text-xs">
                             <span class="text-foreground">{{ splitPath(f.path).name }}</span><span v-if="splitPath(f.path).dir" class="ms-1.5 text-muted-foreground/55">{{ splitPath(f.path).dir.replace(/\/+$/, "") }}</span>
                           </span>
-                          <span v-if="f.adds" class="mono shrink-0 text-[10.5px] text-success">+{{ f.adds }}</span>
-                          <span v-if="f.dels" class="mono shrink-0 text-[10.5px] text-destructive">−{{ f.dels }}</span>
+                          <span v-if="f.adds" class="mono shrink-0 text-2xs text-success">+{{ f.adds }}</span>
+                          <span v-if="f.dels" class="mono shrink-0 text-2xs text-destructive">−{{ f.dels }}</span>
                         </button>
                       </ContextMenuTrigger>
                       <ContextMenuContent>
@@ -1578,13 +1580,13 @@ watch(historyActivityScale, () => {
                       </ContextMenuContent>
                     </ContextMenu>
                   </div>
-                  <div v-else class="text-[11px] text-muted-foreground">{{ $t("repo.history.noChanges") }}</div>
+                  <div v-else class="text-2xs text-muted-foreground">{{ $t("repo.history.noChanges") }}</div>
                   <!-- Same key + plural the worktree section's 60-file cap uses (line ~594). -->
-                  <p v-if="expandedDetail.filesTotal > detailFiles.length" class="mt-1 text-[11px] text-muted-foreground">
+                  <p v-if="expandedDetail.filesTotal > detailFiles.length" class="mt-1 text-2xs text-muted-foreground">
                     {{ $t("repo.history.moreFiles", { count: expandedDetail.filesTotal - detailFiles.length }) }}
                   </p>
                 </template>
-                <div v-else class="text-[12px] text-muted-foreground">
+                <div v-else class="text-xs text-muted-foreground">
                   {{ expandedDetail?.message || $t("repo.history.detailUnavailable") }}
                 </div>
                     </div>
@@ -1598,7 +1600,7 @@ watch(historyActivityScale, () => {
               v-if="logResult.hasMore"
               key="history-sentinel"
               ref="sentinelEl"
-              class="flex items-center justify-center gap-1.5 py-2 text-[12px] text-muted-foreground"
+              class="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground"
             >
               <Loader2 v-if="loadingLog" :size="13" class="animate-spin" />
               <span v-if="loadingLog">{{ $t("repo.history.loading") }}</span>
@@ -1717,6 +1719,21 @@ watch(historyActivityScale, () => {
 }
 .history-scroll--dragging {
   transition: none;
+}
+/* A dragged / stored / gliding height (`--history-h`, from `historyHeight`) pins the exact height
+ * and clears the cap, since the whole point of the drag is to be able to go past it. */
+.history-scroll--pinned {
+  height: var(--history-h);
+  max-height: none;
+}
+
+/* ONE column template, shared verbatim by the wide-mode header and every commit row. The header
+   and each row are SEPARATE grids, so content-sized tracks (auto / minmax) resolve independently
+   per grid — the header sizing to the word "AUTHOR", each row to its own author name — which is
+   why the titles never lined up with the columns under them. Fixed tracks keep the two in
+   lockstep. Order: description · changes · date · author · commit. */
+.history-cols {
+  grid-template-columns: minmax(0, 1fr) 112px 88px 116px 64px;
 }
 
 @media (prefers-reduced-motion: reduce) {

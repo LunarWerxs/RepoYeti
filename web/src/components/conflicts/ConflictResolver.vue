@@ -258,7 +258,7 @@ async function apply(): Promise<void> {
 
 <template>
   <div v-if="conflicted && files.length" class="mb-2 flex flex-col gap-2">
-    <div class="flex items-center gap-1.5 text-[13px] font-semibold text-warning">
+    <div class="flex items-center gap-1.5 text-ui font-semibold text-warning">
       <GitMerge :size="15" />
       <span>{{ $t("repo.resolve.title") }}</span>
       <span class="text-warning/70">
@@ -272,7 +272,7 @@ async function apply(): Promise<void> {
       v-if="available"
       :class="
         cn(
-          'flex items-start gap-2 rounded-lg px-3 py-2 text-[11px]/relaxed ring-1',
+          'flex items-start gap-2 rounded-lg px-3 py-2 text-2xs/relaxed ring-1',
           modelTier === 'small'
             ? 'bg-destructive/10 text-destructive ring-destructive/30'
             : 'bg-muted/50 text-muted-foreground ring-border',
@@ -297,8 +297,8 @@ async function apply(): Promise<void> {
         class="flex items-center gap-2 rounded-md bg-muted/30 px-2 py-1.5"
       >
         <div class="min-w-0 flex-1">
-          <div class="mono truncate text-[11px] text-foreground">{{ f.path }}</div>
-          <div class="truncate text-[10px] text-muted-foreground">
+          <div class="mono truncate text-2xs text-foreground">{{ f.path }}</div>
+          <div class="truncate text-3xs text-muted-foreground">
             <span v-if="f.unsupported">{{ unsupportedLabel(f.unsupported) }}</span>
             <span v-else>{{ $t("repo.resolve.hunkCount", { n: f.hunks }, f.hunks) }}</span>
           </div>
@@ -364,10 +364,10 @@ async function apply(): Promise<void> {
     <!-- review: one card per region -->
     <div v-else class="flex flex-col gap-2">
       <div class="flex items-center gap-2">
-        <span class="mono min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
+        <span class="mono min-w-0 flex-1 truncate text-2xs font-medium text-foreground">
           {{ active.path }}
         </span>
-        <span class="shrink-0 text-[10px] text-muted-foreground">{{ active.model }}</span>
+        <span class="shrink-0 text-3xs text-muted-foreground">{{ active.model }}</span>
         <button
           type="button"
           class="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -380,10 +380,10 @@ async function apply(): Promise<void> {
 
       <!-- Said out loud rather than left implicit: the model was shown a partial file, and a
            resolution made without the surrounding code deserves more scrutiny, not less. -->
-      <p v-if="active.windowed" class="rounded-md bg-warning/10 px-2 py-1 text-[11px] text-warning">
+      <p v-if="active.windowed" class="rounded-md bg-warning/10 px-2 py-1 text-2xs text-warning">
         {{ $t("repo.resolve.windowedNote") }}
       </p>
-      <p v-if="!active.hasBase" class="rounded-md bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground">
+      <p v-if="!active.hasBase" class="rounded-md bg-muted/50 px-2 py-1 text-2xs text-muted-foreground">
         {{ $t("repo.resolve.noBaseNote") }}
       </p>
 
@@ -411,7 +411,7 @@ async function apply(): Promise<void> {
         >
           {{ $t("repo.resolve.acceptClean", { n: cleanIndices.length }) }}
         </Button>
-        <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+        <span class="min-w-0 flex-1 truncate text-2xs text-muted-foreground">
           {{ $t("repo.resolve.applySummary", { n: acceptedCount, total: active.hunks.length }) }}
         </span>
         <Button size="sm" :disabled="acceptedCount === 0 || applying" @click="apply">
@@ -419,7 +419,7 @@ async function apply(): Promise<void> {
           {{ $t("repo.resolve.applyButton") }}
         </Button>
       </div>
-      <p class="text-[10px]/relaxed text-muted-foreground">{{ $t("repo.resolve.applyFootnote") }}</p>
+      <p class="text-3xs/relaxed text-muted-foreground">{{ $t("repo.resolve.applyFootnote") }}</p>
     </div>
   </div>
 </template>

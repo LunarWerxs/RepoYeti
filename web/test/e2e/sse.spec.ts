@@ -28,7 +28,7 @@ test("dashboard connects to the live-update SSE stream", async ({ page }) => {
   const dot = page.getByRole("status", { name: "Connected: live updates" });
   const remote = await page
     .getByRole("button", { name: "Connection" })
-    .evaluate((el) => el.className.includes("text-info"))
+    .evaluate((el) => el.querySelector(".text-info") !== null)
     .catch(() => false);
   if (remote) await expect(dot).toBeVisible();
 });

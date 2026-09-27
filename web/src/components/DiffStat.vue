@@ -36,7 +36,7 @@ const showGlyphs = computed(() => showLines.value && showChars.value);
 <template>
   <span
     v-if="showLines || showChars"
-    class="mono inline-flex shrink-0 items-center gap-1 text-[11px] leading-none tabular-nums"
+    class="mono inline-flex shrink-0 items-center gap-1 text-2xs leading-none tabular-nums"
   >
     <template v-if="showLines">
       <AlignLeft v-if="showGlyphs" :size="9" class="shrink-0 text-muted-foreground/50" />

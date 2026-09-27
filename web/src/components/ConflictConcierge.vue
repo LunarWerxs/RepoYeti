@@ -48,7 +48,7 @@ function goToRepo(repo: Repo): void {
     v-if="store.visibleAttentionRepos.length"
     class="ring-warning/30 bg-warning/10 mb-2.5 flex flex-col gap-1.5 rounded-lg py-2.5 text-xs/relaxed ring-1"
   >
-    <div class="flex items-center gap-1.5 px-3 text-[13px] font-semibold text-warning">
+    <div class="flex items-center gap-1.5 px-3 text-ui font-semibold text-warning">
       <GitMerge :size="15" />
       <span>{{ $t("triage.title") }}</span>
       <span class="text-warning/70">
@@ -65,19 +65,19 @@ function goToRepo(repo: Repo): void {
         :key="repo.id"
         role="button"
         tabindex="0"
-        class="group flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 outline-none transition-colors hover:bg-warning/10 focus-visible:ring-2 focus-visible:ring-ring/40"
+        class="group flex cursor-pointer items-center gap-2 rounded-md p-1.5 outline-none transition-colors hover:bg-warning/10 focus-visible:ring-2 focus-visible:ring-ring/40"
         @click="goToRepo(repo)"
         @keydown.enter.prevent="goToRepo(repo)"
         @keydown.space.prevent="goToRepo(repo)"
       >
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-1.5">
-            <span class="truncate text-[13px] font-medium text-foreground">{{ repo.name }}</span>
-            <span v-if="repo.status?.branch" class="mono shrink-0 truncate text-[11px] text-muted-foreground">
+            <span class="truncate text-ui font-medium text-foreground">{{ repo.name }}</span>
+            <span v-if="repo.status?.branch" class="mono shrink-0 truncate text-2xs text-muted-foreground">
               {{ repo.status.branch }}
             </span>
           </div>
-          <div class="truncate text-[11px] text-warning">{{ reason(repo) }}</div>
+          <div class="truncate text-2xs text-warning">{{ reason(repo) }}</div>
         </div>
         <ChevronRight :size="14" class="shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" />
         <Tooltip>

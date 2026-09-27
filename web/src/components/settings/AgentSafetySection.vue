@@ -108,7 +108,7 @@ async function onApproveTimeout(secs: number): Promise<void> {
         </SettingsRow>
         <ExpandTransition :open="store.mcpAutoDeny">
           <div class="flex flex-col gap-1.5 px-3.5 pb-3">
-            <span class="text-[12px] text-muted-foreground">{{ $t("settings.mcpAutoDenyAfter") }}</span>
+            <span class="text-xs text-muted-foreground">{{ $t("settings.mcpAutoDenyAfter") }}</span>
             <Select v-model="denyChoice">
               <SelectTrigger class="w-full" :aria-label="$t('settings.mcpAutoDenyAfter')"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -133,7 +133,7 @@ async function onApproveTimeout(secs: number): Promise<void> {
         </SettingsRow>
         <ExpandTransition :open="store.mcpAutoApprove">
           <div class="flex flex-col gap-1.5 px-3.5 pb-3">
-            <span class="text-[12px] text-muted-foreground">{{ $t("settings.mcpAutoApproveAfter") }}</span>
+            <span class="text-xs text-muted-foreground">{{ $t("settings.mcpAutoApproveAfter") }}</span>
             <Select v-model="approveChoice">
               <SelectTrigger class="w-full" :aria-label="$t('settings.mcpAutoApproveAfter')"><SelectValue /></SelectTrigger>
               <SelectContent>

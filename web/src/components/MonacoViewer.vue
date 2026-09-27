@@ -245,7 +245,7 @@ onBeforeUnmount(() => {
        open, matching MonacoDiffViewer. -->
   <div
     ref="host"
-    class="dirty-gutter-host h-full w-full transition-opacity duration-150 ease-out"
+    class="dirty-gutter-host size-full transition-opacity duration-150 ease-out"
     :class="ready ? 'opacity-100' : 'opacity-0'"
   />
 </template>

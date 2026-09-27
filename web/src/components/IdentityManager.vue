@@ -223,10 +223,10 @@ async function remove(id: string): Promise<void> {
           v-if="store.identityUiForced && !hasRealIdentityUse"
           class="flex items-center justify-between gap-2 rounded-md bg-secondary/50 px-2.5 py-1.5"
         >
-          <span class="text-[11px] text-muted-foreground">{{ $t("identity.optIn.activeNote") }}</span>
+          <span class="text-2xs text-muted-foreground">{{ $t("identity.optIn.activeNote") }}</span>
           <button
             type="button"
-            class="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground underline-offset-2 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+            class="shrink-0 rounded px-1.5 py-0.5 text-2xs text-muted-foreground underline-offset-2 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
             @click="store.setIdentityUiForced(false)"
           >
             {{ $t("identity.optIn.hide") }}
@@ -234,13 +234,13 @@ async function remove(id: string): Promise<void> {
         </div>
         <!-- local machine suggestions -->
         <div class="flex items-center justify-between gap-2">
-          <div class="text-[12px] font-medium text-muted-foreground">{{ $t("identity.detected.title") }}</div>
+          <div class="text-xs font-medium text-muted-foreground">{{ $t("identity.detected.title") }}</div>
           <div class="flex items-center gap-1">
             <button
               v-if="store.dismissedDetectedIdentities.length"
               type="button"
               :aria-expanded="showDismissed"
-              class="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground underline-offset-2 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+              class="rounded px-1.5 py-0.5 text-2xs text-muted-foreground underline-offset-2 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
               @click="showDismissed = !showDismissed"
             >
               {{
@@ -271,7 +271,7 @@ async function remove(id: string): Promise<void> {
             </Tooltip>
           </div>
         </div>
-        <p class="-mt-1.5 text-[11px] text-muted-foreground/80">{{ $t("identity.detected.hint") }}</p>
+        <p class="-mt-1.5 text-2xs text-muted-foreground/80">{{ $t("identity.detected.hint") }}</p>
         <div v-if="shownDetected.length" v-auto-animate class="flex flex-col gap-2">
           <div
             v-for="d in shownDetected"
@@ -284,13 +284,13 @@ async function remove(id: string): Promise<void> {
             </span>
             <div class="min-w-0 flex-1">
               <div class="flex min-w-0 items-center gap-2">
-                <div class="truncate text-[13px] font-medium">{{ d.title }}</div>
-                <span class="shrink-0 rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                <div class="truncate text-ui font-medium">{{ d.title }}</div>
+                <span class="shrink-0 rounded border border-border bg-secondary px-1.5 py-0.5 text-3xs text-muted-foreground">
                   {{ sourceLabels[d.source] }}
                 </span>
               </div>
-              <div class="mono truncate text-[11px] text-muted-foreground">{{ d.detail }}</div>
-              <div v-if="missingText(d)" class="mt-0.5 text-[11px] text-warning">{{ missingText(d) }}</div>
+              <div class="mono truncate text-2xs text-muted-foreground">{{ d.detail }}</div>
+              <div v-if="missingText(d)" class="mt-0.5 text-2xs text-warning">{{ missingText(d) }}</div>
             </div>
             <Button variant="secondary" size="sm" @click="useDetected(d)">
               <Plus />
@@ -299,9 +299,9 @@ async function remove(id: string): Promise<void> {
             <Tooltip>
               <TooltipTrigger as-child>
                 <Button
-                  variant="ghost"
+                  variant="ghost-destructive-muted"
                   size="icon-sm"
-                  class="shrink-0 text-muted-foreground hover:text-destructive"
+                  class="shrink-0"
                   :aria-label="$t('identity.detected.dismiss')"
                   @click="dismiss(d)"
                 >
@@ -314,7 +314,7 @@ async function remove(id: string): Promise<void> {
         </div>
         <div
           v-else-if="store.detectedIdentitiesReady && !store.detectedIdentitiesLoading"
-          class="rounded-lg border border-dashed border-border px-3 py-2 text-[12px] text-muted-foreground"
+          class="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"
         >
           {{ $t("identity.detected.empty") }}
         </div>
@@ -323,10 +323,10 @@ async function remove(id: string): Promise<void> {
         <ExpandTransition :open="showDismissed && store.dismissedDetectedIdentities.length > 0">
           <div class="flex flex-col gap-2 rounded-xl border border-dashed border-border/70 bg-secondary/20 p-2.5">
             <div class="flex items-center justify-between gap-2">
-              <span class="text-[11px] font-medium text-muted-foreground">{{ $t("identity.detected.dismissedTitle") }}</span>
+              <span class="text-2xs font-medium text-muted-foreground">{{ $t("identity.detected.dismissedTitle") }}</span>
               <button
                 type="button"
-                class="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground underline-offset-2 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+                class="rounded px-1.5 py-0.5 text-2xs text-muted-foreground underline-offset-2 outline-none transition-colors hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
                 @click="restoreDismissed"
               >
                 {{ $t("identity.detected.restoreAll") }}
@@ -338,8 +338,8 @@ async function remove(id: string): Promise<void> {
               class="flex items-center gap-2 rounded-lg border border-border/60 bg-background/40 px-2.5 py-1.5"
             >
               <div class="min-w-0 flex-1">
-                <div class="truncate text-[12px] text-muted-foreground">{{ d.title }}</div>
-                <div class="mono truncate text-[11px] text-muted-foreground/70">{{ d.detail }}</div>
+                <div class="truncate text-xs text-muted-foreground">{{ d.title }}</div>
+                <div class="mono truncate text-2xs text-muted-foreground/70">{{ d.detail }}</div>
               </div>
               <Button variant="ghost" size="sm" class="shrink-0" @click="restoreOne(d)">
                 {{ $t("identity.detected.restore") }}
@@ -351,7 +351,7 @@ async function remove(id: string): Promise<void> {
         <!-- identity list -->
         <div
           v-if="store.identities.length || !shownDetected.length"
-          class="text-[12px] font-medium text-muted-foreground"
+          class="text-xs font-medium text-muted-foreground"
         >
           {{ $t("identity.savedTitle") }}
         </div>
@@ -363,16 +363,16 @@ async function remove(id: string): Promise<void> {
           >
             <div class="flex items-center gap-3 p-2.5">
               <span
-                :class="cn('flex size-9 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold', identityTint(i.id))"
+                :class="cn('flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold', identityTint(i.id))"
               >
                 {{ identityInitials(i.displayName) }}
               </span>
               <div class="min-w-0 flex-1">
-                <div class="truncate text-[14px] font-medium">{{ i.displayName }}</div>
-                <div class="mono truncate text-[12px] text-muted-foreground">
+                <div class="truncate text-sm font-medium">{{ i.displayName }}</div>
+                <div class="mono truncate text-xs text-muted-foreground">
                   {{ i.gitUsername }} · {{ i.gitEmail }}
                 </div>
-                <div v-if="i.sshKeyPath" class="mono mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground/80">
+                <div v-if="i.sshKeyPath" class="mono mt-0.5 flex items-center gap-1 truncate text-2xs text-muted-foreground/80">
                   <KeyRound :size="11" class="shrink-0" /> {{ i.sshKeyPath }}
                 </div>
               </div>
@@ -411,9 +411,8 @@ async function remove(id: string): Promise<void> {
                 <Tooltip>
                   <TooltipTrigger as-child>
                     <Button
-                      variant="ghost"
+                      variant="ghost-destructive-muted"
                       size="icon-sm"
-                      class="text-muted-foreground hover:text-destructive"
                       :aria-label="$t('identity.action.delete')"
                       @click="confirmId = i.id"
                     >
@@ -430,22 +429,24 @@ async function remove(id: string): Promise<void> {
               <div :data-inline-panel="i.id" class="border-t border-border/60 p-3.5">
                 <div class="flex flex-col gap-3">
                   <label class="block">
-                    <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.displayName") }}</span>
+                    <span class="mb-1 block text-xs text-muted-foreground">{{ $t("identity.field.displayName") }}</span>
                     <Input v-model="form.displayName" :placeholder="$t('identity.placeholder.displayName')" />
                   </label>
                   <div class="grid gap-3 sm:grid-cols-2">
                     <label class="block">
-                      <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.gitUsername") }}</span>
+                      <span class="mb-1 block text-xs text-muted-foreground">{{ $t("identity.field.gitUsername") }}</span>
                       <Input v-model="form.gitUsername" :placeholder="$t('identity.placeholder.gitUsername')" />
                     </label>
                     <label class="block">
-                      <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.gitEmail") }}</span>
+                      <span class="mb-1 block text-xs text-muted-foreground">{{ $t("identity.field.gitEmail") }}</span>
                       <Input v-model="form.gitEmail" :placeholder="$t('identity.placeholder.gitEmail')" />
                     </label>
                   </div>
                   <label class="block">
-                    <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.sshKeyPath") }}</span>
-                    <Input v-model="form.sshKeyPath" :placeholder="$t('identity.placeholder.sshKeyPath')" class="mono" />
+                    <span class="mb-1 block text-xs text-muted-foreground">{{ $t("identity.field.sshKeyPath") }}</span>
+                    <div class="mono">
+                      <Input v-model="form.sshKeyPath" :placeholder="$t('identity.placeholder.sshKeyPath')" />
+                    </div>
                   </label>
                 </div>
                 <div class="mt-4 flex justify-end gap-2">
@@ -464,32 +465,34 @@ async function remove(id: string): Promise<void> {
         </div>
         <div
           v-else-if="!shownDetected.length"
-          class="rounded-xl border border-dashed border-border py-8 text-center text-[13px] text-muted-foreground"
+          class="rounded-xl border border-dashed border-border py-8 text-center text-ui text-muted-foreground"
         >
           {{ $t("identity.empty") }}
         </div>
 
         <!-- create / edit form -->
         <div v-if="showForm" ref="formEl" class="rounded-xl border border-border bg-secondary/40 p-3.5">
-          <div class="mb-3 text-[13px] font-semibold text-foreground/90">{{ formTitle }}</div>
+          <div class="mb-3 text-ui font-semibold text-foreground/90">{{ formTitle }}</div>
           <div class="flex flex-col gap-3">
             <label class="block">
-              <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.displayName") }}</span>
+              <span class="mb-1 block text-xs text-muted-foreground">{{ $t("identity.field.displayName") }}</span>
               <Input v-model="form.displayName" :placeholder="$t('identity.placeholder.displayName')" />
             </label>
             <div class="grid gap-3 sm:grid-cols-2">
               <label class="block">
-                <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.gitUsername") }}</span>
+                <span class="mb-1 block text-xs text-muted-foreground">{{ $t("identity.field.gitUsername") }}</span>
                 <Input v-model="form.gitUsername" :placeholder="$t('identity.placeholder.gitUsername')" />
               </label>
               <label class="block">
-                <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.gitEmail") }}</span>
+                <span class="mb-1 block text-xs text-muted-foreground">{{ $t("identity.field.gitEmail") }}</span>
                 <Input v-model="form.gitEmail" :placeholder="$t('identity.placeholder.gitEmail')" />
               </label>
             </div>
             <label class="block">
-              <span class="mb-1 block text-[12px] text-muted-foreground">{{ $t("identity.field.sshKeyPath") }}</span>
-              <Input v-model="form.sshKeyPath" :placeholder="$t('identity.placeholder.sshKeyPath')" class="mono" />
+              <span class="mb-1 block text-xs text-muted-foreground">{{ $t("identity.field.sshKeyPath") }}</span>
+              <div class="mono">
+                <Input v-model="form.sshKeyPath" :placeholder="$t('identity.placeholder.sshKeyPath')" />
+              </div>
             </label>
           </div>
           <div class="mt-4 flex justify-end gap-2">
@@ -503,7 +506,7 @@ async function remove(id: string): Promise<void> {
             </Button>
           </div>
         </div>
-        <Button v-else variant="outline" class="w-full border-dashed" @click="openNew">
+        <Button v-else variant="dashed" class="w-full" @click="openNew">
           <Plus />
           {{ $t("identity.action.add") }}
         </Button>

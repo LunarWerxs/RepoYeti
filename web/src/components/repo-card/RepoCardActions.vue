@@ -14,6 +14,7 @@ import StashPanel from "../StashPanel.vue";
 import PullPreview from "./PullPreview.vue";
 import { Button } from "@/components/ui/button";
 import type { ButtonVariants } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { VCS_CAPABILITIES } from "../../types";
 import type { PullDisposition, Repo } from "../../types";
@@ -222,14 +223,13 @@ async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
     </Tooltip>
     <!-- Pull, with a caret beside it that previews the pull first. The two read as one split
          button (the caret's left corners are squared off against Pull's right edge). -->
-    <div v-if="store.canControl" class="flex items-center">
+    <ButtonGroup v-if="store.canControl" divider="shade" class="items-center">
       <Tooltip>
         <TooltipTrigger as-child>
           <span class="inline-flex">
             <Button
               :variant="pullVariant"
               size="sm"
-              :class="hasPullCaret ? 'rounded-e-none' : ''"
               data-testid="repo-pull-primary"
               :disabled="pullDisabled"
               @click="run('pull')"
@@ -246,7 +246,8 @@ async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
            centralized backend (Lore) has no local equivalent of. Owner-only too — the endpoint
            is owner-gated (see src/share/policy.ts), so a share-link guest would just get a 403. -->
       <!-- No class here: PullPreview's root is a renderless <DropdownMenu>, so anything passed
-           in never reaches an element. It owns its own split-button joining classes. -->
+           in never reaches an element. Its caret is this ButtonGroup's direct child, so the
+           group squares the corners and draws the divider. -->
       <PullPreview
         v-if="hasPullCaret"
         :repo-id="repo.id"
@@ -256,7 +257,7 @@ async function run(name: "fetch" | "pull" | "push" | "refresh"): Promise<void> {
         :status-diverged="statusDiverged"
         @pull="run('pull')"
       />
-    </div>
+    </ButtonGroup>
     <Tooltip v-if="store.canControl">
       <TooltipTrigger as-child>
         <Button

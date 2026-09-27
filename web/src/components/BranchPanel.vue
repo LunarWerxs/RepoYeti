@@ -103,25 +103,30 @@ async function confirmDelete(): Promise<void> {
         <span class="inline-flex min-w-0 max-w-full">
           <DropdownMenu>
             <DropdownMenuTrigger
-              class="mono flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-[12px] text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
-              :aria-label="$t('repo.branches.manageTooltip')"
+              as-child
               :disabled="gitBusy === 'checkout' || gitBusy === 'branch'"
             >
-              <Loader2
-                v-if="gitBusy === 'checkout' || gitBusy === 'branch'"
-                :size="13"
-                class="shrink-0 animate-spin"
-              />
-              <GitBranch v-else :size="13" :class="cn('shrink-0', detached && 'text-warning')" />
-              <span class="truncate">{{ detached ? "detached" : (currentBranch ?? "—") }}</span>
-              <ChevronDown :size="13" class="shrink-0 opacity-60" />
+              <button
+                type="button"
+                class="mono flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
+                :aria-label="$t('repo.branches.manageTooltip')"
+              >
+                <Loader2
+                  v-if="gitBusy === 'checkout' || gitBusy === 'branch'"
+                  :size="13"
+                  class="shrink-0 animate-spin"
+                />
+                <GitBranch v-else :size="13" :class="cn('shrink-0', detached && 'text-warning')" />
+                <span class="truncate">{{ detached ? "detached" : (currentBranch ?? "—") }}</span>
+                <ChevronDown :size="13" class="shrink-0 opacity-60" />
+              </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" class="max-w-64">
               <DropdownMenuLabel>{{ $t("repo.branches.switchLabel") }}</DropdownMenuLabel>
-              <div v-if="!branchList" class="flex items-center gap-2 px-2 py-1.5 text-[12px] text-muted-foreground">
+              <div v-if="!branchList" class="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
                 <Loader2 :size="13" class="animate-spin" />{{ $t("repo.branches.loading") }}
               </div>
-              <div v-else-if="!otherBranches.length" class="px-2 py-1.5 text-[12px] text-muted-foreground">
+              <div v-else-if="!otherBranches.length" class="px-2 py-1.5 text-xs text-muted-foreground">
                 {{ $t("repo.branches.none") }}
               </div>
               <div
@@ -131,12 +136,12 @@ async function confirmDelete(): Promise<void> {
               >
                 <button
                   type="button"
-                  class="mono flex min-w-0 flex-1 items-center gap-1.5 text-start text-[12.5px] outline-none"
+                  class="mono flex min-w-0 flex-1 items-center gap-1.5 text-start text-ui outline-none"
                   @click="switchTo(b.name)"
                 >
                   <GitBranch :size="13" class="shrink-0 opacity-70" />
                   <span class="truncate">{{ b.name }}</span>
-                  <span v-if="b.ahead || b.behind" class="mono shrink-0 text-[10.5px] text-muted-foreground">
+                  <span v-if="b.ahead || b.behind" class="mono shrink-0 text-2xs text-muted-foreground">
                     <span v-if="b.ahead">↑{{ b.ahead }}</span><span v-if="b.behind"> ↓{{ b.behind }}</span>
                   </span>
                 </button>
@@ -144,7 +149,7 @@ async function confirmDelete(): Promise<void> {
                   <TooltipTrigger as-child>
                     <button
                       type="button"
-                      class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 pointer-coarse:opacity-100 outline-none transition group-hover/br:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
+                      class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 pointer-coarse:opacity-100 outline-none transition-no-ring group-hover/br:opacity-100 hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
                       :aria-label="$t('repo.branches.deleteTooltip')"
                       @click="askDelete(b.name)"
                     >
@@ -182,7 +187,7 @@ async function confirmDelete(): Promise<void> {
       type="text"
       :placeholder="$t('repo.branches.newPlaceholder')"
       :aria-label="$t('repo.branches.create')"
-      class="mono h-8 min-w-0 flex-1 rounded-md border border-border bg-background/60 px-2.5 text-[12.5px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+      class="mono h-8 min-w-0 flex-1 rounded-md border border-border bg-background/60 px-2.5 text-ui text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
     />
     <Button type="submit" size="sm" :disabled="!newBranch.trim() || !!gitBusy">
       <Loader2 v-if="gitBusy === 'branch'" class="animate-spin" />
@@ -199,7 +204,7 @@ async function confirmDelete(): Promise<void> {
         <DialogTitle>{{ $t("repo.branches.deleteTitle") }}</DialogTitle>
         <DialogDescription>{{ $t("repo.branches.deleteBody", { name: deleteTarget ?? "" }) }}</DialogDescription>
       </DialogHeader>
-      <DialogFooter class="gap-2 sm:gap-2">
+      <DialogFooter>
         <Button variant="secondary" @click="deleteOpen = false">{{ $t("common.cancel") }}</Button>
         <Button variant="destructive" @click="confirmDelete">{{ $t("repo.branches.deleteConfirm") }}</Button>
       </DialogFooter>

@@ -425,7 +425,7 @@ watch(
     <!-- A share link is reachable only over the tunnel. Rather than mint one that can't be
          opened, say so and point at the toggle directly above this panel. -->
     <div v-if="!isRemote" class="px-3.5 py-3">
-      <p class="text-[12.5px] leading-snug text-muted-foreground">{{ $t("share.needsRemote") }}</p>
+      <p class="text-ui leading-snug text-muted-foreground">{{ $t("share.needsRemote") }}</p>
     </div>
 
     <template v-else>
@@ -440,7 +440,7 @@ watch(
         class="mx-3.5 mt-3 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3"
       >
         <AlertTriangle :size="14" class="mt-px shrink-0 text-warning" />
-        <p class="text-[11.5px] leading-snug text-muted-foreground">
+        <p class="text-xs leading-snug text-muted-foreground">
           {{
             hostedAddressPending
               ? store.relayError
@@ -455,10 +455,10 @@ watch(
       <div v-if="minted" class="mx-3.5 my-3 flex flex-col gap-2.5 rounded-lg border border-success/30 bg-success/10 p-3">
         <div class="flex items-center gap-1.5">
           <Link2 :size="13" class="shrink-0 text-success" />
-          <span class="text-[12.5px] font-medium text-foreground">{{ $t("share.readyTitle", { label: minted.label }) }}</span>
+          <span class="text-ui font-medium text-foreground">{{ $t("share.readyTitle", { label: minted.label }) }}</span>
         </div>
-        <p class="text-[11.5px] leading-snug text-muted-foreground">{{ $t("share.readyOnce") }}</p>
-        <code class="mono block break-all rounded bg-background/60 px-2 py-1.5 text-[11px] text-foreground/90">{{ minted.url }}</code>
+        <p class="text-xs leading-snug text-muted-foreground">{{ $t("share.readyOnce") }}</p>
+        <code class="mono block break-all rounded bg-background/60 px-2 py-1.5 text-2xs text-foreground/90">{{ minted.url }}</code>
         <div class="flex items-center gap-2">
           <Button size="sm" @click="copyLink">
             <Check v-if="copied" />
@@ -474,7 +474,7 @@ watch(
         <Loader2 :size="14" class="animate-spin text-muted-foreground" />
       </div>
       <div v-else-if="shares.length === 0" class="px-3.5 py-3">
-        <p class="text-[12.5px] text-muted-foreground">{{ $t("share.none") }}</p>
+        <p class="text-ui text-muted-foreground">{{ $t("share.none") }}</p>
       </div>
       <div
         v-for="s in shares"
@@ -485,24 +485,24 @@ watch(
       >
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
-            <span class="truncate text-[12.5px] font-medium text-foreground">{{ s.label }}</span>
+            <span class="truncate text-ui font-medium text-foreground">{{ s.label }}</span>
             <span
-              class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+              class="shrink-0 rounded px-1.5 py-0.5 text-3xs font-medium"
               :class="s.perm === 'control' ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground'"
             >
               {{ s.perm === "control" ? $t("share.tierControl") : $t("share.tierView") }}
             </span>
-            <span v-if="s.collaborative" class="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-info">
+            <span v-if="s.collaborative" class="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-3xs font-medium text-info">
               {{ $t("collaboration.live") }}
             </span>
           </div>
-          <div class="mt-0.5 truncate text-[11px] text-muted-foreground">
+          <div class="mt-0.5 truncate text-2xs text-muted-foreground">
             {{ repoLabel(s) }} · {{ expiryLabel(s) }} · {{ usageLabel(s) }}
           </div>
           <!-- The link still WORKS as a grant; it's the address in the URL that has moved, so
                whoever holds it now gets a DNS failure. Say it here rather than let them find out
                from the person they sent it to — Regenerate mints one on the current address. -->
-          <div v-if="s.stale" class="mt-1 flex items-center gap-1.5 text-[11px] text-warning">
+          <div v-if="s.stale" class="mt-1 flex items-center gap-1.5 text-2xs text-warning">
             <AlertTriangle :size="12" class="shrink-0" />
             <span class="truncate">{{ $t("share.staleLink") }}</span>
           </div>
@@ -593,20 +593,20 @@ watch(
       <div v-if="editing" class="mx-3.5 my-3 flex flex-col gap-2.5 rounded-lg border border-info/30 bg-info/5 p-3">
         <div class="flex items-center gap-1.5">
           <Pencil :size="13" class="shrink-0 text-info" />
-          <span class="text-[12.5px] font-medium text-foreground">{{ $t("share.editTitle", { label: editing.label }) }}</span>
+          <span class="text-ui font-medium text-foreground">{{ $t("share.editTitle", { label: editing.label }) }}</span>
           <Button variant="ghost" size="sm" class="ms-auto" @click="cancelEdit">{{ $t("common.cancel") }}</Button>
         </div>
 
         <label class="flex items-center justify-between gap-3">
           <span class="flex items-center gap-1.5">
-            <span class="text-[12.5px] text-foreground">{{ $t("collaboration.allow") }}</span>
+            <span class="text-ui text-foreground">{{ $t("collaboration.allow") }}</span>
             <InfoHint :text="$t('collaboration.allowHint')" />
           </span>
           <Switch v-model="editCollaborative" :aria-label="$t('collaboration.allow')" />
         </label>
-        <p class="text-[11.5px] leading-snug text-muted-foreground">{{ $t("share.editHint") }}</p>
+        <p class="text-xs leading-snug text-muted-foreground">{{ $t("share.editHint") }}</p>
 
-        <Input v-model="editLabel" :placeholder="$t('share.labelPlaceholder')" class="h-8 text-[12.5px]" />
+        <Input v-model="editLabel" :placeholder="$t('share.labelPlaceholder')" class="h-8" />
 
         <div class="flex items-center gap-1.5">
           <Button
@@ -639,7 +639,7 @@ watch(
         </div>
 
         <label class="flex items-center justify-between gap-3">
-          <span class="text-[12.5px] text-foreground">{{ $t("share.scopeAll") }}</span>
+          <span class="text-ui text-foreground">{{ $t("share.scopeAll") }}</span>
           <Switch v-model="editScopeAll" :aria-label="$t('share.scopeAll')" />
         </label>
 
@@ -652,12 +652,12 @@ watch(
             @click="toggleEditPick(r.id)"
           >
             <span
-              class="flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border"
+              class="flex size-3.5 shrink-0 items-center justify-center rounded-xs border"
               :class="editPicked.has(r.id) ? 'border-primary bg-primary text-primary-foreground' : 'border-border'"
             >
               <Check v-if="editPicked.has(r.id)" :size="10" />
             </span>
-            <span class="truncate text-[12px] text-foreground">{{ r.name }}</span>
+            <span class="truncate text-xs text-foreground">{{ r.name }}</span>
           </button>
         </div>
 
@@ -680,7 +680,7 @@ watch(
       </div>
       <div v-else class="flex flex-col gap-2.5 border-t border-border/40 px-3.5 py-3">
         <div class="flex items-center gap-1.5">
-          <span class="text-[12.5px] font-medium text-foreground">{{ $t("share.newTitle") }}</span>
+          <span class="text-ui font-medium text-foreground">{{ $t("share.newTitle") }}</span>
           <InfoHint :text="$t('share.newHint')" />
           <Button variant="ghost" size="sm" class="ms-auto" @click="closeForm">
             {{ $t("common.cancel") }}
@@ -689,7 +689,6 @@ watch(
 
         <Input
           v-model="label"
-          class="text-[12.5px]"
           :placeholder="$t('share.labelPlaceholder')"
           :aria-label="$t('share.labelLabel')"
         />
@@ -704,10 +703,10 @@ watch(
             :class="perm === p ? 'border-primary/60 bg-primary/10' : 'border-border/60 hover:bg-muted/40'"
             @click="perm = p"
           >
-            <div class="text-[12px] font-medium text-foreground">
+            <div class="text-xs font-medium text-foreground">
               {{ p === "view" ? $t("share.tierView") : $t("share.tierControl") }}
             </div>
-            <div class="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
+            <div class="mt-0.5 text-2xs leading-snug text-muted-foreground">
               {{ p === "view" ? $t("share.tierViewHint") : $t("share.tierControlHint") }}
             </div>
           </button>
@@ -719,7 +718,7 @@ watch(
             v-for="d in DURATIONS"
             :key="d"
             type="button"
-            class="rounded-md border px-2 py-1 text-[11.5px] transition-colors"
+            class="rounded-md border px-2 py-1 text-xs transition-colors"
             :class="duration === d ? 'border-primary/60 bg-primary/10 text-foreground' : 'border-border/60 text-muted-foreground hover:bg-muted/40'"
             @click="duration = d"
           >
@@ -729,7 +728,7 @@ watch(
 
         <div class="flex items-center justify-between gap-3 pt-0.5">
           <span class="flex items-center gap-1.5">
-            <span class="text-[12px] text-foreground">{{ $t("collaboration.allow") }}</span>
+            <span class="text-xs text-foreground">{{ $t("collaboration.allow") }}</span>
             <InfoHint :text="$t('collaboration.allowHint')" />
           </span>
           <Switch
@@ -742,7 +741,7 @@ watch(
         <!-- Scope -->
         <div class="flex items-center justify-between gap-3 pt-0.5">
           <span class="flex items-center gap-1.5">
-            <span class="text-[12px] text-foreground">{{ $t("share.scopeAll") }}</span>
+            <span class="text-xs text-foreground">{{ $t("share.scopeAll") }}</span>
             <InfoHint :text="$t('share.scopeAllHint')" />
           </span>
           <Switch :model-value="scopeAll" :aria-label="$t('share.scopeAll')" @update:model-value="(v: boolean) => (scopeAll = v)" />
@@ -763,7 +762,7 @@ watch(
             >
               <Check v-if="picked.has(r.id)" :size="10" />
             </span>
-            <span class="truncate text-[12px] text-foreground">{{ r.name }}</span>
+            <span class="truncate text-xs text-foreground">{{ r.name }}</span>
           </button>
         </div>
 
@@ -784,8 +783,8 @@ watch(
         class="flex items-center justify-between gap-3 border-b border-border/40 px-3.5 py-2.5"
       >
         <div class="min-w-0">
-          <p class="truncate text-[12.5px] font-medium text-foreground">{{ link.label }}</p>
-          <p class="truncate text-[11px] text-muted-foreground">
+          <p class="truncate text-ui font-medium text-foreground">{{ link.label }}</p>
+          <p class="truncate text-2xs text-muted-foreground">
             {{ link.localRepoName }} · {{ $t("collaboration.publishing") }}
           </p>
         </div>
@@ -803,17 +802,19 @@ watch(
     <div class="flex flex-col gap-2.5 px-3.5 py-3">
       <div class="flex items-center gap-1.5">
         <Users :size="14" class="text-info" />
-        <span class="text-[12.5px] font-medium text-foreground">{{ $t("collaboration.joinTitle") }}</span>
+        <span class="text-ui font-medium text-foreground">{{ $t("collaboration.joinTitle") }}</span>
       </div>
-      <p class="text-[11.5px] leading-snug text-muted-foreground">{{ $t("collaboration.joinHint") }}</p>
+      <p class="text-xs leading-snug text-muted-foreground">{{ $t("collaboration.joinHint") }}</p>
       <div class="flex gap-2">
-        <Input
-          v-model="inviteUrl"
-          class="mono min-w-0 flex-1 text-[11.5px]"
-          :placeholder="$t('collaboration.invitePlaceholder')"
-          :aria-label="$t('collaboration.inviteLabel')"
-          @input="invitePreview = null"
-        />
+        <!-- Monospace on a wrapper, not on the row: the row's Inspect button keeps its own face. -->
+        <div class="mono flex min-w-0 flex-1">
+          <Input
+            v-model="inviteUrl"
+            :placeholder="$t('collaboration.invitePlaceholder')"
+            :aria-label="$t('collaboration.inviteLabel')"
+            @input="invitePreview = null"
+          />
+        </div>
         <Button size="sm" :disabled="!inviteUrl.trim() || inspectingInvite" @click="inspectInvite">
           <Loader2 v-if="inspectingInvite" class="animate-spin" />
           <Link2 v-else />
@@ -822,24 +823,24 @@ watch(
       </div>
 
       <div v-if="invitePreview" class="flex flex-col gap-2 rounded-lg border border-info/25 bg-info/5 p-2.5">
-        <p class="text-[11.5px] text-foreground/90">
+        <p class="text-xs text-foreground/90">
           {{ $t("collaboration.inviteFrom", { label: invitePreview.share.label }) }}
         </p>
-        <p v-if="!invitePreview.share.collaborative" class="text-[11.5px] text-warning">
+        <p v-if="!invitePreview.share.collaborative" class="text-xs text-warning">
           {{ $t("collaboration.notAllowed") }}
         </p>
         <template v-else>
           <label class="flex flex-col gap-1">
-            <span class="text-[11px] text-muted-foreground">{{ $t("collaboration.theirRepo") }}</span>
-            <select v-model="remoteRepoId" class="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground">
+            <span class="text-2xs text-muted-foreground">{{ $t("collaboration.theirRepo") }}</span>
+            <select v-model="remoteRepoId" class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground">
               <option v-for="repo in invitePreview.repos" :key="repo.id" :value="repo.id">
                 {{ repo.displayName ?? repo.name }}
               </option>
             </select>
           </label>
           <label class="flex flex-col gap-1">
-            <span class="text-[11px] text-muted-foreground">{{ $t("collaboration.myRepo") }}</span>
-            <select v-model="localRepoId" class="h-8 rounded-md border border-border bg-background px-2 text-[12px] text-foreground">
+            <span class="text-2xs text-muted-foreground">{{ $t("collaboration.myRepo") }}</span>
+            <select v-model="localRepoId" class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground">
               <option v-for="repo in store.repos" :key="repo.id" :value="repo.id">
                 {{ repo.displayName ?? repo.name }}
               </option>

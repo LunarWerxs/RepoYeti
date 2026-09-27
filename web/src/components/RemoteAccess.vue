@@ -172,10 +172,12 @@ async function copyExistingShare(): Promise<void> {
   <Dialog v-model:open="open">
     <DialogContent class="min-w-0 overflow-x-hidden sm:max-w-sm">
       <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <Cloud v-if="isRemote" :size="17" class="text-info" />
-          <CloudOff v-else :size="17" class="text-muted-foreground" />
-          {{ $t("remote.title") }}
+        <DialogTitle>
+          <span class="flex items-center gap-2">
+            <Cloud v-if="isRemote" :size="17" class="text-info" />
+            <CloudOff v-else :size="17" class="text-muted-foreground" />
+            {{ $t("remote.title") }}
+          </span>
         </DialogTitle>
         <DialogDescription>{{ $t("remote.description") }}</DialogDescription>
       </DialogHeader>
@@ -185,8 +187,8 @@ async function copyExistingShare(): Promise<void> {
         class="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-secondary/30 px-3 py-2.5"
       >
         <span class="flex min-w-0 flex-col gap-0.5">
-          <span class="text-[13px] font-medium text-foreground">{{ $t("remote.modeLabel") }}</span>
-          <span class="text-[12px] text-muted-foreground">
+          <span class="text-ui font-medium text-foreground">{{ $t("remote.modeLabel") }}</span>
+          <span class="text-xs text-muted-foreground">
             {{ isRemote ? $t("remote.modeOnHint") : $t("remote.modeOffHint") }}
           </span>
         </span>
@@ -206,7 +208,7 @@ async function copyExistingShare(): Promise<void> {
         v-if="needsOwner && !isRemote"
         class="flex flex-col gap-2.5 rounded-md border border-info/30 bg-info/10 p-3"
       >
-        <p class="text-[12.5px] leading-snug text-foreground/90">{{ $t("remote.needsOwner") }}</p>
+        <p class="text-ui leading-snug text-foreground/90">{{ $t("remote.needsOwner") }}</p>
         <!-- New tab: the sign-in round-trip leaves the provider's site in control of the page,
              and doing that in place throws away whatever the owner had open here. The dashboard
              re-checks auth when the window regains focus (see AppShell), so coming back from the
@@ -224,8 +226,8 @@ async function copyExistingShare(): Promise<void> {
         class="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-secondary/30 px-3 py-2.5"
       >
         <span class="flex min-w-0 flex-col gap-0.5">
-          <span class="text-[13px] font-medium text-foreground">{{ $t("remote.editLabel") }}</span>
-          <span class="text-[12px] text-muted-foreground">{{ $t("remote.editHint") }}</span>
+          <span class="text-ui font-medium text-foreground">{{ $t("remote.editLabel") }}</span>
+          <span class="text-xs text-muted-foreground">{{ $t("remote.editHint") }}</span>
         </span>
         <Switch
           class="shrink-0"
@@ -245,8 +247,8 @@ async function copyExistingShare(): Promise<void> {
         class="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-secondary/30 px-3 py-2.5"
       >
         <span class="flex min-w-0 flex-col gap-0.5">
-          <span class="text-[13px] font-medium text-foreground">{{ $t("remote.browseLabel") }}</span>
-          <span class="text-[12px] text-muted-foreground">{{ $t("remote.browseHint") }}</span>
+          <span class="text-ui font-medium text-foreground">{{ $t("remote.browseLabel") }}</span>
+          <span class="text-xs text-muted-foreground">{{ $t("remote.browseHint") }}</span>
         </span>
         <Switch
           class="shrink-0"
@@ -266,13 +268,13 @@ async function copyExistingShare(): Promise<void> {
             <div class="flex flex-col items-center gap-2.5 pb-1">
               <!-- eslint-disable-next-line vue/no-v-html -- QR SVG generated locally from our own URL -->
               <div v-if="qrSvg" class="size-44 rounded-md bg-white p-2 [&>svg]:size-full" v-html="qrSvg" />
-              <p class="text-center text-[12px] text-muted-foreground">{{ $t("remote.scanHint") }}</p>
+              <p class="text-center text-xs text-muted-foreground">{{ $t("remote.scanHint") }}</p>
             </div>
           </div>
         </div>
         <div
           v-if="!remoteUrl"
-          class="flex items-center justify-center gap-2 rounded-md border border-border bg-secondary/30 py-4 text-[13px] text-muted-foreground"
+          class="flex items-center justify-center gap-2 rounded-md border border-border bg-secondary/30 py-4 text-ui text-muted-foreground"
         >
           <Loader2 :size="15" class="animate-spin" /> {{ $t("remote.starting") }}
         </div>
@@ -282,31 +284,36 @@ async function copyExistingShare(): Promise<void> {
              max-content and push the copy button off the dialog. min-w-0 lets the column
              shrink so the <code> below can truncate. -->
         <div v-if="remoteUrl" class="flex min-w-0 flex-col gap-1.5">
-          <span class="text-[12px] text-muted-foreground">{{ $t("remote.activeLabel") }}</span>
+          <span class="text-xs text-muted-foreground">{{ $t("remote.activeLabel") }}</span>
           <div class="flex items-center gap-2">
             <!-- Copy lives INSIDE the URL box, surfacing on hover/focus. It was a permanent
                  button competing with the URL for the row's width; the box is the thing you'd
                  reach for anyway. `group-focus-within` keeps it reachable by keyboard, where a
-                 hover-only affordance would be invisible. -->
+                 hover-only affordance would be invisible. The reveal sits on a plain wrapper, not
+                 the Button, which owns its own effects; the wrapper stays OUTSIDE the Tooltip so
+                 the trigger is still the Button itself (focus does not bubble to a wrapper). -->
             <div class="group relative min-w-0 flex-1">
               <code
-                class="mono block min-w-0 truncate rounded-md border border-border bg-secondary/40 py-2 pe-9 ps-2.5 text-[12px]"
+                class="mono block min-w-0 truncate rounded-md border border-border bg-secondary/40 py-2 pe-9 ps-2.5 text-xs"
               >{{ remoteUrl }}</code>
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    class="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
-                    :aria-label="$t('remote.copy')"
-                    @click="copyLink"
-                  >
-                    <Check v-if="copied" class="text-success" />
-                    <Copy v-else />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{{ $t("remote.copy") }}</TooltipContent>
-              </Tooltip>
+              <div
+                class="absolute top-1/2 right-1 flex -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+              >
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      :aria-label="$t('remote.copy')"
+                      @click="copyLink"
+                    >
+                      <Check v-if="copied" class="text-success" />
+                      <Copy v-else />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{{ $t("remote.copy") }}</TooltipContent>
+                </Tooltip>
+              </div>
             </div>
             <!-- …and the slot the copy button used to occupy now toggles the QR. -->
             <Tooltip>
@@ -328,19 +335,19 @@ async function copyExistingShare(): Promise<void> {
             :href="remoteUrl ?? undefined"
             target="_blank"
             rel="noopener noreferrer"
-            class="mt-1 inline-flex items-center justify-center gap-1.5 text-[12.5px] text-primary underline-offset-2 transition-colors hover:underline"
+            class="mt-1 inline-flex items-center justify-center gap-1.5 text-ui text-primary underline-offset-2 transition-colors hover:underline"
           >
             <ExternalLink :size="14" /> {{ $t("remote.open") }}
           </a>
           <p
             v-if="store.relayConfig.enabled && store.relayError"
-            class="text-center text-[11.5px] leading-snug text-destructive"
+            class="text-center text-xs leading-snug text-destructive"
           >
             {{ $t("remote.relayFailed", { error: store.relayError }) }}
           </p>
         </div>
 
-        <p v-if="store.authenticated" class="text-center text-[12px] text-muted-foreground">
+        <p v-if="store.authenticated" class="text-center text-xs text-muted-foreground">
           {{ $t("remote.signedInAs", { name: store.owner }) }}
         </p>
       </template>
@@ -355,8 +362,8 @@ async function copyExistingShare(): Promise<void> {
         <template v-if="primaryShare">
           <div class="flex items-center justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-[12.5px] font-medium text-foreground">{{ $t("remote.shareExisting") }}</p>
-              <p class="truncate text-[11px] text-muted-foreground">
+              <p class="text-ui font-medium text-foreground">{{ $t("remote.shareExisting") }}</p>
+              <p class="truncate text-2xs text-muted-foreground">
                 {{ primaryShare.label }}
                 <template v-if="activeShares.length > 1">
                   · {{ $t("remote.shareMore", { count: activeShares.length - 1 }) }}
@@ -370,7 +377,7 @@ async function copyExistingShare(): Promise<void> {
             class="group relative min-w-0"
           >
             <code
-              class="mono block min-w-0 truncate rounded-md border border-border bg-background/45 py-2 pe-9 ps-2.5 text-[11.5px]"
+              class="mono block min-w-0 truncate rounded-md border border-border bg-background/45 py-2 pe-9 ps-2.5 text-xs"
             >{{ primaryShare.url }}</code>
             <Button
               variant="ghost"
@@ -383,7 +390,7 @@ async function copyExistingShare(): Promise<void> {
               <Copy v-else />
             </Button>
           </div>
-          <p v-else class="text-[11.5px] text-muted-foreground">{{ $t("remote.shareUnavailable") }}</p>
+          <p v-else class="text-xs text-muted-foreground">{{ $t("remote.shareUnavailable") }}</p>
           <Button variant="secondary" size="sm" class="self-start" @click="openShareLinks">
             {{ $t("remote.shareManage") }}
           </Button>
@@ -391,8 +398,8 @@ async function copyExistingShare(): Promise<void> {
         <template v-else>
           <div class="flex items-center justify-between gap-3">
             <div>
-              <p class="text-[12.5px] font-medium text-foreground">{{ $t("remote.shareNewTitle") }}</p>
-              <p class="text-[11px] text-muted-foreground">{{ $t("remote.shareNewHint") }}</p>
+              <p class="text-ui font-medium text-foreground">{{ $t("remote.shareNewTitle") }}</p>
+              <p class="text-2xs text-muted-foreground">{{ $t("remote.shareNewHint") }}</p>
             </div>
             <Button
               variant="secondary"
@@ -412,7 +419,7 @@ async function copyExistingShare(): Promise<void> {
       <!-- local only -->
       <div
         v-else
-        class="flex items-start gap-2 rounded-md border border-border bg-secondary/30 p-3 text-[12.5px] text-muted-foreground"
+        class="flex items-start gap-2 rounded-md border border-border bg-secondary/30 p-3 text-ui text-muted-foreground"
       >
         <Laptop :size="15" class="mt-0.5 shrink-0" />
         <span>{{ $t("remote.localBody") }}</span>

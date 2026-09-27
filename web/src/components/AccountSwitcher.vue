@@ -96,8 +96,8 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
         v-if="!store.ghAvailable && store.accountsReady"
         class="rounded-xl border border-dashed border-border px-3 py-6 text-center"
       >
-        <div class="text-[13px] font-medium">{{ $t("accounts.unavailableTitle") }}</div>
-        <p class="mt-1 text-[12px] text-muted-foreground">{{ $t("accounts.unavailableBody") }}</p>
+        <div class="text-ui font-medium">{{ $t("accounts.unavailableTitle") }}</div>
+        <p class="mt-1 text-xs text-muted-foreground">{{ $t("accounts.unavailableBody") }}</p>
       </div>
 
       <!-- authenticated accounts -->
@@ -109,24 +109,24 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
           :class="a.active ? 'border-success/40 bg-success/5' : 'border-border bg-secondary/40'"
         >
           <span
-            :class="cn('flex size-9 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold', identityTint(a.login))"
+            :class="cn('flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold', identityTint(a.login))"
           >
             {{ identityInitials(a.login) }}
           </span>
           <div class="min-w-0 flex-1">
             <div class="flex min-w-0 items-center gap-2">
-              <div class="truncate text-[14px] font-medium">{{ a.login }}</div>
+              <div class="truncate text-sm font-medium">{{ a.login }}</div>
               <span
                 v-if="a.active"
-                class="inline-flex shrink-0 items-center gap-1 rounded border border-success/40 bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success"
+                class="inline-flex shrink-0 items-center gap-1 rounded border border-success/40 bg-success/10 px-1.5 py-0.5 text-3xs font-medium text-success"
               >
                 <Check :size="11" /> {{ $t("accounts.active") }}
               </span>
             </div>
-            <div class="mono truncate text-[12px] text-muted-foreground">
+            <div class="mono truncate text-xs text-muted-foreground">
               {{ a.host }} · {{ a.gitProtocol }}
             </div>
-            <div v-if="a.scopes.length" class="mono truncate text-[11px] text-muted-foreground/70">
+            <div v-if="a.scopes.length" class="mono truncate text-2xs text-muted-foreground/70">
               {{ a.scopes.join(", ") }}
             </div>
             <!-- commit-identity link: collapsed by default (progressive disclosure); a
@@ -135,8 +135,8 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
                  its empty state reads "Add an identity above", which would point at a manager
                  that is itself hidden in that case. -->
             <div v-if="store.identitiesRelevant" class="mt-1.5 flex items-center gap-1.5">
-              <span class="shrink-0 text-[11px] text-muted-foreground">{{ $t("accounts.linkLabel") }}:</span>
-              <span class="truncate text-[11px] text-foreground/80">
+              <span class="shrink-0 text-2xs text-muted-foreground">{{ $t("accounts.linkLabel") }}:</span>
+              <span class="truncate text-2xs text-foreground/80">
                 {{ linkName(a) }}
               </span>
               <Tooltip v-if="store.identities.length || a.identityId">
@@ -144,18 +144,24 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    class="size-5 shrink-0 text-muted-foreground"
+                    class="size-5 shrink-0"
                     :aria-label="$t('accounts.linkToggle')"
                     :aria-expanded="!!linkOpen[accKey(a)]"
                     @click="toggleLink(a)"
                   >
-                    <Link2 :size="12" />
-                    <ChevronDown :size="10" :class="cn('transition-transform', linkOpen[accKey(a)] && 'rotate-180')" />
+                    <Link2 :size="12" class="text-muted-foreground group-hover/button:text-foreground group-aria-expanded/button:text-foreground" />
+                    <ChevronDown
+                      :size="10"
+                      :class="cn(
+                        'text-muted-foreground transition-transform group-hover/button:text-foreground group-aria-expanded/button:text-foreground',
+                        linkOpen[accKey(a)] && 'rotate-180',
+                      )"
+                    />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{{ $t("accounts.linkToggle") }}</TooltipContent>
               </Tooltip>
-              <span v-else class="text-[11px] text-muted-foreground/70">· {{ $t("accounts.linkEmpty") }}</span>
+              <span v-else class="text-2xs text-muted-foreground/70">· {{ $t("accounts.linkEmpty") }}</span>
             </div>
             <ExpandTransition :open="!!linkOpen[accKey(a)] && (store.identities.length > 0 || !!a.identityId) && store.identitiesRelevant">
               <div class="pt-1.5">
@@ -163,7 +169,7 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
                   :model-value="a.identityId ?? NONE"
                   @update:model-value="(v) => onMap(a, String(v))"
                 >
-                  <SelectTrigger class="h-7 w-full max-w-[13rem] text-[12px]" :aria-label="$t('accounts.linkLabel')">
+                  <SelectTrigger class="h-7 w-full max-w-52":aria-label="$t('accounts.linkLabel')">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -191,7 +197,7 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
       <!-- gh present but no accounts logged in -->
       <div
         v-else-if="store.accountsReady"
-        class="rounded-xl border border-dashed border-border py-8 text-center text-[13px] text-muted-foreground"
+        class="rounded-xl border border-dashed border-border py-8 text-center text-ui text-muted-foreground"
       >
         {{ $t("accounts.empty") }}
       </div>

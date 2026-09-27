@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { gitFor } from "./git.ts";
 import {
   applyUpdate as applyReleaseUpdate,
@@ -53,7 +54,25 @@ export interface UpdateApplyResult {
 // only RepoYeti's checkout root, update-remote env var, install/build commands, and
 // service identity are local. The engine's UpdateStatus.service is `string`; it is
 // narrowed back to the "repoyeti" literal here (the runtime value already is).
-const APP_ROOT = resolve(import.meta.dir, "..");
+// The bare `../..` hop count rotted silently when this file (or the package it ships in)
+// moves: no error, just a wrong root and a source checkout that falsely reports no updates.
+// Walk up to the nearest directory that carries BOTH .git and package.json instead — the
+// same marker the tests use — so the marker, not the path depth, defines the root. A
+// compiled release bundle carries no .git, so fall back to this file's parent dir, where
+// the bundle layout still puts the app root.
+function repoRoot(): string {
+  const fallback = resolve(import.meta.dir, "..");
+  let dir = resolve(import.meta.dir);
+  for (;;) {
+    if (existsSync(resolve(dir, ".git")) && existsSync(resolve(dir, "package.json"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return fallback;
+}
+
+const APP_ROOT = repoRoot();
 const gitEngine = createUpdater({
   appRoot: APP_ROOT,
   serviceName: "repoyeti",

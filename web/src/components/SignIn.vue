@@ -37,18 +37,9 @@ async function continueLocal(): Promise<void> {
         class="inline-flex h-11 items-center gap-2.5 rounded-xl border border-border bg-secondary px-5 text-sm font-semibold text-foreground transition-colors hover:bg-accent active:translate-y-px"
         href="/oauth/login"
       >
-        <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
-          <rect x="11" y="9.5" width="26" height="7" rx="3.5" fill="#4285F4" />
-          <circle cx="11" cy="13" r="7" fill="#4285F4" />
-          <circle cx="37" cy="13" r="7" fill="#EA4335" />
-          <circle cx="10" cy="24" r="4.5" fill="#9AA0A6" />
-          <rect x="23" y="20.5" width="15" height="7" rx="3.5" fill="#FBBC05" />
-          <circle cx="23" cy="24" r="7" fill="#FBBC05" />
-          <circle cx="38" cy="24" r="5.5" fill="#F9AB00" />
-          <rect x="14" y="31.5" width="26" height="7" rx="3.5" fill="#34A853" />
-          <circle cx="14" cy="35" r="7" fill="#34A853" />
-          <circle cx="40" cy="35" r="7" fill="#34A853" />
-        </svg>
+        <!-- Sign-in provider's brand mark: fixed brand colours, not theme colours, so it ships as
+             an asset like the logos above rather than inline SVG with hard-coded fills. -->
+        <img src="/signin-mark.svg" alt="" aria-hidden="true" width="20" height="20" />
         <span>{{ $t("signIn.buttonLabel") }}</span>
       </a>
 
@@ -58,7 +49,7 @@ async function continueLocal(): Promise<void> {
       <div v-if="store.canContinueLocal" class="mt-6 border-t border-border/50 pt-5">
         <button
           type="button"
-          class="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+          class="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-ui font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
           :disabled="continuing"
           @click="continueLocal"
         >
@@ -66,7 +57,7 @@ async function continueLocal(): Promise<void> {
           <Laptop v-else :size="15" />
           {{ $t("signIn.continueLocal") }}
         </button>
-        <p class="mt-2 text-[11px] text-muted-foreground/60">{{ $t("signIn.continueLocalHint") }}</p>
+        <p class="mt-2 text-2xs text-muted-foreground/60">{{ $t("signIn.continueLocalHint") }}</p>
       </div>
     </div>
   </div>

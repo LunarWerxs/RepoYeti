@@ -64,7 +64,7 @@ async function onDiffPatchBytes(bytes: number): Promise<void> {
     </ExpandTransition>
     <!-- When the threshold is hidden (always-side-by-side on), say why instead of rendering an
          empty card — an Advanced group with visibly nothing in it reads as a rendering bug. -->
-    <p v-if="!store.diffPatchEnabled" class="px-3.5 py-3 text-[12px] text-muted-foreground">
+    <p v-if="!store.diffPatchEnabled" class="px-3.5 py-3 text-xs text-muted-foreground">
       {{ $t("settings.diffPatchAllOff") }}
     </p>
   </SettingsGroup>

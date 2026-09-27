@@ -46,7 +46,7 @@
     "check:imports": "bun run scripts/check-tracked-imports.ts",
     "check:gitenv": "bun run scripts/check-git-env.ts",
     "check:kit": "node ../../lunarwerx-ui/sync.mjs --check --app repoyeti",
-    "//check:local": "Checks that CANNOT run on GitHub, so localci runs them on the host instead. check:kit compares this app's kit-managed copies against lunarwerx-ui, a PRIVATE sibling repo a public repo's CI can never check out. Until this existed its only enforcement was the pre-commit hook, which --no-verify skips and which silently no-ops on any machine without the sibling checkout.",
+    "//check:local": "Checks that CANNOT run on GitHub, so localci runs them on the host instead. check:kit compares this app's kit-managed copies against lunarwerx-ui, a PRIVATE sibling repo a public repo's CI can never check out. Until this existed its only enforcement was the pre-commit hook, which --no-verify skips and which silently no-ops on any machine without the sibling checkout. The .githooks/pre-push hook runs it before every push where the sibling exists.",
     "check:local": "bun run check:kit",
     "lint": "biome lint .",
     "format": "biome format --write .",

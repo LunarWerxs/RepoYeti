@@ -101,7 +101,9 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
       <Input
         v-model="group.subjectLine"
         :placeholder="$t('repo.smartCommit.subjectPlaceholder')"
-        class="h-8 flex-1 font-mono text-[12.5px]"
+        variant="mono"
+        text-size="ui"
+        class="h-8 flex-1"
       />
       <Tooltip>
         <TooltipTrigger as-child>
@@ -153,7 +155,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
       <button
         v-if="!group.showBody"
         type="button"
-        class="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline"
+        class="text-xs text-muted-foreground underline-offset-2 hover:underline"
         @click="group.showBody = true"
       >
         {{ $t("repo.smartCommit.bodyToggle") }}
@@ -163,7 +165,8 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
         v-model="group.body"
         :placeholder="$t('repo.smartCommit.bodyPlaceholder')"
         rows="2"
-        class="max-h-28 min-h-9 resize-none text-[12.5px]"
+        text-size="ui"
+        class="max-h-28 min-h-9"
       />
     </div>
 
@@ -172,7 +175,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
       <div
         v-for="f in group.files"
         :key="f"
-        class="flex max-w-full items-stretch overflow-hidden rounded-md border border-border bg-secondary/40 text-[11.5px]"
+        class="flex max-w-full items-stretch overflow-hidden rounded-md border border-border bg-secondary/40 text-xs"
       >
         <button
           type="button"
@@ -181,7 +184,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
           :title="$t('repo.smartCommit.viewDiff')"
           @click="emit('toggle-diff', f)"
         >
-          <Badge :variant="statusVariant(statusByPath[f])" class="px-1 py-0 text-[9px] leading-none">{{ statusByPath[f] ?? "·" }}</Badge>
+          <Badge :variant="statusVariant(statusByPath[f])" size="sm">{{ statusByPath[f] ?? "·" }}</Badge>
           <span class="truncate">{{ f }}</span>
           <DiffStat v-if="statByPath[f]" :stat="statByPath[f]" show="lines" class="shrink-0" />
           <ChevronDown :size="12" :class="cn('shrink-0 text-muted-foreground transition-transform', openDiff === f && 'rotate-180')" />
@@ -234,7 +237,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
     <div v-if="group.files.length > 1" class="mt-2 ps-6">
       <button
         type="button"
-        class="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+        class="inline-flex items-center gap-1 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
         :aria-expanded="openAll === group.key"
         @click="emit('toggle-all')"
       >

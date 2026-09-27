@@ -108,7 +108,7 @@ async function removeRoot(path: string): Promise<void> {
     </SettingsRow>
     <ExpandTransition :open="showScanFolders">
       <div class="flex flex-col gap-2.5 px-3.5 py-3">
-        <p v-if="!store.roots.length" class="text-[12.5px] text-muted-foreground">
+        <p v-if="!store.roots.length" class="text-ui text-muted-foreground">
           {{ $t("settings.rootsEmpty") }}
         </p>
         <div
@@ -116,7 +116,7 @@ async function removeRoot(path: string): Promise<void> {
           :key="r"
           class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5"
         >
-          <code class="mono min-w-0 flex-1 truncate text-[12px]" :title="r">{{ r }}</code>
+          <code class="mono min-w-0 flex-1 truncate text-xs" :title="r">{{ r }}</code>
           <Button
             :variant="confirmRemoveRoot === r ? 'destructive' : 'ghost'"
             size="sm"
@@ -130,12 +130,15 @@ async function removeRoot(path: string): Promise<void> {
           </Button>
         </div>
         <form class="flex items-center gap-2 pt-0.5" @submit.prevent="addRoot">
-          <Input
-            v-model="newRoot"
-            class="mono min-w-0 flex-1 text-[12.5px]"
-            :placeholder="$t('settings.rootsPlaceholder')"
-            :aria-label="$t('settings.rootsAdd')"
-          />
+          <!-- The monospace face sits on a wrapper: <Input> owns its typography, and the input
+               inherits font-family from its parent (preflight `font: inherit`). -->
+          <div class="mono min-w-0 flex-1">
+            <Input
+              v-model="newRoot"
+              :placeholder="$t('settings.rootsPlaceholder')"
+              :aria-label="$t('settings.rootsAdd')"
+            />
+          </div>
           <Button type="submit" size="sm" class="shrink-0" :disabled="!newRoot.trim() || addingRoot">
             <Loader2 v-if="addingRoot" class="animate-spin" />
             <Plus v-else />

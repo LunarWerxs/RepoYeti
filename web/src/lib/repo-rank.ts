@@ -12,7 +12,7 @@
 //     log-scaled, and all three share one cap: no pile of generated files outranks a conflict.
 //   - Staleness is a soft demotion, never a filter. A repo nobody touched in months sinks below
 //     active ones but stays in the list, and anything genuinely wrong with it still lifts it.
-import type { Repo } from "../types";
+import type { Repo, RepoStatus } from "../types";
 
 export type RankReasonKey =
   | "conflicted"
@@ -71,59 +71,74 @@ function volumePoints(weight: number, count: number): number {
   return weight * (1 + Math.log10(count));
 }
 
+/** Record a reason, rounded to what the card displays; a term that rounds to zero is dropped. */
+function addReason(reasons: RankReason[], reason: RankReason): void {
+  const points = round(reason.points);
+  if (points !== 0) reasons.push({ ...reason, points });
+}
+
+/** Flat points for the states that block normal work until someone acts. */
+function addBlockingReasons(reasons: RankReason[], st: RepoStatus): void {
+  if (st.conflicted) addReason(reasons, { key: "conflicted", points: RANK_WEIGHTS.conflicted });
+  if (st.gitOperation) addReason(reasons, { key: "midOperation", points: RANK_WEIGHTS.midOperation });
+  if (st.error) addReason(reasons, { key: "error", points: RANK_WEIGHTS.error });
+}
+
+/** behind + ahead + dirty, log-scaled and sharing one cap. */
+function addVolumeReasons(reasons: RankReason[], st: RepoStatus): void {
+  // Behind first: it is the one that turns into a conflict if you start editing on top of it.
+  let volumeLeft: number = RANK_WEIGHTS.volumeCap;
+  const volumes: [RankReasonKey, number, number][] = [
+    ["behind", RANK_WEIGHTS.behind, st.behind],
+    ["ahead", RANK_WEIGHTS.ahead, st.ahead],
+    ["dirty", RANK_WEIGHTS.dirty, st.dirty],
+  ];
+  for (const [key, weight, count] of volumes) {
+    if (count <= 0 || volumeLeft <= 0) continue;
+    const points = Math.min(volumePoints(weight, count), volumeLeft);
+    volumeLeft -= points;
+    addReason(reasons, { key, points, count });
+  }
+}
+
+/** ahead/behind are only as fresh as the last fetch; an erroring repo already carries its own term. */
+function addUnfetchedReason(reasons: RankReason[], st: RepoStatus, now: number): void {
+  if (!st.remote || st.error) return;
+  const since = st.fetchedAt == null ? null : now - st.fetchedAt;
+  if (since == null || since > UNFETCHED_AFTER_DAYS * DAY_MS) {
+    addReason(reasons, {
+      key: "unfetched",
+      points: RANK_WEIGHTS.unfetched,
+      ...(since == null ? {} : { days: Math.floor(since / DAY_MS) }),
+    });
+  }
+}
+
+// Activity is when HEAD last moved (its reflog), never `repo.updatedAt`: the daemon rewrites
+// that on every discovery pass, rescan and hide/pin toggle, so after a restart it would call
+// every repo "changed in the last day" and nothing would ever go stale. No reflog, no term.
+function addActivityReason(reasons: RankReason[], moved: number | null | undefined, now: number): void {
+  if (moved == null) return;
+  const idle = now - moved;
+  if (idle <= ACTIVE_WITHIN_MS) addReason(reasons, { key: "active", points: RANK_WEIGHTS.active });
+  else if (idle > STALE_AFTER_DAYS * DAY_MS) {
+    addReason(reasons, { key: "stale", points: RANK_WEIGHTS.stale, days: Math.floor(idle / DAY_MS) });
+  }
+}
+
 /** Score one repo. Pure: `now` is passed in so the ordering is reproducible. */
 export function rankRepo(repo: Repo, now: number): RepoRank {
   const reasons: RankReason[] = [];
-  const add = (reason: RankReason): void => {
-    const points = round(reason.points);
-    if (points !== 0) reasons.push({ ...reason, points });
-  };
   const st = repo.status;
 
   if (st) {
-    if (st.conflicted) add({ key: "conflicted", points: RANK_WEIGHTS.conflicted });
-    if (st.gitOperation) add({ key: "midOperation", points: RANK_WEIGHTS.midOperation });
-    if (st.error) add({ key: "error", points: RANK_WEIGHTS.error });
-
-    // Behind first: it is the one that turns into a conflict if you start editing on top of it.
-    let volumeLeft: number = RANK_WEIGHTS.volumeCap;
-    const volumes: [RankReasonKey, number, number][] = [
-      ["behind", RANK_WEIGHTS.behind, st.behind],
-      ["ahead", RANK_WEIGHTS.ahead, st.ahead],
-      ["dirty", RANK_WEIGHTS.dirty, st.dirty],
-    ];
-    for (const [key, weight, count] of volumes) {
-      if (count <= 0 || volumeLeft <= 0) continue;
-      const points = Math.min(volumePoints(weight, count), volumeLeft);
-      volumeLeft -= points;
-      add({ key, points, count });
-    }
-
-    if (st.detached) add({ key: "detached", points: RANK_WEIGHTS.detached });
-
-    if (st.remote && !st.error) {
-      const since = st.fetchedAt == null ? null : now - st.fetchedAt;
-      if (since == null || since > UNFETCHED_AFTER_DAYS * DAY_MS) {
-        add({
-          key: "unfetched",
-          points: RANK_WEIGHTS.unfetched,
-          ...(since == null ? {} : { days: Math.floor(since / DAY_MS) }),
-        });
-      }
-    }
+    addBlockingReasons(reasons, st);
+    addVolumeReasons(reasons, st);
+    if (st.detached) addReason(reasons, { key: "detached", points: RANK_WEIGHTS.detached });
+    addUnfetchedReason(reasons, st, now);
   }
 
-  // Activity is when HEAD last moved (its reflog), never `repo.updatedAt`: the daemon rewrites
-  // that on every discovery pass, rescan and hide/pin toggle, so after a restart it would call
-  // every repo "changed in the last day" and nothing would ever go stale. No reflog, no term.
-  const moved = st?.headMovedAt;
-  if (moved != null) {
-    const idle = now - moved;
-    if (idle <= ACTIVE_WITHIN_MS) add({ key: "active", points: RANK_WEIGHTS.active });
-    else if (idle > STALE_AFTER_DAYS * DAY_MS) {
-      add({ key: "stale", points: RANK_WEIGHTS.stale, days: Math.floor(idle / DAY_MS) });
-    }
-  }
+  addActivityReason(reasons, st?.headMovedAt, now);
 
   return { score: round(reasons.reduce((sum, r) => sum + r.points, 0)), reasons };
 }

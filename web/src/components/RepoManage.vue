@@ -126,8 +126,12 @@ async function remove(): Promise<void> {
       </DialogHeader>
 
       <div class="flex flex-col gap-1.5">
-        <label class="text-[12px] text-muted-foreground">{{ $t("repo.manage.remoteLabel") }}</label>
-        <Input v-model="url" class="mono" :placeholder="$t('repo.manage.remotePlaceholder')" @keyup.enter="save" />
+        <label class="text-xs text-muted-foreground">{{ $t("repo.manage.remoteLabel") }}</label>
+        <!-- The monospace face is set on a wrapper: Input owns its classes, and the input
+             inherits the family (Tailwind's preflight gives form controls `font: inherit`). -->
+        <div class="mono">
+          <Input v-model="url" :placeholder="$t('repo.manage.remotePlaceholder')" @keyup.enter="save" />
+        </div>
         <div class="flex items-center gap-2 pt-1">
           <Button size="sm" :disabled="!url.trim() || busy" @click="save">
             <Loader2 v-if="busy" class="animate-spin" />
@@ -149,24 +153,24 @@ async function remove(): Promise<void> {
 
       <!-- tags: listed newest first, each pushable on its own -->
       <div class="flex flex-col gap-1.5 border-t border-border/40 pt-3">
-        <div class="flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
+        <div class="flex items-center gap-1.5 text-ui font-medium text-foreground">
           <Tag :size="14" class="text-muted-foreground" /> {{ $t("repo.manage.tagsTitle") }}
         </div>
-        <p v-if="!tags.length" class="text-[12px] text-muted-foreground">{{ $t("repo.manage.tagsEmpty") }}</p>
+        <p v-if="!tags.length" class="text-xs text-muted-foreground">{{ $t("repo.manage.tagsEmpty") }}</p>
         <div v-else class="scroll-slim flex max-h-40 flex-col gap-0.5 overflow-y-auto">
           <div
             v-for="tg in tags"
             :key="tg.name"
             class="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-accent/40"
           >
-            <span class="mono shrink-0 text-[12px] text-foreground">{{ tg.name }}</span>
-            <span class="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground" :title="tg.subject">{{ tg.subject }}</span>
-            <span class="shrink-0 text-[11px] text-muted-foreground/70">{{ fromNow(tg.date) }}</span>
+            <span class="mono shrink-0 text-xs text-foreground">{{ tg.name }}</span>
+            <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground" :title="tg.subject">{{ tg.subject }}</span>
+            <span class="shrink-0 text-2xs text-muted-foreground/70">{{ fromNow(tg.date) }}</span>
             <Button
               v-if="remote"
               variant="ghost"
               size="sm"
-              class="h-6 shrink-0 px-1.5 text-[11px]"
+              class="shrink-0"
               :disabled="tagBusy"
               :title="$t('repo.manage.tagPushTitle', { name: tg.name })"
               :aria-label="$t('repo.manage.tagPushTitle', { name: tg.name })"
@@ -174,7 +178,7 @@ async function remove(): Promise<void> {
             >
               <Loader2 v-if="pushingTag === tg.name" class="animate-spin" />
               <ArrowUpToLine v-else />
-              {{ $t("repo.manage.tagPushOne") }}
+              <span class="text-2xs">{{ $t("repo.manage.tagPushOne") }}</span>
             </Button>
           </div>
         </div>
@@ -182,14 +186,18 @@ async function remove(): Promise<void> {
         <!-- create a tag (annotated when a message is given; optional push) -->
         <form class="flex flex-col gap-2 pt-1" @submit.prevent="createTag">
           <div class="flex items-center gap-2">
-            <Input v-model="tagName" class="mono" :placeholder="$t('repo.manage.tagNamePlaceholder')" />
+            <div class="mono min-w-0 flex-1">
+              <Input v-model="tagName" :placeholder="$t('repo.manage.tagNamePlaceholder')" />
+            </div>
             <Button type="submit" size="sm" class="shrink-0" :disabled="!tagName.trim() || tagBusy">
               <Loader2 v-if="tagBusy" class="animate-spin" />
               {{ $t("repo.manage.tagCreate") }}
             </Button>
           </div>
-          <Input v-model="tagMessage" class="mono" :placeholder="$t('repo.manage.tagMessagePlaceholder')" />
-          <label v-if="remote" class="flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground">
+          <div class="mono">
+            <Input v-model="tagMessage" :placeholder="$t('repo.manage.tagMessagePlaceholder')" />
+          </div>
+          <label v-if="remote" class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
             <input v-model="tagPush" type="checkbox" class="size-3.5 accent-primary" />
             {{ $t("repo.manage.tagPush") }}
           </label>

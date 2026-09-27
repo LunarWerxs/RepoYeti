@@ -59,16 +59,16 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
 <template>
   <!-- unassigned (blocks commit) -->
   <div class="mt-3 rounded-lg border border-warning/30 bg-warning/5 p-3">
-    <div class="mb-1 flex items-center gap-2 text-[12.5px] font-medium text-warning">
+    <div class="mb-1 flex items-center gap-2 text-ui font-medium text-warning">
       <CornerUpLeft :size="15" />
       <span>{{ $t("repo.smartCommit.unassigned") }}</span>
     </div>
-    <p class="mb-2 text-[11.5px] text-muted-foreground">{{ $t("repo.smartCommit.unassignedHint") }}</p>
+    <p class="mb-2 text-xs text-muted-foreground">{{ $t("repo.smartCommit.unassignedHint") }}</p>
     <div class="flex flex-wrap gap-1.5">
       <div
         v-for="f in leftovers"
         :key="f"
-        class="flex max-w-full items-stretch overflow-hidden rounded-md border border-border bg-secondary/40 text-[11.5px]"
+        class="flex max-w-full items-stretch overflow-hidden rounded-md border border-border bg-secondary/40 text-xs"
       >
         <button
           type="button"
@@ -77,7 +77,7 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
           :title="$t('repo.smartCommit.viewDiff')"
           @click="emit('toggle-diff', f)"
         >
-          <Badge :variant="statusVariant(statusByPath[f])" class="px-1 py-0 text-[9px] leading-none">{{ statusByPath[f] ?? "·" }}</Badge>
+          <Badge :variant="statusVariant(statusByPath[f])" size="sm">{{ statusByPath[f] ?? "·" }}</Badge>
           <span class="truncate">{{ f }}</span>
           <DiffStat v-if="statByPath[f]" :stat="statByPath[f]" show="lines" class="shrink-0" />
           <ChevronDown :size="12" :class="cn('shrink-0 text-muted-foreground transition-transform', openDiff === f && 'rotate-180')" />

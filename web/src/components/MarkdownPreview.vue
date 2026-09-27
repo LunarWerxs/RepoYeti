@@ -9,7 +9,7 @@ const html = computed(() => renderMarkdown(props.source));
 <template>
   <div class="h-full overflow-auto px-5 py-4 sm:px-7 sm:py-6">
     <!-- renderMarkdown sanitizes raw HTML and hardens links before it reaches this sink. -->
-    <article class="markdown-preview mx-auto max-w-4xl text-[13.5px]" v-html="html" />
+    <article class="markdown-preview mx-auto max-w-4xl text-sm" v-html="html" />
   </div>
 </template>
 

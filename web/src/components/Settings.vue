@@ -142,7 +142,7 @@ watch(
            negative inline margin lets the background span the body's padding, so rows pass
            underneath rather than appearing beside it. Below the header's z-10, so if the two ever
            do meet, this still goes under the title rather than over it. -->
-      <div class="bg-background sticky -top-3 z-[9] -mx-3.5 px-3.5 py-1.5">
+      <div class="bg-background sticky -top-3 z-9 -mx-3.5 px-3.5 py-1.5">
         <SettingsTabs v-model="tab" :tabs="tabs" />
       </div>
 

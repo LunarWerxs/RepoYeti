@@ -85,8 +85,8 @@ function toggle(path: string): void {
       <button
         v-if="n.type === 'dir'"
         type="button"
-        class="commit-tree-row group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-2 text-start text-[12px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-        :style="{ paddingInlineStart: (depth ?? 0) * 14 + 6 + 'px' }"
+        class="commit-tree-row group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--tree-indent) pe-2 text-start text-xs outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+        :style="{ '--tree-indent': (depth ?? 0) * 14 + 6 + 'px' }"
         :title="n.path"
         :aria-expanded="isOpen(n.path)"
         @click.stop="toggle(n.path)"
@@ -96,7 +96,7 @@ function toggle(path: string): void {
           class="shrink-0 text-muted-foreground/70 transition-transform duration-150"
           :class="isOpen(n.path) && 'rotate-90'"
         />
-        <component :is="fileVisual(n.name, true)" class="shrink-0 text-[14px]" />
+        <component :is="fileVisual(n.name, true)" class="shrink-0 text-sm" />
         <span class="truncate text-muted-foreground">{{ n.name }}</span>
       </button>
       <!-- file row — same actions as the flat history list, via LogPanel -->
@@ -104,20 +104,20 @@ function toggle(path: string): void {
         <ContextMenuTrigger as-child>
           <button
             type="button"
-            class="commit-tree-row group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-2 text-start outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-            :style="{ paddingInlineStart: (depth ?? 0) * 14 + 6 + 'px' }"
+            class="commit-tree-row group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--tree-indent) pe-2 text-start outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+            :style="{ '--tree-indent': (depth ?? 0) * 14 + 6 + 'px' }"
             :title="n.from ? `${n.from} → ${n.path}` : n.path"
             @click.stop="emit('open', n)"
           >
-            <span class="w-[13px] shrink-0" aria-hidden="true" />
-            <component :is="fileVisual(n.name, false)" class="shrink-0 text-[14px]" />
+            <span class="w-3.25 shrink-0" aria-hidden="true" />
+            <component :is="fileVisual(n.name, false)" class="shrink-0 text-sm" />
             <span
-              class="mono min-w-0 flex-1 truncate text-[11.5px]"
+              class="mono min-w-0 flex-1 truncate text-xs"
               :class="n.status === 'D' ? 'text-muted-foreground line-through' : 'text-foreground'"
             >{{ n.name }}</span>
-            <span v-if="n.stat?.addedLines" class="mono shrink-0 text-[10.5px] text-success">+{{ n.stat.addedLines }}</span>
-            <span v-if="n.stat?.removedLines" class="mono shrink-0 text-[10.5px] text-destructive">−{{ n.stat.removedLines }}</span>
-            <span class="mono shrink-0 ps-1 text-[11px] font-bold" :style="{ color: statusColor(n.status ?? 'M') }">{{ n.status }}</span>
+            <span v-if="n.stat?.addedLines" class="mono shrink-0 text-2xs text-success">+{{ n.stat.addedLines }}</span>
+            <span v-if="n.stat?.removedLines" class="mono shrink-0 text-2xs text-destructive">−{{ n.stat.removedLines }}</span>
+            <span class="mono shrink-0 ps-1 text-2xs font-bold text-(--status-color)" :style="{ '--status-color': statusColor(n.status ?? 'M') }">{{ n.status }}</span>
           </button>
         </ContextMenuTrigger>
         <ContextMenuContent>

@@ -96,12 +96,33 @@ export function useIdentities(repos: Ref<Repo[]>) {
     await api.restoreDetectedIdentities();
     await loadDetectedIdentities();
   }
+  /** Optimistic: the new identity shows at once under a placeholder id, the server's row replaces
+   *  it when the POST answers, then the full list reconciles. On failure the placeholder is
+   *  dropped and the error rethrown (the caller toasts). */
   async function createIdentity(input: Omit<Identity, "id">): Promise<void> {
-    await api.createIdentity(input);
+    const pendingId = `pending-${Date.now()}`;
+    identities.value = [...identities.value, { ...input, id: pendingId }];
+    try {
+      const created = await api.createIdentity(input);
+      identities.value = identities.value.map((i) => (i.id === pendingId ? created : i));
+    } catch (e) {
+      identities.value = identities.value.filter((i) => i.id !== pendingId);
+      throw e;
+    }
     await reloadIdentities();
   }
+  /** Optimistic: the patch applies locally first, the server's row replaces it when the PUT
+   *  answers, then the full list reconciles. On failure the row reverts and the error rethrows. */
   async function updateIdentity(id: string, patch: Partial<Omit<Identity, "id">>): Promise<void> {
-    await api.updateIdentity(id, patch);
+    const before = identities.value.find((i) => i.id === id);
+    if (before) identities.value = identities.value.map((i) => (i.id === id ? { ...i, ...patch } : i));
+    try {
+      const updated = await api.updateIdentity(id, patch);
+      identities.value = identities.value.map((i) => (i.id === id ? updated : i));
+    } catch (e) {
+      if (before) identities.value = identities.value.map((i) => (i.id === id ? before : i));
+      throw e;
+    }
     await reloadIdentities();
   }
   async function removeIdentity(id: string): Promise<void> {

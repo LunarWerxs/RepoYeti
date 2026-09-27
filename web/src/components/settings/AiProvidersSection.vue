@@ -381,372 +381,369 @@ async function onDiffDetail(detail: string): Promise<void> {
 
     <!-- Providers — only the ones you've connected (plus any you're adding right now). -->
     <div class="flex flex-col gap-1.5 px-3.5 py-3">
-      <span class="text-[12px] text-muted-foreground">{{ $t("settings.providers") }}</span>
-      <p v-if="!shownProviders.length" class="text-[12px] text-muted-foreground/70">
+      <span class="text-xs text-muted-foreground">{{ $t("settings.providers") }}</span>
+      <p v-if="!shownProviders.length" class="text-xs text-muted-foreground/70">
         {{ $t("settings.providersEmpty") }}
       </p>
       <div v-auto-animate class="flex flex-col gap-2">
-        <Collapsible
+        <!-- The card surface lives on a plain wrapper and the trigger's look on its own <button>
+             (as-child): the kit Collapsible/CollapsibleTrigger own their appearance, so a call
+             site may not restyle them directly. -->
+        <div
           v-for="p in shownProviders"
           :key="p.id"
-          v-model:open="rowFor(p.id).open"
           class="overflow-hidden rounded-lg border border-border bg-secondary/45"
-          @update:open="(o) => { if (!o) rowFor(p.id).confirmRemove = false }"
         >
-          <CollapsibleTrigger
-            class="group flex w-full items-center justify-between gap-2 px-3 py-2.5 text-start transition-colors hover:bg-secondary/40"
+          <Collapsible
+            v-model:open="rowFor(p.id).open"
+            @update:open="(o) => { if (!o) rowFor(p.id).confirmRemove = false }"
           >
-            <div class="flex min-w-0 items-center gap-2">
-              <span class="truncate text-[13px] font-semibold">{{ p.label }}</span>
-              <Badge
-                v-if="isConfigured(p.id)"
-                variant="success"
-                class="gap-1 px-1.5 py-0 text-[10px]"
+            <CollapsibleTrigger as-child>
+              <button
+                type="button"
+                class="group flex w-full items-center justify-between gap-2 px-3 py-2.5 text-start transition-colors hover:bg-secondary/40"
               >
-                <Check :size="10" /> {{ $t("settings.badgeActive") }}
-              </Badge>
-              <Badge
-                v-else-if="p.suggested"
-                variant="info"
-                class="px-1.5 py-0 text-[10px]"
-              >
-                {{ $t("settings.badgeSuggested") }}
-              </Badge>
-              <Badge
-                v-if="settings.defaultProvider === p.id"
-                variant="primary"
-                class="px-1.5 py-0 text-[10px]"
-              >
-                {{ $t("settings.badgeDefault") }}
-              </Badge>
-            </div>
-            <ChevronDown
-              :size="16"
-              aria-hidden="true"
-              class="pointer-events-none shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180"
-            />
-          </CollapsibleTrigger>
-
-          <CollapsibleContent>
-            <div class="flex flex-col gap-2.5 border-t border-border/60 px-3 py-3">
-              <!-- tier + provider link. The "Free tier available" badge is a catalog fact about the
-                   VENDOR (they offer a no-cost tier) — NOT a statement about the owner's key/plan —
-                   so an InfoHint spells that out (owners kept reading it as "only free tier works"). -->
-              <div v-if="p.free || p.url" class="flex items-center justify-between gap-2">
-                <span v-if="p.free" class="flex items-center gap-1">
-                  <Badge variant="success" class="px-1.5 py-0 text-[10px]">
-                    {{ $t("settings.badgeFreeTier") }}
+                <div class="flex min-w-0 items-center gap-2">
+                  <span class="truncate text-ui font-semibold">{{ p.label }}</span>
+                  <Badge v-if="isConfigured(p.id)" variant="success">
+                    <Check :size="10" /> {{ $t("settings.badgeActive") }}
                   </Badge>
-                  <InfoHint :text="$t('settings.freeTierHint')" />
-                </span>
-                <a
-                  v-if="p.url"
-                  :href="`https://${p.url}`"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="mono ms-auto text-[11px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-                >{{ p.url }}</a>
-              </div>
+                  <Badge v-else-if="p.suggested" variant="info">
+                    {{ $t("settings.badgeSuggested") }}
+                  </Badge>
+                  <Badge v-if="settings.defaultProvider === p.id" variant="primary">
+                    {{ $t("settings.badgeDefault") }}
+                  </Badge>
+                </div>
+                <ChevronDown
+                  :size="16"
+                  aria-hidden="true"
+                  class="pointer-events-none shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180"
+                />
+              </button>
+            </CollapsibleTrigger>
 
-              <!-- not configured → bring your own key. For the suggested provider (Groq), a short
-                   nudge: it's free + fast and takes ~30s, so a fresh install has an obvious path. -->
-              <div v-if="!isConfigured(p.id)" class="flex flex-col gap-2.5">
-                <p v-if="p.suggested && p.url" class="text-[12px] text-muted-foreground">
-                  {{ $t("settings.suggestedNudge") }}
+            <CollapsibleContent>
+              <div class="flex flex-col gap-2.5 border-t border-border/60 p-3">
+                <!-- tier + provider link. The "Free tier available" badge is a catalog fact about the
+                     VENDOR (they offer a no-cost tier) — NOT a statement about the owner's key/plan —
+                     so an InfoHint spells that out (owners kept reading it as "only free tier works"). -->
+                <div v-if="p.free || p.url" class="flex items-center justify-between gap-2">
+                  <span v-if="p.free" class="flex items-center gap-1">
+                    <Badge variant="success">
+                      {{ $t("settings.badgeFreeTier") }}
+                    </Badge>
+                    <InfoHint :text="$t('settings.freeTierHint')" />
+                  </span>
                   <a
+                    v-if="p.url"
                     :href="`https://${p.url}`"
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="text-primary underline-offset-2 hover:underline"
+                    class="mono ms-auto text-2xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
                   >{{ p.url }}</a>
-                </p>
+                </div>
 
-                <div
-                  v-if="isCompatible(p)"
-                  class="flex flex-col gap-2.5 rounded-md border border-border/70 bg-background/35 p-2.5"
-                >
-                  <label class="flex flex-col gap-1">
-                    <span class="text-[11px] font-medium text-muted-foreground">
-                      {{ $t("settings.compatiblePreset") }}
-                    </span>
-                    <Select
-                      :model-value="selectedCompatiblePreset(p.id)"
-                      @update:model-value="(v) => typeof v === 'string' && applyCompatiblePreset(p.id, v)"
-                    >
-                      <SelectTrigger class="w-full" :aria-label="$t('settings.compatiblePreset')">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem
-                          v-for="preset in OPENAI_COMPATIBLE_PRESETS"
-                          :key="preset.id"
-                          :value="preset.id"
-                        >
-                          {{ preset.label }}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <p class="text-[11px] leading-relaxed text-muted-foreground">
-                    {{ $t("settings.compatiblePresetHint") }}
+                <!-- not configured → bring your own key. For the suggested provider (Groq), a short
+                     nudge: it's free + fast and takes ~30s, so a fresh install has an obvious path. -->
+                <div v-if="!isConfigured(p.id)" class="flex flex-col gap-2.5">
+                  <p v-if="p.suggested && p.url" class="text-xs text-muted-foreground">
+                    {{ $t("settings.suggestedNudge") }}
+                    <a
+                      :href="`https://${p.url}`"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="text-primary underline-offset-2 hover:underline"
+                    >{{ p.url }}</a>
                   </p>
 
-                  <label class="flex flex-col gap-1">
-                    <span class="text-[11px] font-medium text-muted-foreground">
-                      {{ $t("settings.compatibleBaseUrl") }}
-                    </span>
+                  <div
+                    v-if="isCompatible(p)"
+                    class="flex flex-col gap-2.5 rounded-md border border-border/70 bg-background/35 p-2.5"
+                  >
+                    <label class="flex flex-col gap-1">
+                      <span class="text-2xs font-medium text-muted-foreground">
+                        {{ $t("settings.compatiblePreset") }}
+                      </span>
+                      <Select
+                        :model-value="selectedCompatiblePreset(p.id)"
+                        @update:model-value="(v) => typeof v === 'string' && applyCompatiblePreset(p.id, v)"
+                      >
+                        <SelectTrigger class="w-full" :aria-label="$t('settings.compatiblePreset')">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem
+                            v-for="preset in OPENAI_COMPATIBLE_PRESETS"
+                            :key="preset.id"
+                            :value="preset.id"
+                          >
+                            {{ preset.label }}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </label>
+                    <p class="text-2xs leading-relaxed text-muted-foreground">
+                      {{ $t("settings.compatiblePresetHint") }}
+                    </p>
+
+                    <label class="flex flex-col gap-1">
+                      <span class="text-2xs font-medium text-muted-foreground">
+                        {{ $t("settings.compatibleBaseUrl") }}
+                      </span>
+                      <Input
+                        v-model="rowFor(p.id).baseUrlInput"
+                        type="url"
+                        spellcheck="false"
+                        autocomplete="url"
+                        :aria-label="$t('settings.compatibleBaseUrl')"
+                        :placeholder="$t('settings.compatibleBaseUrlPlaceholder')"
+                        @keyup.enter="connect(p.id)"
+                      />
+                    </label>
+
+                    <p
+                      v-if="compatibleDestination(p.id)"
+                      class="rounded border border-warning/20 bg-warning/5 px-2 py-1.5 text-2xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+                    >
+                      {{
+                        $t("settings.compatibleDestinationDisclosure", {
+                          url: compatibleDestination(p.id),
+                        })
+                      }}
+                    </p>
+
+                    <label class="flex flex-col gap-1">
+                      <span class="text-2xs font-medium text-muted-foreground">
+                        {{ $t("settings.compatibleManualModel") }}
+                      </span>
+                      <Input
+                        v-model="rowFor(p.id).modelInput"
+                        type="text"
+                        spellcheck="false"
+                        :aria-label="$t('settings.compatibleManualModel')"
+                        :placeholder="$t('settings.compatibleManualModelPlaceholder')"
+                        @keyup.enter="connect(p.id)"
+                      />
+                    </label>
+                    <p class="text-2xs leading-relaxed text-muted-foreground">
+                      {{ $t("settings.compatibleManualModelHint") }}
+                    </p>
+                  </div>
+
+                  <!-- Every provider ships selected diffs/prompts to it — a custom endpoint is not
+                       more of a privacy step than Groq or Anthropic, so the same warning applies to
+                       all of them, just naming the provider instead of a typed URL. -->
+                  <p
+                    v-else
+                    class="rounded border border-warning/20 bg-warning/5 px-2 py-1.5 text-2xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+                  >
+                    {{ $t("settings.providerDestinationDisclosure", { name: p.label }) }}
+                  </p>
+
+                  <div class="flex items-center gap-2">
                     <Input
-                      v-model="rowFor(p.id).baseUrlInput"
-                      type="url"
-                      spellcheck="false"
-                      autocomplete="url"
-                      :aria-label="$t('settings.compatibleBaseUrl')"
-                      :placeholder="$t('settings.compatibleBaseUrlPlaceholder')"
+                      v-model="rowFor(p.id).keyInput"
+                      type="password"
+                      class="flex-1"
+                      :aria-label="`${p.label} API key`"
+                      :placeholder="
+                        isCompatible(p) && compatibleKeyOptional(p.id)
+                          ? $t('settings.compatibleApiKeyOptionalPlaceholder')
+                          : p.keyPlaceholder
+                      "
                       @keyup.enter="connect(p.id)"
                     />
-                  </label>
+                    <Button
+                      size="sm"
+                      :disabled="!canConnect(p.id) || rowFor(p.id).connecting"
+                      @click="connect(p.id)"
+                    >
+                      <Link2 />
+                      {{ $t("settings.btnConnect") }}
+                    </Button>
+                    <!-- only a provider you just added via the picker can be dismissed again;
+                         a connected one is removed with the trash button instead -->
+                    <Button
+                      v-if="adding.includes(p.id)"
+                      variant="ghost"
+                      size="sm"
+                      @click="cancelAdd(p.id)"
+                    >
+                      {{ $t("common.cancel") }}
+                    </Button>
+                  </div>
+                  <p v-if="isCompatible(p)" class="text-2xs leading-relaxed text-muted-foreground">
+                    {{
+                      compatibleKeyOptional(p.id)
+                        ? $t("settings.compatibleApiKeyLoopbackHint")
+                        : $t("settings.compatibleApiKeyRemoteHint")
+                    }}
+                  </p>
+                </div>
 
-                  <p
-                    v-if="compatibleDestination(p.id)"
-                    class="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
+                <!-- owner-configured → choose a model, set default, or remove -->
+                <template v-else>
+                  <div
+                    v-if="isCompatible(p) && compatibleDestination(p.id)"
+                    class="rounded-md border border-warning/20 bg-warning/5 px-2.5 py-2 text-2xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
                   >
                     {{
-                      $t("settings.compatibleDestinationDisclosure", {
+                      $t("settings.compatibleSavedDestination", {
                         url: compatibleDestination(p.id),
                       })
                     }}
-                  </p>
-
-                  <label class="flex flex-col gap-1">
-                    <span class="text-[11px] font-medium text-muted-foreground">
-                      {{ $t("settings.compatibleManualModel") }}
-                    </span>
-                    <Input
-                      v-model="rowFor(p.id).modelInput"
-                      type="text"
-                      spellcheck="false"
-                      :aria-label="$t('settings.compatibleManualModel')"
-                      :placeholder="$t('settings.compatibleManualModelPlaceholder')"
-                      @keyup.enter="connect(p.id)"
-                    />
-                  </label>
-                  <p class="text-[11px] leading-relaxed text-muted-foreground">
-                    {{ $t("settings.compatibleManualModelHint") }}
-                  </p>
-                </div>
-
-                <!-- Every provider ships selected diffs/prompts to it — a custom endpoint is not
-                     more of a privacy step than Groq or Anthropic, so the same warning applies to
-                     all of them, just naming the provider instead of a typed URL. -->
-                <p
-                  v-else
-                  class="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
-                >
-                  {{ $t("settings.providerDestinationDisclosure", { name: p.label }) }}
-                </p>
-
-                <div class="flex items-center gap-2">
-                  <Input
-                    v-model="rowFor(p.id).keyInput"
-                    type="password"
-                    class="flex-1"
-                    :aria-label="`${p.label} API key`"
-                    :placeholder="
-                      isCompatible(p) && compatibleKeyOptional(p.id)
-                        ? $t('settings.compatibleApiKeyOptionalPlaceholder')
-                        : p.keyPlaceholder
-                    "
-                    @keyup.enter="connect(p.id)"
-                  />
-                  <Button
-                    size="sm"
-                    :disabled="!canConnect(p.id) || rowFor(p.id).connecting"
-                    @click="connect(p.id)"
+                  </div>
+                  <div
+                    v-else-if="!isCompatible(p)"
+                    class="rounded-md border border-warning/20 bg-warning/5 px-2.5 py-2 text-2xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
                   >
-                    <Link2 />
-                    {{ $t("settings.btnConnect") }}
-                  </Button>
-                  <!-- only a provider you just added via the picker can be dismissed again;
-                       a connected one is removed with the trash button instead -->
-                  <Button
-                    v-if="adding.includes(p.id)"
-                    variant="ghost"
-                    size="sm"
-                    @click="cancelAdd(p.id)"
-                  >
-                    {{ $t("common.cancel") }}
-                  </Button>
-                </div>
-                <p v-if="isCompatible(p)" class="text-[11px] leading-relaxed text-muted-foreground">
-                  {{
-                    compatibleKeyOptional(p.id)
-                      ? $t("settings.compatibleApiKeyLoopbackHint")
-                      : $t("settings.compatibleApiKeyRemoteHint")
-                  }}
-                </p>
-              </div>
-
-              <!-- owner-configured → choose a model, set default, or remove -->
-              <template v-else>
-                <div
-                  v-if="isCompatible(p) && compatibleDestination(p.id)"
-                  class="rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
-                >
-                  {{
-                    $t("settings.compatibleSavedDestination", {
-                      url: compatibleDestination(p.id),
-                    })
-                  }}
-                </div>
-                <div
-                  v-else-if="!isCompatible(p)"
-                  class="rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]"
-                >
-                  {{ $t("settings.providerSavedDestination", { name: p.label }) }}
-                </div>
-
-                <div class="flex items-center gap-2">
-                  <Select
-                    :model-value="savedModel(p.id) ?? undefined"
-                    :disabled="rowFor(p.id).loadingModels"
-                    @update:model-value="(v) => typeof v === 'string' && onModel(p.id, v)"
-                  >
-                    <SelectTrigger class="flex-1" :aria-label="`${p.label} model`">
-                      <SelectValue :placeholder="$t('settings.selectModelPlaceholder')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem v-for="o in modelOptions(p.id)" :key="o.value" :value="o.value">
-                        {{ o.label }}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    :aria-label="$t('settings.btnRefreshModels')"
-                    :disabled="rowFor(p.id).loadingModels"
-                    @click="refreshModels(p.id)"
-                  >
-                    <RefreshCw :class="rowFor(p.id).loadingModels && 'animate-spin'" />
-                  </Button>
-                </div>
-
-                <p
-                  v-if="isCompatible(p) && rowFor(p.id).discoveryAvailable === false"
-                  class="text-[11px] leading-relaxed text-muted-foreground"
-                >
-                  {{ $t("settings.compatibleDiscoveryUnavailable") }}
-                </p>
-
-                <!-- Backup keys (rotation pool): never shows a full key, only its masked
-                     fingerprint + health. See src/ai/credential-pool.ts. -->
-                <div class="flex flex-col gap-2 rounded-md border border-border/70 bg-background/35 p-2.5">
-                  <div class="flex items-center gap-1.5">
-                    <span class="text-[11px] font-medium text-muted-foreground">
-                      {{ $t("settings.aiKeyPoolTitle") }}
-                    </span>
-                    <InfoHint :text="$t('settings.aiKeyPoolHint')" />
+                    {{ $t("settings.providerSavedDestination", { name: p.label }) }}
                   </div>
 
-                  <div v-if="poolSnapshot(p.id)" class="flex flex-wrap gap-1.5">
-                    <span
-                      v-for="entry in poolSnapshot(p.id)!.entries"
-                      :key="entry.id"
-                      class="inline-flex items-center gap-1 rounded-full border border-border/70 py-0.5 ps-2 pe-1 text-[10.5px] mono text-muted-foreground"
+                  <div class="flex items-center gap-2">
+                    <Select
+                      :model-value="savedModel(p.id) ?? undefined"
+                      :disabled="rowFor(p.id).loadingModels"
+                      @update:model-value="(v) => typeof v === 'string' && onModel(p.id, v)"
                     >
-                      {{ entry.id }}
-                      <Badge :variant="keyStatusVariant(entry.status)" class="px-1.5 py-0 text-[9.5px]">
-                        {{ keyStatusLabel(entry.status) }}
-                      </Badge>
-                    </span>
-                    <span v-if="!poolSnapshot(p.id)!.entries.length" class="text-[11px] text-muted-foreground/70">
-                      {{ $t("settings.aiKeyPoolNoKeys") }}
-                    </span>
-                  </div>
-
-                  <div class="flex flex-col gap-1.5">
-                    <div v-for="(_k, i) in rowsFor(p.id)" :key="i" class="flex items-center gap-1.5">
-                      <Input
-                        v-model="rowsFor(p.id)[i]"
-                        type="password"
-                        class="flex-1 text-[12px]"
-                        autocomplete="off"
-                        spellcheck="false"
-                        :aria-label="$t('settings.aiKeyPoolEntryLabel', { n: i + 1 })"
-                        :placeholder="$t('settings.aiKeyPoolPlaceholder')"
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        class="shrink-0 text-muted-foreground hover:text-destructive"
-                        :aria-label="$t('settings.aiKeyPoolRemove')"
-                        @click="removePoolRow(p.id, i)"
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <Button variant="outline" size="sm" @click="addPoolRow(p.id)">
-                        <Plus />
-                        {{ $t("settings.aiKeyPoolAdd") }}
-                      </Button>
-                      <Button
-                        size="sm"
-                        class="ms-auto"
-                        :disabled="poolSaving[p.id]"
-                        @click="savePoolRows(p.id)"
-                      >
-                        <Save />
-                        {{ $t("settings.aiKeyPoolSave") }}
-                      </Button>
-                    </div>
-                    <p class="text-[11px] leading-relaxed text-muted-foreground">
-                      {{ $t("settings.aiKeyPoolSaveHint") }}
-                    </p>
-                  </div>
-                </div>
-
-                <div class="flex items-center gap-2">
-                  <Button
-                    v-if="settings.defaultProvider !== p.id"
-                    variant="secondary"
-                    size="sm"
-                    @click="makeDefault(p.id)"
-                  >
-                    {{ $t("settings.btnSetDefault") }}
-                  </Button>
-
-                  <div class="ms-auto flex items-center gap-2">
-                    <template v-if="rowFor(p.id).confirmRemove">
-                      <Button variant="destructive" size="sm" @click="remove(p.id)">
-                        <Check />
-                        {{ $t("settings.btnConfirmRemove") }}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        :aria-label="$t('common.cancel')"
-                        @click="rowFor(p.id).confirmRemove = false"
-                      >
-                        <X />
-                      </Button>
-                    </template>
+                      <SelectTrigger class="flex-1" :aria-label="`${p.label} model`">
+                        <SelectValue :placeholder="$t('settings.selectModelPlaceholder')" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem v-for="o in modelOptions(p.id)" :key="o.value" :value="o.value">
+                          {{ o.label }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button
-                      v-else
                       variant="ghost"
                       size="icon-sm"
-                      class="text-muted-foreground hover:text-destructive"
-                      :aria-label="$t('settings.btnRemoveKey')"
-                      @click="rowFor(p.id).confirmRemove = true"
+                      :aria-label="$t('settings.btnRefreshModels')"
+                      :disabled="rowFor(p.id).loadingModels"
+                      @click="refreshModels(p.id)"
                     >
-                      <Trash2 />
+                      <RefreshCw :class="rowFor(p.id).loadingModels && 'animate-spin'" />
                     </Button>
                   </div>
-                </div>
-              </template>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+
+                  <p
+                    v-if="isCompatible(p) && rowFor(p.id).discoveryAvailable === false"
+                    class="text-2xs leading-relaxed text-muted-foreground"
+                  >
+                    {{ $t("settings.compatibleDiscoveryUnavailable") }}
+                  </p>
+
+                  <!-- Backup keys (rotation pool): never shows a full key, only its masked
+                       fingerprint + health. See src/ai/credential-pool.ts. -->
+                  <div class="flex flex-col gap-2 rounded-md border border-border/70 bg-background/35 p-2.5">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-2xs font-medium text-muted-foreground">
+                        {{ $t("settings.aiKeyPoolTitle") }}
+                      </span>
+                      <InfoHint :text="$t('settings.aiKeyPoolHint')" />
+                    </div>
+
+                    <div v-if="poolSnapshot(p.id)" class="flex flex-wrap gap-1.5">
+                      <span
+                        v-for="entry in poolSnapshot(p.id)!.entries"
+                        :key="entry.id"
+                        class="inline-flex items-center gap-1 rounded-full border border-border/70 py-0.5 ps-2 pe-1 text-2xs mono text-muted-foreground"
+                      >
+                        {{ entry.id }}
+                        <Badge :variant="keyStatusVariant(entry.status)">
+                          {{ keyStatusLabel(entry.status) }}
+                        </Badge>
+                      </span>
+                      <span v-if="!poolSnapshot(p.id)!.entries.length" class="text-2xs text-muted-foreground/70">
+                        {{ $t("settings.aiKeyPoolNoKeys") }}
+                      </span>
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                      <div v-for="(_k, i) in rowsFor(p.id)" :key="i" class="flex items-center gap-1.5">
+                        <Input
+                          v-model="rowsFor(p.id)[i]"
+                          type="password"
+                          class="flex-1"
+                          autocomplete="off"
+                          spellcheck="false"
+                          :aria-label="$t('settings.aiKeyPoolEntryLabel', { n: i + 1 })"
+                          :placeholder="$t('settings.aiKeyPoolPlaceholder')"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          class="shrink-0"
+                          :aria-label="$t('settings.aiKeyPoolRemove')"
+                          @click="removePoolRow(p.id, i)"
+                        >
+                          <Trash2 class="text-muted-foreground group-hover/button:text-destructive" />
+                        </Button>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <Button variant="outline" size="sm" @click="addPoolRow(p.id)">
+                          <Plus />
+                          {{ $t("settings.aiKeyPoolAdd") }}
+                        </Button>
+                        <Button
+                          size="sm"
+                          class="ms-auto"
+                          :disabled="poolSaving[p.id]"
+                          @click="savePoolRows(p.id)"
+                        >
+                          <Save />
+                          {{ $t("settings.aiKeyPoolSave") }}
+                        </Button>
+                      </div>
+                      <p class="text-2xs leading-relaxed text-muted-foreground">
+                        {{ $t("settings.aiKeyPoolSaveHint") }}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <Button
+                      v-if="settings.defaultProvider !== p.id"
+                      variant="secondary"
+                      size="sm"
+                      @click="makeDefault(p.id)"
+                    >
+                      {{ $t("settings.btnSetDefault") }}
+                    </Button>
+
+                    <div class="ms-auto flex items-center gap-2">
+                      <template v-if="rowFor(p.id).confirmRemove">
+                        <Button variant="destructive" size="sm" @click="remove(p.id)">
+                          <Check />
+                          {{ $t("settings.btnConfirmRemove") }}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          :aria-label="$t('common.cancel')"
+                          @click="rowFor(p.id).confirmRemove = false"
+                        >
+                          <X />
+                        </Button>
+                      </template>
+                      <Button
+                        v-else
+                        variant="ghost"
+                        size="icon-sm"
+                        :aria-label="$t('settings.btnRemoveKey')"
+                        @click="rowFor(p.id).confirmRemove = true"
+                      >
+                        <!-- the destructive hint colours the icon (content), not the kit Button -->
+                        <Trash2 class="text-muted-foreground group-hover/button:text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
       </div>
 
       <!-- Add provider: a picker over everything in the catalogue you haven't connected. Picking
@@ -762,10 +759,10 @@ async function onDiffDetail(detail: string): Promise<void> {
           <DropdownMenuLabel>{{ $t("settings.addProviderLabel") }}</DropdownMenuLabel>
           <DropdownMenuItem v-for="p in addableProviders" :key="p.id" @select="beginAdd(p.id)">
             <span class="min-w-0 flex-1 truncate">{{ p.label }}</span>
-            <Badge v-if="p.suggested" variant="info" class="shrink-0 px-1.5 py-0 text-[10px]">
+            <Badge v-if="p.suggested" variant="info" class="shrink-0">
               {{ $t("settings.badgeSuggested") }}
             </Badge>
-            <Badge v-else-if="p.free" variant="success" class="shrink-0 px-1.5 py-0 text-[10px]">
+            <Badge v-else-if="p.free" variant="success" class="shrink-0">
               {{ $t("settings.badgeFreeTier") }}
             </Badge>
           </DropdownMenuItem>

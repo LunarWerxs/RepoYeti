@@ -94,7 +94,7 @@ async function onDesktopNotify(on: boolean): Promise<void> {
           </template>
         </SettingsRow>
         <div class="flex flex-col gap-1.5 px-3.5 py-3">
-          <span class="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
             {{ $t("settings.syncInterval") }}
             <InfoHint :text="$t('settings.syncIntervalHint')" />
           </span>
@@ -121,7 +121,7 @@ async function onDesktopNotify(on: boolean): Promise<void> {
         />
       </template>
     </SettingsRow>
-    <p v-if="store.notifyPermission === 'denied'" class="px-3.5 pb-3 text-[11px] text-warning">
+    <p v-if="store.notifyPermission === 'denied'" class="px-3.5 pb-3 text-2xs text-warning">
       {{ $t("settings.desktopNotifyBlocked") }}
     </p>
   </SettingsGroup>

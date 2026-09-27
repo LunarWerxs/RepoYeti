@@ -14,6 +14,7 @@ import {
   AUTO_UPDATE_MAX_OPS_DEFERRALS,
   setAutoUpdateCooldownDays,
 } from "../src/auto-update.ts";
+import type { UpdateApplyResult, UpdateStatus } from "../src/updater.ts";
 
 // The auto-update orchestrator's decision logic, driven through injected hooks so nothing actually
 // pulls git / spawns / exits.
@@ -34,8 +35,7 @@ afterEach(() => {
 });
 
 // A full UpdateStatus with sensible defaults; overrides tweak the fields under test.
-// biome-ignore lint/suspicious/noExplicitAny: loose fixture shape so overrides can merge freely
-function status(over: Record<string, unknown>): any {
+function status(over: Partial<UpdateStatus>): UpdateStatus {
   return {
     ok: true,
     service: "repoyeti",
@@ -53,8 +53,7 @@ function status(over: Record<string, unknown>): any {
     ...over,
   };
 }
-// biome-ignore lint/suspicious/noExplicitAny: loose fixture shape so overrides can merge freely
-function applyResult(over: Record<string, unknown>): any {
+function applyResult(over: Partial<UpdateApplyResult>): UpdateApplyResult {
   return { ok: true, message: "updated", restartRequired: true, status: status({}), output: [], ...over };
 }
 

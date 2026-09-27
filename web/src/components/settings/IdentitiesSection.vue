@@ -47,7 +47,7 @@ watch(
     <div class="flex items-center justify-between gap-3 px-3.5 py-3">
       <div class="flex min-w-0 items-center gap-2.5">
         <UserCog :size="16" class="shrink-0 text-muted-foreground" />
-        <p class="text-[13px] font-medium text-foreground">{{ $t("identity.optIn.title") }}</p>
+        <p class="text-ui font-medium text-foreground">{{ $t("identity.optIn.title") }}</p>
       </div>
       <Button variant="outline" size="sm" class="shrink-0" @click="store.setIdentityUiForced(true)">
         {{ $t("identity.optIn.action") }}

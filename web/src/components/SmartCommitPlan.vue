@@ -34,6 +34,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -460,44 +461,54 @@ async function execute(sync: boolean): Promise<void> {
 
 <template>
   <Dialog v-model:open="isOpen">
-    <DialogContent class="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-2xl">
+    <DialogContent flush class="flex max-h-[85vh] flex-col sm:max-w-2xl">
       <!-- The subtitle is sr-only rather than deleted: reka-ui wires DialogDescription to the
            dialog's aria-describedby, so screen readers still get the framing the sighted header
            doesn't need to spell out. `mr-5` keeps the style picker clear of the close X, which
            DialogContent pins at top-2 right-2. -->
-      <DialogHeader class="border-b border-border px-5 py-3.5">
-        <div class="flex items-center justify-between gap-3">
-          <DialogTitle class="flex items-center gap-2">
-            <Sparkles :size="18" class="text-primary" />
-            {{ $t("repo.smartCommit.title") }}
-          </DialogTitle>
-          <DropdownMenu v-if="!store.isGuest">
-            <DropdownMenuTrigger as-child>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="me-5 h-7 gap-1.5 px-2 font-normal text-muted-foreground hover:text-foreground"
-                :disabled="loading || committing"
-                :aria-label="$t('settings.aiStyle')"
-                :title="$t('settings.aiStyle')"
-              >
-                <Pencil :size="13" />
-                <span>{{ styleLabel }}</span>
-                <ChevronDown :size="13" class="opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="max-w-52">
-              <DropdownMenuLabel>{{ $t("settings.aiStyle") }}</DropdownMenuLabel>
-              <DropdownMenuRadioGroup :model-value="style" @update:model-value="onStyle">
-                <DropdownMenuRadioItem value="conventional">{{ $t("settings.aiStyleConventional") }}</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="concise">{{ $t("settings.aiStyleConcise") }}</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="detailed">{{ $t("settings.aiStyleDetailed") }}</DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <DialogDescription class="sr-only">{{ $t("repo.smartCommit.subtitle", { name: repoName }) }}</DialogDescription>
-      </DialogHeader>
+      <!-- The header's divider and padding sit on a plain wrapper: DialogHeader owns its own
+           spacing, so the band around it is drawn here instead. The trigger's muted, regular-weight
+           label lives on an inner span for the same reason; the group-* variants keep it lighting up
+           on hover and while the menu is open, as the ghost button's own text does. -->
+      <div class="border-b border-border px-5 py-3.5">
+        <DialogHeader>
+          <div class="flex items-center justify-between gap-3">
+            <DialogTitle>
+              <span class="flex items-center gap-2">
+                <Sparkles :size="18" class="text-primary" />
+                {{ $t("repo.smartCommit.title") }}
+              </span>
+            </DialogTitle>
+            <DropdownMenu v-if="!store.isGuest">
+              <DropdownMenuTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="me-5 h-7"
+                  :disabled="loading || committing"
+                  :aria-label="$t('settings.aiStyle')"
+                  :title="$t('settings.aiStyle')"
+                >
+                  <span class="inline-flex items-center gap-1.5 font-normal text-muted-foreground group-hover/button:text-foreground group-aria-expanded/button:text-foreground">
+                    <Pencil :size="13" />
+                    <span>{{ styleLabel }}</span>
+                    <ChevronDown :size="13" class="opacity-60" />
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" class="max-w-52">
+                <DropdownMenuLabel>{{ $t("settings.aiStyle") }}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup :model-value="style" @update:model-value="onStyle">
+                  <DropdownMenuRadioItem value="conventional">{{ $t("settings.aiStyleConventional") }}</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="concise">{{ $t("settings.aiStyleConcise") }}</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="detailed">{{ $t("settings.aiStyleDetailed") }}</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <DialogDescription class="sr-only">{{ $t("repo.smartCommit.subtitle", { name: repoName }) }}</DialogDescription>
+        </DialogHeader>
+      </div>
 
       <!-- scrolling body -->
       <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -511,7 +522,7 @@ async function execute(sync: boolean): Promise<void> {
         <div v-else-if="error" class="flex flex-col items-center gap-3 py-10 text-center">
           <AlertTriangle :size="24" class="text-warning" />
           <p class="text-sm font-medium">{{ $t("repo.smartCommit.failed") }}</p>
-          <p class="text-[12.5px] text-muted-foreground">{{ error }}</p>
+          <p class="text-ui text-muted-foreground">{{ error }}</p>
           <Button variant="secondary" size="sm" @click="generate">
             <RefreshCw :size="15" />
             <span>{{ $t("repo.smartCommit.button") }}</span>
@@ -522,19 +533,19 @@ async function execute(sync: boolean): Promise<void> {
           <!-- banners -->
           <div
             v-if="degraded"
-            class="mb-3 flex items-start gap-2 rounded-md border border-warning/25 bg-warning/10 px-3 py-2 text-[12.5px] text-warning"
+            class="mb-3 flex items-start gap-2 rounded-md border border-warning/25 bg-warning/10 px-3 py-2 text-ui text-warning"
           >
             <AlertTriangle :size="15" class="mt-0.5 shrink-0" />
             <div class="min-w-0">
               <span>{{ degradedTitle }}</span>
               <!-- The provider's own words. For a rate limit this is the whole answer — it names
                    the limit that tripped and when it resets — so show it rather than paraphrase. -->
-              <p v-if="degradedMessage" class="mt-1 break-words text-[11.5px] opacity-80">{{ degradedMessage }}</p>
+              <p v-if="degradedMessage" class="mt-1 wrap-break-word text-xs opacity-80">{{ degradedMessage }}</p>
             </div>
           </div>
           <div
             v-if="truncated"
-            class="mb-3 flex items-start gap-2 rounded-md border border-info/25 bg-info/10 px-3 py-2 text-[12.5px] text-info"
+            class="mb-3 flex items-start gap-2 rounded-md border border-info/25 bg-info/10 px-3 py-2 text-ui text-info"
           >
             <AlertTriangle :size="15" class="mt-0.5 shrink-0" />
             <span>{{ $t("repo.smartCommit.truncated") }}</span>
@@ -542,12 +553,12 @@ async function execute(sync: boolean): Promise<void> {
           <div
             v-for="f in liveFixups"
             :key="f.hash"
-            class="mb-3 flex items-start gap-2 rounded-md border border-info/25 bg-info/10 px-3 py-2 text-[12.5px] text-info"
+            class="mb-3 flex items-start gap-2 rounded-md border border-info/25 bg-info/10 px-3 py-2 text-ui text-info"
           >
             <GitCommitHorizontal :size="15" class="mt-0.5 shrink-0" />
             <div class="min-w-0 flex-1">
               <span>{{ $t("repo.smartCommit.fixupFound", { count: f.files.length, hash: f.shortHash, subject: f.subject }, f.files.length) }}</span>
-              <p class="mt-1 break-words text-[11.5px] opacity-80">{{ $t("repo.smartCommit.fixupHint") }}</p>
+              <p class="mt-1 wrap-break-word text-xs opacity-80">{{ $t("repo.smartCommit.fixupHint") }}</p>
             </div>
             <Button variant="secondary" size="sm" class="shrink-0" @click="applyFixup(f)">
               {{ $t("repo.smartCommit.fixupApply") }}
@@ -596,67 +607,67 @@ async function execute(sync: boolean): Promise<void> {
       </div>
 
       <!-- footer -->
-      <DialogFooter class="flex-col gap-2 border-t border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex items-center gap-3 text-[12px] text-muted-foreground">
-          <span v-if="!loading && !error">{{ $t("repo.smartCommit.summary", { commits: groups.length, files: totalFiles }) }}</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <span class="inline-flex">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  :disabled="loading || committing"
-                  :aria-label="$t('repo.smartCommit.regeneratePlan')"
-                  @click="requestRegenerate"
-                >
-                  <RefreshCw :size="15" :class="cn(loading && 'animate-spin')" />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{{ $t("repo.smartCommit.regeneratePlan") }}</TooltipContent>
-          </Tooltip>
-          <!-- Split "Commit all ▾" — mirrors the Commit/Auto split buttons on the repo card: the
-               main half runs the default mode, the chevron picks the other. With no remote there's
-               nothing to sync to, so it collapses to a plain button. -->
-          <div class="flex">
-            <Button
-              size="sm"
-              :class="cn(hasRemote && 'rounded-e-none')"
-              :disabled="!canCommit"
-              @click="execute(primarySync)"
-            >
-              <Loader2 v-if="committing" :size="15" class="animate-spin" />
-              <RefreshCw v-else-if="primarySync" :size="15" />
-              <GitCommitHorizontal v-else :size="15" />
-              <span>{{ primarySync ? $t("repo.smartCommit.commitSync") : $t("repo.smartCommit.commitAll") }}</span>
-            </Button>
-            <DropdownMenu v-if="hasRemote">
-              <DropdownMenuTrigger as-child>
-                <Button
-                  size="sm"
-                  class="rounded-s-none border-s border-s-black/15 px-1.5 dark:border-s-white/20"
-                  :disabled="!canCommit"
-                  :aria-label="$t('repo.commit.menuLabel')"
-                >
-                  <ChevronDown :size="16" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" class="max-w-52">
-                <DropdownMenuItem @select="execute(false)">
-                  <GitCommitHorizontal :size="15" />
-                  <span>{{ $t("repo.smartCommit.commitAll") }}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem @select="execute(true)">
-                  <RefreshCw :size="15" />
-                  <span>{{ $t("repo.smartCommit.commitSync") }}</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+      <div class="border-t border-border px-5 py-3">
+        <DialogFooter class="flex-col sm:items-center sm:justify-between">
+          <div class="flex items-center gap-3 text-xs text-muted-foreground">
+            <span v-if="!loading && !error">{{ $t("repo.smartCommit.summary", { commits: groups.length, files: totalFiles }) }}</span>
           </div>
-        </div>
-      </DialogFooter>
+          <div class="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <span class="inline-flex">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    :disabled="loading || committing"
+                    :aria-label="$t('repo.smartCommit.regeneratePlan')"
+                    @click="requestRegenerate"
+                  >
+                    <RefreshCw :size="15" :class="cn(loading && 'animate-spin')" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{{ $t("repo.smartCommit.regeneratePlan") }}</TooltipContent>
+            </Tooltip>
+            <!-- Split "Commit all ▾" — mirrors the Commit/Auto split buttons on the repo card: the
+                 main half runs the default mode, the chevron picks the other. With no remote there's
+                 nothing to sync to, so it collapses to a plain button. -->
+            <ButtonGroup divider="shade">
+              <Button
+                size="sm"
+                :disabled="!canCommit"
+                @click="execute(primarySync)"
+              >
+                <Loader2 v-if="committing" :size="15" class="animate-spin" />
+                <RefreshCw v-else-if="primarySync" :size="15" />
+                <GitCommitHorizontal v-else :size="15" />
+                <span>{{ primarySync ? $t("repo.smartCommit.commitSync") : $t("repo.smartCommit.commitAll") }}</span>
+              </Button>
+              <DropdownMenu v-if="hasRemote">
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    size="icon-sm"
+                    :disabled="!canCommit"
+                    :aria-label="$t('repo.commit.menuLabel')"
+                  >
+                    <ChevronDown :size="16" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="max-w-52">
+                  <DropdownMenuItem @select="execute(false)">
+                    <GitCommitHorizontal :size="15" />
+                    <span>{{ $t("repo.smartCommit.commitAll") }}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem @select="execute(true)">
+                    <RefreshCw :size="15" />
+                    <span>{{ $t("repo.smartCommit.commitSync") }}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </ButtonGroup>
+          </div>
+        </DialogFooter>
+      </div>
     </DialogContent>
   </Dialog>
 
@@ -669,7 +680,7 @@ async function execute(sync: boolean): Promise<void> {
         <DialogTitle>{{ $t("repo.smartCommit.redraftTitle") }}</DialogTitle>
         <DialogDescription>{{ $t("repo.smartCommit.redraftBody") }}</DialogDescription>
       </DialogHeader>
-      <DialogFooter class="gap-2 sm:gap-2">
+      <DialogFooter>
         <Button variant="secondary" @click="confirmRedraftCancel">
           {{ $t("repo.smartCommit.redraftKeep") }}
         </Button>

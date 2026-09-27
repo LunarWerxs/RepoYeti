@@ -55,8 +55,8 @@ function onMobileOpenChange(open: boolean): void {
     >
       <aside
         v-if="isDesktopViewer && fileViewer.open"
-        class="fixed inset-y-0 right-0 z-40 flex border-s border-border bg-card shadow-2xl shadow-black/40"
-        :style="{ width: `${viewerWidth}px` }"
+        class="fixed inset-y-0 right-0 z-40 flex border-s border-border bg-card shadow-2xl shadow-black/40 w-(--viewer-w)"
+        :style="{ '--viewer-w': `${viewerWidth}px` }"
       >
         <!-- resize grip (left edge) -->
         <button
@@ -83,7 +83,7 @@ function onMobileOpenChange(open: boolean): void {
        of FileViewerInner's in-flow one (`show-close`), so it doesn't float on top of the
        split/unified toggle at the end of the header row. -->
   <Sheet v-if="!isDesktopViewer" :open="fileViewer.open" @update:open="onMobileOpenChange">
-    <SheetContent side="bottom" :show-close-button="false" class="data-[side=bottom]:h-[85vh] gap-0 p-0">
+    <SheetContent side="bottom" :show-close-button="false" class="data-[side=bottom]:h-[85vh]">
       <FileViewerInner :target="fileViewer.target" :show-close="true" class="h-full" @close="closeFile" />
     </SheetContent>
   </Sheet>

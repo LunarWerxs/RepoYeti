@@ -80,34 +80,34 @@ onBeforeUnmount(() => {
     <div v-for="path in files" :key="path" class="min-w-0">
       <!-- file header: status letter + path -->
       <div class="flex items-center gap-2 bg-card/60 px-2.5 py-1.5">
-        <span class="mono shrink-0 text-[11px] font-bold" :style="{ color: statusColor(statusByPath[path]) }">
+        <span class="mono shrink-0 text-2xs font-bold text-(--status-color)" :style="{ '--status-color': statusColor(statusByPath[path]) }">
           {{ statusByPath[path] ?? "·" }}
         </span>
-        <span class="mono min-w-0 flex-1 truncate text-[11.5px] text-foreground" :title="path">{{ path }}</span>
+        <span class="mono min-w-0 flex-1 truncate text-xs text-foreground" :title="path">{{ path }}</span>
       </div>
 
       <!-- body: loading · error · binary · too-large · the diff rows -->
-      <div v-if="!states[path] || states[path].phase === 'loading'" class="flex items-center gap-2 px-3 py-2 text-[11.5px] text-muted-foreground">
+      <div v-if="!states[path] || states[path].phase === 'loading'" class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
         <Loader2 :size="14" class="animate-spin" />
       </div>
-      <div v-else-if="states[path].phase === 'error'" class="flex items-center gap-2 px-3 py-2 text-[11.5px] text-muted-foreground">
+      <div v-else-if="states[path].phase === 'error'" class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
         <FileWarning :size="14" class="shrink-0 text-destructive" />
         <span class="mono truncate">{{ states[path].error }}</span>
       </div>
-      <div v-else-if="states[path].rendered?.binary" class="flex items-center gap-2 px-3 py-2 text-[11.5px] text-muted-foreground">
+      <div v-else-if="states[path].rendered?.binary" class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
         <FileWarning :size="14" class="shrink-0" />
         <span>{{ $t("fileViewer.binary") }}</span>
       </div>
-      <div v-else-if="states[path].rendered?.tooLarge" class="flex items-center gap-2 px-3 py-2 text-[11.5px] text-muted-foreground">
+      <div v-else-if="states[path].rendered?.tooLarge" class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
         <FileWarning :size="14" class="shrink-0" />
         <span>{{ $t("repo.smartCommit.diffTooLarge") }}</span>
       </div>
       <div v-else class="overflow-x-auto">
-        <div class="mono w-max min-w-full text-[11px] leading-[1.5]">
+        <div class="mono w-max min-w-full text-2xs leading-normal">
           <template v-for="(row, ri) in states[path].rendered?.rows ?? []" :key="ri">
             <div
               v-if="row.kind === 'meta'"
-              class="bg-secondary/30 px-2.5 py-0.5 text-[10.5px] text-muted-foreground select-none"
+              class="bg-secondary/30 px-2.5 py-0.5 text-2xs text-muted-foreground select-none"
             >
               {{ row.collapsed ? $t("repo.smartCommit.elided", { n: row.collapsed }) : row.text }}
             </div>

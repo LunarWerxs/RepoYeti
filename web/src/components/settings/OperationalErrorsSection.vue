@@ -54,10 +54,10 @@ async function dismiss(fingerprint: string): Promise<void> {
 <template>
   <SettingsGroup :label="$t('settings.cardOperationalErrors')" :description="$t('settings.operationalErrorsDescription')">
     <div class="flex flex-col gap-2 px-3.5 py-3">
-      <p v-if="!store.operationalErrorsReady" class="text-[12px] text-muted-foreground/70">
+      <p v-if="!store.operationalErrorsReady" class="text-xs text-muted-foreground/70">
         {{ $t("settings.operationalErrorsLoading") }}
       </p>
-      <p v-else-if="!sortedErrors.length" class="text-[12px] text-muted-foreground/70">
+      <p v-else-if="!sortedErrors.length" class="text-xs text-muted-foreground/70">
         {{ $t("settings.operationalErrorsEmpty") }}
       </p>
       <div v-else class="flex flex-col gap-1.5">
@@ -70,15 +70,15 @@ async function dismiss(fingerprint: string): Promise<void> {
           <CircleAlert :size="14" class="mt-0.5 shrink-0" :class="err.muted ? 'text-muted-foreground' : 'text-destructive'" />
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5">
-              <p class="truncate text-[12.5px] font-medium">{{ err.repoName }}</p>
-              <Badge variant="outline" class="px-1.5 py-0 text-[10px] mono">{{ err.op }}</Badge>
-              <Badge variant="outline" class="px-1.5 py-0 text-[10px] mono">{{ err.code }}</Badge>
-              <Badge v-if="err.occurrences > 1" variant="warning" class="px-1.5 py-0 text-[10px]">
+              <p class="truncate text-ui font-medium">{{ err.repoName }}</p>
+              <Badge variant="outline"><span class="mono">{{ err.op }}</span></Badge>
+              <Badge variant="outline"><span class="mono">{{ err.code }}</span></Badge>
+              <Badge v-if="err.occurrences > 1" variant="warning">
                 {{ $t("settings.operationalErrorOccurrences", { n: err.occurrences }, err.occurrences) }}
               </Badge>
             </div>
-            <p class="mt-0.5 truncate text-[11.5px] text-muted-foreground" :title="err.message">{{ err.message }}</p>
-            <p class="text-[11px] text-muted-foreground/70">{{ fromNow(err.lastSeenAt) }}</p>
+            <p class="mt-0.5 truncate text-xs text-muted-foreground" :title="err.message">{{ err.message }}</p>
+            <p class="text-2xs text-muted-foreground/70">{{ fromNow(err.lastSeenAt) }}</p>
           </div>
           <div class="flex shrink-0 items-center gap-1">
             <Button
@@ -94,12 +94,11 @@ async function dismiss(fingerprint: string): Promise<void> {
             <Button
               variant="ghost"
               size="icon-sm"
-              class="text-muted-foreground hover:text-destructive"
               :aria-label="$t('settings.operationalErrorDismiss')"
               :title="$t('settings.operationalErrorDismiss')"
               @click="dismiss(err.fingerprint)"
             >
-              <Trash2 />
+              <Trash2 class="text-muted-foreground group-hover/button:text-destructive" />
             </Button>
           </div>
         </div>

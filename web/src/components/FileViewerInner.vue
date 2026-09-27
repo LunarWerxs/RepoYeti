@@ -70,7 +70,7 @@ const Spinner = (): ReturnType<typeof h> =>
 const EditorFailed = (): ReturnType<typeof h> =>
   h(
     "div",
-    { class: "flex h-full items-center justify-center p-6 text-center text-[13px] text-muted-foreground" },
+    { class: "flex h-full items-center justify-center p-6 text-center text-ui text-muted-foreground" },
     t("fileViewer.editorFailed"),
   );
 const MonacoViewer = defineAsyncComponent({
@@ -529,14 +529,14 @@ onBeforeUnmount(() => {
   <div class="flex h-full min-h-0 flex-col bg-card">
     <!-- header -->
     <div class="flex items-center gap-2.5 border-b border-border/60 px-3 py-2.5 sm:px-4">
-      <component :is="icon" class="shrink-0 text-[17px]" />
+      <component :is="icon" class="shrink-0 text-lg" />
       <div class="flex min-w-0 flex-1 flex-col">
         <div class="flex items-center gap-2">
-          <span class="truncate text-[14px] font-semibold text-foreground">{{ fileName }}</span>
+          <span class="truncate text-sm font-semibold text-foreground">{{ fileName }}</span>
           <span
             v-if="target?.status"
-            class="mono shrink-0 text-[11px] font-bold"
-            :style="{ color: statusColor }"
+            class="mono shrink-0 text-2xs font-bold text-(--status-color)"
+            :style="{ '--status-color': statusColor }"
             >{{ target.status }}</span
           >
           <span
@@ -545,7 +545,7 @@ onBeforeUnmount(() => {
             :title="$t('fileViewer.unsaved')"
           />
         </div>
-        <div class="mono truncate text-[11px] text-muted-foreground" :title="target?.path">
+        <div class="mono truncate text-2xs text-muted-foreground" :title="target?.path">
           {{ dirName ? `${repoName} · ${dirName}` : repoName
           }}<span v-if="target?.commit" class="text-primary"> · @{{ target.commit.slice(0, 7) }}</span>
         </div>
@@ -553,7 +553,7 @@ onBeforeUnmount(() => {
       <!-- Content ↔ Diff toggle -->
       <div
         v-if="!binaryPreview"
-        class="flex shrink-0 items-center rounded-md border border-border bg-secondary/40 p-0.5 text-[12px] font-medium"
+        class="flex shrink-0 items-center rounded-md border border-border bg-secondary/40 p-0.5 text-xs font-medium"
       >
         <button
           type="button"
@@ -589,7 +589,7 @@ onBeforeUnmount(() => {
       <template v-if="showEditControls && editing">
         <button
           type="button"
-          class="flex h-[26px] shrink-0 items-center rounded-md border border-border bg-secondary/40 px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          class="flex h-6.5 shrink-0 items-center rounded-md border border-border bg-secondary/40 px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
           @click="cancelEdit"
         >
           {{ $t("fileViewer.cancel") }}
@@ -600,7 +600,7 @@ onBeforeUnmount(() => {
           :title="editBlockedReason ?? undefined"
           :class="
             cn(
-              'flex h-[26px] shrink-0 items-center gap-1 rounded-md border px-2 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40',
+              'flex h-6.5 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40',
               'border-primary/40 bg-primary/15 text-foreground hover:bg-primary/25',
               'disabled:cursor-not-allowed disabled:opacity-40',
             )
@@ -689,7 +689,7 @@ onBeforeUnmount(() => {
                     <ExternalLink :size="14" />
                     {{ $t("fileViewer.openWith") }}
                   </DropdownMenuItem>
-                  <DropdownMenuItem v-for="e in openableEditors" :key="e.id" class="ps-7" @select="openWith(e.id)">
+                  <DropdownMenuItem v-for="e in openableEditors" :key="e.id" inset @select="openWith(e.id)">
                     <span class="truncate">{{ e.label }}</span>
                     <Check v-if="e.id === store.effectiveEditor" :size="14" class="ms-auto text-primary" />
                   </DropdownMenuItem>
@@ -729,8 +729,8 @@ onBeforeUnmount(() => {
         class="flex h-full flex-col items-center justify-center gap-2 p-6 text-center"
       >
         <FileWarning :size="22" class="text-destructive" />
-        <div class="text-[13px] font-medium text-foreground">{{ $t("fileViewer.error") }}</div>
-        <div class="mono max-w-sm text-[11.5px] break-words text-muted-foreground">{{ errorMsg }}</div>
+        <div class="text-ui font-medium text-foreground">{{ $t("fileViewer.error") }}</div>
+        <div class="mono max-w-sm text-xs wrap-break-word text-muted-foreground">{{ errorMsg }}</div>
       </div>
 
       <div
@@ -759,12 +759,12 @@ onBeforeUnmount(() => {
         <Loader2
           v-if="previewLoading"
           :size="20"
-          class="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+          class="absolute left-1/2 top-1/2 z-10 -translate-1/2 animate-spin text-muted-foreground"
         />
         <iframe
           :src="previewSrc"
           :title="fileName"
-          class="h-full w-full border-0"
+          class="size-full border-0"
           sandbox=""
           @load="previewLoading = false"
           @error="previewFailed = true"
@@ -816,7 +816,7 @@ onBeforeUnmount(() => {
         class="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground"
       >
         <FileWarning :size="22" />
-        <div class="text-[13px]">{{ $t("fileViewer.previewUnavailable") }}</div>
+        <div class="text-ui">{{ $t("fileViewer.previewUnavailable") }}</div>
       </div>
 
       <div
@@ -824,13 +824,13 @@ onBeforeUnmount(() => {
         class="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground"
       >
         <FileWarning :size="22" />
-        <div class="text-[13px]">{{ $t("fileViewer.binary") }}</div>
+        <div class="text-ui">{{ $t("fileViewer.binary") }}</div>
       </div>
 
       <div v-else class="flex h-full min-h-0 flex-col">
         <div
           v-if="patchMode || fromHead || truncated"
-          class="shrink-0 border-b border-border/60 bg-secondary/40 px-3 py-1.5 text-[11.5px] text-muted-foreground sm:px-4"
+          class="shrink-0 border-b border-border/60 bg-secondary/40 px-3 py-1.5 text-xs text-muted-foreground sm:px-4"
         >
           <!-- The notice now carries its own way out. Reading "this is a compact diff" and having
                no idea how to get the full one is the whole complaint this fixes. -->
@@ -839,7 +839,7 @@ onBeforeUnmount(() => {
             <button
               v-if="!store.isGuest"
               type="button"
-              class="inline-flex items-center gap-1 rounded text-[11.5px] font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+              class="inline-flex items-center gap-1 rounded text-xs font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
               @click="setAlwaysSideBySide(true)"
             >
               <Columns2 :size="11" />

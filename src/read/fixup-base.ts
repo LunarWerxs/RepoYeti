@@ -29,7 +29,7 @@
  */
 import { gitFor } from "../git.ts";
 import { readGate } from "../gitgate.ts";
-import { parseNumstatZ, splitZ } from "./git-records.ts";
+import { parseNumstatZ, splitZ, type NumstatRecord } from "./git-records.ts";
 
 /** Most files examined per call (one diff + one blame spawn each). Past this, `truncated`. */
 export const MAX_FIXUP_FILES = 100;
@@ -296,6 +296,87 @@ async function examineFile(
   }
 }
 
+/** HEAD's full hash, or "" on an unborn branch. */
+async function readHead(git: Git): Promise<string> {
+  // No `-q`: simple-git only rejects a failing command that wrote to stderr, so a quiet
+  // failure would read as success. The empty-output check covers the same case twice over.
+  try {
+    return (await git.raw(["rev-parse", "--verify", "HEAD"])).trim();
+  } catch {
+    return "";
+  }
+}
+
+/** The changed tracked files and the untracked ones, scoped to `onlyPaths` when it is non-empty. */
+async function readChangedFiles(
+  git: Git,
+  onlyPaths: readonly string[] | undefined,
+): Promise<{ changed: NumstatRecord[]; untracked: string[] }> {
+  const pathspec = onlyPaths?.length ? ["--", ...onlyPaths.map((p) => `:(literal)${p}`)] : [];
+  const changed = parseNumstatZ(
+    splitZ(await git.raw(["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD", ...pathspec])),
+  );
+  // Untracked files are invisible to `diff HEAD`, yet a whole-tree commit (`git add -A`) sweeps
+  // them in: count each as an unresolved new file so `single` can never hide one.
+  const untracked = splitZ(await git.raw(["ls-files", "--others", "--exclude-standard", "-z", ...pathspec]));
+  return { changed, untracked };
+}
+
+/** Why a changed file is skipped without reading its diff, or null when it is worth blaming. */
+function skipReason(rec: NumstatRecord): FixupUnresolvedReason | null {
+  if (rec.binary) return "binary";
+  if (rec.added + rec.removed > MAX_FIXUP_FILE_LINES) return "too-large";
+  return null;
+}
+
+/** Examine the first MAX_FIXUP_FILES changed files in order; every untracked one is a new file. */
+async function examineChangedFiles(
+  git: Git,
+  changed: readonly NumstatRecord[],
+  untracked: readonly string[],
+): Promise<{ blamed: BlamedFile[]; skipped: FixupUnresolved[] }> {
+  const blamed: BlamedFile[] = [];
+  const skipped: FixupUnresolved[] = untracked
+    .slice(0, MAX_FIXUP_FILES)
+    .map((path): FixupUnresolved => ({ path, reason: "new-file" }));
+  for (const rec of changed.slice(0, MAX_FIXUP_FILES)) {
+    const reason = skipReason(rec);
+    if (reason) {
+      skipped.push({ path: rec.path, reason });
+      continue;
+    }
+    const r = await examineFile(git, rec.path);
+    if ("blamed" in r) blamed.push(r.blamed);
+    else skipped.push(r.unresolved);
+  }
+  return { blamed, skipped };
+}
+
+/** The whole answer for one repository, run inside the read gate. */
+async function readFixupBasesGated(absPath: string, onlyPaths?: readonly string[]): Promise<FixupBaseResult> {
+  const git = gitFor(absPath);
+  const head = await readHead(git);
+  if (!head) return emptyFixupResult("OK", "no commits yet");
+  const unpushed = await readUnpushed(git);
+  if (unpushed.size === 0) return emptyFixupResult("OK", "no unpushed commits");
+
+  const { changed, untracked } = await readChangedFiles(git, onlyPaths);
+  const truncated = changed.length > MAX_FIXUP_FILES || untracked.length > MAX_FIXUP_FILES;
+  const { blamed, skipped } = await examineChangedFiles(git, changed, untracked);
+
+  const { targets, unresolved } = resolveFixupTargets(blamed, unpushed);
+  const allUnresolved = [...skipped, ...unresolved];
+  return {
+    ok: true,
+    code: "OK" as const,
+    unpushed: unpushed.size,
+    targets,
+    single: targets.length === 1 && allUnresolved.length === 0 && !truncated ? targets[0]! : null,
+    unresolved: allUnresolved,
+    truncated,
+  };
+}
+
 /**
  * Find, per changed tracked file, the one unpushed commit it fixes. `onlyPaths` scopes the check
  * to a subset (Smart Commit's checked selection); absent or empty means every changed file.
@@ -303,59 +384,7 @@ async function examineFile(
  */
 export async function readFixupBases(absPath: string, onlyPaths?: readonly string[]): Promise<FixupBaseResult> {
   try {
-    return await readGate.run(async () => {
-      const git = gitFor(absPath);
-      // No `-q`: simple-git only rejects a failing command that wrote to stderr, so a quiet
-      // failure would read as success. The empty-output check covers the same case twice over.
-      let head = "";
-      try {
-        head = (await git.raw(["rev-parse", "--verify", "HEAD"])).trim();
-      } catch {
-        head = "";
-      }
-      if (!head) return emptyFixupResult("OK", "no commits yet");
-      const unpushed = await readUnpushed(git);
-      if (unpushed.size === 0) return emptyFixupResult("OK", "no unpushed commits");
-
-      const pathspec = onlyPaths?.length ? ["--", ...onlyPaths.map((p) => `:(literal)${p}`)] : [];
-      const changed = parseNumstatZ(
-        splitZ(await git.raw(["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD", ...pathspec])),
-      );
-      // Untracked files are invisible to `diff HEAD`, yet a whole-tree commit (`git add -A`) sweeps
-      // them in: count each as an unresolved new file so `single` can never hide one.
-      const untracked = splitZ(await git.raw(["ls-files", "--others", "--exclude-standard", "-z", ...pathspec]));
-      const truncated = changed.length > MAX_FIXUP_FILES || untracked.length > MAX_FIXUP_FILES;
-
-      const blamed: BlamedFile[] = [];
-      const skipped: FixupUnresolved[] = untracked
-        .slice(0, MAX_FIXUP_FILES)
-        .map((path): FixupUnresolved => ({ path, reason: "new-file" }));
-      for (const rec of changed.slice(0, MAX_FIXUP_FILES)) {
-        if (rec.binary) {
-          skipped.push({ path: rec.path, reason: "binary" });
-          continue;
-        }
-        if (rec.added + rec.removed > MAX_FIXUP_FILE_LINES) {
-          skipped.push({ path: rec.path, reason: "too-large" });
-          continue;
-        }
-        const r = await examineFile(git, rec.path);
-        if ("blamed" in r) blamed.push(r.blamed);
-        else skipped.push(r.unresolved);
-      }
-
-      const { targets, unresolved } = resolveFixupTargets(blamed, unpushed);
-      const allUnresolved = [...skipped, ...unresolved];
-      return {
-        ok: true,
-        code: "OK" as const,
-        unpushed: unpushed.size,
-        targets,
-        single: targets.length === 1 && allUnresolved.length === 0 && !truncated ? targets[0]! : null,
-        unresolved: allUnresolved,
-        truncated,
-      };
-    });
+    return await readGate.run(() => readFixupBasesGated(absPath, onlyPaths));
   } catch (e) {
     return emptyFixupResult("ERROR", errorMessage(e));
   }

@@ -66,11 +66,13 @@ function later(): void {
          The shadow goes with it: only the OVERLAY dims, and the overlay stays at z-50 under the
          panel, so over a full-width panel (mobile) the ring alone left this reading as an inline
          card rather than something on top. -->
-    <DialogContent class="z-[60] shadow-xl sm:max-w-md">
+    <DialogContent elevated class="z-60 sm:max-w-md">
       <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <Sparkles :size="16" class="shrink-0 text-primary" />
-          {{ $t("notify.updateTitle") }}
+        <DialogTitle>
+          <span class="flex items-center gap-2">
+            <Sparkles :size="16" class="shrink-0 text-primary" />
+            {{ $t("notify.updateTitle") }}
+          </span>
         </DialogTitle>
         <DialogDescription>
           {{ blocked ? $t("notify.updateBlockedBody") : $t("notify.updatePromptBody") }}
@@ -81,7 +83,7 @@ function later(): void {
            to resolve — the update stays waiting either way. -->
       <div
         v-if="blocked"
-        class="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[12.5px] text-warning"
+        class="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-ui text-warning"
       >
         <AlertTriangle :size="15" class="mt-px shrink-0" />
         <span class="min-w-0">{{ blocked }}</span>

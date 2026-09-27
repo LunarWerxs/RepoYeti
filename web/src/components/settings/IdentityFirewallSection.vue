@@ -77,12 +77,15 @@ async function save(): Promise<void> {
           :key="i"
           class="flex flex-col gap-2 rounded-xl border border-border bg-secondary/40 p-2.5 sm:flex-row sm:items-center"
         >
-          <Input
-            v-model="row.pathPattern"
-            class="mono flex-1 text-[12.5px]"
-            :placeholder="$t('identity.firewall.patternPlaceholder')"
-            :aria-label="$t('identity.firewall.patternLabel')"
-          />
+          <!-- The monospace face is set on this wrapper: <Input> owns its own classes and inherits
+               the font family. -->
+          <div class="mono flex min-w-0 flex-1">
+            <Input
+              v-model="row.pathPattern"
+              :placeholder="$t('identity.firewall.patternPlaceholder')"
+              :aria-label="$t('identity.firewall.patternLabel')"
+            />
+          </div>
           <Select v-model="row.requiredIdentityId">
             <SelectTrigger class="w-full sm:w-48" :aria-label="$t('identity.firewall.identityLabel')">
               <SelectValue :placeholder="$t('identity.firewall.identityPlaceholder')" />
@@ -96,11 +99,11 @@ async function save(): Promise<void> {
           <Button
             variant="ghost"
             size="icon-sm"
-            class="shrink-0 self-end text-muted-foreground hover:text-destructive sm:self-auto"
+            class="shrink-0 self-end sm:self-auto"
             :aria-label="$t('identity.firewall.remove')"
             @click="removeRow(i)"
           >
-            <Trash2 />
+            <Trash2 class="text-muted-foreground group-hover/button:text-destructive" />
           </Button>
         </div>
       </div>
@@ -108,14 +111,14 @@ async function save(): Promise<void> {
            button below is disabled) instead of leaving it looking broken. -->
       <div
         v-else-if="!store.identities.length"
-        class="flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[12px] text-muted-foreground"
+        class="flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"
       >
         <ShieldAlert :size="14" class="mt-0.5 shrink-0" />
         <span>{{ $t("identity.firewall.needIdentityFirst") }}</span>
       </div>
       <div
         v-else
-        class="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[12px] text-muted-foreground"
+        class="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"
       >
         <ShieldAlert :size="14" class="shrink-0" />
         {{ $t("identity.firewall.empty") }}

@@ -221,8 +221,8 @@ watch(
       >
         <Loader2 :size="14" class="shrink-0 animate-spin text-info" />
         <div class="min-w-0 flex-1">
-          <p class="truncate text-[12.5px] font-medium">{{ kindLabel(kind) }}</p>
-          <p class="truncate text-[11.5px] text-muted-foreground">{{ liveProgressText(kind) }}</p>
+          <p class="truncate text-ui font-medium">{{ kindLabel(kind) }}</p>
+          <p class="truncate text-xs text-muted-foreground">{{ liveProgressText(kind) }}</p>
         </div>
         <Button
           size="sm"
@@ -242,10 +242,10 @@ watch(
 
     <!-- recent runs, newest first -->
     <div class="flex flex-col gap-2 px-3.5 py-3">
-      <p v-if="!store.automationRunsReady" class="text-[12px] text-muted-foreground/70">
+      <p v-if="!store.automationRunsReady" class="text-xs text-muted-foreground/70">
         {{ $t("settings.automationHistoryLoading") }}
       </p>
-      <p v-else-if="!sortedRuns.length" class="text-[12px] text-muted-foreground/70">
+      <p v-else-if="!sortedRuns.length" class="text-xs text-muted-foreground/70">
         {{ $t("settings.automationHistoryEmpty") }}
       </p>
       <div v-else class="flex flex-col gap-1.5">
@@ -271,19 +271,19 @@ watch(
             />
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-1.5">
-                <p class="text-[12.5px] font-medium">{{ kindLabel(run.kind) }}</p>
-                <Badge :variant="OUTCOME_VARIANTS[outcomeKey(run.outcome)]" class="px-1.5 py-0 text-[10px]">
+                <p class="text-ui font-medium">{{ kindLabel(run.kind) }}</p>
+                <Badge :variant="OUTCOME_VARIANTS[outcomeKey(run.outcome)]">
                   {{ outcomeLabel(run.outcome) }}
                 </Badge>
               </div>
-              <p class="text-[11.5px] text-muted-foreground">
+              <p class="text-xs text-muted-foreground">
                 {{ fromNow(run.startedAt) }}<template v-if="durationLabel(run)"> · {{ durationLabel(run) }}</template>
                 · {{ $t("settings.automationHistoryProgressCounts", { done: run.reposDone, total: run.reposTotal }) }}
               </p>
-              <p v-if="run.outcome === 'failed' && run.error" class="mt-0.5 text-[11.5px] text-destructive">
+              <p v-if="run.outcome === 'failed' && run.error" class="mt-0.5 text-xs text-destructive">
                 {{ run.error }}
               </p>
-              <p v-else-if="run.outcome === 'interrupted'" class="mt-0.5 text-[11px] text-muted-foreground/80">
+              <p v-else-if="run.outcome === 'interrupted'" class="mt-0.5 text-2xs text-muted-foreground/80">
                 {{ $t("settings.automationHistoryOutcomeInterruptedHint") }}
               </p>
             </div>
@@ -291,13 +291,13 @@ watch(
 
           <ExpandTransition :open="expandedRunId === run.id">
             <div class="border-t border-border/60 bg-secondary/20 px-3.5 py-2.5">
-              <p v-if="detailLoading[run.id]" class="text-[11.5px] text-muted-foreground">
+              <p v-if="detailLoading[run.id]" class="text-xs text-muted-foreground">
                 {{ $t("settings.automationHistoryLoading") }}
               </p>
-              <p v-else-if="detailError[run.id]" class="text-[11.5px] text-destructive">
+              <p v-else-if="detailError[run.id]" class="text-xs text-destructive">
                 {{ $t("settings.automationHistoryDetailFailed") }}
               </p>
-              <p v-else-if="detailCache[run.id] === null" class="text-[11.5px] text-muted-foreground">
+              <p v-else-if="detailCache[run.id] === null" class="text-xs text-muted-foreground">
                 {{ $t("settings.automationHistoryDetailUnavailable") }}
               </p>
               <div v-else-if="detailCache[run.id]" class="flex flex-col gap-1.5">
@@ -307,16 +307,16 @@ watch(
                   class="rounded-md border border-border/40 p-2"
                 >
                   <div class="flex flex-wrap items-center gap-1.5">
-                    <span class="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+                    <span class="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                       {{ repo.repoName }}
                     </span>
-                    <Badge variant="outline" class="px-1.5 py-0 text-[10px]">
+                    <Badge variant="outline">
                       {{ repoOutcomeLabel(repo.outcome) }}
                     </Badge>
-                    <span class="shrink-0 text-[11px] text-muted-foreground">{{ formatDuration(repo.durationMs) }}</span>
+                    <span class="shrink-0 text-2xs text-muted-foreground">{{ formatDuration(repo.durationMs) }}</span>
                   </div>
                   <div v-if="repoDetailBits(repo).length" class="mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
-                    <span v-for="(bit, i) in repoDetailBits(repo)" :key="i" class="text-[11px] text-muted-foreground">
+                    <span v-for="(bit, i) in repoDetailBits(repo)" :key="i" class="text-2xs text-muted-foreground">
                       {{ bit }}
                     </span>
                   </div>

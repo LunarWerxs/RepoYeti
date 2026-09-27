@@ -98,7 +98,10 @@ function repo(status: Partial<NonNullable<Repo["status"]>> = {}): Repo {
   };
 }
 
-function mountPreview(result: IncomingResult, props: Record<string, unknown> = {}) {
+function mountPreview(
+  result: IncomingResult,
+  props: Omit<InstanceType<typeof PullPreview>["$props"], "repoId"> = {},
+) {
   useStore().incomingByRepo["pull-repo"] = result;
   return mount(PullPreview, {
     props: { repoId: "pull-repo", ...props },

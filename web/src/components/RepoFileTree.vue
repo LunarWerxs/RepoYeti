@@ -98,18 +98,18 @@ async function open(entry: RepoTreeEntry): Promise<void> {
        the panel owns the searching/no-matches copy in that mode. -->
   <div
     v-if="!searching && depth === 0 && state?.loading && !entries.length"
-    class="flex items-center gap-2 px-2.5 py-2 text-[12.5px] text-muted-foreground"
+    class="flex items-center gap-2 px-2.5 py-2 text-ui text-muted-foreground"
   >
     <Loader2 :size="14" class="animate-spin" /> {{ $t("repo.files.loading") }}
   </div>
-  <div v-else-if="!searching && state?.error" class="px-2.5 py-2 text-[12px] text-destructive">
+  <div v-else-if="!searching && state?.error" class="px-2.5 py-2 text-xs text-destructive">
     {{ state.error }}
   </div>
   <!-- `state &&` matters: an unrequested directory has no state at all, and rendering "empty" for
        one would claim a folder is empty when it simply has not been read yet. -->
   <div
     v-else-if="!searching && depth === 0 && state && !state.loading && !entries.length"
-    class="px-2.5 py-2 text-[12px] text-muted-foreground"
+    class="px-2.5 py-2 text-xs text-muted-foreground"
   >
     {{ $t("repo.files.empty") }}
   </div>
@@ -130,8 +130,8 @@ async function open(entry: RepoTreeEntry): Promise<void> {
           <div class="group/dir relative">
             <button
               type="button"
-              class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-3 text-start text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-              :style="{ paddingInlineStart: (searching ? 8 : depth * 14 + 8) + 'px' }"
+              class="group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--row-indent) pe-3 text-start text-ui outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+              :style="{ '--row-indent': (searching ? 8 : depth * 14 + 8) + 'px' }"
               :aria-expanded="searching ? undefined : browser.isOpen(n.path)"
               :title="n.ignored ? $t('repo.files.ignoredTitle', { path: n.path }) : n.path"
               @click="searching ? emit('goToFolder', n) : browser.toggle(n.path)"
@@ -142,8 +142,8 @@ async function open(entry: RepoTreeEntry): Promise<void> {
                 class="shrink-0 text-muted-foreground transition-transform"
                 :class="browser.isOpen(n.path) && 'rotate-90'"
               />
-              <component :is="iconFor(n)" class="shrink-0 text-[15px]" :class="n.ignored && 'opacity-40'" />
-              <span class="truncate" :class="n.ignored ? 'text-[#cfcfd8]/45' : 'text-[#cfcfd8]'">
+              <component :is="iconFor(n)" class="shrink-0 text-base" :class="n.ignored && 'opacity-40'" />
+              <span class="truncate" :class="n.ignored ? 'text-file-name/45' : 'text-file-name'">
                 {{ n.name }}<span v-if="searching && rowDir(n.path)" class="ms-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
               </span>
               <Loader2
@@ -194,22 +194,22 @@ async function open(entry: RepoTreeEntry): Promise<void> {
         <div class="group/file relative">
           <button
             type="button"
-            class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-3 text-start text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+            class="group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--row-indent) pe-3 text-start text-ui outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
             :class="isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30'"
-            :style="{ paddingInlineStart: (searching ? 8 : depth * 14 + 8 + 22) + 'px' }"
+            :style="{ '--row-indent': (searching ? 8 : depth * 14 + 8 + 22) + 'px' }"
             :title="n.ignored ? $t('repo.files.ignoredTitle', { path: n.path }) : n.path"
             @click="open(n)"
           >
-            <component :is="iconFor(n)" class="shrink-0 text-[15px]" :class="n.ignored && 'opacity-40'" />
-            <span class="truncate" :class="n.ignored ? 'text-[#cfcfd8]/45' : 'text-[#cfcfd8]'">
+            <component :is="iconFor(n)" class="shrink-0 text-base" :class="n.ignored && 'opacity-40'" />
+            <span class="truncate" :class="n.ignored ? 'text-file-name/45' : 'text-file-name'">
               {{ n.name }}<span v-if="searching && rowDir(n.path)" class="ms-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
             </span>
             <!-- A file that is ALSO in the changed list keeps its status letter, so switching to
                  "All files" never loses the one signal the changes view existed to give. -->
             <span
               v-if="changedFor(n.path)"
-              class="mono ms-auto shrink-0 ps-1 text-[11px] font-bold"
-              :style="{ color: statusColor(changedFor(n.path)!.status) }"
+              class="mono ms-auto shrink-0 ps-1 text-2xs font-bold text-(--status-color)"
+              :style="{ '--status-color': statusColor(changedFor(n.path)!.status) }"
               >{{ changedFor(n.path)!.status }}</span
             >
           </button>
@@ -245,8 +245,8 @@ async function open(entry: RepoTreeEntry): Promise<void> {
   <!-- an oversized directory was capped server-side; say so rather than silently showing a head -->
   <div
     v-if="!searching && state?.truncated"
-    class="px-2.5 py-1.5 text-[11.5px] text-warning/80"
-    :style="{ paddingInlineStart: depth * 14 + 10 + 'px' }"
+    class="ps-(--row-indent) pe-2.5 py-1.5 text-xs text-warning/80"
+    :style="{ '--row-indent': depth * 14 + 10 + 'px' }"
   >
     {{ $t("repo.files.truncated", { shown: entries.length, total: state.total }) }}
   </div>

@@ -137,9 +137,10 @@ function selectMode(v: unknown): void {
   if (v && typeof v === "string") mode.value = v as Mode;
 }
 
-// Layout only. Resting/hover/selected now come from the kit's toggleVariants, which paints them
-// so they stay distinct on any container (see lunarwerx-ui src/components/ui/toggle/index.ts).
-const itemClass = "justify-center gap-1.5";
+// Resting/hover/selected come from the kit's toggleVariants, which paints them so they stay
+// distinct on any container (see lunarwerx-ui src/components/ui/toggle/index.ts). The items carry
+// no classes of their own: the kit owns their spacing, so the icon-to-label gap lives on a plain
+// inner span in the template.
 
 // Hand off to the one "Scan for projects" modal — scanning lives there, not in this dialog.
 // `scanReturnToAdd` gives that modal a Back control so the hand-off isn't a one-way door.
@@ -231,28 +232,31 @@ async function submit(): Promise<void> {
 
       <!-- A `bg-secondary` track with the selected item lifted to `bg-background`, matching the
            Scan modal's segmented control this dialog hands off to. -->
-      <ToggleGroup
-        type="single"
-        :model-value="mode"
-        class="grid w-full grid-cols-2 gap-1 rounded-lg bg-secondary p-1"
-        @update:model-value="selectMode"
-      >
-        <ToggleGroupItem value="register" :class="itemClass">
-          <FolderGit2 :size="14" /> {{ $t("addRepo.modeRegister") }}
-        </ToggleGroupItem>
-        <ToggleGroupItem value="create" :class="itemClass">
-          <FolderPlus :size="14" /> {{ $t("addRepo.modeCreate") }}
-        </ToggleGroupItem>
-        <ToggleGroupItem value="clone" :class="itemClass">
-          <DownloadCloud :size="14" /> {{ $t("addRepo.modeClone") }}
-        </ToggleGroupItem>
-        <ToggleGroupItem value="lore" :class="itemClass">
-          <Server :size="14" /> {{ $t("addRepo.modeLore") }}
-        </ToggleGroupItem>
-        <ToggleGroupItem v-if="store.buzzEnabled" value="buzz" :class="itemClass">
-          <Radio :size="14" /> {{ $t("addRepo.modeBuzz") }}
-        </ToggleGroupItem>
-      </ToggleGroup>
+      <div class="rounded-lg bg-secondary p-1">
+        <ToggleGroup
+          type="single"
+          :model-value="mode"
+          :spacing="1"
+          class="grid w-full grid-cols-2"
+          @update:model-value="selectMode"
+        >
+          <ToggleGroupItem value="register">
+            <span class="inline-flex items-center gap-1.5"><FolderGit2 :size="14" /> {{ $t("addRepo.modeRegister") }}</span>
+          </ToggleGroupItem>
+          <ToggleGroupItem value="create">
+            <span class="inline-flex items-center gap-1.5"><FolderPlus :size="14" /> {{ $t("addRepo.modeCreate") }}</span>
+          </ToggleGroupItem>
+          <ToggleGroupItem value="clone">
+            <span class="inline-flex items-center gap-1.5"><DownloadCloud :size="14" /> {{ $t("addRepo.modeClone") }}</span>
+          </ToggleGroupItem>
+          <ToggleGroupItem value="lore">
+            <span class="inline-flex items-center gap-1.5"><Server :size="14" /> {{ $t("addRepo.modeLore") }}</span>
+          </ToggleGroupItem>
+          <ToggleGroupItem v-if="store.buzzEnabled" value="buzz">
+            <span class="inline-flex items-center gap-1.5"><Radio :size="14" /> {{ $t("addRepo.modeBuzz") }}</span>
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
 
       <!-- hand-off to the dedicated Scan-for-projects modal -->
       <button
@@ -262,42 +266,49 @@ async function submit(): Promise<void> {
       >
         <FolderSearch />
         <span class="flex flex-col">
-          <span class="text-[13px] font-medium text-foreground">{{ $t("addRepo.scanButton") }}</span>
-          <span class="text-[11.5px] text-muted-foreground">{{ $t("addRepo.scanHint") }}</span>
+          <span class="text-ui font-medium text-foreground">{{ $t("addRepo.scanButton") }}</span>
+          <span class="text-xs text-muted-foreground">{{ $t("addRepo.scanHint") }}</span>
         </span>
       </button>
 
       <!-- register / create: a single path -->
       <template v-if="mode === 'register' || mode === 'create'">
-        <p class="text-[12.5px] text-muted-foreground">
+        <p class="text-ui text-muted-foreground">
           <template v-if="mode === 'register'">{{ $t("addRepo.hintRegister") }}</template>
           <template v-else>{{ $t("addRepo.hintCreateBefore") }}<code class="mono">git init</code>{{ $t("addRepo.hintCreateAfter") }}</template>
         </p>
-        <Input
-          v-model="path"
-          class="mono"
-          :placeholder="mode === 'register' ? $t('addRepo.placeholderRegister') : $t('addRepo.placeholderCreate')"
-          @keyup.enter="submit"
-        />
+        <div class="mono">
+          <Input
+            v-model="path"
+            :placeholder="mode === 'register' ? $t('addRepo.placeholderRegister') : $t('addRepo.placeholderCreate')"
+            @keyup.enter="submit"
+          />
+        </div>
       </template>
 
       <!-- clone: url + destination folder + optional name + identity -->
       <template v-else-if="mode === 'clone'">
-        <p class="text-[12.5px] text-muted-foreground">{{ $t("addRepo.hintClone") }}</p>
+        <p class="text-ui text-muted-foreground">{{ $t("addRepo.hintClone") }}</p>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelUrl") }}</label>
-          <Input v-model="cloneUrl" class="mono" :placeholder="$t('addRepo.placeholderUrl')" @keyup.enter="submit" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelUrl") }}</label>
+          <div class="mono">
+            <Input v-model="cloneUrl" :placeholder="$t('addRepo.placeholderUrl')" @keyup.enter="submit" />
+          </div>
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelParent") }}</label>
-          <Input v-model="cloneParent" class="mono" :placeholder="$t('addRepo.placeholderParent')" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelParent") }}</label>
+          <div class="mono">
+            <Input v-model="cloneParent" :placeholder="$t('addRepo.placeholderParent')" />
+          </div>
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelName") }}</label>
-          <Input v-model="cloneName" class="mono" :placeholder="$t('addRepo.placeholderName')" @keyup.enter="submit" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelName") }}</label>
+          <div class="mono">
+            <Input v-model="cloneName" :placeholder="$t('addRepo.placeholderName')" @keyup.enter="submit" />
+          </div>
         </div>
         <div v-if="store.identities.length" class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelIdentity") }}</label>
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelIdentity") }}</label>
           <Select v-model="cloneIdentity">
             <SelectTrigger class="w-full" :aria-label="$t('addRepo.labelIdentity')"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -310,9 +321,9 @@ async function submit(): Promise<void> {
 
       <!-- lore: clone from a registered Lore server -->
       <template v-else-if="mode === 'lore'">
-        <p class="text-[12.5px] text-muted-foreground">{{ $t("addRepo.hintLore") }}</p>
+        <p class="text-ui text-muted-foreground">{{ $t("addRepo.hintLore") }}</p>
         <div v-if="store.servers.length" class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelServer") }}</label>
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelServer") }}</label>
           <Select v-model="loreServerUrl">
             <SelectTrigger class="w-full" :aria-label="$t('addRepo.labelServer')"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -320,26 +331,32 @@ async function submit(): Promise<void> {
             </SelectContent>
           </Select>
         </div>
-        <p v-else class="text-[12.5px] text-muted-foreground">{{ $t("addRepo.loreNoServers") }}</p>
+        <p v-else class="text-ui text-muted-foreground">{{ $t("addRepo.loreNoServers") }}</p>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelLoreRepo") }}</label>
-          <Input v-model="loreRepoPath" class="mono" :placeholder="$t('addRepo.placeholderLoreRepo')" @keyup.enter="submit" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelLoreRepo") }}</label>
+          <div class="mono">
+            <Input v-model="loreRepoPath" :placeholder="$t('addRepo.placeholderLoreRepo')" @keyup.enter="submit" />
+          </div>
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelParent") }}</label>
-          <Input v-model="loreParent" class="mono" :placeholder="$t('addRepo.placeholderParent')" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelParent") }}</label>
+          <div class="mono">
+            <Input v-model="loreParent" :placeholder="$t('addRepo.placeholderParent')" />
+          </div>
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelName") }}</label>
-          <Input v-model="loreName" class="mono" :placeholder="$t('addRepo.placeholderName')" @keyup.enter="submit" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelName") }}</label>
+          <div class="mono">
+            <Input v-model="loreName" :placeholder="$t('addRepo.placeholderName')" @keyup.enter="submit" />
+          </div>
         </div>
       </template>
 
       <!-- Buzz: construct a standard Smart HTTP clone URL, then use the normal Git clone path. -->
       <template v-else-if="mode === 'buzz'">
-        <p class="text-[12.5px] text-muted-foreground">{{ $t("addRepo.hintBuzz") }}</p>
+        <p class="text-ui text-muted-foreground">{{ $t("addRepo.hintBuzz") }}</p>
         <div v-if="store.buzzCommunities.length" class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelBuzzCommunity") }}</label>
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelBuzzCommunity") }}</label>
           <Select v-model="buzzCommunityUrl">
             <SelectTrigger class="w-full" :aria-label="$t('addRepo.labelBuzzCommunity')"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -349,18 +366,24 @@ async function submit(): Promise<void> {
             </SelectContent>
           </Select>
         </div>
-        <p v-else class="text-[12.5px] text-muted-foreground">{{ $t("addRepo.buzzNoCommunities") }}</p>
+        <p v-else class="text-ui text-muted-foreground">{{ $t("addRepo.buzzNoCommunities") }}</p>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelBuzzRepo") }}</label>
-          <Input v-model="buzzRepoPath" class="mono" :placeholder="$t('addRepo.placeholderBuzzRepo')" @keyup.enter="submit" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelBuzzRepo") }}</label>
+          <div class="mono">
+            <Input v-model="buzzRepoPath" :placeholder="$t('addRepo.placeholderBuzzRepo')" @keyup.enter="submit" />
+          </div>
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelParent") }}</label>
-          <Input v-model="buzzParent" class="mono" :placeholder="$t('addRepo.placeholderParent')" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelParent") }}</label>
+          <div class="mono">
+            <Input v-model="buzzParent" :placeholder="$t('addRepo.placeholderParent')" />
+          </div>
         </div>
         <div class="flex flex-col gap-1.5">
-          <label class="text-[12px] text-muted-foreground">{{ $t("addRepo.labelName") }}</label>
-          <Input v-model="buzzName" class="mono" :placeholder="$t('addRepo.placeholderName')" @keyup.enter="submit" />
+          <label class="text-xs text-muted-foreground">{{ $t("addRepo.labelName") }}</label>
+          <div class="mono">
+            <Input v-model="buzzName" :placeholder="$t('addRepo.placeholderName')" @keyup.enter="submit" />
+          </div>
         </div>
       </template>
 

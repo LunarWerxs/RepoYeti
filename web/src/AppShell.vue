@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
         <LogOut :size="20" />
       </div>
       <h1 class="text-lg font-semibold text-foreground">{{ $t("share.leftTitle") }}</h1>
-      <p class="text-[13px] leading-relaxed text-muted-foreground">{{ $t("share.leftHint") }}</p>
+      <p class="text-ui leading-relaxed text-muted-foreground">{{ $t("share.leftHint") }}</p>
     </div>
   </div>
 
@@ -154,10 +154,8 @@ onBeforeUnmount(() => {
 
   <div
     v-else
-    class="safe-bottom relative min-h-dvh transition-[padding] duration-300 ease-in-out"
-    :style="{
-      paddingInlineEnd: appShiftPx ? `${appShiftPx}px` : undefined,
-    }"
+    class="app-push-shift safe-bottom relative min-h-dvh"
+    :style="{ '--app-shift': `${appShiftPx}px` }"
   >
     <!-- Above the header, so a guest sees whose machine this is before anything else. Renders
          nothing for the owner. -->
@@ -181,7 +179,7 @@ onBeforeUnmount(() => {
           <div
             v-for="i in 4"
             :key="i"
-            class="h-[58px] animate-pulse rounded-md border border-border/60 bg-card"
+            class="h-14.5 animate-pulse rounded-md border border-border/60 bg-card"
           />
         </div>
       </template>
@@ -211,12 +209,12 @@ onBeforeUnmount(() => {
               :draggable="false"
             />
           </div>
-          <div v-else class="py-12 text-center text-[13px] text-muted-foreground">
+          <div v-else class="py-12 text-center text-ui text-muted-foreground">
             {{ $t("shell.noMatch") }}
           </div>
         </template>
         <RepoList v-else-if="store.visibleRepos.length" />
-        <div v-else class="py-12 text-center text-[13px] text-muted-foreground">
+        <div v-else class="py-12 text-center text-ui text-muted-foreground">
           {{ $t("shell.allHidden") }}
         </div>
       </template>

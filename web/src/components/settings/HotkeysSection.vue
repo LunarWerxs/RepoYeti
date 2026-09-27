@@ -37,19 +37,19 @@ const shortcutDesc = computed<Record<string, string>>(() => ({
     <!-- The reference list only matters while shortcuts are on → HIDE it (not dim) while off. -->
     <ExpandTransition :open="hotkeysEnabled">
       <div class="flex flex-col gap-2 px-3.5 py-3">
-        <span class="text-[12px] text-muted-foreground">{{ $t("settings.hotkeysListLabel") }}</span>
+        <span class="text-xs text-muted-foreground">{{ $t("settings.hotkeysListLabel") }}</span>
         <ul class="flex flex-col gap-1.5">
           <li
             v-for="s in SHORTCUTS"
             :key="s.id"
             class="flex items-center justify-between gap-3"
           >
-            <span class="text-[12.5px] text-foreground">{{ shortcutDesc[s.id] }}</span>
+            <span class="text-ui text-foreground">{{ shortcutDesc[s.id] }}</span>
             <span class="flex shrink-0 items-center gap-1">
               <kbd
                 v-for="k in s.keys"
                 :key="k"
-                class="mono rounded border border-border bg-secondary px-1.5 py-0.5 text-[10.5px] leading-none text-muted-foreground"
+                class="mono rounded border border-border bg-secondary px-1.5 py-0.5 text-2xs leading-none text-muted-foreground"
               >{{ k }}</kbd>
             </span>
           </li>

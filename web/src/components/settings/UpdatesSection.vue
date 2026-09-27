@@ -118,7 +118,7 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
           data-testid="restart-pending"
           :disabled="restarting"
           :title="$t('settings.versionRestartPendingAction')"
-          class="cursor-pointer hover:bg-warning/20 disabled:cursor-default disabled:opacity-70 dark:hover:bg-warning/30"
+          interactive
           @click="restartNow"
         >
           {{ $t("settings.versionRestartPending") }}
@@ -136,7 +136,7 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
           variant="info"
           data-testid="update-available"
           :title="$t('settings.versionUpdateAvailableAction')"
-          class="cursor-pointer hover:bg-info/20 dark:hover:bg-info/30"
+          interactive
           @click="store.openUpdatePrompt()"
         >
           {{ $t("settings.versionUpdateAvailable") }}
@@ -151,7 +151,7 @@ async function onAutoUpdate(enabled: boolean): Promise<void> {
           data-testid="changelog-link"
           :aria-label="$t('settings.versionChangelog')"
           :title="$t('settings.versionChangelog')"
-          class="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          class="rounded-sm text-muted-foreground transition-no-ring hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <FileText :size="15" />
         </a>

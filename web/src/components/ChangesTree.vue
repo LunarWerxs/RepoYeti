@@ -433,9 +433,9 @@ onBeforeUnmount(() => {
           <div class="tree-row-cv group/dir relative">
       <button
         type="button"
-        class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-3 text-start text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+        class="group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--row-indent) pe-3 text-start text-ui outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
         :class="dragOverPath === n.path && 'bg-primary/15 ring-1 ring-primary/40'"
-        :style="{ paddingInlineStart: (depth ?? 0) * 14 + 8 + 'px' }"
+        :style="{ '--row-indent': (depth ?? 0) * 14 + 8 + 'px' }"
         :title="n.path"
         :aria-expanded="isOpen(n.path)"
         tabindex="-1"
@@ -458,8 +458,8 @@ onBeforeUnmount(() => {
           class="shrink-0 text-muted-foreground/70 transition-transform duration-150"
           :class="isOpen(n.path) && 'rotate-90'"
         />
-        <component :is="icon" class="shrink-0 text-[15px]" />
-        <span class="truncate text-[#93939f]">{{ n.name }}</span>
+        <component :is="icon" class="shrink-0 text-base" />
+        <span class="truncate text-folder-name">{{ n.name }}</span>
       </button>
       <!-- folder selection checkbox: ticks every file beneath this folder at once, which is the
            whole point of having it (ticking a build output folder used to be one click per file).
@@ -476,13 +476,13 @@ onBeforeUnmount(() => {
         :aria-checked="folderState(files) === 'all' ? 'true' : folderState(files) === 'some' ? 'mixed' : 'false'"
         :aria-label="$t('repo.changes.select', { name: n.name })"
         :title="$t('repo.changes.selectFolder')"
-        class="absolute top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded opacity-0 outline-none transition-opacity pointer-coarse:opacity-100 group-hover/dir:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
+        class="absolute top-1/2 left-(--box-left) flex size-6 -translate-y-1/2 items-center justify-center rounded opacity-0 outline-none transition-opacity pointer-coarse:opacity-100 group-hover/dir:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
         :class="(folderState(files) !== 'none' || selection.count.value > 0) && 'opacity-100'"
-        :style="{ left: (depth ?? 0) * 14 + 3 + 'px' }"
+        :style="{ '--box-left': (depth ?? 0) * 14 + 3 + 'px' }"
         @click.stop="toggleFolder(files)"
       >
         <span
-          class="flex size-3.5 items-center justify-center rounded-[4px] border transition-colors"
+          class="flex size-3.5 items-center justify-center rounded-sm border transition-colors"
           :class="
             folderState(files) !== 'none'
               ? 'border-primary bg-primary text-primary-foreground'
@@ -539,9 +539,9 @@ onBeforeUnmount(() => {
         <button
           type="button"
           :draggable="!isGuest"
-          class="group flex h-[24px] w-full items-center gap-1.5 rounded-md pe-3 text-start text-[12.5px] outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+          class="group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--row-indent) pe-3 text-start text-ui outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
           :class="[isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30', draggingPath === n.path && 'opacity-40']"
-          :style="{ paddingInlineStart: (depth ?? 0) * 14 + 8 + 'px' }"
+          :style="{ '--row-indent': (depth ?? 0) * 14 + 8 + 'px' }"
           :title="rowTitle(n)"
           tabindex="-1"
           data-tree-row
@@ -556,10 +556,10 @@ onBeforeUnmount(() => {
                which keeps file icons aligned under folder icons. -->
           <span v-if="!readOnly && canControl" class="w-3.5 shrink-0" aria-hidden="true" />
           <span class="w-3.5 shrink-0" aria-hidden="true" />
-          <component :is="icon" class="shrink-0 text-[15px]" />
+          <component :is="icon" class="shrink-0 text-base" />
           <span
             class="truncate"
-            :class="n.status === 'D' ? 'text-muted-foreground line-through' : n.staged ? 'text-[#cfe9d9]' : 'text-[#cfcfd8]'"
+            :class="n.status === 'D' ? 'text-muted-foreground line-through' : n.staged ? 'text-file-name-staged' : 'text-file-name'"
           >
             {{ n.name }}<span v-if="flat && rowDir(n.path)" class="ms-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
           </span>
@@ -598,13 +598,13 @@ onBeforeUnmount(() => {
               />
               <DiffStat v-else :stat="n.stat" :show="statShow" :title="diffTitle(n.stat)" />
             </template>
-            <span class="w-[84px] shrink-0" aria-hidden="true" />
+            <span class="w-21 shrink-0" aria-hidden="true" />
             <!-- A resolved conflict keeps its ordinary staged letter (M/A/D) on purpose — the
                  daemon never invents a letter for it, so nothing downstream that keys off `status`
                  has to learn a new code. The green tint is what marks it. -->
             <span
-              class="ps-1 text-[11px] font-bold"
-              :style="{ color: n.resolved ? RESOLVED_COLOR : statusColor(n.status) }"
+              class="ps-1 text-2xs font-bold text-(--status-color)"
+              :style="{ '--status-color': n.resolved ? RESOLVED_COLOR : statusColor(n.status) }"
               :title="statusLabel(n)"
               >{{ n.status }}</span
             >
@@ -637,13 +637,13 @@ onBeforeUnmount(() => {
           :aria-checked="selection.isSelected(n.path)"
           :aria-label="$t('repo.changes.select', { name: n.name })"
           :title="$t('repo.changes.selectFile')"
-          class="absolute top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded opacity-0 outline-none transition-opacity pointer-coarse:opacity-100 group-hover/file:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
+          class="absolute top-1/2 left-(--box-left) flex size-6 -translate-y-1/2 items-center justify-center rounded opacity-0 outline-none transition-opacity pointer-coarse:opacity-100 group-hover/file:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
           :class="(selection.isSelected(n.path) || selection.count.value > 0) && 'opacity-100'"
-          :style="{ left: (depth ?? 0) * 14 + 3 + 'px' }"
+          :style="{ '--box-left': (depth ?? 0) * 14 + 3 + 'px' }"
           @click.stop="selection.toggle(n.path)"
         >
           <span
-            class="flex size-3.5 items-center justify-center rounded-[4px] border transition-colors"
+            class="flex size-3.5 items-center justify-center rounded-sm border transition-colors"
             :class="
               selection.isSelected(n.path)
                 ? 'border-primary bg-primary text-primary-foreground'
@@ -666,7 +666,7 @@ onBeforeUnmount(() => {
             v-if="!isGuest"
             type="button"
             tabindex="-1"
-            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
             :aria-label="$t('repo.changes.revealAction')"
             :title="$t('repo.changes.revealAction')"
             @click.stop="emit('reveal', n.path)"
@@ -678,7 +678,7 @@ onBeforeUnmount(() => {
             v-if="canControl"
             type="button"
             tabindex="-1"
-            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition hover:bg-primary/15 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40"
+            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-primary/15 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40"
             :aria-label="$t('repo.changes.stageAction')"
             :title="$t('repo.changes.stageAction')"
             @click.stop="emit('stage', n.path)"
@@ -690,7 +690,7 @@ onBeforeUnmount(() => {
             v-if="!isGuest"
             type="button"
             tabindex="-1"
-            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40"
+            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40"
             :aria-label="$t('repo.discard.action')"
             :title="$t('repo.discard.action')"
             @click.stop="emit('discard', n.path)"

@@ -10,13 +10,13 @@ import { ArrowUpFromLine, ChevronDown, GitCommitHorizontal, History, Loader2, Pe
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
-import { cn } from "@/lib/utils";
 import { defaultCommitAction, resolveDefaultCommitAction } from "@/lib/commit-default";
 import { useRepoFeedback } from "@/lib/repo-feedback";
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import { shortcutsActive } from "@/lib/hotkeys";
 import SmartCommitPlan from "../SmartCommitPlan.vue";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
@@ -274,7 +274,9 @@ defineExpose({ loadRecentMsgs, recentMsgs });
         :placeholder="$t('repo.commit.placeholder')"
         :maxlength="300"
         rows="1"
-        :class="cn('max-h-40 min-h-9 resize-none py-1.5 leading-snug', aiHere && recentMsgs.length ? 'pe-17' : aiHere || recentMsgs.length ? 'pe-10' : '')"
+        density="compact"
+        :trailing="aiHere && recentMsgs.length ? 'actions' : aiHere || recentMsgs.length ? 'action' : 'none'"
+        class="max-h-40 min-h-9"
         @keydown="onCommitKey"
       />
       <div class="absolute top-1 right-1 flex items-center gap-0.5">
@@ -302,12 +304,15 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             -->
             <span class="inline-flex">
               <DropdownMenu>
-                <DropdownMenuTrigger
-                  class="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-                  :aria-label="$t('repo.commit.recent')"
-                  @click.stop
-                >
-                  <History :size="16" />
+                <DropdownMenuTrigger as-child>
+                  <button
+                    type="button"
+                    class="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                    :aria-label="$t('repo.commit.recent')"
+                    @click.stop
+                  >
+                    <History :size="16" />
+                  </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" class="max-w-[min(22rem,80vw)]">
                   <DropdownMenuLabel>{{ $t("repo.commit.recent") }}</DropdownMenuLabel>
@@ -317,7 +322,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
                     :title="$t('repo.commit.useRecentTitle')"
                     @select="commitMsg = m"
                   >
-                    <span class="truncate text-[12.5px]">{{ m }}</span>
+                    <span class="truncate text-ui">{{ m }}</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -344,12 +349,12 @@ defineExpose({ loadRecentMsgs, recentMsgs });
     </div>
 
     <div class="flex shrink-0 items-start justify-end gap-1.5">
-      <div class="flex">
+      <ButtonGroup divider="shade">
         <Button
           data-testid="primary-commit-action"
           :data-commit-mode="primaryCommitMode"
           :data-commit-scope="selectedCount > 0 ? 'selected' : 'all'"
-          class="h-9 rounded-e-none"
+          class="h-9"
           :disabled="!commitMsg.trim() || committing"
           :title="tooltipsEnabled && selectedCount > 0
             ? (primaryCommitMode === 'sync'
@@ -376,7 +381,8 @@ defineExpose({ loadRecentMsgs, recentMsgs });
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <Button
-              class="h-9 rounded-s-none border-s border-s-black/15 px-1.5 dark:border-s-white/20"
+              size="icon"
+              class="h-9"
               :disabled="!commitMsg.trim() || committing"
               :title="tooltipsEnabled ? $t('repo.commit.moreOptions') : undefined"
               :aria-label="$t('repo.commit.menuLabel')"
@@ -425,19 +431,19 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
+      </ButtonGroup>
       <!-- Smart-commit (AI multi-commit split): inline "Auto" split button, right of Commit.
            The chevron mirrors the regular Commit dropdown — plain vs. commit-and-sync. Shown for
            ANY dirty repo (dirty > 0) so it stays consistent across every card — with a single file
            it just AI-drafts that one commit; the >1 threshold used to hide it on 1-file repos,
            which read as "the button randomly went missing". -->
-      <div v-if="aiHere && st && st.dirty > 0" class="flex">
+      <ButtonGroup v-if="aiHere && st && st.dirty > 0" divider="shade">
         <Tooltip>
           <TooltipTrigger as-child>
             <span class="inline-flex">
               <Button
                 variant="outline"
-                class="gemini-auto h-9 rounded-e-none"
+                class="gemini-auto h-9"
                 :disabled="smartBusy || committing"
                 :aria-label="$t('repo.smartCommit.button')"
                 @click="runSmart()"
@@ -454,7 +460,8 @@ defineExpose({ loadRecentMsgs, recentMsgs });
           <DropdownMenuTrigger as-child>
             <Button
               variant="outline"
-              class="gemini-auto h-9 rounded-s-none border-s border-s-white/30 px-1.5"
+              size="icon"
+              class="gemini-auto h-9"
               :disabled="smartBusy || committing"
               :aria-label="$t('repo.smartCommit.menuLabel')"
             >
@@ -472,7 +479,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
+      </ButtonGroup>
     </div>
   </div>
 

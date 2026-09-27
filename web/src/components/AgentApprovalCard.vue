@@ -104,7 +104,7 @@ async function onDeny(id: string): Promise<void> {
     v-if="store.pendingApprovals.length && !store.isGuest"
     class="ring-primary/30 bg-primary/5 mb-2.5 flex flex-col gap-1.5 rounded-lg py-2.5 text-xs/relaxed ring-1"
   >
-    <div class="flex items-center gap-1.5 px-3 text-[13px] font-semibold text-primary">
+    <div class="flex items-center gap-1.5 px-3 text-ui font-semibold text-primary">
       <ShieldAlert :size="15" />
       <span>{{ $t("approvals.title") }}</span>
       <span class="text-primary/70">
@@ -119,53 +119,53 @@ async function onDeny(id: string): Promise<void> {
       <div
         v-for="req in store.pendingApprovals"
         :key="req.id"
-        class="flex flex-col gap-1 rounded-md px-1.5 py-1.5"
+        class="flex flex-col gap-1 rounded-md p-1.5"
       >
         <div class="flex items-center gap-2">
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-1.5">
-              <span class="mono truncate text-[13px] font-medium text-foreground">{{ req.tool }}</span>
-              <span v-if="req.repo" class="mono shrink-0 truncate text-[11px] text-muted-foreground">
+              <span class="mono truncate text-ui font-medium text-foreground">{{ req.tool }}</span>
+              <span v-if="req.repo" class="mono shrink-0 truncate text-2xs text-muted-foreground">
                 {{ req.repo }}
               </span>
             </div>
-            <div class="mono truncate text-[11px] text-muted-foreground">{{ req.argsSummary }}</div>
+            <div class="mono truncate text-2xs text-muted-foreground">{{ req.argsSummary }}</div>
             <!-- The fingerprint of the exact action this tap approves; the receipt carries the full value. -->
-            <div v-if="req.digest" class="mono truncate text-[10px] text-muted-foreground/70" :title="req.digest">
+            <div v-if="req.digest" class="mono truncate text-3xs text-muted-foreground/70" :title="req.digest">
               {{ $t("approvals.digest", { digest: req.digest.slice(0, 12) }) }}
             </div>
-            <div v-if="req.autoAction === 'approve'" class="text-[11px] text-primary/80">
+            <div v-if="req.autoAction === 'approve'" class="text-2xs text-primary/80">
               {{ $t("approvals.countdownApprove", { seconds: secondsLeft(req.expiresAt) }) }}
             </div>
-            <div v-else-if="req.autoAction === 'deny'" class="text-[11px] text-primary/80">
+            <div v-else-if="req.autoAction === 'deny'" class="text-2xs text-primary/80">
               {{ $t("approvals.countdown", { seconds: secondsLeft(req.expiresAt) }) }}
             </div>
-            <div v-else class="text-[11px] text-muted-foreground/80">
+            <div v-else class="text-2xs text-muted-foreground/80">
               {{ $t("approvals.waiting") }}
             </div>
             <Button
-              size="sm"
+              size="inline"
               variant="link"
-              class="h-auto px-0 py-0.5 text-[11px]"
+              class="my-0.5"
               :aria-expanded="requestState(req.id).expanded"
               @click="toggleRequest(req.id)"
             >
-              {{ requestState(req.id).expanded ? $t("approvals.hideRequest") : $t("approvals.showRequest") }}
+              <span class="text-2xs">{{ requestState(req.id).expanded ? $t("approvals.hideRequest") : $t("approvals.showRequest") }}</span>
             </Button>
             <div
               v-if="requestState(req.id).expanded"
               class="mt-1 rounded-md border border-border/60 bg-background/60 p-2"
             >
-              <div v-if="requestState(req.id).loading" class="text-[11px] text-muted-foreground">
+              <div v-if="requestState(req.id).loading" class="text-2xs text-muted-foreground">
                 {{ $t("approvals.loadingRequest") }}
               </div>
-              <div v-else-if="requestState(req.id).error" class="text-[11px] text-muted-foreground">
+              <div v-else-if="requestState(req.id).error" class="text-2xs text-muted-foreground">
                 {{ $t("approvals.requestUnavailable") }}
               </div>
               <template v-else-if="requestState(req.id).details">
                 <div
                   v-if="Object.keys(requestState(req.id).details!.request.args).length === 0"
-                  class="text-[11px] text-muted-foreground"
+                  class="text-2xs text-muted-foreground"
                 >
                   {{ $t("approvals.noArguments") }}
                 </div>
@@ -175,19 +175,19 @@ async function onDeny(id: string): Promise<void> {
                     :key="argKey"
                     class="flex flex-col gap-0.5"
                   >
-                    <span class="mono text-[11px] font-medium text-foreground">{{ argKey }}</span>
-                    <span v-if="argIsHidden(argValue)" class="text-[11px] text-muted-foreground italic">
+                    <span class="mono text-2xs font-medium text-foreground">{{ argKey }}</span>
+                    <span v-if="argIsHidden(argValue)" class="text-2xs text-muted-foreground italic">
                       {{ $t("approvals.hiddenValue") }}
                     </span>
                     <pre
                       v-else
-                      class="mono max-h-32 overflow-y-auto rounded bg-muted/50 p-1.5 text-[11px] break-words whitespace-pre-wrap"
+                      class="mono max-h-32 overflow-y-auto rounded bg-muted/50 p-1.5 text-2xs wrap-break-word whitespace-pre-wrap"
                     >{{ argText(argValue) }}</pre>
                   </div>
                 </div>
                 <div
                   v-if="requestState(req.id).details!.request.truncated"
-                  class="mt-1.5 text-[11px] text-muted-foreground"
+                  class="mt-1.5 text-2xs text-muted-foreground"
                 >
                   {{ $t("approvals.truncated") }}
                 </div>

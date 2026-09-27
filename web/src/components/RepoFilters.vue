@@ -63,7 +63,10 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
     <Input
       v-model="store.filterQuery"
       :placeholder="$t('filters.searchPlaceholder')"
-      class="h-11 border-transparent bg-secondary/25 ps-8 pe-10 hover:bg-secondary/40 focus-visible:border-ring/40 focus-visible:bg-secondary/40 focus-visible:ring-1 dark:bg-secondary/25 sm:h-9"
+      variant="quiet"
+      leading="icon"
+      trailing="action"
+      class="h-11 sm:h-9"
     />
 
     <Popover v-model:open="open">
@@ -88,8 +91,9 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
         </button>
       </PopoverTrigger>
 
-      <PopoverContent align="end" :side-offset="8" class="w-[min(20rem,92vw)] p-3">
-        <div class="flex flex-col gap-3">
+      <PopoverContent align="end" :side-offset="8" class="w-[min(20rem,92vw)]">
+        <!-- p-0.5 on top of PopoverContent's own p-2.5 keeps the flyout's 12px inset. -->
+        <div class="flex flex-col gap-3 p-0.5">
           <div class="flex flex-wrap items-center gap-2">
             <!-- identity filter -->
             <DropdownMenu>
@@ -97,7 +101,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
                 <Button
                   variant="outline"
                   size="sm"
-                  :class="cn(store.filterIdentity !== undefined && 'border-primary/50 text-foreground')"
+                  :data-active="store.filterIdentity !== undefined"
                 >
                   <User />
                   {{ identityLabel }}
@@ -134,7 +138,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
                 <Button
                   variant="outline"
                   size="sm"
-                  :class="cn(store.filterStatuses.length > 0 && 'border-primary/50 text-foreground')"
+                  :data-active="store.filterStatuses.length > 0"
                 >
                   <GitBranch />
                   {{ statusLabel }}
@@ -155,9 +159,9 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
                 </DropdownMenuCheckboxItem>
                 <template v-if="store.filterStatuses.length">
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem class="text-muted-foreground" @select="store.filterStatuses = []">
-                    <X :size="14" />
-                    {{ $t("filters.clearStatuses") }}
+                  <DropdownMenuItem @select="store.filterStatuses = []">
+                    <X :size="14" class="text-muted-foreground" />
+                    <span class="text-muted-foreground">{{ $t("filters.clearStatuses") }}</span>
                   </DropdownMenuItem>
                 </template>
               </DropdownMenuContent>
@@ -168,7 +172,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
           <label
             :class="
               cn(
-                'flex h-9 cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-secondary/30 px-2.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground',
+                'flex h-9 cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-secondary/30 px-2.5 text-ui text-muted-foreground transition-colors hover:text-foreground',
                 store.showHidden && 'border-primary/40 text-foreground',
               )
             "
@@ -188,7 +192,7 @@ const anyActive = computed(() => store.filtersActive || store.showHidden);
             v-if="store.filtersActive"
             class="flex items-center justify-between gap-2 border-t border-border/60 pt-2.5"
           >
-            <span class="text-[12px] text-muted-foreground">
+            <span class="text-xs text-muted-foreground">
               {{ $t("filters.matchCount", { filtered: store.filteredRepos.length, total: store.visibleRepos.length }) }}
             </span>
             <Button variant="ghost" size="sm" :aria-label="$t('filters.clearFilters')" @click="store.clearFilters()">

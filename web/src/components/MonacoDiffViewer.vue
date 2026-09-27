@@ -195,7 +195,7 @@ onBeforeUnmount(() => {
        then faded in, so the un-diffed file never flashes on open. -->
   <div
     ref="host"
-    class="h-full w-full transition-opacity duration-150 ease-out"
+    class="size-full transition-opacity duration-150 ease-out"
     :class="[{ 'gm-line-level-diff': !wordLevel }, ready ? 'opacity-100' : 'opacity-0']"
   />
 </template>

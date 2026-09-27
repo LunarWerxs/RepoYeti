@@ -85,14 +85,17 @@ async function confirmDrop(): Promise<void> {
   </Tooltip>
   <!-- existing stashes: pop / drop -->
   <DropdownMenu v-if="canStash && stashes.length">
-    <DropdownMenuTrigger
-      class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-transparent px-2.5 text-[13px] font-medium text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40"
-      :title="tooltipsEnabled ? $t('repo.stash.menuLabel') : undefined"
-      :aria-label="$t('repo.stash.menuLabel')"
-    >
-      <Archive :size="15" />
-      <span>{{ stashes.length }}</span>
-      <ChevronDown :size="14" class="opacity-60" />
+    <DropdownMenuTrigger as-child>
+      <button
+        type="button"
+        class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-transparent px-2.5 text-ui font-medium text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40"
+        :title="tooltipsEnabled ? $t('repo.stash.menuLabel') : undefined"
+        :aria-label="$t('repo.stash.menuLabel')"
+      >
+        <Archive :size="15" />
+        <span>{{ stashes.length }}</span>
+        <ChevronDown :size="14" class="opacity-60" />
+      </button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" class="max-w-72">
       <DropdownMenuLabel>{{ $t("repo.stash.menuLabel") }}</DropdownMenuLabel>
@@ -101,10 +104,10 @@ async function confirmDrop(): Promise<void> {
         :key="s.index"
         class="flex items-center gap-1.5 rounded-sm px-1.5 py-1 hover:bg-accent/50"
       >
-        <span class="min-w-0 flex-1 truncate text-[12px]" :title="s.message">{{ s.message }}</span>
+        <span class="min-w-0 flex-1 truncate text-xs" :title="s.message">{{ s.message }}</span>
         <button
           type="button"
-          class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+          class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-no-ring hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
           :disabled="!!gitBusy"
           :title="tooltipsEnabled ? $t('repo.stash.popTooltip') : undefined"
           :aria-label="$t('repo.stash.pop')"
@@ -114,7 +117,7 @@ async function confirmDrop(): Promise<void> {
         </button>
         <button
           type="button"
-          class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+          class="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-no-ring hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
           :disabled="!!gitBusy"
           :title="tooltipsEnabled ? $t('repo.stash.dropTooltip') : undefined"
           :aria-label="$t('repo.stash.drop')"
@@ -133,7 +136,7 @@ async function confirmDrop(): Promise<void> {
         <DialogTitle>{{ $t("repo.stash.dropTitle") }}</DialogTitle>
         <DialogDescription>{{ $t("repo.stash.dropBody", { message: dropTarget?.message ?? "" }) }}</DialogDescription>
       </DialogHeader>
-      <DialogFooter class="gap-2 sm:gap-2">
+      <DialogFooter>
         <Button variant="secondary" @click="dropOpen = false">{{ $t("common.cancel") }}</Button>
         <Button variant="destructive" @click="confirmDrop">{{ $t("repo.stash.dropConfirm") }}</Button>
       </DialogFooter>

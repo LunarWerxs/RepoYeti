@@ -116,7 +116,7 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
   >
     <!-- header: which region, what the model claimed, accept toggle -->
     <div class="flex items-center gap-2 px-3 py-2">
-      <span class="mono shrink-0 text-[11px] font-semibold text-muted-foreground">
+      <span class="mono shrink-0 text-2xs font-semibold text-muted-foreground">
         {{ $t("repo.resolve.regionLabel", { n: hunk.index, line: hunk.line + 1 }) }}
       </span>
 
@@ -124,7 +124,7 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
         v-if="resolution"
         :class="
           cn(
-            'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+            'shrink-0 rounded px-1.5 py-0.5 text-3xs font-medium uppercase tracking-wide',
             confidence === 'high'
               ? 'bg-success/15 text-success'
               : confidence === 'medium'
@@ -136,7 +136,7 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
         {{ confidenceLabel }}
       </span>
 
-      <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+      <span class="min-w-0 flex-1 truncate text-2xs text-muted-foreground">
         {{ resolution?.note || rejectedReason }}
       </span>
 
@@ -150,7 +150,7 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
             :aria-label="$t('repo.resolve.acceptAria', { n: hunk.index })"
             :class="
               cn(
-                'flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40',
+                'flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-2xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40',
                 accepted
                   ? 'bg-success/15 text-success hover:bg-success/25'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -173,7 +173,7 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
         :key="flag"
         :class="
           cn(
-            'flex items-start gap-1.5 rounded-md px-2 py-1.5 text-[11px]/relaxed',
+            'flex items-start gap-1.5 rounded-md px-2 py-1.5 text-2xs/relaxed',
             flagIsSevere(flag) ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground',
           )
         "
@@ -185,37 +185,40 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
            should be able to check in place rather than take on faith. -->
       <pre
         v-if="resolution?.droppedLines?.length"
-        class="mono max-h-24 overflow-auto rounded-md bg-destructive/5 px-2 py-1 text-[10px]/snug text-destructive"
+        class="mono max-h-24 overflow-auto rounded-md bg-destructive/5 px-2 py-1 text-3xs/snug text-destructive"
       >{{ resolution.droppedLines.join("\n") }}</pre>
     </div>
 
     <!-- the proposal -->
     <div v-if="resolution" class="px-3 pb-2">
       <div class="mb-1 flex items-center gap-2">
-        <span class="text-[11px] font-medium text-foreground">{{ $t("repo.resolve.proposed") }}</span>
-        <span class="text-[10px] text-muted-foreground">
+        <span class="text-2xs font-medium text-foreground">{{ $t("repo.resolve.proposed") }}</span>
+        <span class="text-3xs text-muted-foreground">
           {{ $t("repo.resolve.lineCount", { n: lineCount(content) }, lineCount(content)) }}
         </span>
         <button
           type="button"
-          class="ms-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          class="ms-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
           @click="editing = !editing"
         >
           <Pencil :size="11" />
           {{ editing ? $t("repo.resolve.editDone") : $t("repo.resolve.edit") }}
         </button>
       </div>
-      <Textarea
-        v-if="editing"
-        v-model="content"
-        rows="8"
-        spellcheck="false"
-        class="mono resize-y text-[11px]/snug"
-        :aria-label="$t('repo.resolve.editAria', { n: hunk.index })"
-      />
+      <div v-if="editing">
+        <Textarea
+          v-model="content"
+          rows="8"
+          spellcheck="false"
+          variant="mono"
+          text-size="2xs"
+          class="resize-y"
+          :aria-label="$t('repo.resolve.editAria', { n: hunk.index })"
+        />
+      </div>
       <pre
         v-else
-        class="mono max-h-64 overflow-auto rounded-md bg-background/60 px-2 py-1.5 text-[11px]/snug ring-1 ring-border"
+        class="mono max-h-64 overflow-auto rounded-md bg-background/60 px-2 py-1.5 text-2xs/snug ring-1 ring-border"
       >{{ content || $t("repo.resolve.emptyResolution") }}</pre>
     </div>
 
@@ -223,7 +226,7 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
     <div class="px-3 pb-2">
       <button
         type="button"
-        class="flex items-center gap-1 text-[11px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+        class="flex items-center gap-1 text-2xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
         :aria-expanded="showSides"
         @click="showSides = !showSides"
       >
@@ -232,22 +235,22 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
       </button>
       <div v-if="showSides" class="mt-1.5 grid gap-1.5">
         <div>
-          <div class="mono mb-0.5 text-[10px] font-semibold text-muted-foreground">
+          <div class="mono mb-0.5 text-3xs font-semibold text-muted-foreground">
             {{ $t("repo.resolve.ours", { label: hunk.oursLabel }) }}
           </div>
-          <pre class="mono max-h-40 overflow-auto rounded-md bg-background/60 px-2 py-1 text-[11px]/snug ring-1 ring-border">{{ hunk.oursText || $t("repo.resolve.emptySide") }}</pre>
+          <pre class="mono max-h-40 overflow-auto rounded-md bg-background/60 px-2 py-1 text-2xs/snug ring-1 ring-border">{{ hunk.oursText || $t("repo.resolve.emptySide") }}</pre>
         </div>
         <div v-if="hunk.baseText !== undefined">
-          <div class="mono mb-0.5 text-[10px] font-semibold text-muted-foreground">
+          <div class="mono mb-0.5 text-3xs font-semibold text-muted-foreground">
             {{ $t("repo.resolve.base") }}
           </div>
-          <pre class="mono max-h-40 overflow-auto rounded-md bg-background/60 px-2 py-1 text-[11px]/snug ring-1 ring-border">{{ hunk.baseText || $t("repo.resolve.emptySide") }}</pre>
+          <pre class="mono max-h-40 overflow-auto rounded-md bg-background/60 px-2 py-1 text-2xs/snug ring-1 ring-border">{{ hunk.baseText || $t("repo.resolve.emptySide") }}</pre>
         </div>
         <div>
-          <div class="mono mb-0.5 text-[10px] font-semibold text-muted-foreground">
+          <div class="mono mb-0.5 text-3xs font-semibold text-muted-foreground">
             {{ $t("repo.resolve.theirs", { label: hunk.theirsLabel }) }}
           </div>
-          <pre class="mono max-h-40 overflow-auto rounded-md bg-background/60 px-2 py-1 text-[11px]/snug ring-1 ring-border">{{ hunk.theirsText || $t("repo.resolve.emptySide") }}</pre>
+          <pre class="mono max-h-40 overflow-auto rounded-md bg-background/60 px-2 py-1 text-2xs/snug ring-1 ring-border">{{ hunk.theirsText || $t("repo.resolve.emptySide") }}</pre>
         </div>
       </div>
     </div>

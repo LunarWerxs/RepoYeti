@@ -21,7 +21,7 @@ import { discardDialogOpen, resolveDiscard } from "@/lib/file-viewer";
         <DialogTitle>{{ $t("fileViewer.discardTitle") }}</DialogTitle>
         <DialogDescription>{{ $t("fileViewer.discardBody") }}</DialogDescription>
       </DialogHeader>
-      <DialogFooter class="gap-2 sm:gap-2">
+      <DialogFooter>
         <Button variant="secondary" @click="resolveDiscard(false)">
           {{ $t("fileViewer.keepEditing") }}
         </Button>

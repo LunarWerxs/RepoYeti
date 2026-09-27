@@ -62,7 +62,7 @@ async function removeServer(id: string): Promise<void> {
 <template>
   <ExpandTransition :open="store.loreServersEnabled">
     <div class="flex flex-col gap-2.5 px-3.5 py-3">
-        <p v-if="!store.servers.length" class="text-[12.5px] text-muted-foreground">
+        <p v-if="!store.servers.length" class="text-ui text-muted-foreground">
           {{ $t("settings.serversEmpty") }}
         </p>
         <div
@@ -71,8 +71,8 @@ async function removeServer(id: string): Promise<void> {
           class="flex items-center gap-2 rounded-md border border-border bg-secondary/30 px-2.5 py-1.5"
         >
           <span class="flex min-w-0 flex-1 flex-col">
-            <span class="truncate text-[12.5px] font-medium text-foreground">{{ s.name }}</span>
-            <code class="mono truncate text-[11.5px] text-muted-foreground" :title="s.url">{{ s.url }}</code>
+            <span class="truncate text-ui font-medium text-foreground">{{ s.name }}</span>
+            <code class="mono truncate text-xs text-muted-foreground" :title="s.url">{{ s.url }}</code>
           </span>
           <Button
             :variant="confirmRemoveServer === s.id ? 'destructive' : 'ghost'"
@@ -89,17 +89,18 @@ async function removeServer(id: string): Promise<void> {
         <form class="flex flex-col gap-2 pt-0.5" @submit.prevent="addServer">
           <Input
             v-model="newServerName"
-            class="text-[12.5px]"
             :placeholder="$t('settings.serversPlaceholderName')"
             :aria-label="$t('settings.serversLabelName')"
           />
           <div class="flex items-center gap-2">
-            <Input
-              v-model="newServerUrl"
-              class="mono min-w-0 flex-1 text-[12.5px]"
-              :placeholder="$t('settings.serversPlaceholderUrl')"
-              :aria-label="$t('settings.serversLabelUrl')"
-            />
+            <!-- Monospace on a wrapper, not on the row: the row's Add button must keep its own face. -->
+            <div class="mono flex min-w-0 flex-1">
+              <Input
+                v-model="newServerUrl"
+                :placeholder="$t('settings.serversPlaceholderUrl')"
+                :aria-label="$t('settings.serversLabelUrl')"
+              />
+            </div>
             <Button type="submit" size="sm" class="shrink-0" :disabled="!newServerUrl.trim() || addingServer">
               <Loader2 v-if="addingServer" class="animate-spin" />
               <Plus v-else />

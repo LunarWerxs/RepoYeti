@@ -122,64 +122,67 @@ watch(
 </script>
 
 <template>
-  <Collapsible
-    :id="`repo-card-${repo.id}`"
-    :open="expanded"
-    :unmount-on-hide="!keepMounted"
-    :class="
-      cn(
-        'repo-card-visibility overflow-hidden rounded-md border border-border bg-card transition-colors',
-        expanded && 'border-border/80 bg-card/90 ring-1 ring-white/5',
-        repo.hidden && 'opacity-60',
-      )
-    "
-  >
-    <!-- collapsed header row — see repo-card/RepoCardHeader.vue -->
-    <RepoCardHeader
-      :repo="repo"
-      :draggable="draggable"
-      :expanded="expanded"
-      :section="section"
-      @toggle="toggle"
-    />
+  <Collapsible as-child :open="expanded" :unmount-on-hide="!keepMounted">
+    <!-- as-child: the Collapsible is behaviour only (open state, data-state), so it renders onto
+         the card's own <div>, which carries the card surface. Still ONE element, so the drag list
+         and ConflictConcierge's getElementById see exactly the node they did before. -->
+    <div
+      :id="`repo-card-${repo.id}`"
+      :class="
+        cn(
+          'repo-card-visibility overflow-hidden rounded-md border border-border bg-card transition-colors',
+          expanded && 'border-border/80 bg-card/90 ring-1 ring-white/5',
+          repo.hidden && 'opacity-60',
+        )
+      "
+    >
+      <!-- collapsed header row — see repo-card/RepoCardHeader.vue -->
+      <RepoCardHeader
+        :repo="repo"
+        :draggable="draggable"
+        :expanded="expanded"
+        :section="section"
+        @toggle="toggle"
+      />
 
-    <!-- ── expanded body ───────────────────────────────────────────────────── -->
-    <CollapsibleContent>
-      <div class="flex flex-col gap-3 border-t border-border/60 px-3 pt-3 pb-3.5">
-        <!-- path/branch/error + changed-files tree — see repo-card/RepoCardChanges.vue -->
-        <RepoCollaboration
-          v-if="hasCollaborators"
-          :repo="repo"
-          v-model:mode="collaborationMode"
-        />
-        <RepoCardChanges
-          v-if="collaborationMode === 'mine'"
-          :repo="repo"
-          v-model:tree-query="treeQuery"
-          v-model:content-mode="contentMode"
-        />
+      <!-- ── expanded body ───────────────────────────────────────────────────── -->
+      <CollapsibleContent>
+        <div class="flex flex-col gap-3 border-t border-border/60 px-3 pt-3 pb-3.5">
+          <!-- path/branch/error + changed-files tree — see repo-card/RepoCardChanges.vue -->
+          <RepoCollaboration
+            v-if="hasCollaborators"
+            :repo="repo"
+            v-model:mode="collaborationMode"
+          />
+          <RepoCardChanges
+            v-if="collaborationMode === 'mine'"
+            :repo="repo"
+            v-model:tree-query="treeQuery"
+            v-model:content-mode="contentMode"
+          />
 
-        <!-- conflicted files + AI resolution — see conflicts/ConflictResolver.vue. Sits ABOVE
-             the commit box on purpose: while a merge is unresolved, resolving it is the only
-             thing the owner can actually do here (git refuses the commit either way). -->
-        <ConflictResolver v-if="collaborationMode === 'mine' && repo.status?.conflicted" :repo="repo" />
+          <!-- conflicted files + AI resolution — see conflicts/ConflictResolver.vue. Sits ABOVE
+               the commit box on purpose: while a merge is unresolved, resolving it is the only
+               thing the owner can actually do here (git refuses the commit either way). -->
+          <ConflictResolver v-if="collaborationMode === 'mine' && repo.status?.conflicted" :repo="repo" />
 
-        <!-- commit message box + smart-commit — see repo-card/RepoCardCommit.vue -->
-        <RepoCardCommit
-          v-if="collaborationMode === 'mine'"
-          ref="commitRef"
-          :repo="repo"
-          :tree-selection="treeSelection"
-          v-model:commit-msg="commitMsg"
-        />
+          <!-- commit message box + smart-commit — see repo-card/RepoCardCommit.vue -->
+          <RepoCardCommit
+            v-if="collaborationMode === 'mine'"
+            ref="commitRef"
+            :repo="repo"
+            :tree-selection="treeSelection"
+            v-model:commit-msg="commitMsg"
+          />
 
-        <!-- fetch/pull/push/stash/refresh + overflow menu — see repo-card/RepoCardActions.vue -->
-        <RepoCardActions :repo="repo" :active="expanded" />
+          <!-- fetch/pull/push/stash/refresh + overflow menu — see repo-card/RepoCardActions.vue -->
+          <RepoCardActions :repo="repo" :active="expanded" />
 
-        <!-- commit history (lazy-loaded when opened) — see LogPanel.vue -->
-        <LogPanel :repo-id="repo.id" :active="expanded" />
-      </div>
-    </CollapsibleContent>
+          <!-- commit history (lazy-loaded when opened) — see LogPanel.vue -->
+          <LogPanel :repo-id="repo.id" :active="expanded" />
+        </div>
+      </CollapsibleContent>
+    </div>
   </Collapsible>
 </template>
 

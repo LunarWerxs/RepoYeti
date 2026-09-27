@@ -226,12 +226,15 @@ async function confirmUndo(): Promise<void> {
 
 <template>
   <DropdownMenu @update:open="onMenuToggle">
-    <DropdownMenuTrigger
-      class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-      :aria-label="$t('repo.moreActions')"
-      @click.stop
-    >
-      <MoreVertical :size="15" />
+    <DropdownMenuTrigger as-child>
+      <button
+        type="button"
+        class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+        :aria-label="$t('repo.moreActions')"
+        @click.stop
+      >
+        <MoreVertical :size="15" />
+      </button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" class="max-w-44">
       <!-- Open the repo folder in an external editor (local sessions only). -->
@@ -314,7 +317,7 @@ async function confirmUndo(): Promise<void> {
           autofocus
           @keydown.enter.prevent="saveRename"
         />
-        <p class="mono truncate text-[11px] text-muted-foreground" :title="repo.absPath">{{ repo.absPath }}</p>
+        <p class="mono truncate text-2xs text-muted-foreground" :title="repo.absPath">{{ repo.absPath }}</p>
       </div>
       <DialogFooter>
         <Button variant="ghost" @click="renameOpen = false">{{ $t("common.cancel") }}</Button>
@@ -328,7 +331,7 @@ async function confirmUndo(): Promise<void> {
   <Dialog v-model:open="removeOpen">
     <DialogContent class="sm:max-w-md">
       <DialogHeader class="min-w-0">
-        <DialogTitle class="break-words">
+        <DialogTitle class="wrap-break-word">
           {{ $t("repo.remove.title", { name: repo.displayName || repo.name }) }}
         </DialogTitle>
         <DialogDescription>{{ $t("repo.remove.description") }}</DialogDescription>
@@ -339,7 +342,7 @@ async function confirmUndo(): Promise<void> {
            and the overflow is contained to this box (with a copy button, since a scrolled-off
            path is awkward to select by hand). -->
       <div class="flex min-w-0 items-center gap-2 rounded-md border border-border bg-secondary/40 p-2">
-        <p class="scroll-slim mono min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-[11px] text-muted-foreground">
+        <p class="scroll-slim mono min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-2xs text-muted-foreground">
           {{ repo.absPath }}
         </p>
         <Button
@@ -369,8 +372,8 @@ async function confirmUndo(): Promise<void> {
       </DialogHeader>
       <p v-if="!undoPlan" class="text-sm text-muted-foreground">{{ $t("repo.gitUndo.loading") }}</p>
       <div v-else class="min-w-0 space-y-1 text-sm">
-        <p v-if="undoPlan.step" class="mono break-words text-[12px]">{{ $t("repo.gitUndo.step", { subject: undoPlan.step.subject }) }}</p>
-        <p :class="undoPlan.ok ? 'text-muted-foreground' : 'text-destructive'" class="break-words">
+        <p v-if="undoPlan.step" class="mono wrap-break-word text-xs">{{ $t("repo.gitUndo.step", { subject: undoPlan.step.subject }) }}</p>
+        <p :class="undoPlan.ok ? 'text-muted-foreground' : 'text-destructive'" class="wrap-break-word">
           {{ undoPlan.ok ? undoPlan.message : friendly(undoPlan.code) || undoPlan.message }}
         </p>
       </div>
