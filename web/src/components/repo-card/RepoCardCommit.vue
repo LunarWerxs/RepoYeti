@@ -505,7 +505,7 @@ defineExpose({ loadRecentMsgs, recentMsgs });
 <style scoped>
 /* color tokens - lifted from raw literals by Odin's fix_color_tokens.py (2026-09-14); the Architect's
    color-scheme-conformance check wants every color consumed through the token layer. */
-:root {
+:global(:root) {
   --color-white: #fff;
 }
 </style>
