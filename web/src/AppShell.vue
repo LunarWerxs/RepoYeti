@@ -221,7 +221,7 @@ onBeforeUnmount(() => {
       </AppContainer>
     </main>
 
-    <AppFooter discord="https://discord.gg/DtE5bZh49m" />
+    <AppFooter discord="https://lunarwerx.com/discord/repoyeti" />
 
     <!-- bulk action bar — only while the dashboard is in multi-select mode (started from the
          header's ⋮ menu; see @/lib/repo-selection) -->
