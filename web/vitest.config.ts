@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { availableParallelism } from "node:os";
 import { fileURLToPath, URL } from "node:url";
 import vue from "@vitejs/plugin-vue";
 
@@ -22,7 +23,9 @@ export default defineConfig({
     pool: 'forks',
     // 104 happy-dom files, most of their time in environment setup: paired on the shared box, 8 workers ran 40 s
     // at 2.2 GB peak where 4 ran 55 s at 1.7 GB and an unbounded pool 21-42 s at 4.8 GB with a timing flake.
-    maxWorkers: 8,
+    // Never more workers than cores: 8 forks on a 4-vCPU GitHub runner starved LogPanel's 275-row test past
+    // its 15 s limit under coverage, red on every CI run from c5a26ac (2026-09-26) until this cap.
+    maxWorkers: Math.min(8, availableParallelism()),
     environment: "happy-dom",
     globals: true,
     setupFiles: ["./test/setup.ts"],
