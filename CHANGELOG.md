@@ -6,6 +6,11 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **The Discord link now opens RepoYeti's own channel and gives you the RepoYeti role** on joining,
+  instead of dropping you in the server's general room to find it yourself.
+
 ## [1.2.0] - 2026-09-27
 
 ### Added
