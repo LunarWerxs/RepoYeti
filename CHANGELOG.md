@@ -6,6 +6,8 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-27
+
 ### Added
 
 - **An agent's approved action is the exact action that runs, once.** The MCP approval gate used
@@ -2349,6 +2351,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
 [#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
 [#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[1.2.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.1...v1.0.2

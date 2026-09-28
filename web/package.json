@@ -1,7 +1,7 @@
 {
   "name": "repoyeti-web",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "//test": "Web tests run under VITEST via `bun run test` — NOT `bun test`. Bun's native runner has no Vue SFC compiler, so `.vue` imports resolve to a string path and @vue/test-utils crashes (WeakMap key error). This run IS the gate: ci.yml and release.yml invoke exactly `bun run test --coverage`, so the dashboard coverage floor from vitest.config.ts applies to the run that is the gate — a change that strips a component's tests fails the build rather than passing it. There is deliberately no `test:coverage` alias: the gates pass `--coverage` themselves, so a second name for the same command would be a script no gate ever reaches. There is deliberately no `test:watch` alias either: a watch process never exits, so no gate could ever run it, and it would verify nothing a gate sees — for the dev loop run `bunx vitest` in `web/`. There is deliberately no `test:e2e` alias: that developer suite needs YOUR live daemon on :4319 (web/playwright.config.ts) so it can never run in CI; the specs still exist and run via `bunx playwright test` in `web/`, while the release browser gate (`test:gate`) is the gated one.",
