@@ -854,7 +854,12 @@ interface PublishState {
 }
 
 const publishState = new Map<string, PublishState>();
-const HEARTBEAT_MS = 10_000;
+// An unchanged tree is re-diffed and re-sent once per heartbeat: that refreshes the owner's
+// presence entry (dropped after SNAPSHOT_FRESH_MS) and catches same-stat byte edits. It must be
+// longer than PUBLISH_INTERVAL_MS, or every timer tick re-diffs, re-encrypts and re-POSTs an
+// unchanged snapshot; and shorter than SNAPSHOT_FRESH_MS - PUBLISH_INTERVAL_MS, so the first tick
+// past it still lands before the owner (whatever its version) expires this peer.
+const HEARTBEAT_MS = SNAPSHOT_FRESH_MS / 2;
 
 /** Signature for the actual peer-visible snapshot, not merely its path/stat overview. */
 export function collaborationPresenceSignature(changes: ChangedFile[], diff: string | null): string {
