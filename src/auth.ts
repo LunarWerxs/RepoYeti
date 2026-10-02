@@ -208,8 +208,7 @@ export function readSession(c: Context, o: OAuthConfig, opts?: AuthOptions): Ses
   }
 }
 
-// arkitect-allow: no-bandaids - the quoted text is that button's shipped label (web/src/components/SignIn.vue), not a pending change: this section IS the bypass the label grants.
-// ── local-bypass ("Continue local for now") ─────────────────────────────────────
+// Local bypass (the sign-in screen's skip button)
 // In remote mode the dashboard demands a login, but someone physically at the machine
 // can opt to keep using it locally. This is gated HARD on the request being loopback:
 // a request that arrived over the tunnel carries Cloudflare/forwarding headers it cannot
@@ -648,8 +647,7 @@ export function effectiveGuest(c: Context, cfg: RepoYetiConfig): Share | null {
   if (validBearerToken(c, cfg.apiToken)) return null; // owner's API token
   if (!isRemoteRequest(c)) {
     if (accessMode(cfg) !== "remote") return null; // local mode → open on this machine
-    // arkitect-allow: no-bandaids - the quoted text is the sign-in button's label, not a pending change: this is where pressing it lands the owner (LOCAL_COOKIE, set above).
-    if (hasLocalBypass(c)) return null; // "Continue local for now" → the owner, at their desk
+    if (hasLocalBypass(c)) return null; // Local bypass → the owner, at their desk
   }
   return readGuestShare(c);
 }
@@ -710,8 +708,7 @@ async function guestGate(
  *  - A request over the tunnel ALWAYS requires a signed-in owner (or a valid API Bearer token),
  *    in any mode — or, failing that, a live share-link cookie limited to that share's policy.
  *  - A local (loopback) request: open in "local" mode; in "remote" mode it needs either an
- *  arkitect-allow: no-bandaids - the quoted text is the sign-in button's label (web/src/components/SignIn.vue): the sentence below names it because it describes what the user pressed.
- *    owner session, the local bypass ("Continue local for now"), or a valid API Bearer token.
+ *    owner session, the local bypass (the sign-in screen's skip button), or a valid API Bearer token.
  *  Public endpoints (health + the status probes the gate itself relies on) always pass.
  *
  *  On share links (see src/share/): the guest branch is deliberately LAST in each arm, so the

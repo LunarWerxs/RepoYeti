@@ -291,8 +291,7 @@ export function useRepoActions(
   const filterIdentity = ref<string | null | undefined>(undefined);
   // multi-select: an empty set means "any status"; multiple selected = OR (e.g. ahead OR behind).
   const filterStatuses = ref<StatusKey[]>([]);
-  // arkitect-allow: no-bandaids - the "deprecated repo" is the owner's own hidden repo: showHidden is the display toggle that brings it back, not a code path awaiting removal.
-  // Hidden repos are excluded from every view unless this is on (a deprecated-repo opt-out,
+  // Hidden repos are excluded from every view unless this is on (a retired-repo opt-out,
   // not a "filter" — drag-reorder still works over the visible set when it's off).
   const showHidden = ref(false);
   const hasHidden = computed(() => repos.value.some((r) => r.hidden));
