@@ -1,155 +1,46 @@
 # AGENTS.md
 
-Orientation for an AI agent (or a new human) about to change this repository. It is a map and a
-list of traps, not a tutorial. The deep documents are [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-(what this is and why it is shaped this way) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
-(setup, i18n, test conventions, the git-safety rules). Read this first, then the one you need.
+Distilled rules. The full text, with the reasons, is [docs/agents/RULES_FULL.md](docs/agents/RULES_FULL.md) and wins on any doubt; each heading links to its section. Deep docs: [ARCHITECTURE](docs/ARCHITECTURE.md), [CONTRIBUTING](docs/CONTRIBUTING.md) (setup, tests, git safety). Issues are the working surface: a bug report is usually the best spec.
 
-RepoYeti is openly AI-built, and issues are the working surface. If you are an agent reading this
-because someone pointed you at a bug report, the report is usually the best spec in the room.
+## [Thesis](docs/agents/RULES_FULL.md#the-one-thesis)
+- A background daemon on the machine that owns the repos, plus a dashboard reached from a phone. Nothing is uploaded or mirrored, no server holds the code. A change that needs code to leave the machine is the wrong change.
 
-## The one thesis
+## [Layout](docs/agents/RULES_FULL.md#layout)
+- `src/` daemon (Bun + TS), tests in `tests/`. `web/` dashboard (Vue 3) is **its own package** with its own deps and runner, tests in `web/test/` (Vitest + jsdom). `scripts/checks/` guardrails. `relay/` Worker, deployed separately. `site/` is not the app. `misc/` tray chain, partly kit-managed.
 
-A background daemon on the machine that owns the repositories, and a dashboard you reach from a
-phone. Nothing is uploaded, nothing is mirrored, no server holds the code. Every design decision
-follows from that; if a change would require code to leave the machine, it is the wrong change.
+## [Before you push](docs/agents/RULES_FULL.md#before-you-push)
+- Two package roots, two runners; running only one is how broken pushes happen. Run all: `bun test`, `bun run typecheck`, `bun run check` (lint + every guardrail), `bun run check:coverage`; then `bun run --cwd web test`, `bun run --cwd web build` (i18n:check, vue-tsc, bundle); then `bun run --cwd web test:gate` (needs that build, plus `bunx playwright install chromium` once).
+- Bare `bun test` at the root would glob web's Vitest files (fake failures), so `bunfig.toml` ignores `web/**` and the `test` script is scoped to `tests/`.
+- Every test file that spawns calls `useSuiteTimeout()` (`tests/helpers/timeouts.ts`), enforced by `check:spawntimeout`. Never move that timeout to the command line or `bunfig.toml` (both measured as false greens).
+- Enable the pre-commit hook once per clone: `git config core.hooksPath .githooks`.
 
-## Layout
+## [Enforced by `bun run check`](docs/agents/RULES_FULL.md#things-that-are-enforced-so-you-cannot-drift-past-them)
+Each one's incident really happened; read the script header before calling a check pedantic.
+- `check:boundaries`: HTTP routes go through `service.ts`, never straight to `git-actions`/`status`/`inspect`. Read-only layers never import the orchestration layer. VCS backends never import `service.ts`. The contract type never imports the git implementation.
+- `check:codes`: git operations return first-class codes (`DIRTY_WORKING_TREE`, `NON_FAST_FORWARD`); they are API surface.
+- `check:popper`: a menu or popover whose trigger resolves to a tooltip's anchor context opens off-screen with perfect `aria` and no error. Read that header.
+- `check:testscratch`: never `mkdtemp` under the OS temp dir; use `tests/helpers/scratch.ts` (the daemon refuses to import a repo from there).
+- Also `check:spawntimeout`, `check:changelog`, `check:bytes`, `check:gitenv`, `check:libtypes`.
+- New guardrails are encouraged, often the right end to a bug fix. Copy a `scripts/checks/` shape (incident header, `audit` export, standalone CLI block, `DELIBERATELY NOT FLAGGED` section) and prove it goes red on the broken code before wiring it into `check`.
 
-| Path | What lives there |
-| --- | --- |
-| `src/` | The daemon: git orchestration, HTTP API, auth, discovery, auto-update, CLI. Bun + TypeScript. |
-| `web/` | The dashboard. **Its own package** with its own `package.json`, deps, and test runner. Vue 3 + reka-ui + Tailwind. |
-| `tests/` | Daemon tests (`bun test`). |
-| `web/test/` | Dashboard tests (Vitest + jsdom). |
-| `scripts/` | Build, release, and the guardrail checks. `scripts/checks/` holds the standalone ones. |
-| `relay/` | The Cloudflare Worker behind the permanent `app.repoyeti.com/r/<id>` address. Deployed separately. |
-| `site/` | The static marketing site. Not part of the app. |
-| `misc/` | Windows tray launch chain. **Partly kit-managed, see below.** |
-| `docs/` | Architecture, contributing, the stable-address guide, the Buzz protocol. |
+## [i18n](docs/agents/RULES_FULL.md#internationalisation-is-not-optional)
+- Every user-facing string goes through `web/src/locales/en.json`. `i18n:check` in the web build fails on a hard-coded string, a missing key or locale drift.
 
-## Before you push
+## [Kit-managed files](docs/agents/RULES_FULL.md#kit-managed-files-do-not-edit-them-here)
+- Some files under `web/src/components/ui/`, `tests/server-lib/` and `misc/` are synced byte-for-byte from the private sibling `lunarwerx-ui`. Never edit them here; fix upstream. `bun run check:kit` compares them (run as `check:local` on a dev machine, not in CI) and the pre-commit hook rejects a local edit.
+- `misc/lunarwerx-tray.exe` drifting in `check:kit` usually means a local rebuild, not a stale repo. Never sync a locally built binary into a public release without knowing what changed in it.
 
-There are **two** package roots and **two** test runners. Running only one of them is the single
-most common way to push something broken here.
+## [Traps that cost a release](docs/agents/RULES_FULL.md#traps-that-have-actually-cost-a-release)
+- The daemon serves `web/dist` live, so the build writes `dist-next` and renames it over `dist` in one step. Never "simplify" that away.
+- jsdom has no layout: for positioned elements assert the mechanism (reka's transform, the resolved anchor), not a rect, and wait for Floating UI, which resolves async.
+- Watch a fix work in a real browser before claiming it. `bun run --cwd web test:gate` does that on an isolated daemon (touches nothing of yours) and gates the release in CI. The older `web/test/e2e` suite needs your live daemon plus `bun run dev`: run `bunx playwright test` from `web/`.
+- A local red may belong to another agent editing this tree: check `git status --short` and file mtimes first.
 
-```sh
-# daemon
-bun test
-bun run typecheck
-bun run check              # lint + every guardrail below
-bun run check:coverage     # coverage floor
+## [Changelog and releases](docs/agents/RULES_FULL.md#changelog-and-releases)
+- `CHANGELOG.md` entries are prose giving the cause: what the user saw, what was happening, why it was not caught. Measurements beat adjectives. New entries go under `## [Unreleased]`.
+- Releases are the owner's call and timeline. Never bump a version or push a tag unless asked.
+- When asked: bump `package.json`, `web/package.json` and `src/config.ts` (`tests/version-consistency.test.ts` fails if they disagree), turn `Unreleased` into the version with a date, add its comparison link at the bottom of the changelog, commit `release: x.y.z`, tag `vx.y.z`, push the tag (it builds and publishes the binaries). Run the gates AFTER the bump.
+- The tag is not the last step: CI builds Windows assets UNSIGNED and they are signed afterwards on the workstation. Read [docs/RELEASING.md](docs/RELEASING.md) before tagging (two repack traps there silently break the auto-updater).
 
-# dashboard
-bun run --cwd web test     # Vitest
-bun run --cwd web build    # runs i18n:check, then vue-tsc, then the bundle
-
-# browser gate (needs the build above, plus `bunx playwright install chromium` once)
-bun run --cwd web test:gate
-```
-
-`bun test` on its own from the repo root would glob the dashboard's Vitest files and report failures
-that are not real; `bunfig.toml` ignores `web/**` and the `test` script is scoped to `tests/` for
-exactly that reason. The subprocess timeout lives in the test files themselves: every file that
-spawns calls `useSuiteTimeout()` (`tests/helpers/timeouts.ts`), and `check:spawntimeout` enforces
-it. Do not move it to the command line or to `bunfig.toml`; `docs/CONTRIBUTING.md` explains why
-both of those were measured as false greens.
-
-Enable the pre-commit hook once per clone: `git config core.hooksPath .githooks`.
-
-## Things that are enforced, so you cannot drift past them
-
-`bun run check` runs each of these. Every one exists because the thing it prevents actually
-happened, and each script's header says which incident. Read that header before you decide a check
-is being pedantic.
-
-- **Architectural boundaries** (`check:boundaries`). HTTP routes go through `service.ts` and never
-  reach into `git-actions`/`status`/`inspect` directly. Read-only layers do not import the
-  orchestration layer. VCS backends do not import `service.ts`. The contract type does not import
-  the git implementation.
-- **Error-code drift** (`check:codes`). Git operations return first-class codes such as
-  `DIRTY_WORKING_TREE` and `NON_FAST_FORWARD`. They are API surface.
-- **Popper nesting** (`check:popper`). A menu or popover whose trigger resolves to a *tooltip's*
-  anchor context opens off-screen with perfect `aria` and no error. Four controls shipped dead for
-  four releases this way. See the header of that script; it is the most surprising trap in the
-  dashboard.
-- **Subprocess tests without an explicit timeout** (`check:spawntimeout`).
-- **Test scratch outside the helper** (`check:testscratch`). Never `mkdtemp` under the OS temp dir;
-  use `tests/helpers/scratch.ts`. The daemon *refuses to import a repository* from the temp dir, so
-  fixtures there are also the exact shape of the junk rows that refusal exists to prevent.
-- **Changelog links** (`check:changelog`), **source byte hygiene** (`check:bytes`), **git env**
-  (`check:gitenv`), **lib types** (`check:libtypes`).
-
-Adding a guardrail is encouraged and is often the right end to a bug fix. Copy the shape of an
-existing one in `scripts/checks/`: a long header explaining the incident, an `audit` export, a
-standalone CLI block, and a `DELIBERATELY NOT FLAGGED` section. **Prove it goes red** on the broken
-code before you wire it into `check`. A check that has never failed on purpose is a guess.
-
-## Internationalisation is not optional
-
-Every user-facing string goes through `web/src/locales/en.json`. `i18n:check` fails the build on a
-hard-coded one, on a missing key, and on locale drift. This runs inside `web`'s build, so you
-cannot ship past it.
-
-## Kit-managed files: do not edit them here
-
-Some files under `web/src/components/ui/`, `tests/server-lib/`, and `misc/` are synced byte-for-byte
-from `lunarwerx-ui`, a private sibling repository shared by four apps. `bun run check:kit` compares
-them, and the pre-commit hook rejects a local edit to one. Fix those upstream instead. A public
-repository's CI cannot check out that sibling, which is why this runs as `check:local` on a
-developer machine rather than in GitHub Actions.
-
-Note that `misc/lunarwerx-tray.exe` is a compiled Rust artifact whose upstream copy is a local build
-output, not a tracked file. If `check:kit` reports it as drifted, that usually means somebody
-rebuilt the crate on this machine, not that this repository is stale. Do not sync a locally built
-binary into a public release without knowing what changed in it.
-
-## Traps that have actually cost a release
-
-- **The daemon serves `web/dist` live.** Building in place leaves it empty or half-written for the
-  whole build, which is a real 404 storm for anyone connected. The build writes `dist-next` and
-  renames it over `dist` in one step. Do not "simplify" that away.
-- **jsdom has no layout.** A dashboard test can prove an element exists and still tell you nothing
-  about whether a user can see it. When something positions itself, assert the mechanism (the
-  transform reka writes, the anchor it resolved) rather than a rect, and wait for Floating UI, which
-  resolves asynchronously and reads as broken for a tick even when it is healthy.
-- **Watch the fix work in a real browser before you claim it.** The popper bug above was "fixed"
-  once, with a confident code comment naming the wrong cause, and three more components then copied
-  that comment. A fix nobody watched is a hypothesis. `bun run --cwd web test:gate` is that watching,
-  automated: it boots an isolated daemon on an ephemeral port with a throwaway state directory (so
-  it needs nothing running and touches nothing of yours) and checks the three things only a browser
-  can see: a page on another loopback port cannot drive a write, a dashboard that loses its event
-  stream converges when it returns, and every menu opens inside the window. It runs in CI and gates
-  the release. The older `web/test/e2e` suite is the developer one and still needs your live daemon
-  plus `bun run dev`; it has no npm-script alias (no gate could reach one; it can only run against
-  your own machine), so run it as `bunx playwright test` from `web/`.
-- A local red may belong to another agent editing this tree - check `git status --short` and file mtimes first (global CLAUDE.md, localci section).
-
-## Changelog and releases
-
-`CHANGELOG.md` entries are prose that explain the **cause**, not a list of verbs. Say what the user
-saw, what was actually happening, and why it was not caught. Measurements beat adjectives. Put new
-entries under `## [Unreleased]`.
-
-Releases are the owner's call and the owner's timeline. **Do not bump a version or push a tag unless
-you are asked to.** When asked: bump `package.json`, `web/package.json` and `src/config.ts`, turn
-the `Unreleased` heading into the version with a date, add its comparison link at the bottom of the
-changelog, commit as `release: x.y.z`, then tag `vx.y.z` and push the tag. The tag is what builds
-and publishes the binaries.
-
-**The tag is not the last step.** CI builds the Windows assets UNSIGNED, and they are signed
-afterwards on the workstation through the Connections vault. A release published and left there
-hands every Windows visitor an "Unknown publisher" wall. The whole procedure, including the two
-repack traps that would silently break the auto-updater, is [docs/RELEASING.md](docs/RELEASING.md).
-Read it before you tag, not after.
-
-Version drift is a real failure here, not a tidiness point: the version lives in THREE files and
-`tests/version-consistency.test.ts` fails on all three OS legs if they disagree. Run the gates
-AFTER the bump. A green suite from before the bump proves nothing about the release.
-
-## Style
-
-Comments explain **why**, especially why an obvious-looking simplification is wrong. Several files
-here carry long headers that read like incident reports, and that is deliberate: they are the only
-thing standing between a future reader and repeating the incident. Match the density of the file you
-are editing. Do not delete a comment you have not disproven.
+## [Style](docs/agents/RULES_FULL.md#style)
+- Comments explain why, especially why an obvious-looking simplification is wrong; long incident-report headers are deliberate. Match the comment density of the file you edit. Never delete a comment you have not disproven.
