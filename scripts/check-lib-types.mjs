@@ -63,9 +63,49 @@ function runtimeValueExports(file) {
   return new Set(exports);
 }
 
-/** Strip block and line comments so `// export foo` in prose is never matched. */
+/** Index just past the literal that opens at `start` (string, template or regex), so a `//` or
+ *  `/*` inside it is never read as a comment. Stops at a newline for a regex, which cannot span one. */
+function literalEnd(text, start, quote) {
+  let j = start + 1;
+  let inClass = false;
+  while (j < text.length && (inClass || text[j] !== quote)) {
+    if (quote === "/" && text[j] === "\n") return j;
+    if (text[j] === "\\") j++;
+    else if (quote === "/" && text[j] === "[") inClass = true;
+    else if (quote === "/" && text[j] === "]") inClass = false;
+    j++;
+  }
+  return j + 1;
+}
+
+/** Strip block and line comments so `// export foo` in prose is never matched. Walks the text
+ *  rather than using two regexes: a `//` or `/*` inside a string or regex literal (a module
+ *  specifier such as "https://x", say) must survive, and a regex would eat the rest of that line.
+ *  A `/` opens a regex literal only after an operator or opening bracket (or at the start), which
+ *  is what tells it apart from division. */
 function stripComments(text) {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  let out = "";
+  let i = 0;
+  let prev = "";
+  while (i < text.length) {
+    const c = text[i];
+    const next = text[i + 1];
+    let end = i + 1;
+    if (c === "/" && next === "*") {
+      const close = text.indexOf("*/", i + 2);
+      end = close === -1 ? text.length : close + 2;
+    } else if (c === "/" && next === "/") {
+      end = text.indexOf("\n", i);
+      if (end === -1) end = text.length;
+    } else {
+      const opensRegex = c === "/" && (prev === "" || "(,=:[!&|?{};".includes(prev));
+      if (opensRegex || c === '"' || c === "'" || c === "`") end = literalEnd(text, i, c);
+      out += text.slice(i, end);
+      if (!/\s/.test(c)) prev = c;
+    }
+    i = end;
+  }
+  return out;
 }
 
 const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*/;

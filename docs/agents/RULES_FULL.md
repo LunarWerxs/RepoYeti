@@ -3,8 +3,8 @@ Full text of the rules distilled in AGENTS.md; that file links here. A distillat
 # AGENTS.md
 
 Orientation for an AI agent (or a new human) about to change this repository. It is a map and a
-list of traps, not a tutorial. The deep documents are [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-(what this is and why it is shaped this way) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+list of traps, not a tutorial. The deep documents are [docs/ARCHITECTURE.md](../ARCHITECTURE.md)
+(what this is and why it is shaped this way) and [docs/CONTRIBUTING.md](../CONTRIBUTING.md)
 (setup, i18n, test conventions, the git-safety rules). Read this first, then the one you need.
 
 RepoYeti is openly AI-built, and issues are the working surface. If you are an agent reading this
@@ -142,7 +142,7 @@ and publishes the binaries.
 **The tag is not the last step.** CI builds the Windows assets UNSIGNED, and they are signed
 afterwards on the workstation through the Connections vault. A release published and left there
 hands every Windows visitor an "Unknown publisher" wall. The whole procedure, including the two
-repack traps that would silently break the auto-updater, is [docs/RELEASING.md](docs/RELEASING.md).
+repack traps that would silently break the auto-updater, is [docs/RELEASING.md](../RELEASING.md).
 Read it before you tag, not after.
 
 Version drift is a real failure here, not a tidiness point: the version lives in THREE files and
