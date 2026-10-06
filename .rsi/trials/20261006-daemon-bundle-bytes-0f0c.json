@@ -1,5 +1,88 @@
 {
- "closed": null,
+ "closed": {
+  "a": {
+   "commit": "a6626599d0fcf1b9c5c44f5e3d59d986d2133dba",
+   "def_hash": "04bfe9e1257a052a",
+   "dirty": false,
+   "id": "m-20261006T090010-c647da",
+   "load_after": 0.485,
+   "load_before": 0.555,
+   "machine": "MPC-HELL",
+   "metric": "daemon.bundle_bytes",
+   "project": "repoyeti",
+   "reason": null,
+   "seconds": 39.577,
+   "settings": {
+    "gate": "exact",
+    "kind": "size",
+    "measure_files": {
+     "scripts/rsi/daemon_bundle_bytes.py": "0df3058298288a137e1762560ff03f28e94b4480"
+    }
+   },
+   "started": "2026-10-06T09:00:10+00:00",
+   "status": "ok",
+   "value": 765315
+  },
+  "applies_if": null,
+  "at": "2026-10-06T09:18:31+00:00",
+  "b": {
+   "commit": "e5e3f3a9dcf98a71a58ab153fdedf162f05422e7",
+   "def_hash": "04bfe9e1257a052a",
+   "dirty": false,
+   "id": "m-20261006T090315-b4e7b8",
+   "load_after": 0.48,
+   "load_before": 0.893,
+   "machine": "MPC-HELL",
+   "metric": "daemon.bundle_bytes",
+   "project": "repoyeti",
+   "reason": null,
+   "seconds": 902.31,
+   "settings": {
+    "gate": "exact",
+    "kind": "size",
+    "measure_files": {
+     "scripts/rsi/daemon_bundle_bytes.py": "0df3058298288a137e1762560ff03f28e94b4480"
+    }
+   },
+   "started": "2026-10-06T09:03:15+00:00",
+   "status": "ok",
+   "value": 764703
+  },
+  "guards": [
+   {
+    "a": 5,
+    "b": 5,
+    "declared": false,
+    "metric": "arkitect_gating_errors",
+    "state": "ok"
+   },
+   {
+    "a": 1180,
+    "b": 1180,
+    "declared": false,
+    "metric": "arkitect_warnings",
+    "state": "ok"
+   },
+   {
+    "a": 100,
+    "b": 100,
+    "declared": false,
+    "metric": "arkitect_no_data",
+    "state": "ok"
+   },
+   {
+    "a": 10,
+    "b": 10,
+    "declared": false,
+    "metric": "deps_total",
+    "state": "ok"
+   }
+  ],
+  "method": "exact: 765315 -> 764703",
+  "note": "hoisted strings repeated 7-8x in mcp/tools.ts and service/files.ts into constants; -612 bytes, behaviour unchanged",
+  "pattern": null,
+  "verdict": "kept"
+ },
  "def_hash": "04bfe9e1257a052a",
  "id": "20261006-daemon-bundle-bytes-0f0c",
  "idea": "hoist the strings repeated 7-8x in mcp/tools.ts and service/files.ts into one constant each",
