@@ -1,15 +1,15 @@
 schema: hydra-rsi/1
-# Committed bytes of what RepoYeti ships: the daemon source (src/) and the mobile dashboard (web/src, web/public).
-# Smaller source and a lighter dashboard mean a leaner daemon and a faster first load on a phone.
+# daemon.bundle_bytes: bytes of the minified Bun bundle of the daemon (what bun --compile embeds).
+# web.source_bytes: committed bytes of the mobile dashboard (web/src, web/public).
 metrics:
-  - id: daemon.source_bytes
+  - id: daemon.bundle_bytes
     kind: size
     better: lower
     unit: bytes
-    measure: "python scripts/rsi/shipped_bytes.py"
-    pick: 'daemon_bytes=(\d+)'
+    measure: "python scripts/rsi/daemon_bundle_bytes.py"
+    pick: 'daemon_bundle_bytes=(\d+)'
     gate: exact
-    light: true
+    light: false
   - id: web.source_bytes
     kind: size
     better: lower
