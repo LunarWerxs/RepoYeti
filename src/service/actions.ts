@@ -25,7 +25,8 @@ import { runAction, refreshRepo, accountAuthFor, type ActionOutcome } from "./co
 import { guardRepo } from "./guards.ts";
 import { resolveRepoPath } from "./files.ts";
 import { normalizeRelPath, pathTouchesVcsMarker } from "../paths.ts";
-import { safeGitEnv } from "../git.ts";
+import { safeGitEnv, type GitHubAuth } from "../git.ts";
+import { artifactsOutage } from "../artifacts.ts";
 import { readGate } from "../gitgate.ts";
 import { collaborationFingerprint } from "../collaboration.ts";
 
@@ -589,7 +590,14 @@ export async function smartCommitRepo(
     // Resolve the GitHub credential this repo syncs as, for the network round-trip below. Injected
     // into each git child rather than switching the machine's active account (see core.ts
     // accountAuthFor); null when the repo needs nothing special.
-    const auth = await accountAuthFor(repo);
+    let auth: GitHubAuth | null;
+    try {
+      auth = await accountAuthFor(repo);
+    } catch (err) {
+      const outage = artifactsOutage(err);
+      if (!outage) throw err;
+      return { ...base, synced: false, syncCode: outage.code, syncMessage: outage.message };
+    }
 
     // Post-commit sync (mirrors the UI's "commit & sync"): pull --ff-only, THEN push, but only if
     // the pull actually succeeded. Pushing after a failed pull would publish the just-made local

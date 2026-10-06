@@ -561,6 +561,7 @@
       "sshAuthFailed": "Authentication failed. Check this repo's identity / SSH key.",
       "ghAccountNotAuthorized": "GitHub wouldn't accept the account this repo syncs as. Pick the right account for this repo, or sign in to it with: gh auth login",
       "artifactsNotAuthorized": "Cloudflare Artifacts needs a token for this repo. Add a Cloudflare API token with Artifacts Edit access in Settings → Accounts.",
+      "artifactsUnavailable": "Cloudflare isn't handing out repo tokens right now, so nothing was sent. Your saved token wasn't refused; try again in a minute.",
       "sshPassphraseRequired": "This remote's SSH key can prompt for a passphrase, and nothing here can answer it. Load the key into ssh-agent, or use a passphrase-free key.",
       "networkTimeout": "The remote stopped responding and the operation was stopped. Check your connection, then try again.",
       "branchExists": "A branch with that name already exists.",

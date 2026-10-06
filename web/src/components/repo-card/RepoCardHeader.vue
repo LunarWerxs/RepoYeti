@@ -127,7 +127,7 @@ const STATUS_TEXT: Record<StatusTone, string> = {
 };
 function statusChip(tone: StatusTone): string {
   return cn(
-    "inline-flex items-center rounded-md transition-all duration-200 ease-out",
+    "status-chip-morph inline-flex items-center rounded-md",
     STATUS_TEXT[tone],
     props.expanded ? `${STATUS_BG[tone]} px-1.5 py-0.5` : "bg-transparent p-0",
   );
@@ -565,5 +565,13 @@ const detectedReason = computed(() => {
   transition:
     max-width 200ms ease-out,
     opacity 200ms ease-out;
+}
+/* The pill around it (statusChip) gains its padding and tint as the card expands. Padding is a
+   layout property too, so this names the three things that change instead of `transition-all`. */
+.status-chip-morph {
+  transition:
+    padding 200ms ease-out,
+    background-color 200ms ease-out,
+    color 200ms ease-out;
 }
 </style>

@@ -11,7 +11,7 @@ import { getRepo, setRepoStatus, setRepoOrder, recordOperationalError } from "..
 import { resolveRepoIdentity, enforceIdentityPolicy } from "../identity.ts";
 import { backendFor } from "../vcs/index.ts";
 import { authForRepo } from "../gh-account.ts";
-import type { ArtifactsAccess } from "../artifacts.ts";
+import { ArtifactsUnavailableError, artifactsOutage, type ArtifactsAccess } from "../artifacts.ts";
 import type { GitHubAuth } from "../git.ts";
 import type { VcsBackend } from "../vcs/types.ts";
 import type { ActionResult } from "../contract.ts";
@@ -105,7 +105,12 @@ export async function accountAuthFor(
   repo: RepoView,
   access: ArtifactsAccess = "write",
 ): Promise<GitHubAuth | null> {
-  return authForRepo(repo, access).catch(() => null);
+  // Best-effort, except for Cloudflare's token API not answering: swallowed, that ran git with no
+  // credential, and the failure that followed told the owner to replace a token that was fine.
+  return authForRepo(repo, access).catch((err: unknown) => {
+    if (err instanceof ArtifactsUnavailableError) throw err;
+    return null;
+  });
 }
 
 /**
@@ -168,9 +173,14 @@ export async function runAction(
     // Credential resolution belongs in the same per-repo queue slot as the operation. Otherwise
     // two rapid actions for one repo both walk branch/config/remotes and read a token in parallel
     // before either reaches the queue.
-    const auth = syncAccount
-      ? await accountAuthFor(repo, READ_ONLY_NETWORK_OPS.has(op) ? "read" : "write")
-      : null;
+    let auth: GitHubAuth | null = null;
+    try {
+      auth = syncAccount ? await accountAuthFor(repo, READ_ONLY_NETWORK_OPS.has(op) ? "read" : "write") : null;
+    } catch (err) {
+      const outage = artifactsOutage(err);
+      if (outage) return outage;
+      throw err;
+    }
     const blocked = await precondition?.(backend, repo.absPath, identity, auth);
     return blocked ?? action(backend, repo.absPath, identity, auth);
   });

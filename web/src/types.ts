@@ -604,6 +604,8 @@ export type ApiErrorCode =
   | "GH_ACCOUNT_NOT_AUTHORIZED"
   // A Cloudflare Artifacts remote had no repo token, or refused it (src/artifacts.ts).
   | "ARTIFACTS_NOT_AUTHORIZED"
+  // Cloudflare's token API did not answer, so git was not run (src/artifacts.ts).
+  | "ARTIFACTS_UNAVAILABLE"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
   | "NETWORK_TIMEOUT"

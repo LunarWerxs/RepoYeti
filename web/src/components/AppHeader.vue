@@ -762,7 +762,7 @@ onBeforeUnmount(() => {
           <span class="inline-flex items-center">
             <Plus class="size-4 shrink-0" />
             <span
-              class="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 ease-out group-hover/add:ms-1.5 group-hover/add:max-w-32 group-hover/add:opacity-100 group-focus-visible/add:ms-1.5 group-focus-visible/add:max-w-32 group-focus-visible/add:opacity-100"
+              class="add-label-reveal max-w-0 overflow-hidden whitespace-nowrap opacity-0 group-hover/add:ms-1.5 group-hover/add:max-w-32 group-hover/add:opacity-100 group-focus-visible/add:ms-1.5 group-focus-visible/add:max-w-32 group-focus-visible/add:opacity-100"
             >{{ $t("header.addRepository") }}</span>
           </span>
         </Button>
@@ -789,3 +789,16 @@ onBeforeUnmount(() => {
     </DialogContent>
   </Dialog>
 </template>
+
+<style scoped>
+/* The Add button's hover label. It grows the button by animating max-width and its leading margin,
+   both layout properties, on purpose: the label has to take real space in the header row. So the
+   transition names exactly those two plus opacity, here rather than in a utility, the same way
+   RepoCardHeader's status-word-reveal does; `transition-all` also animated everything else. */
+.add-label-reveal {
+  transition:
+    max-width 200ms ease-out,
+    margin-inline-start 200ms ease-out,
+    opacity 200ms ease-out;
+}
+</style>

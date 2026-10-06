@@ -6,6 +6,8 @@
 
 A self-hosted git dashboard: one small daemon on your computer, a live status grid, commit graph and real Monaco diffs on any screen you own.
 
+A remote git client for an Android phone, an iPhone or any browser, and a self-hosted stand-in for GitHub Desktop when you are not at the machine. It drives your real local repos against any git remote: GitHub, GitLab, Bitbucket, Gitea, Forgejo, Cloudflare Artifacts or your own server.
+
 [![Latest release](https://img.shields.io/github/v/release/LunarWerxs/RepoYeti?sort=semver&color=3ddc84)](https://github.com/LunarWerxs/RepoYeti/releases)
 [![CI](https://github.com/LunarWerxs/RepoYeti/actions/workflows/ci.yml/badge.svg)](https://github.com/LunarWerxs/RepoYeti/actions)
 [![License](https://img.shields.io/badge/license-PolyForm_Noncommercial-3ddc84)](#license)
@@ -319,6 +321,25 @@ Signing is about who published the file. Integrity is handled separately and was
 
 ---
 
+## More from LunarWerx
+
+RepoYeti is one of the developer tools LunarWerx Studios builds. These are on GitHub too, most of them free for personal use and running on your own machine:
+
+| Product | What it does | Links |
+| --- | --- | --- |
+| **AgentHydra** | Every local AI coding session in one tab: Claude Code, Codex and OpenCode, with each account's usage and a queue you can schedule | [site](https://agenthydra.lunarwerx.com) · [GitHub](https://github.com/LunarWerxs/AgentHydra) |
+| **DevWebUI** | Start, stop and watch every local dev server across your projects, from a dashboard or an MCP server an AI agent can drive | [site](https://devwebui.lunarwerx.com) · [GitHub](https://github.com/LunarWerxs/DevWebUI) |
+| **ReDesign** | Drop in a UI screenshot and get self-contained HTML redesigns from ten AI models at once | [site](https://redesign.lunarwerx.com) · [GitHub](https://github.com/LunarWerxs/ReDesign) |
+| **SageThumbs 2K** | Windows Explorer thumbnails and previews for 360+ file types Windows can't show, from a crash-isolated Rust shell extension | [site](https://sagethumbs.lunarwerx.com) · [GitHub](https://github.com/LunarWerxs/SageThumbs-2k) |
+| **NormWind** | A zero-config CLI and GitHub Action that rewrites bloated Tailwind CSS classes into canonical ones | [site](https://normwind.lunarwerx.com) · [GitHub](https://github.com/LunarWerxs/NormWind) |
+| **AnatomyOf** | An interactive, annotated tour of what is actually inside a source file, for 48 languages | [site](https://anatomyof.lunarwerx.com) · [GitHub](https://github.com/LunarWerxs/AnatomyOf) |
+| **QuickDictate** | Hold a hotkey, speak, and it types into whatever Windows app has focus | [site](https://quickdictate.lunarwerx.com) · [GitHub](https://github.com/LunarWerxs/QuickDictate) |
+| **PyOverdrive** | A drop-in NumPy accelerator: `enable()` swaps in proof-tested fast paths, call by call | [GitHub](https://github.com/LunarWerxs/PyOverdrive) |
+
+Everything else is at [lunarwerx.com](https://lunarwerx.com) and [github.com/LunarWerxs](https://github.com/LunarWerxs).
+
+---
+
 ## Credits
 
 [Monaco](https://microsoft.github.io/monaco-editor/) for the diffs · [Bun](https://bun.com) and [Hono](https://hono.dev) for the daemon · [`simple-git`](https://github.com/steveukx/git-js) for every git call · [Vue 3](https://vuejs.org) and [Tailwind](https://tailwindcss.com) for the dashboard · [`cloudflared`](https://github.com/cloudflare/cloudflared) for the tunnel · file-type icons from [`vscode-icons`](https://github.com/vscode-icons/vscode-icons) (artwork under CC BY-SA).
@@ -329,9 +350,5 @@ Signing is about who published the file. Integrity is handled separately and was
 
 <div align="center">
 <br />
-Made by <a href="https://lunarwerx.com">LunarWerx Studios</a>. Also building
-<a href="https://sagethumbs.lunarwerx.com">SageThumbs 2K</a>,
-<a href="https://agenthydra.lunarwerx.com">AgentHydra</a>,
-<a href="https://devwebui.lunarwerx.com">DevWebUI</a> and
-<a href="https://redesign.lunarwerx.com">ReDesign</a>.
+Made by <a href="https://lunarwerx.com">LunarWerx Studios</a>. See <a href="#more-from-lunarwerx">More from LunarWerx</a> for the rest.
 </div>

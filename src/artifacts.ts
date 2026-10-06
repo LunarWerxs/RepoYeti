@@ -124,20 +124,53 @@ function expiryMs(plaintext: string, expiresAt: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * Cloudflare's token API did not answer: a network error, the mint timeout, a 429 or a 5xx.
+ *
+ * Thrown rather than returned as null, because null means "run git with no credential", and the
+ * "could not read Username" that follows is classified as ARTIFACTS_NOT_AUTHORIZED, which tells the
+ * owner to replace a saved token that was never the problem. A review of the first version found
+ * exactly that (2026-10-05): every background fetch during a Cloudflare outage said "add a token in
+ * Settings". Callers turn this into an ARTIFACTS_UNAVAILABLE result and do not run git at all.
+ */
+export class ArtifactsUnavailableError extends Error {}
+
+/** The ARTIFACTS_UNAVAILABLE result for an ArtifactsUnavailableError, or null for any other error. */
+export function artifactsOutage(err: unknown): { ok: false; code: "ARTIFACTS_UNAVAILABLE"; message: string } | null {
+  return err instanceof ArtifactsUnavailableError
+    ? { ok: false, code: "ARTIFACTS_UNAVAILABLE", message: err.message }
+    : null;
+}
+
+function unavailable(why: string): ArtifactsUnavailableError {
+  return new ArtifactsUnavailableError(
+    `Cloudflare's token API is not answering (${why}), so this Artifacts repo got no token; the saved API token was not refused, try again shortly`,
+  );
+}
+
 async function mint(
   ref: ArtifactsRepository,
   access: ArtifactsAccess,
   apiToken: string,
 ): Promise<MintedToken | null> {
-  const res = await fetch(
-    `${API_BASE}/accounts/${ref.accountId}/artifacts/namespaces/${ref.namespace}/tokens`,
-    {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/accounts/${ref.accountId}/artifacts/namespaces/${ref.namespace}/tokens`, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ repo: ref.repo, scope: access, ttl: TOKEN_TTL_S }),
       signal: AbortSignal.timeout(MINT_TIMEOUT_MS),
-    },
-  );
+    });
+  } catch (err) {
+    throw unavailable(
+      err instanceof Error && err.name === "TimeoutError"
+        ? `no answer in ${MINT_TIMEOUT_MS / 1000}s`
+        : "api.cloudflare.com could not be reached",
+    );
+  }
+  // Busy or broken on Cloudflare's side. Any other refusal (401, 403, 404) is about the token or
+  // the repo, and falls through to null and ARTIFACTS_NOT_AUTHORIZED.
+  if (res.status === 429 || res.status >= 500) throw unavailable(`HTTP ${res.status}`);
   if (!res.ok) return null;
   const body = (await res.json().catch(() => null)) as {
     result?: { plaintext?: unknown; expires_at?: unknown };
@@ -153,23 +186,28 @@ async function mint(
 /**
  * The per-operation credential for an Artifacts remote, or null to leave the operation as it was.
  *
- * Best-effort like the GitHub path: no saved API token, a token without Artifacts access, or the
- * API being unreachable all return null, and git then fails on its own with a "could not read
- * Username" that sync.ts classifies as ARTIFACTS_NOT_AUTHORIZED, pointing the owner at Settings.
+ * Best-effort like the GitHub path: no saved API token, or a token the API refuses, returns null,
+ * and git then fails on its own with a "could not read Username" that sync.ts classifies as
+ * ARTIFACTS_NOT_AUTHORIZED, pointing the owner at Settings. The API not answering is the one
+ * exception: it throws ArtifactsUnavailableError, because Settings is not where that gets fixed.
  *
  * Each scope has its own cached token. A cached write token would also serve a fetch, and an
  * earlier draft let it, which quietly put a push-capable token in every fetch for the hour after a
  * push. One extra mint per repo per hour is the price of a fetch never holding write access.
+ *
+ * The API token is read from the keychain before the cache is consulted, even when a cached repo
+ * token would do. Settings clears the cache itself, but an owner who deletes the entry in the OS's
+ * own keychain manager would otherwise keep pushing on cached tokens for up to fifty minutes.
  */
 export async function artifactsAuthFor(url: string, access: ArtifactsAccess): Promise<GitHubAuth | null> {
   const ref = artifactsRepository(url);
   if (!ref) return null;
+  const apiToken = await loadApiToken();
+  if (!apiToken) return null;
   const cached = minted.get(cacheKey(ref, access));
   if (cached && cached.expiresAtMs - Date.now() > REUSE_MARGIN_MS) return gitHubAuth(ref.host, "x", cached.secret);
 
-  const apiToken = await loadApiToken();
-  if (!apiToken) return null;
-  const fresh = await mint(ref, access, apiToken).catch(() => null);
+  const fresh = await mint(ref, access, apiToken);
   if (!fresh) return null;
   minted.set(cacheKey(ref, access), fresh);
   // Artifacts ignores the Basic-auth username, but git's credential protocol needs one.

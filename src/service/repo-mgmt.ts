@@ -24,6 +24,8 @@ import { detectVcs } from "../vcs/index.ts";
 import { loreClone } from "../vcs/lore.ts";
 import { gitClone } from "../git-actions.ts";
 import { authForCloneUrl } from "../gh-account.ts";
+import { artifactsOutage } from "../artifacts.ts";
+import type { GitHubAuth } from "../git.ts";
 import type { RepoView } from "../db.ts";
 import { refreshRepo } from "./core.ts";
 import { coalescedRefresh, watchOne, unwatchOne } from "./watch.ts";
@@ -174,7 +176,16 @@ export async function cloneRepo(
   const identity = identityId ? getIdentity(identityId) : null;
   // Clone the same way a sync authenticates: as the account that owns the URL, when that account
   // is one of ours. Best-effort — an org/third-party URL resolves to nothing and clones as before.
-  const auth = await authForCloneUrl(url).catch(() => null);
+  let auth: GitHubAuth | null;
+  try {
+    auth = await authForCloneUrl(url);
+  } catch (err) {
+    // A Cloudflare outage is the one failure worth reporting: cloning with no credential would
+    // fail as "add a token in Settings" (see artifacts.ts ArtifactsUnavailableError).
+    const outage = artifactsOutage(err);
+    if (outage) return outage;
+    auth = null;
+  }
   const res = await gitClone(parentAbs, url, name, identity, auth);
   if (!res.ok) return { ok: false, code: res.code, message: res.message };
   const dest = join(parentAbs, name);

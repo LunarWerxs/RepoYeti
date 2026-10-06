@@ -12,6 +12,7 @@
  *   - an API answer that would add lines to git's credential protocol is refused;
  *   - a repo token is reused until near expiry (Artifacts bills per operation, and the background
  *     sync fetches every five minutes), and clearing the API token stops the very next operation;
+ *   - Cloudflare's API being down is reported as that, never as a token to replace in Settings;
  *   - the API token never comes back out of the daemon.
  */
 import { test, expect, beforeEach, afterEach } from "bun:test";
@@ -21,6 +22,9 @@ import { mkScratchDir } from "./helpers/scratch.ts";
 import { createApp } from "../src/http/app.ts";
 import { authForRepo, authForCloneUrl } from "../src/gh-account.ts";
 import { forgetArtifactsCredentials } from "../src/artifacts.ts";
+import { deleteSecret, CLOUDFLARE_API_TOKEN } from "../src/secrets.ts";
+import { pushRepo } from "../src/service/actions.ts";
+import { mustUpsertRepo } from "./helpers/upsert.ts";
 import { credentialConfigArgs } from "../src/git.ts";
 import { classify } from "../src/git-actions/sync.ts";
 import type { RepoView } from "../src/db.ts";
@@ -195,7 +199,7 @@ test("an API answer that is not a plain token, or an API refusal, yields no cred
   expect(await authForRepo(repo, "read")).toBeNull();
 });
 
-test("clearing the token in Settings stops the next operation at once, cached repo token included", async () => {
+test("clearing the token, in Settings or in the OS keychain, stops the next operation at once", async () => {
   const saved = await putToken(API_TOKEN);
   expect(saved.text).not.toContain(API_TOKEN);
   expect(JSON.parse(saved.text)).toEqual({ ok: true, configured: true });
@@ -208,6 +212,35 @@ test("clearing the token in Settings stops the next operation at once, cached re
   expect(JSON.parse((await putToken("")).text)).toEqual({ ok: true, configured: false });
   expect(await authForRepo(repo, "read")).toBeNull();
   expect(calls).toHaveLength(1); // nothing was minted after the clear, and the cached token was dropped
+
+  // Deleted in the OS's own keychain manager, where nothing tells RepoYeti to drop its cache: the
+  // repo token cached a moment ago must not keep serving for the rest of its hour.
+  await putToken(API_TOKEN);
+  expect(await authForRepo(repo, "read")).not.toBeNull();
+  await deleteSecret(CLOUDFLARE_API_TOKEN);
+  expect(await authForRepo(repo, "read")).toBeNull();
+  expect(calls).toHaveLength(2);
+});
+
+test("a Cloudflare outage is reported as an outage, not as a token to replace in Settings", async () => {
+  await putToken(API_TOKEN);
+  const repo = await artifactsRepo();
+  const id = mustUpsertRepo(repo.absPath, "repo", "auto", false);
+  // A 5xx, a rate limit, and no answer at all. Before the fix each returned no credential, git ran
+  // without one, and the "could not read Username" that followed came back as
+  // ARTIFACTS_NOT_AUTHORIZED, telling the owner to replace a token that was fine.
+  for (const outage of [
+    () => new Response("bad gateway", { status: 502 }),
+    () => new Response("slow down", { status: 429 }),
+    (): Response => {
+      throw new TypeError("fetch failed");
+    },
+  ]) {
+    answer = outage;
+    const pushed = await pushRepo(id);
+    expect(pushed.code).toBe("ARTIFACTS_UNAVAILABLE");
+    expect(pushed.message).not.toContain(API_TOKEN);
+  }
 });
 
 test("Artifacts auth failures are reported as Artifacts, not as a GitHub account or an SSH key", () => {

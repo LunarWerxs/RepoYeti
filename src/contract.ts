@@ -32,6 +32,8 @@ export type ApiErrorCode =
   | "GH_ACCOUNT_NOT_AUTHORIZED"
   /** A Cloudflare Artifacts remote had no repo token, or refused it (see src/artifacts.ts). */
   | "ARTIFACTS_NOT_AUTHORIZED"
+  /** Cloudflare's token API did not answer, so git was not run at all (see src/artifacts.ts). */
+  | "ARTIFACTS_UNAVAILABLE"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
   | "NETWORK_TIMEOUT"
@@ -219,6 +221,7 @@ const STATUS_BY_CODE: Partial<Record<ApiCode, ContentfulStatusCode>> = {
   SSH_AUTH_FAILED: 502,
   GH_ACCOUNT_NOT_AUTHORIZED: 502,
   ARTIFACTS_NOT_AUTHORIZED: 502,
+  ARTIFACTS_UNAVAILABLE: 502,
   AI_ERROR: 502,
   // 504 — an upstream hung past our timeout.
   SSH_PASSPHRASE_REQUIRED: 504,
