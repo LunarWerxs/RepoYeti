@@ -288,6 +288,17 @@ export const TunnelSettingsSchema = z.object({
   token: z.string().optional(),
 });
 
+// ── Cloudflare Artifacts (the API token that mints repo-scoped git tokens) ────────────────────
+// Write-only: "" clears it, a value replaces it, and nothing ever reads it back (see
+// src/artifacts.ts). Cloudflare API tokens are a few dozen URL-safe characters; the cap and the
+// alphabet keep a stray paste (a whole .env file, a token with its newline) out of the keychain.
+export const ArtifactsSettingsSchema = z.object({
+  token: z
+    .string()
+    .trim()
+    .refine((s) => s === "" || /^[A-Za-z0-9_-]{20,200}$/.test(s), "must be a Cloudflare API token"),
+});
+
 // ── relay (a permanent forwarding URL for a rotating quick tunnel) ────────────────
 // `url` must be an https ORIGIN — no path, no http. https is not politeness here: the announce
 // carries a signature over our current address, and letting it go out in clear would hand anyone

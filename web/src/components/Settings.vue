@@ -13,6 +13,7 @@ import SettingsTabs from "@/shell/SettingsTabs.vue";
 // mounted after the sheet opens still loads current data.
 const IdentitiesSection = defineAsyncComponent(() => import("./settings/IdentitiesSection.vue"));
 const AccessSection = defineAsyncComponent(() => import("./settings/AccessSection.vue"));
+const ArtifactsSection = defineAsyncComponent(() => import("./settings/ArtifactsSection.vue"));
 const SharingSection = defineAsyncComponent(() => import("./settings/SharingSection.vue"));
 const DiscoverySection = defineAsyncComponent(() => import("./settings/DiscoverySection.vue"));
 const CloudSyncSection = defineAsyncComponent(() => import("./settings/CloudSyncSection.vue"));
@@ -162,7 +163,7 @@ watch(
         <UpdatesSection />
       </div>
 
-      <!-- Accounts & access: GitHub accounts, git identities, Connections account,
+      <!-- Accounts & access: GitHub accounts, git identities, Cloudflare Artifacts token, Connections account,
            remote access + tunnel, share links, cloud sync ──────────────────────── -->
       <div
         v-if="visitedTabs.includes('access')"
@@ -171,6 +172,7 @@ watch(
         class="flex flex-col gap-4"
       >
         <IdentitiesSection :open="open" />
+        <ArtifactsSection :open="open" />
         <AccessSection :open="open" />
         <SharingSection :open="open" />
         <CloudSyncSection />

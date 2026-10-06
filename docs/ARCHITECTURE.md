@@ -442,6 +442,17 @@ part of this section, not as a feature note.
   remotes cannot identify a human login by name, so RepoYeti asks GitHub for each signed-in
   account's `permissions.push` value and uses the unique writable account (or the active writable
   account when several qualify). Those non-secret booleans are cached briefly; tokens never are.
+- **Cloudflare Artifacts remotes** (`https://<account>.artifacts.cloudflare.net/git/<ns>/<repo>.git`)
+  take no login at their git endpoint, only a repo token the Artifacts API mints for one repo, one
+  scope and a bounded lifetime. The owner saves a Cloudflare API token (Artifacts Edit) in Settings;
+  it is keychain-only (no config.json copy) and, like a PAT, is read immediately before use and never
+  held. Before each network op `src/artifacts.ts` mints a repo token for exactly that repo, **read**
+  for fetch/pull/clone and **write** for a push (Artifacts refuses a push made with a read token, so
+  the scope is enforced at Cloudflare, not just here), and hands it to the single git child through
+  the same host-scoped helper as a GitHub token. These minted tokens are the one cached credential:
+  RepoYeti's own, an hour at most, one repo and one scope each, held in memory until ten minutes
+  before expiry so the five-minute background fetch does not mint every time, and dropped the moment
+  the API token is saved or cleared. A cached write token never serves a fetch.
 - **OS keychain, and what happens when it is not there:** secrets are stored via **`Bun.secrets`**,
   built into the Bun runtime, which talks to Windows Credential Manager, macOS Keychain, or Linux
   `libsecret` directly, so there is no native addon to compile or ship (see `src/secrets.ts`). If
@@ -630,7 +641,7 @@ repoyeti/
 │  │  ├─ reads.ts            #   status / log / branches / drift reads
 │  │  ├─ files.ts            #   changed-files tree, file content/diff, search, discard, write
 │  │  ├─ guards.ts           #   shared guardRepo() (NOT_FOUND / SUBMODULE)
-│  │  └─ index.ts            #   barrel — the single public import surface for the service
+│  │  └─ index.ts            #   barrel: the single public import surface for the service
 │  ├─ read/                 # pure read-only inspection layer (no mutation, no service deps)
 │  │  ├─ status.ts           #   simple-git status / branch / rev-list
 │  │  ├─ inspect.ts          #   log + commit detail (parents/isMerge), changed-files
@@ -644,8 +655,8 @@ repoyeti/
 │  │  ├─ core.ts             #   transport-agnostic dispatch (initialize/ping/tools.list/tools.call)
 │  │  ├─ tools.ts            #   the 14-tool catalog (readOnly vs MUTATES)
 │  │  ├─ backend.ts          #   McpBackend interface the tools call
-│  │  ├─ adapter-service.ts  #   in-process adapter (service/db) — behind POST /api/mcp
-│  │  ├─ adapter-http.ts     #   HTTP adapter (cli/client) — behind `repoyeti mcp`
+│  │  ├─ adapter-service.ts  #   in-process adapter (service/db), behind POST /api/mcp
+│  │  ├─ adapter-http.ts     #   HTTP adapter (cli/client), behind `repoyeti mcp`
 │  │  └─ stdio.ts            #   newline-delimited JSON stdio server; diagnostics → stderr
 │  └─ (flat kernel)         # db.ts · discovery.ts · watcher.ts · opqueue.ts · git-actions.ts ·
 │     …                      #   identity.ts · secrets.ts · auth.ts · tunnel.ts · runtime.ts ·
@@ -818,7 +829,7 @@ interface CommitGroup {
   subject: string;     // imperative, ≤72 chars (the message subject line)
   body?: string;       // optional body (used for the "secondary change" note, etc.)
   files: string[];     // repo-relative paths assigned to this commit
-  rationale?: string;  // one-line "why these belong together" — shown as a hint, not committed
+  rationale?: string;  // one-line "why these belong together", shown as a hint, not committed
 }
 
 interface CommitPlan {

@@ -63,6 +63,7 @@ import * as errors from "./routes/errors.ts";
 import * as auth from "./routes/auth.ts";
 import * as token from "./routes/token.ts";
 import * as mode from "./routes/mode.ts";
+import * as artifacts from "./routes/artifacts.ts";
 import * as repos from "./routes/repos.ts";
 import * as roots from "./routes/roots.ts";
 import * as scan from "./routes/scan.ts";
@@ -257,6 +258,7 @@ export function createApp(cfg: RepoYetiConfig, hooks: AppHooks = {}): Hono {
   auth.register(app, deps);
   token.register(app, deps);
   mode.register(app, deps);
+  artifacts.register(app);
   repos.register(app, deps);
   roots.register(app, deps);
   scan.register(app, deps);

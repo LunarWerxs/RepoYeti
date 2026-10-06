@@ -173,6 +173,10 @@ export const OWNER_ONLY: readonly string[] = [
   // The relay publishes where this daemon lives; a guest repointing it would aim every share link
   // already handed out at a server of their choosing. Owner-only, emphatically.
   "PUT /api/relay",
+  // The Cloudflare API token behind Artifacts remotes: a guest who could set it would choose which
+  // account the owner's pushes authenticate as, and even reading whether one exists is the owner's.
+  "GET /api/artifacts",
+  "PUT /api/artifacts",
   // repo inventory management — a guest sees a scoped VIEW of the owner's list, so editing that
   // list (renaming a card, removing one, or reading/undoing what the owner removed) is the
   // owner's alone. Nothing here is destructive to the repo itself, but all of it is the owner's

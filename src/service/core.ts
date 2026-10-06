@@ -11,6 +11,7 @@ import { getRepo, setRepoStatus, setRepoOrder, recordOperationalError } from "..
 import { resolveRepoIdentity, enforceIdentityPolicy } from "../identity.ts";
 import { backendFor } from "../vcs/index.ts";
 import { authForRepo } from "../gh-account.ts";
+import type { ArtifactsAccess } from "../artifacts.ts";
 import type { GitHubAuth } from "../git.ts";
 import type { VcsBackend } from "../vcs/types.ts";
 import type { ActionResult } from "../contract.ts";
@@ -100,9 +101,18 @@ type VcsPrecondition = (
  * state is touched, concurrent ops can each use a different account, and the answer can come from
  * the repo itself rather than only from an explicit pin (see gh-account.ts).
  */
-export async function accountAuthFor(repo: RepoView): Promise<GitHubAuth | null> {
-  return authForRepo(repo).catch(() => null);
+export async function accountAuthFor(
+  repo: RepoView,
+  access: ArtifactsAccess = "write",
+): Promise<GitHubAuth | null> {
+  return authForRepo(repo, access).catch(() => null);
 }
+
+/**
+ * Network ops that only download. A Cloudflare Artifacts remote gets a read-scope token for these
+ * and a write-scope one for anything else (see artifacts.ts); every other remote ignores this.
+ */
+const READ_ONLY_NETWORK_OPS = new Set(["fetch", "pull"]);
 
 export async function runAction(
   repoId: string,
@@ -158,7 +168,9 @@ export async function runAction(
     // Credential resolution belongs in the same per-repo queue slot as the operation. Otherwise
     // two rapid actions for one repo both walk branch/config/remotes and read a token in parallel
     // before either reaches the queue.
-    const auth = syncAccount ? await accountAuthFor(repo) : null;
+    const auth = syncAccount
+      ? await accountAuthFor(repo, READ_ONLY_NETWORK_OPS.has(op) ? "read" : "write")
+      : null;
     const blocked = await precondition?.(backend, repo.absPath, identity, auth);
     return blocked ?? action(backend, repo.absPath, identity, auth);
   });

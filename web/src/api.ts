@@ -465,6 +465,11 @@ export const api = {
    *  immediately, so the returned `relayUrl` is usable as soon as `announced` is true. */
   setRelay: (input: { enabled?: boolean; url?: string }) =>
     req<RelayResult>("PUT", "/api/relay", input),
+  /** Whether a Cloudflare API token for Artifacts remotes is saved. Never returns the token. */
+  artifactsStatus: () => req<{ ok: boolean; configured: boolean }>("GET", "/api/artifacts"),
+  /** Save the Cloudflare API token that mints Artifacts repo tokens, or clear it with "". Write-only. */
+  setArtifactsToken: (token: string) =>
+    req<{ ok: boolean; configured: boolean }>("PUT", "/api/artifacts", { token }),
   /** Toggle per-file/per-repo diff statistics (owner setting; persisted in config). */
   setDiffStats: (enabled: boolean) =>
     req<{ ok: boolean; diffStats: boolean }>("PUT", "/api/settings", { diffStats: enabled }),

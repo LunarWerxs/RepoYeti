@@ -133,6 +133,19 @@ function isAuthFailed(low: string): boolean {
   );
 }
 
+/**
+ * A Cloudflare Artifacts remote refused us, or we had no repo token to offer it. Its failures read
+ * like everyone else's ("could not read Username", a bare 401/403), so without this they were
+ * reported as a GitHub account that is not signed in, or as an SSH key problem: an Artifacts
+ * remote has neither. The fix is always the same one, a Cloudflare API token in Settings.
+ */
+function isArtifactsAuthFailure(raw: string, low: string): boolean {
+  return (
+    /\.artifacts\.cloudflare\.net\b/i.test(raw) &&
+    (isMissingCredentials(low) || isAuthFailed(low) || /returned error: 40[13]\b/.test(low))
+  );
+}
+
 /** git has nothing (useful) configured to talk to. */
 function isNoRemote(low: string): boolean {
   return (
@@ -196,6 +209,12 @@ export function classify(err: unknown, ctx?: ClassifyContext): ActionResult {
   }
   if (isNonFastForward(low)) return fail("NON_FAST_FORWARD", "remote has diverged — resolve at your desk");
   if (isNoUpstream(low)) return fail("NO_UPSTREAM", "branch has no upstream — set one at your desk");
+  if (isArtifactsAuthFailure(raw, low)) {
+    return fail(
+      "ARTIFACTS_NOT_AUTHORIZED",
+      "Cloudflare Artifacts needs a token for this repo: add a Cloudflare API token with Artifacts Edit access in Settings",
+    );
+  }
   if (isMissingCredentials(low)) return missingCredentialsResult(raw);
   if (isAuthFailed(low)) return fail("SSH_AUTH_FAILED", "authentication failed — check this repo's identity / SSH key");
   if (isTimeout(err)) return timeoutResult(ctx);

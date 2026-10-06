@@ -602,6 +602,8 @@ export type ApiErrorCode =
   // A merge/rebase/cherry-pick/revert is in progress: a partial commit is refused (src/git-actions/commit.ts).
   | "OPERATION_IN_PROGRESS"
   | "GH_ACCOUNT_NOT_AUTHORIZED"
+  // A Cloudflare Artifacts remote had no repo token, or refused it (src/artifacts.ts).
+  | "ARTIFACTS_NOT_AUTHORIZED"
   | "SSH_AUTH_FAILED"
   | "SSH_PASSPHRASE_REQUIRED"
   | "NETWORK_TIMEOUT"

@@ -31,6 +31,7 @@ import {
   type GhAccount,
 } from "./gh-cli.ts";
 import { gitHubAuth, type GitHubAuth } from "./git.ts";
+import { artifactsAuthFor, isArtifactsHost, type ArtifactsAccess } from "./artifacts.ts";
 import { createSemaphore } from "./gitgate.ts";
 import type { RepoView } from "./db.ts";
 
@@ -209,6 +210,8 @@ export async function authForCloneUrl(url: string): Promise<GitHubAuth | null> {
   } catch {
     return null;
   }
+  // A clone only reads, so an Artifacts clone gets a read-scope repo token (see artifacts.ts).
+  if (isArtifactsHost(host)) return artifactsAuthFor(url, "read");
   const owner = remoteOwner(url);
   if (!owner || !isValidLogin(owner)) return null;
   let accounts: GhAccount[];
@@ -231,12 +234,16 @@ export async function authForCloneUrl(url: string): Promise<GitHubAuth | null> {
  * Deliberately best-effort at every step: no gh, no matching account, or no retrievable token all
  * mean "run it with ambient credentials" rather than "fail". A repo that used to sync fine under the machine's
  * ambient credential helper must keep syncing fine.
+ *
+ * `access` matters only for a Cloudflare Artifacts remote, whose tokens are scoped per operation
+ * (see artifacts.ts). It defaults to write because a caller that pushes and forgot to say so must
+ * not end up with a token that cannot push; fetch and pull pass "read".
  */
-export async function authForRepo(repo: RepoView): Promise<GitHubAuth | null> {
-  return accountResolutionGate.run(() => resolveAuthForRepo(repo));
+export async function authForRepo(repo: RepoView, access: ArtifactsAccess = "write"): Promise<GitHubAuth | null> {
+  return accountResolutionGate.run(() => resolveAuthForRepo(repo, access));
 }
 
-async function resolveAuthForRepo(repo: RepoView): Promise<GitHubAuth | null> {
+async function resolveAuthForRepo(repo: RepoView, access: ArtifactsAccess): Promise<GitHubAuth | null> {
   // Establish the target FIRST, from local git config alone. Everything below can disqualify the
   // repo without spawning `gh`, which matters: this runs before every fetch/pull/push, and a repo
   // that can never take an injected credential should not pay for a subprocess to find that out.
@@ -259,6 +266,9 @@ async function resolveAuthForRepo(repo: RepoView): Promise<GitHubAuth | null> {
   } catch {
     return null; // scp-style (git@host:owner/repo) or unparseable → not an https credential path
   }
+  // An Artifacts remote is not a GitHub account question at all: its credential is a repo token
+  // minted from the owner's Cloudflare API token, and no GitHub pin may ever apply to its host.
+  if (isArtifactsHost(host)) return artifactsAuthFor(url, access);
   // A pin names its own host, so a mismatch is decidable here — no account list required.
   if (repo.syncAccountLogin && (repo.syncAccountHost || DEFAULT_HOST).toLowerCase() !== host) {
     return null;

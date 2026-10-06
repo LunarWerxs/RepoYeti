@@ -83,6 +83,9 @@ export const FetchAllStateResponse = z.looseObject({
 
 export const TokenStateResponse = z.looseObject({ ok: z.literal(true), configured: z.boolean() });
 
+/** GET/PUT /api/artifacts: whether a Cloudflare API token is saved. Never the token. */
+export const ArtifactsStateResponse = z.looseObject({ ok: z.literal(true), configured: z.boolean() });
+
 /** The read-list envelope inspect.ts returns (BranchList / StashList / TagList). */
 const readList = <K extends string, T extends z.ZodType>(key: K, item: T) =>
   z.looseObject({

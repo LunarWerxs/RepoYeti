@@ -46,6 +46,7 @@ import {
   AccountIdentitySchema,
   TunnelSettingsSchema,
   RelaySettingsSchema,
+  ArtifactsSettingsSchema,
   ConnectSchema,
   AiSettingsSchema,
   ProviderUpdateSchema,
@@ -73,6 +74,7 @@ import {
   CancelResponse,
   FetchAllStateResponse,
   TokenStateResponse,
+  ArtifactsStateResponse,
   BranchListResponse,
   StashListResponse,
   TagListResponse,
@@ -144,6 +146,10 @@ export const META: Record<string, RouteMeta> = {
   "PUT /api/mode": { summary: "Flip local ↔ remote access (manages the Cloudflare tunnel).", tags: ["system"] },
   "PUT /api/tunnel": { summary: "Configure the stable named tunnel (hostname + connector token).", body: TunnelSettingsSchema, tags: ["system"] },
   "PUT /api/relay": { summary: "Turn the share-link relay on/off and choose which relay to use.", body: RelaySettingsSchema, tags: ["system"] },
+
+  // ── Cloudflare Artifacts ────────────────────────────────────────────────────────
+  "GET /api/artifacts": { summary: "Whether a Cloudflare API token for Artifacts remotes is saved (never returns the value).", response: ArtifactsStateResponse, tags: ["system"] },
+  "PUT /api/artifacts": { summary: "Save or clear (\"\") the Cloudflare API token that mints Artifacts repo tokens. Write-only, kept in the OS keychain.", body: ArtifactsSettingsSchema, response: ArtifactsStateResponse, tags: ["system"] },
 
   // ── repos ─────────────────────────────────────────────────────────────────────
   "GET /api/repos": { summary: "List all known repositories.", response: RepoListResponse, tags: ["repos"] },

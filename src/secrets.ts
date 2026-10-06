@@ -221,3 +221,7 @@ export const RELAY_PRIVATE_KEY = "relay/privateKey";
  *  (studio.connectionsapi.com/v1/app-data) server-to-server, without the browser ever holding a token.
  *  Sensitive → keychain-only, NEVER written to config.json. See src/connections-sync.ts. */
 export const CONNECTIONS_REFRESH_TOKEN = "connections/refreshToken";
+/** The owner's Cloudflare API token (Account > Artifacts > Edit), used ONLY to mint short-lived,
+ *  repo-scoped git tokens for Cloudflare Artifacts remotes (see src/artifacts.ts). Keychain-only:
+ *  there is no config.json copy, so a host with no OS secret service simply cannot save one. */
+export const CLOUDFLARE_API_TOKEN = "cloudflare/apiToken";

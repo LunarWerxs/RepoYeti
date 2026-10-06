@@ -6,6 +6,20 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Repos hosted on Cloudflare Artifacts push, pull, fetch and clone.** Artifacts, Cloudflare's
+  git-speaking repo store, takes no login at its git endpoint, only a short-lived token minted
+  for one repo, so until now every operation on such a remote failed with "could not read
+  Username" unless the token had been pasted into the remote URL, where it sat in `.git/config`
+  and was echoed back by every git error. Save a Cloudflare API token with Artifacts Edit access
+  under Settings → Accounts (it stays in the OS keychain) and each operation asks Cloudflare for a
+  token for exactly that repo: read-only for a fetch, pull or clone, write for a push. It is handed
+  to that one git process alone, cached in memory for up to an hour so the five-minute background
+  fetch does not mint a fresh one every time, and dropped the moment the API token is removed. A
+  refusal now says it is Cloudflare that wants a token, instead of blaming a GitHub account or an
+  SSH key the remote never used.
+
 ### Changed
 
 - **The Discord link now opens RepoYeti's own channel and gives you the RepoYeti role** on joining,
