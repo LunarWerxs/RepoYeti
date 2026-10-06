@@ -452,7 +452,12 @@ part of this section, not as a feature note.
   the same host-scoped helper as a GitHub token. These minted tokens are the one cached credential:
   RepoYeti's own, an hour at most, one repo and one scope each, held in memory until ten minutes
   before expiry so the five-minute background fetch does not mint every time, and dropped the moment
-  the API token is saved or cleared. A cached write token never serves a fetch.
+  the API token is saved or cleared. A cached write token never serves a fetch, and none serves at
+  all once the API token is gone from the keychain: it is looked up before the cache is, so deleting
+  it in the OS's own credential manager stops the next operation too. A token API that does not
+  answer (a network error, the 15-second timeout, a 429 or a 5xx) is `ARTIFACTS_UNAVAILABLE` and runs
+  no git; only a refusal (401, 403, 404) leaves git to fail as `ARTIFACTS_NOT_AUTHORIZED`, the one
+  answer that sends the owner to Settings.
 - **OS keychain, and what happens when it is not there:** secrets are stored via **`Bun.secrets`**,
   built into the Bun runtime, which talks to Windows Credential Manager, macOS Keychain, or Linux
   `libsecret` directly, so there is no native addon to compile or ship (see `src/secrets.ts`). If
