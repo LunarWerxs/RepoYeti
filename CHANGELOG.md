@@ -6,6 +6,8 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-05
+
 ### Added
 
 - **Repos hosted on Cloudflare Artifacts push, pull, fetch and clone.** Artifacts, Cloudflare's
@@ -16,9 +18,12 @@ All notable changes to RepoYeti are documented here. The format is based on
   under Settings → Accounts (it stays in the OS keychain) and each operation asks Cloudflare for a
   token for exactly that repo: read-only for a fetch, pull or clone, write for a push. It is handed
   to that one git process alone, cached in memory for up to an hour so the five-minute background
-  fetch does not mint a fresh one every time, and dropped the moment the API token is removed. A
-  refusal now says it is Cloudflare that wants a token, instead of blaming a GitHub account or an
-  SSH key the remote never used.
+  fetch does not mint a fresh one every time, and dropped the moment the API token is removed,
+  whether in Settings or straight from the OS keychain. A refusal now says it is Cloudflare that
+  wants a token, instead of blaming a GitHub account or an SSH key the remote never used. If
+  Cloudflare's token service itself is down, rate-limited or not answering, the operation says
+  that and does not run: a review of the first version found it would have told you to replace a
+  saved token that was fine.
 
 ### Changed
 
@@ -2378,6 +2383,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
 [#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
 [#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[1.3.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.2...v1.0.3
