@@ -1,0 +1,20 @@
+schema: hydra-rsi/1
+# Committed bytes of what RepoYeti ships: the daemon source (src/) and the mobile dashboard (web/src, web/public).
+# Smaller source and a lighter dashboard mean a leaner daemon and a faster first load on a phone.
+metrics:
+  - id: daemon.source_bytes
+    kind: size
+    better: lower
+    unit: bytes
+    measure: "python scripts/rsi/shipped_bytes.py"
+    pick: 'daemon_bytes=(\d+)'
+    gate: exact
+    light: true
+  - id: web.source_bytes
+    kind: size
+    better: lower
+    unit: bytes
+    measure: "python scripts/rsi/shipped_bytes.py"
+    pick: 'web_bytes=(\d+)'
+    gate: exact
+    light: true
