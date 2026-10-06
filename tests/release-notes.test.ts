@@ -2,6 +2,11 @@ import { test, expect } from "bun:test";
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { findRepoRoot } from "./helpers/repo-root.ts";
+import { useSuiteTimeout } from "./helpers/timeouts.ts";
+
+// One node process per released version: 20s, not bun's 5s default, so `bun test` and `bun run test`
+// agree. On a loaded machine the two whole-history tests ran 5.0s and 5.5s and were killed at 5s.
+useSuiteTimeout();
 
 // The Release workflow builds its body with scripts/release-notes.mjs. If that script breaks or
 // drifts from the CHANGELOG's shape, the failure lands on a published release page — after the
