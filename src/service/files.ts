@@ -39,6 +39,7 @@ export interface FileContentResult {
 
 /** Cap how much we ship to the browser editor — big enough for real source, small
  *  enough that Monaco stays snappy and we never stream a multi-MB blob to a phone. */
+const GIT_DIR_REFUSED = "refusing to read inside a .git directory";
 const MAX_FILE_BYTES = 2_000_000;
 
 /**
@@ -541,7 +542,7 @@ export async function readImagePreview(
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   if (insideGitMetadata(r.clean)) {
-    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+    return { ok: false, code: "ERROR", message: GIT_DIR_REFUSED };
   }
   const contentType = imagePreviewType(r.clean);
   if (!contentType) {
@@ -576,7 +577,7 @@ export async function readCommitImagePreview(
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   if (insideGitMetadata(r.clean)) {
-    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+    return { ok: false, code: "ERROR", message: GIT_DIR_REFUSED };
   }
   if (!backendFor(repo.vcs).capabilities.fileModels) {
     return { ok: false, code: "ERROR", message: "commit file view isn't available for this repository" };
@@ -611,7 +612,7 @@ export async function readBinaryPreview(
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   if (insideGitMetadata(r.clean)) {
-    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+    return { ok: false, code: "ERROR", message: GIT_DIR_REFUSED };
   }
   const descriptor = binaryPreviewDescriptor(r.clean, kind);
   if (!descriptor) {
@@ -644,7 +645,7 @@ export async function readCommitBinaryPreview(
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   if (insideGitMetadata(r.clean)) {
-    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+    return { ok: false, code: "ERROR", message: GIT_DIR_REFUSED };
   }
   if (!backendFor(repo.vcs).capabilities.fileModels) {
     return { ok: false, code: "ERROR", message: "commit file view isn't available for this repository" };
@@ -741,7 +742,7 @@ export async function readFileContent(
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   if (insideGitMetadata(r.clean)) {
-    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+    return { ok: false, code: "ERROR", message: GIT_DIR_REFUSED };
   }
 
   try {
@@ -1138,7 +1139,7 @@ export async function readFileDiff(repoId: string, relPath: string): Promise<Fil
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   if (insideGitMetadata(r.clean)) {
-    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+    return { ok: false, code: "ERROR", message: GIT_DIR_REFUSED };
   }
 
   const backend = backendFor(repo.vcs);
@@ -1214,7 +1215,7 @@ export async function readCommitFile(repoId: string, hash: string, relPath: stri
   const r = resolveRepoPath(repo.absPath, relPath);
   if ("error" in r) return { ok: false, code: "ERROR", message: r.error };
   if (insideGitMetadata(r.clean)) {
-    return { ok: false, code: "ERROR", message: "refusing to read inside a .git directory" };
+    return { ok: false, code: "ERROR", message: GIT_DIR_REFUSED };
   }
   // Per-rev blob reconstruction is a git concept; Lore has no arbitrary-rev blob view.
   if (!backendFor(repo.vcs).capabilities.fileModels) {

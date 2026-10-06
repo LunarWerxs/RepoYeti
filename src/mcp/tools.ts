@@ -46,11 +46,14 @@ function optBool(args: Record<string, unknown>, key: string): boolean {
   return v === true || v === "true";
 }
 
+const REPO_ARG_DESC = "Repository id, name, or folder basename.";
+const COLLAB_ARG_DESC = "Accepted collaboration id or mapped local repository name.";
+
 /** A common single-`repo` input schema, reused by the many repo-scoped tools. */
 const repoOnlySchema = (): JsonSchema => ({
   type: "object",
   properties: {
-    repo: { type: "string", description: "Repository id, name, or folder basename." },
+    repo: { type: "string", description: REPO_ARG_DESC },
   },
   required: ["repo"],
   additionalProperties: false,
@@ -61,7 +64,7 @@ const collaborationOnlySchema = (): JsonSchema => ({
   properties: {
     collaboration: {
       type: "string",
-      description: "Accepted collaboration id or mapped local repository name.",
+      description: COLLAB_ARG_DESC,
     },
   },
   required: ["collaboration"],
@@ -99,7 +102,7 @@ export const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        repo: { type: "string", description: "Repository id, name, or folder basename." },
+        repo: { type: "string", description: REPO_ARG_DESC },
         limit: { type: "number", description: "Max commits to return (page size)." },
         merges: {
           type: "string",
@@ -131,7 +134,7 @@ export const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        repo: { type: "string", description: "Repository id, name, or folder basename." },
+        repo: { type: "string", description: REPO_ARG_DESC },
         path: { type: "string", description: "Repo-relative path of the changed file." },
       },
       required: ["repo", "path"],
@@ -146,7 +149,7 @@ export const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        repo: { type: "string", description: "Repository id, name, or folder basename." },
+        repo: { type: "string", description: REPO_ARG_DESC },
         query: { type: "string", description: "Text to search for (min 3 chars)." },
       },
       required: ["repo", "query"],
@@ -173,7 +176,7 @@ export const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        repo: { type: "string", description: "Repository id, name, or folder basename." },
+        repo: { type: "string", description: REPO_ARG_DESC },
         paths: {
           type: "array",
           items: { type: "string" },
@@ -241,7 +244,7 @@ export const TOOLS: McpTool[] = [
       properties: {
         collaboration: {
           type: "string",
-          description: "Accepted collaboration id or mapped local repository name.",
+          description: COLLAB_ARG_DESC,
         },
         path: { type: "string", description: "Repo-relative changed path." },
       },
@@ -266,7 +269,7 @@ export const TOOLS: McpTool[] = [
       properties: {
         collaboration: {
           type: "string",
-          description: "Accepted collaboration id or mapped local repository name.",
+          description: COLLAB_ARG_DESC,
         },
         message: { type: "string", description: "Commit message." },
       },
@@ -288,7 +291,7 @@ export const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        repo: { type: "string", description: "Repository id, name, or folder basename." },
+        repo: { type: "string", description: REPO_ARG_DESC },
         message: { type: "string", description: "Commit message." },
         amend: { type: "boolean", description: "Amend the previous commit instead of creating a new one." },
       },
@@ -304,7 +307,7 @@ export const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        repo: { type: "string", description: "Repository id, name, or folder basename." },
+        repo: { type: "string", description: REPO_ARG_DESC },
         name: { type: "string", description: "New branch name." },
         switch: { type: "boolean", description: "Switch to the new branch after creating it (default true)." },
       },
@@ -323,7 +326,7 @@ export const TOOLS: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        repo: { type: "string", description: "Repository id, name, or folder basename." },
+        repo: { type: "string", description: REPO_ARG_DESC },
         branch: { type: "string", description: "Branch to switch to." },
       },
       required: ["repo", "branch"],
