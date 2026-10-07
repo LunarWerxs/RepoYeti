@@ -1,5 +1,88 @@
 {
- "closed": null,
+ "closed": {
+  "a": {
+   "commit": "21787bec6e75c57a28677e7f1f036b0ff5def592",
+   "def_hash": "a08b20821fd7efa3",
+   "dirty": false,
+   "id": "m-20261007T104312-7aa01b",
+   "load_after": 0.994,
+   "load_before": 0.996,
+   "machine": "MPC-HELL",
+   "metric": "web.source_bytes",
+   "project": "repoyeti",
+   "reason": null,
+   "seconds": 4.182,
+   "settings": {
+    "gate": "exact",
+    "kind": "size",
+    "measure_files": {
+     "scripts/rsi/shipped_bytes.py": "d721790e6cc0dc018295578a568fc6a14d81c623"
+    }
+   },
+   "started": "2026-10-07T10:43:12+00:00",
+   "status": "ok",
+   "value": 1903717
+  },
+  "applies_if": null,
+  "at": "2026-10-07T10:45:03+00:00",
+  "b": {
+   "commit": "c48a878285852c407a86752adeafb373dc9ca275",
+   "def_hash": "a08b20821fd7efa3",
+   "dirty": false,
+   "id": "m-20261007T104450-bc60b4",
+   "load_after": 0.996,
+   "load_before": 1.0,
+   "machine": "MPC-HELL",
+   "metric": "web.source_bytes",
+   "project": "repoyeti",
+   "reason": null,
+   "seconds": 0.938,
+   "settings": {
+    "gate": "exact",
+    "kind": "size",
+    "measure_files": {
+     "scripts/rsi/shipped_bytes.py": "d721790e6cc0dc018295578a568fc6a14d81c623"
+    }
+   },
+   "started": "2026-10-07T10:44:50+00:00",
+   "status": "ok",
+   "value": 1903649
+  },
+  "guards": [
+   {
+    "a": 5,
+    "b": 5,
+    "declared": false,
+    "metric": "arkitect_gating_errors",
+    "state": "ok"
+   },
+   {
+    "a": 1180,
+    "b": 1180,
+    "declared": false,
+    "metric": "arkitect_warnings",
+    "state": "ok"
+   },
+   {
+    "a": 100,
+    "b": 100,
+    "declared": false,
+    "metric": "arkitect_no_data",
+    "state": "ok"
+   },
+   {
+    "a": 10,
+    "b": 10,
+    "declared": false,
+    "metric": "deps_total",
+    "state": "ok"
+   }
+  ],
+  "method": "exact: 1903717 -> 1903649",
+  "note": "fontTools re-save of latin-ext woff2 saved only 68 bytes, under the 150-byte pass line",
+  "pattern": null,
+  "verdict": "kept"
+ },
  "def_hash": "a08b20821fd7efa3",
  "id": "20261007-web-source-bytes-3dfb",
  "idea": "lossless re-save of the Inter latin-ext woff2 through fontTools (brotli max) to shave the font bytes",
