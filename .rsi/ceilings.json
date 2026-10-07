@@ -4,5 +4,11 @@
   "commit": "e5e3f3a9dcf98a71a58ab153fdedf162f05422e7",
   "trial": "20261006-daemon-bundle-bytes-0f0c",
   "value": 764703
+ },
+ "web.source_bytes": {
+  "at": "2026-10-07T10:46:57+00:00",
+  "commit": "c48a878285852c407a86752adeafb373dc9ca275",
+  "trial": "20261007-web-source-bytes-3dfb",
+  "value": 1903649
  }
 }
