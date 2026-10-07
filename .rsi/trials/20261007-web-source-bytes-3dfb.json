@@ -1,0 +1,24 @@
+{
+ "closed": null,
+ "def_hash": "a08b20821fd7efa3",
+ "id": "20261007-web-source-bytes-3dfb",
+ "idea": "lossless re-save of the Inter latin-ext woff2 through fontTools (brotli max) to shave the font bytes",
+ "lane": "moonshot",
+ "metric": "web.source_bytes",
+ "opened": {
+  "at": "2026-10-07T10:42:54+00:00",
+  "by": "blogi",
+  "commit": "21787bec6e75c57a28677e7f1f036b0ff5def592",
+  "machine": "MPC-HELL"
+ },
+ "pass_line": "web_bytes drops by at least 150 bytes with identical glyph tables",
+ "predict": {
+  "expect": 170.0,
+  "hi": 200.0,
+  "lo": 50.0,
+  "p_keep": 0.3
+ },
+ "probe_minutes": 20.0,
+ "project": "repoyeti",
+ "schema": "hydra-rsi-trial/1"
+}
