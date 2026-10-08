@@ -64,7 +64,7 @@ human puts the secret in, or a self-hosted Windows runner with the vault exists.
    the executable are byte-identical, so sign one and reuse it.
 3. Sign, via the Connections MCP `sign_artifact`, with `expect_subject: "LUNARWERX LLC"`:
    - `repoyeti.exe`
-   - `misc/lunarwerx-tray.exe`
+   - `misc/RepoYeti-Tray.exe`
    - `misc/Create-Shortcut.ps1`, `New-TrayShortcut.ps1`, `RepoYeti-Tray.ps1`, `Tray-Host.ps1`
 4. Copy the signed executable over all three of its homes, and smoke it: `./repoyeti.exe --version`
    must print the release version. That is the same check the updater makes before it swaps a

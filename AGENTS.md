@@ -28,7 +28,7 @@ Each one's incident really happened; read the script header before calling a che
 
 ## [Kit-managed files](docs/agents/RULES_FULL.md#kit-managed-files-do-not-edit-them-here)
 - Some files under `web/src/components/ui/`, `tests/server-lib/` and `misc/` are synced byte-for-byte from the private sibling `lunarwerx-ui`. Never edit them here; fix upstream. `bun run check:kit` compares them (run as `check:local` on a dev machine, not in CI) and the pre-commit hook rejects a local edit.
-- `misc/lunarwerx-tray.exe` drifting in `check:kit` usually means a local rebuild, not a stale repo. Never sync a locally built binary into a public release without knowing what changed in it.
+- `misc/RepoYeti-Tray.exe` drifting in `check:kit` usually means a local rebuild, not a stale repo. Never sync a locally built binary into a public release without knowing what changed in it.
 
 ## [Traps that cost a release](docs/agents/RULES_FULL.md#traps-that-have-actually-cost-a-release)
 - The daemon serves `web/dist` live, so the build writes `dist-next` and renames it over `dist` in one step. Never "simplify" that away.

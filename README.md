@@ -131,7 +131,7 @@ To reach it from your phone, which opens a Cloudflare tunnel and prints a QR cod
 repoyeti start --tunnel
 ```
 
-> **The tray icon comes with both downloads.** The icon is drawn by a small separate launcher (`misc\lunarwerx-tray.exe`); the zip ships it beside the exe, and since 1.0.2 the single-file `repoyeti.exe` carries it inside the binary and writes it out beside its own state on first run, so either download gets you the icon, Quit and the auto-restart supervisor. (Before 1.0.2 the bare exe had none, and this line said so as though it were a decision.) `misc\Create-Shortcut.ps1` still makes a shortcut that launches through the tray host directly.
+> **The tray icon comes with both downloads.** The icon is drawn by a small separate launcher (`misc\RepoYeti-Tray.exe`); the zip ships it beside the exe, and since 1.0.2 the single-file `repoyeti.exe` carries it inside the binary and writes it out beside its own state on first run, so either download gets you the icon, Quit and the auto-restart supervisor. (Before 1.0.2 the bare exe had none, and this line said so as though it were a decision.) `misc\Create-Shortcut.ps1` still makes a shortcut that launches through the tray host directly.
 
 > **Signed.** Starting with 1.0.1 the Windows executable, the tray launcher and the tray scripts are Authenticode-signed as **LUNARWERX LLC** through Azure Trusted Signing, and timestamped, so Windows names the publisher instead of warning about an unknown one. SmartScreen still rates new signing identities on reputation, so a very early download may show a prompt that now says who published it. Every release also publishes a `SHA256SUMS.txt`.
 
@@ -313,7 +313,7 @@ What it does offer for a wrong tap is **Undo last git action** (the repo card's 
 
 <br />
 
-Yes, from 1.0.1 onward. `repoyeti.exe`, the tray launcher `lunarwerx-tray.exe` and the tray PowerShell scripts are Authenticode-signed as `CN=LUNARWERX LLC` through Azure Trusted Signing and RFC-3161 timestamped, so the signature stays valid after the (deliberately short-lived) certificate expires. Right-click the exe, Properties, Digital Signatures to see it.
+Yes, from 1.0.1 onward. `repoyeti.exe`, the tray launcher `RepoYeti-Tray.exe` and the tray PowerShell scripts are Authenticode-signed as `CN=LUNARWERX LLC` through Azure Trusted Signing and RFC-3161 timestamped, so the signature stays valid after the (deliberately short-lived) certificate expires. Right-click the exe, Properties, Digital Signatures to see it.
 
 Signing is about who published the file. Integrity is handled separately and was already in place: every release publishes `SHA256SUMS.txt`, and the automatic updater fetches that manifest first, refuses a release that has no verifiable checksum, stream-hashes the download and deletes it on mismatch, and makes the new binary report the expected version before swapping it in.
 

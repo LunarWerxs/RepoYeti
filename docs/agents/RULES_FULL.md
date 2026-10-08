@@ -101,7 +101,7 @@ them, and the pre-commit hook rejects a local edit to one. Fix those upstream in
 repository's CI cannot check out that sibling, which is why this runs as `check:local` on a
 developer machine rather than in GitHub Actions.
 
-Note that `misc/lunarwerx-tray.exe` is a compiled Rust artifact whose upstream copy is a local build
+Note that `misc/RepoYeti-Tray.exe` is a compiled Rust artifact whose upstream copy is a local build
 output, not a tracked file. If `check:kit` reports it as drifted, that usually means somebody
 rebuilt the crate on this machine, not that this repository is stale. Do not sync a locally built
 binary into a public release without knowing what changed in it.

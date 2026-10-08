@@ -218,7 +218,7 @@ jobs:
           # prompt, which reads to a user exactly like the warning signing was meant to remove.
           files: |
             ${{ github.workspace }}\dist\repoyeti.exe
-            ${{ github.workspace }}\misc\lunarwerx-tray.exe
+            ${{ github.workspace }}\misc\RepoYeti-Tray.exe
             ${{ github.workspace }}\misc\Create-Shortcut.ps1
             ${{ github.workspace }}\misc\New-TrayShortcut.ps1
             ${{ github.workspace }}\misc\Tray-Host.ps1
@@ -233,7 +233,7 @@ jobs:
         if: runner.os == 'Windows' && vars.RY_SIGN_WINDOWS == 'true'
         shell: pwsh
         run: |
-          foreach ($f in @("dist/repoyeti.exe", "misc/lunarwerx-tray.exe")) {
+          foreach ($f in @("dist/repoyeti.exe", "misc/RepoYeti-Tray.exe")) {
             $sig = Get-AuthenticodeSignature -LiteralPath $f
             if ($sig.Status -ne "Valid") {
               throw "$f is not validly signed after the signing step (status: $($sig.Status))"
@@ -274,7 +274,7 @@ jobs:
           }
           # A THIRD Windows asset: the same executable plus the misc/ tray toolkit, for anyone who
           # wants the notification-area icon rather than a bare window. RepoYeti draws no tray icon
-          # itself - misc/lunarwerx-tray.exe does, as a separate launcher - so without these files a
+          # itself - misc/RepoYeti-Tray.exe does, as a separate launcher - so without these files a
           # downloaded build simply cannot have one, whatever the app's settings say.
           #
           # Deliberately a SEPARATE asset, so the single-file invariant asserted just above (and the
@@ -284,7 +284,7 @@ jobs:
           New-Item -ItemType Directory -Path "tmp/$tray/misc" -Force | Out-Null
           Copy-Item -LiteralPath "dist/repoyeti.exe" -Destination "tmp/$tray/"
           $trayFiles = @(
-            "lunarwerx-tray.exe", "RepoYeti-Tray.json", "RepoYeti.ico",
+            "RepoYeti-Tray.exe", "RepoYeti-Tray.json", "RepoYeti.ico",
             "Create-Shortcut.ps1", "New-TrayShortcut.ps1",
             "Tray-Host.ps1", "RepoYeti-Tray.ps1", "Tray-Launch.vbs"
           )

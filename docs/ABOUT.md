@@ -54,7 +54,7 @@ edit the dossier, not this block. Everything ABOVE the marker is yours.
 - `src/vcs/` - pluggable VCS backend interface; `git` (default, via simple-git) and an experimental `Lore` backend behind `REPOYETI_LORE=1`
 - `web/src/` - Vue 3 + Tailwind PWA dashboard: repo grid, git-graph history view, Monaco diff/file editor, identity selector, SSE client
 - `relay/` - separately-deployed Cloudflare Worker: stable-address redirects plus the Quick Tunnel OAuth callback resolver (never proxies dashboard traffic)
-- `misc/tray-host-native/` - Rust native tray host (lunarwerx-tray) - optional sidecar launcher that spawns the unchanged daemon binary and draws the system-tray icon
+- `misc/tray-host-native/` - Rust native tray host (RepoYeti-Tray.exe) - optional sidecar launcher that spawns the unchanged daemon binary and draws the system-tray icon
 - `scripts/` - build pipeline (vite build -> bun --compile per target) and the `check:*` guardrail scripts (boundaries, gitenv, bytes, changelog, ...)
 
 ### Features
@@ -82,7 +82,7 @@ edit the dossier, not this block. Everything ABOVE the marker is yours.
 - **Owner-minted API token** - An optional Bearer token (mint/revoke/show via `repoyeti token`) sits alongside the OIDC session for remote/headless agent callers, off by default and never weakening the OIDC posture. - `src/cli/token.ts`
 - **Auto-updater** - Git-based self-update: periodic check/apply on an interval with relaunch, busy-retry backoff, and a bounded deferral count when git operations are in flight. - `src/auto-update.ts`
 - **Scheduled auto-commit** - Optional per-repo scheduled commit (interval or daily-at) with optional pull-first/push-after and an AI-or-fallback commit message, skipping repos mid-operation or in conflict; turning it off mid-round now actually cancels the in-flight round via the shared round controller instead of walking every remaining repository. - `src/auto-commit.ts`
-- **System-tray launcher (Windows)** - A separate native Rust launcher (lunarwerx-tray) draws the tray icon and spawns the unchanged daemon binary; running repoyeti.exe alone never produces a tray icon. - `misc/tray-host-native/src/main.rs`
+- **System-tray launcher (Windows)** - A separate native Rust launcher (RepoYeti-Tray.exe) draws the tray icon and spawns the unchanged daemon binary; running repoyeti.exe alone never produces a tray icon. - `misc/tray-host-native/src/main.rs`
 - **GitHub account sync** - Resolves each repo's writable GitHub account among the machine's signed-in gh accounts (by permissions.push) and uses that account's token for the git credential helper, scoped per-host, never cached. - `src/http/routes/accounts.ts`
 - **Agent approval gate** - A configurable auto-approve / auto-deny / manual-with-timeout gate in front of MCP/agent-triggered mutating actions, with a pending-approvals list an operator can settle; a 'Show full request' view now serves the exact (bounded, secret-redacted) arguments the call will run with, not just an 80-character summary, so approval is actually informed. - `src/http/routes/approvals.ts`, `src/approvals.ts`
 - **On-demand repo scan + configurable scan roots** - Trigger a cancellable rescan of the whole machine or a single folder, and add/remove which root folders RepoYeti searches for git repos, with new repos streaming in live over SSE. - `src/http/routes/scan.ts`, `src/http/routes/roots.ts`

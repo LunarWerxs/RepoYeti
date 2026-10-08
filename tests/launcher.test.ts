@@ -352,7 +352,7 @@ test.skipIf(!isWin)("a root shortcut can be (re)generated and resolves to the tr
   // start PowerShell without a console flash, and the native host suppresses its own console, so
   // both layers are gone: the daemon process is created at ~25ms instead of ~475ms.
   assert(
-    /lunarwerx-tray\.exe$/i.test(info.target),
+    /RepoYeti-Tray\.exe$/i.test(info.target),
     `shortcut target isn't the native tray host: ${info.target}`,
   );
   assert(!/wscript/i.test(info.target), `shortcut still goes through wscript: ${info.target}`);
@@ -362,7 +362,7 @@ test.skipIf(!isWin)("a root shortcut can be (re)generated and resolves to the tr
     /RepoYeti-Tray\.json/i.test(info.args),
     `shortcut doesn't pass RepoYeti-Tray.json: ${info.args}`,
   );
-  assert(info.targetExists, "shortcut points at a lunarwerx-tray.exe that doesn't exist");
+  assert(info.targetExists, "shortcut points at a RepoYeti-Tray.exe that doesn't exist");
   assert(info.configExists, "shortcut names a RepoYeti-Tray.json that doesn't exist");
   assert(info.iconExists, "shortcut's tray icon (RepoYeti.ico) doesn't exist");
   expect(info.iconExists && info.targetExists && info.configExists).toBe(true);

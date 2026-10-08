@@ -66,14 +66,14 @@ function writeReleaseEntrypoint(): string {
     `asset${index}`,
   ]);
 
-  // The tray toolkit (misc\lunarwerx-tray.exe plus its config/icon), embedded the same way as
+  // The tray toolkit (misc\RepoYeti-Tray.exe plus its config/icon), embedded the same way as
   // the web assets above so a compiled single-file exe can still place and start its own tray
   // icon; see src/tray-bootstrap.mjs. Windows-only: the tray host is a Win32 program, so there
   // is nothing to embed on another OS. A file missing on disk THROWS rather than shipping an
   // exe that can never show its icon with no warning at all: that silent drop is the exact
   // 2026-09-11 bug this embedding fixes.
   const trayFiles = isWin
-    ? ["lunarwerx-tray.exe", "RepoYeti-Tray.json", "RepoYeti.ico"].map((name) => {
+    ? ["RepoYeti-Tray.exe", "RepoYeti-Tray.json", "RepoYeti.ico"].map((name) => {
         const path = join(ROOT, "misc", name);
         if (!existsSync(path)) {
           throw new Error(
