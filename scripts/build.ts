@@ -125,9 +125,9 @@ try {
   // the already-supported `lore` CLI fallback when installed; it no longer ships Koffi's source,
   // docs, and native binaries for every operating system beside a 99 MB executable.
   if (isWin) {
-    await $`bun build --compile --minify --external @lore-vcs/sdk --external koffi --windows-hide-console --windows-icon=${join(ROOT, "misc", "RepoYeti.ico")} --windows-title=RepoYeti --windows-publisher=LunarWerx --windows-version=${`${pkg.version}.0`} --windows-description=${"System-wide remote Git manager"} ${releaseEntry} --outfile ${outBin}`;
+    await $`bun build --compile --bytecode --format=esm --compile-exec-argv=--disallow-code-generation-from-strings --minify --external @lore-vcs/sdk --external koffi --windows-hide-console --windows-icon=${join(ROOT, "misc", "RepoYeti.ico")} --windows-title=RepoYeti --windows-publisher=LunarWerx --windows-version=${`${pkg.version}.0`} --windows-description=${"System-wide remote Git manager"} ${releaseEntry} --outfile ${outBin}`;
   } else {
-    await $`bun build --compile --minify --external @lore-vcs/sdk --external koffi ${releaseEntry} --outfile ${outBin}`;
+    await $`bun build --compile --bytecode --format=esm --compile-exec-argv=--disallow-code-generation-from-strings --minify --external @lore-vcs/sdk --external koffi ${releaseEntry} --outfile ${outBin}`;
   }
 } finally {
   rmSync(TMP, { recursive: true, force: true });

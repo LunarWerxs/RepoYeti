@@ -65,7 +65,7 @@ function reportFailures(out: string): void {
   for (const line of failures) console.error(`  ${line}`);
 }
 
-const baseArgs = ["bun", "test", "tests", "--coverage", "--timeout", "20000"];
+const baseArgs = ["bun", "test", "tests", "--timeout", "20000"];
 
 /** One shard's report as `file → (line → hit count)`. */
 function parseLcov(report: string): Map<string, Map<number, number>> {
