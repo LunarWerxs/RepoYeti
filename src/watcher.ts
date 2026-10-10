@@ -165,6 +165,8 @@ export function watchRepo(
 ): WatchHandle {
   const layout = markerLayout(absPath, marker);
   const watchers = new Map<string, FSWatcher>();
+  /** path → its pending "is the watched path still there" check (see addWatch). */
+  const existsChecks = new Map<string, ReturnType<typeof setTimeout>>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
   let healthy = true;
@@ -179,6 +181,9 @@ export function watchRepo(
       }
     }
     watchers.clear();
+    // A pending existence check must not outlive its watch and flip a closed handle unhealthy.
+    for (const t of existsChecks.values()) clearTimeout(t);
+    existsChecks.clear();
   };
 
   /**
@@ -228,19 +233,41 @@ export function watchRepo(
     if (watchers.has(path)) return true;
     if (!existsSync(path)) return false;
     try {
-      const handle = watchFactory(path, { persistent: true, recursive }, listener);
+      // A watch on a DELETED directory does not die on Windows: it reports the directory gone
+      // about 2,000 times a second (Bun 1.4.3, measured 2026-10-10), which held 95% of a core per
+      // deleted repo and, since each event re-arms the one debounce, never let a refresh run. On
+      // Linux it goes silent instead. So a watched path that is gone is dropped like a native
+      // error: a required one hands the repo to the polling fallback. Any event arms ONE existence
+      // check a second later (never one per event: the recursive worktree watch can see thousands
+      // a second during a build), and the last event of a burst always gets a check after it.
+      const handle = watchFactory(path, { persistent: true, recursive }, (eventType, filename) => {
+        if (!existsChecks.has(path)) {
+          existsChecks.set(
+            path,
+            setTimeout(() => {
+              existsChecks.delete(path);
+              if (!existsSync(path)) drop();
+            }, 1_000),
+          );
+        }
+        listener(eventType, filename);
+      });
       // FSWatcher reports some native failures asynchronously. Consume the EventEmitter error
       // and move required coverage to the service's polling fallback instead of crashing or
       // silently leaving History stale.
-      handle.on("error", () => {
+      const drop = (): void => {
+        const pending = existsChecks.get(path);
+        if (pending) clearTimeout(pending);
+        existsChecks.delete(path);
         try {
           handle.close();
         } catch {
           /* ignore */
         }
-        watchers.delete(path);
+        if (watchers.get(path) === handle) watchers.delete(path);
         if (required) markUnhealthy();
-      });
+      };
+      handle.on("error", drop);
       watchers.set(path, handle);
       return true;
     } catch {

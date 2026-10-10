@@ -1,11 +1,12 @@
 import { test, expect } from "bun:test";
 import { EventEmitter } from "node:events";
-import { unlinkSync, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync, type FSWatcher } from "node:fs";
 
 import { join } from "node:path";
 import { $ } from "bun";
 import { watchRepo, type WatchFactory } from "../src/watcher.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
+import { rmrf } from "./rmrf.ts";
 import { useSuiteTimeout } from "./helpers/timeouts.ts";
 
 // Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
@@ -211,6 +212,27 @@ test("a required runtime watcher error tears down native coverage and reports un
   expect(unhealthy).toBe(1);
   expect(handles.every((handle) => handle.closed)).toBe(true);
   watcher.close();
+});
+
+test("deleting the repo drops its native watches and reports unhealthy, so polling takes over", async () => {
+  // Real fs.watch on a real deletion. On Windows a watch on a deleted directory never dies: it
+  // reported the directory gone ~2,000 times a second, held 95% of a core, and stayed "watching"
+  // for good. On Linux the watch goes silent instead. Either way the repo must leave native watching.
+  const dir = await gitRepo();
+  let unhealthy = 0;
+  const watcher = watchRepo(dir, () => {}, ".git", 250, () => {
+    unhealthy++;
+  });
+  try {
+    expect(watcher.watching).toBe(true);
+    await rmrf(dir);
+    expect(existsSync(dir)).toBe(false); // rmrf is best-effort: a failed delete fails here, by name
+    await waitFor(() => !watcher.watching, 4_000).catch(() => {});
+    expect(watcher.watching).toBe(false);
+    expect(unhealthy).toBe(1);
+  } finally {
+    watcher.close();
+  }
 });
 
 test("watchRepo reports unhealthy when there is no .git to watch", () => {
