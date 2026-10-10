@@ -849,6 +849,45 @@ const setRowEl = (hash: string) => (el: unknown): void => {
   if (el instanceof HTMLElement) rowEls.set(hash, el);
   else rowEls.delete(hash);
 };
+// One context menu serves every commit row. A reka ContextMenu per row mounted a menu root and
+// trigger for each one: with 275 paged-in rows that was 1.4 s of a 2.2 s History open under
+// happy-dom, paid again on every refresh that re-renders the list. A row now hands its right-click,
+// and the touch and pen presses reka reads as a long-press, to the one trigger, so reka still
+// decides when the menu opens. The copies do not bubble, so no ancestor sees an event twice.
+const rowMenuCommit = ref<LogEntry | null>(null);
+// Found by attribute, not a template ref: reka's as-child slot clones the vnode, and a ref on it
+// stayed bound to the first panel ever mounted, so a later panel's rows dispatched to nothing.
+const rowMenuTrigger = (): HTMLElement | null =>
+  rootEl.value?.querySelector<HTMLElement>("[data-history-row-menu]") ?? null;
+function onRowContextMenu(commit: LogEntry, event: MouseEvent): void {
+  const trigger = rowMenuTrigger();
+  // A control inside the row (a touch tooltip mid-hold) may already have claimed the event.
+  if (event.defaultPrevented || !trigger) return;
+  event.preventDefault();
+  rowMenuCommit.value = commit;
+  trigger.dispatchEvent(
+    new MouseEvent("contextmenu", { cancelable: true, clientX: event.clientX, clientY: event.clientY }),
+  );
+}
+function onRowPointer(commit: LogEntry, event: PointerEvent): void {
+  if (event.pointerType === "mouse") return;
+  const trigger = rowMenuTrigger();
+  if (!trigger) return;
+  if (event.type === "pointerdown") {
+    if (event.defaultPrevented) return;
+    rowMenuCommit.value = commit;
+  }
+  trigger.dispatchEvent(
+    new PointerEvent(event.type, {
+      cancelable: true,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      isPrimary: event.isPrimary,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    }),
+  );
+}
 const flashHash = ref<string | null>(null);
 let flashTimer: ReturnType<typeof setTimeout> | null = null;
 function jumpToParent(hash: string): void {
@@ -1203,13 +1242,14 @@ watch(historyActivityScale, () => {
                    (the disclosure, change-stat tooltip, and copy-hash button). Pointer users can
                    still click the row background, while keyboard users get a real disclosure
                    button. This avoids nesting focusable controls inside role="button". -->
-              <ContextMenu>
-                <ContextMenuTrigger as-child>
+              <!-- pointer-events and the callout rule are what reka's trigger set on each row: a row
+                   stays right-clickable while the shared menu holds the page, and a touch hold
+                   raises the menu instead of the iOS callout. -->
                   <div
                     :ref="setRowEl(item.commit!.hash)"
                     role="group"
                     :data-history-row="item.commit!.hash"
-                    class="history-row-visibility group/r flex cursor-pointer items-stretch rounded-md transition-colors hover:bg-accent/40"
+                    class="history-row-visibility group/r pointer-events-auto flex cursor-pointer items-stretch rounded-md transition-colors [-webkit-touch-callout:none] hover:bg-accent/40"
                     :class="[
                       compact && 'history-row-compact',
                       expandedCommit === item.commit!.hash && 'bg-accent/40',
@@ -1217,6 +1257,11 @@ watch(historyActivityScale, () => {
                     ]"
                     :aria-label="t('repo.history.commitRowLabel', { subject: item.commit!.subject })"
                     @click="toggleCommit(item.commit!.hash)"
+                    @contextmenu="onRowContextMenu(item.commit!, $event)"
+                    @pointerdown="onRowPointer(item.commit!, $event)"
+                    @pointermove="onRowPointer(item.commit!, $event)"
+                    @pointerup="onRowPointer(item.commit!, $event)"
+                    @pointercancel="onRowPointer(item.commit!, $event)"
                   >
                 <!-- graph gutter -->
                 <svg
@@ -1404,44 +1449,6 @@ watch(historyActivityScale, () => {
                   </div>
                 </button>
               </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  <ContextMenuItem @select="toggleCommit(item.commit!.hash)">
-                    <Eye :size="15" />
-                    <span>
-                      {{
-                        expandedCommit === item.commit!.hash
-                          ? $t("repo.history.ctxHideDetails")
-                          : $t("repo.history.ctxViewDetails")
-                      }}
-                    </span>
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem @select="copyHash(item.commit!.hash)">
-                    <Copy :size="15" /><span>{{ $t("repo.history.copyHash") }}</span>
-                  </ContextMenuItem>
-                  <ContextMenuItem @select="copyMessage(item.commit!)">
-                    <MessageSquareText :size="15" /><span>{{ $t("repo.history.ctxCopyMessage") }}</span>
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    v-if="item.commit!.authorEmail"
-                    @select="copyAuthorEmail(item.commit!.authorEmail)"
-                  >
-                    <Mail :size="15" /><span>{{ $t("repo.history.ctxCopyAuthorEmail") }}</span>
-                  </ContextMenuItem>
-                  <template v-if="!selectedAuthor && item.commit!.parents.length">
-                    <ContextMenuSeparator />
-                    <ContextMenuItem
-                      v-for="parent in item.commit!.parents"
-                      :key="parent"
-                      @select="jumpToParent(parent)"
-                    >
-                      <CornerDownRight :size="15" />
-                      <span>{{ $t("repo.history.ctxJumpToParent", { hash: parent.slice(0, 8) }) }}</span>
-                    </ContextMenuItem>
-                  </template>
-                </ContextMenuContent>
-              </ContextMenu>
 
               <!-- commit detail (files + bounded diff), indented past the gutter -->
               <Transition name="expand">
@@ -1606,6 +1613,50 @@ watch(historyActivityScale, () => {
               <span v-if="loadingLog">{{ $t("repo.history.loading") }}</span>
             </div>
           </TransitionGroup>
+          <!-- the one menu every commit row opens (onRowContextMenu) -->
+          <ContextMenu>
+            <ContextMenuTrigger as="span" hidden data-history-row-menu />
+            <!-- The content stays mounted, like each row's used to, so its portal is ready on the
+                 first right-click; only what it shows waits for a row to name its commit. -->
+            <ContextMenuContent>
+              <template v-if="rowMenuCommit">
+                <ContextMenuItem @select="toggleCommit(rowMenuCommit.hash)">
+                  <Eye :size="15" />
+                  <span>
+                    {{
+                      expandedCommit === rowMenuCommit.hash
+                        ? $t("repo.history.ctxHideDetails")
+                        : $t("repo.history.ctxViewDetails")
+                    }}
+                  </span>
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem @select="copyHash(rowMenuCommit.hash)">
+                  <Copy :size="15" /><span>{{ $t("repo.history.copyHash") }}</span>
+                </ContextMenuItem>
+                <ContextMenuItem @select="copyMessage(rowMenuCommit)">
+                  <MessageSquareText :size="15" /><span>{{ $t("repo.history.ctxCopyMessage") }}</span>
+                </ContextMenuItem>
+                <ContextMenuItem
+                  v-if="rowMenuCommit.authorEmail"
+                  @select="copyAuthorEmail(rowMenuCommit.authorEmail)"
+                >
+                  <Mail :size="15" /><span>{{ $t("repo.history.ctxCopyAuthorEmail") }}</span>
+                </ContextMenuItem>
+                <template v-if="!selectedAuthor && rowMenuCommit.parents.length">
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    v-for="parent in rowMenuCommit.parents"
+                    :key="parent"
+                    @select="jumpToParent(parent)"
+                  >
+                    <CornerDownRight :size="15" />
+                    <span>{{ $t("repo.history.ctxJumpToParent", { hash: parent.slice(0, 8) }) }}</span>
+                  </ContextMenuItem>
+                </template>
+              </template>
+            </ContextMenuContent>
+          </ContextMenu>
         </div>
         <!-- resize grip: drag (or ↑/↓) to set an explicit height; double-click / Delete to reset -->
         <button

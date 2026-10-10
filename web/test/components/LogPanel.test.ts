@@ -740,6 +740,39 @@ describe("LogPanel.vue", () => {
     expect(disclosure.attributes("aria-expanded")).toBe("false");
   });
 
+  // Rows share one menu, so a touch hold reaches it only because the row forwards the press;
+  // iOS raises no contextmenu event of its own for a hold.
+  it("opens the commit-row menu on a touch hold", async () => {
+    const store = useStore();
+    store.logByRepo[repoId] = {
+      ok: true,
+      code: "OK",
+      hasMore: false,
+      commits: [entry("abc123def", "hold me")],
+    };
+    const wrapper = mount(
+      {
+        components: { LogPanel, TooltipProvider },
+        props: ["repoId"],
+        template: '<TooltipProvider><LogPanel :repo-id="repoId" /></TooltipProvider>',
+      },
+      { attachTo: document.body, props: { repoId }, global: { plugins: [i18n] } },
+    );
+    await wrapper.findAll("button").find((b) => b.text().includes("History"))!.trigger("click");
+    const row = wrapper.get('[role="group"][aria-label="Commit: hold me"]');
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await row.trigger("pointerdown", { pointerType: "touch", pointerId: 1, isPrimary: true, clientX: 20, clientY: 20 });
+    await vi.advanceTimersByTimeAsync(800);
+    vi.useRealTimers();
+    await flush();
+
+    const menuText = [...document.body.querySelectorAll('[role="menuitem"]')]
+      .map((item) => item.textContent ?? "")
+      .join(" ");
+    expect(menuText).toContain("Copy commit hash");
+  });
+
   it("renders proportional additions/deletions bars in the wide Changes column", async () => {
     historyChangesDisplay.value = "bars";
     const detailSpy = vi
