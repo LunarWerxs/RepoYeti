@@ -6,6 +6,14 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deleting a watched repo no longer pins a CPU core on Windows.** Windows never ends a watch on
+  a deleted folder: it reports the folder gone about 2,000 times a second for as long as the watch
+  is open, so RepoYeti held most of a core and showed the repo as watched for good. A watched
+  folder that turns out to be gone is now dropped within a second, and a repo that still needs
+  watching moves to polling.
+
 ## [1.3.0] - 2026-10-05
 
 ### Added
