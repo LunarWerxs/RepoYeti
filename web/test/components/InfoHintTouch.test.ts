@@ -26,36 +26,38 @@ describe("InfoHint on touch", () => {
       attachTo: document.body,
     });
     mounted.push(wrapper);
-    return { wrapper, button: wrapper.get("button") };
+    // The tooltip mounts on first interest, which rebuilds the icon button: after a tap the live one is
+    // a new element, so look it up again each time rather than hold the one from before the tap.
+    return { wrapper, get button() { return wrapper.get("button"); } };
   }
 
   const finger = { pointerType: "touch", pointerId: 1, isPrimary: true, clientX: 8, clientY: 8 };
 
   it("discloses its text on a single tap", async () => {
-    const { button } = mountHint();
-    expect(button.attributes("data-state")).toBe("closed");
+    const hint = mountHint();
+    expect(hint.button.attributes("data-state")).toBe("closed");
 
-    await button.trigger("pointerdown", finger);
-    await button.trigger("pointerup", finger);
+    await hint.button.trigger("pointerdown", finger);
+    await hint.button.trigger("pointerup", finger);
 
-    expect(button.attributes("data-state")).not.toBe("closed");
+    expect(hint.button.attributes("data-state")).not.toBe("closed");
   });
 
   it("stays exempt from the app-wide 'show tooltips' switch", async () => {
     // The nested always-enabled provider exists because this text has no other surface. The gesture
     // has to inherit that exemption, not the global setting.
-    const { button } = mountHint();
+    const hint = mountHint();
 
-    await button.trigger("pointerdown", finger);
-    await button.trigger("pointerup", finger);
+    await hint.button.trigger("pointerdown", finger);
+    await hint.button.trigger("pointerup", finger);
 
-    expect(button.attributes("data-state")).not.toBe("closed");
+    expect(hint.button.attributes("data-state")).not.toBe("closed");
   });
 
   it("carries a finger-sized hit area around a 14px icon", () => {
     // A pseudo-element, so the target grows without nudging the row it sits in.
-    const { button } = mountHint();
-    expect(button.classes()).toContain("before:-inset-2");
-    expect(button.classes()).toContain("relative");
+    const hint = mountHint();
+    expect(hint.button.classes()).toContain("before:-inset-2");
+    expect(hint.button.classes()).toContain("relative");
   });
 });
