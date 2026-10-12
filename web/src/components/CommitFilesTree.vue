@@ -16,13 +16,8 @@ import type { TreeNode } from "../types";
 import { fileVisual } from "@/lib/file-icons";
 import { statusColor } from "@/lib/git-status-colors";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from "@/components/ui/context-menu";
+import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
+import LazyContextMenu from "@/components/LazyContextMenu.vue";
 
 defineOptions({ name: "CommitFilesTree" });
 
@@ -100,42 +95,42 @@ function toggle(path: string): void {
         <span class="truncate text-muted-foreground">{{ n.name }}</span>
       </button>
       <!-- file row — same actions as the flat history list, via LogPanel -->
-      <ContextMenu v-else>
-        <ContextMenuTrigger as-child>
-          <button
-            type="button"
-            class="commit-tree-row group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--tree-indent) pe-2 text-start outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-            :style="{ '--tree-indent': (depth ?? 0) * 14 + 6 + 'px' }"
-            :title="n.from ? `${n.from} → ${n.path}` : n.path"
-            @click.stop="emit('open', n)"
-          >
-            <span class="w-3.25 shrink-0" aria-hidden="true" />
-            <component :is="fileVisual(n.name, false)" class="shrink-0 text-sm" />
-            <span
-              class="mono min-w-0 flex-1 truncate text-xs"
-              :class="n.status === 'D' ? 'text-muted-foreground line-through' : 'text-foreground'"
-            >{{ n.name }}</span>
-            <span v-if="n.stat?.addedLines" class="mono shrink-0 text-2xs text-success">+{{ n.stat.addedLines }}</span>
-            <span v-if="n.stat?.removedLines" class="mono shrink-0 text-2xs text-destructive">−{{ n.stat.removedLines }}</span>
-            <span class="mono shrink-0 ps-1 text-2xs font-bold text-(--status-color)" :style="{ '--status-color': statusColor(n.status ?? 'M') }">{{ n.status }}</span>
-          </button>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem @select="emit('open', n)">
-            <Eye :size="15" /><span>{{ $t("repo.history.ctxOpenAtCommit") }}</span>
-          </ContextMenuItem>
-          <ContextMenuItem @select="emit('editor', n.path)">
-            <SquarePen :size="15" /><span>{{ $t("repo.changes.ctxEditor") }}</span>
-          </ContextMenuItem>
-          <ContextMenuItem @select="emit('reveal', n.path)">
-            <FolderOpen :size="15" /><span>{{ $t("repo.changes.revealAction") }}</span>
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem @select="emit('copyPath', n.path)">
-            <Copy :size="15" /><span>{{ $t("repo.changes.ctxCopyPath") }}</span>
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
+      <LazyContextMenu v-else>
+        <button
+          type="button"
+          class="commit-tree-row group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--tree-indent) pe-2 text-start outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+          :style="{ '--tree-indent': (depth ?? 0) * 14 + 6 + 'px' }"
+          :title="n.from ? `${n.from} → ${n.path}` : n.path"
+          @click.stop="emit('open', n)"
+        >
+          <span class="w-3.25 shrink-0" aria-hidden="true" />
+          <component :is="fileVisual(n.name, false)" class="shrink-0 text-sm" />
+          <span
+            class="mono min-w-0 flex-1 truncate text-xs"
+            :class="n.status === 'D' ? 'text-muted-foreground line-through' : 'text-foreground'"
+          >{{ n.name }}</span>
+          <span v-if="n.stat?.addedLines" class="mono shrink-0 text-2xs text-success">+{{ n.stat.addedLines }}</span>
+          <span v-if="n.stat?.removedLines" class="mono shrink-0 text-2xs text-destructive">−{{ n.stat.removedLines }}</span>
+          <span class="mono shrink-0 ps-1 text-2xs font-bold text-(--status-color)" :style="{ '--status-color': statusColor(n.status ?? 'M') }">{{ n.status }}</span>
+        </button>
+        <template #content>
+          <ContextMenuContent>
+            <ContextMenuItem @select="emit('open', n)">
+              <Eye :size="15" /><span>{{ $t("repo.history.ctxOpenAtCommit") }}</span>
+            </ContextMenuItem>
+            <ContextMenuItem @select="emit('editor', n.path)">
+              <SquarePen :size="15" /><span>{{ $t("repo.changes.ctxEditor") }}</span>
+            </ContextMenuItem>
+            <ContextMenuItem @select="emit('reveal', n.path)">
+              <FolderOpen :size="15" /><span>{{ $t("repo.changes.revealAction") }}</span>
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem @select="emit('copyPath', n.path)">
+              <Copy :size="15" /><span>{{ $t("repo.changes.ctxCopyPath") }}</span>
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </template>
+      </LazyContextMenu>
       <!-- children render only while this folder is expanded -->
       <ExpandTransition v-if="n.children && n.children.length" :open="isOpen(n.path)">
         <CommitFilesTree

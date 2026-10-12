@@ -17,21 +17,16 @@ import SmartCommitFileDiff from "../SmartCommitFileDiff.vue";
 import SmartCommitCommitDiff from "../SmartCommitCommitDiff.vue";
 import DiffStat from "../DiffStat.vue";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
+import LazyTooltip from "@/components/LazyTooltip.vue";
+import LazyDropdownMenu from "@/components/LazyDropdownMenu.vue";
 
 interface EditableGroup {
   key: string;
@@ -86,18 +81,16 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
 <template>
   <div class="rounded-lg border border-border bg-card/40 p-3">
     <div class="flex items-center gap-1.5">
-      <Tooltip>
-        <TooltipTrigger as-child>
-          <button
-            type="button"
-            class="sc-drag flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/50 outline-none transition-colors hover:bg-accent hover:text-muted-foreground active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring/40"
-            :aria-label="$t('repo.smartCommit.drag')"
-          >
-            <GripVertical :size="15" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{{ $t("repo.smartCommit.drag") }}</TooltipContent>
-      </Tooltip>
+      <LazyTooltip>
+        <button
+          type="button"
+          class="sc-drag flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/50 outline-none transition-colors hover:bg-accent hover:text-muted-foreground active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring/40"
+          :aria-label="$t('repo.smartCommit.drag')"
+        >
+          <GripVertical :size="15" />
+        </button>
+        <template #content>{{ $t("repo.smartCommit.drag") }}</template>
+      </LazyTooltip>
       <Input
         v-model="group.subjectLine"
         :placeholder="$t('repo.smartCommit.subjectPlaceholder')"
@@ -105,49 +98,47 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
         text-size="ui"
         class="h-8 flex-1"
       />
-      <Tooltip>
-        <TooltipTrigger as-child>
-          <button
-            type="button"
-            :disabled="regenBusy"
-            class="flex size-8 shrink-0 items-center justify-center rounded-md text-primary outline-none transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/40"
-            :aria-label="$t('repo.smartCommit.regen')"
-            @click="emit('regenerate')"
-          >
-            <Loader2 v-if="regenBusy" :size="15" class="animate-spin" />
-            <Sparkles v-else :size="15" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{{ $t("repo.smartCommit.regen") }}</TooltipContent>
-      </Tooltip>
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-8 shrink-0"
-            :title="tooltipsEnabled ? $t('repo.smartCommit.cardMenu') : undefined"
-            :aria-label="$t('repo.smartCommit.cardMenu')"
-          >
-            <MoreVertical :size="15" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" class="max-w-48">
-          <DropdownMenuItem :disabled="index === 0" @select="emit('move-up')">
-            <ArrowUp :size="15" /><span>{{ $t("repo.smartCommit.moveUp") }}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem :disabled="index === total - 1" @select="emit('move-down')">
-            <ArrowDown :size="15" /><span>{{ $t("repo.smartCommit.moveDown") }}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem :disabled="index === 0" @select="emit('merge-up')">
-            <Combine :size="15" /><span>{{ $t("repo.smartCommit.mergeUp") }}</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem @select="emit('remove')">
-            <Trash2 :size="15" /><span>{{ $t("repo.smartCommit.removeCommit") }}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <LazyTooltip>
+        <button
+          type="button"
+          :disabled="regenBusy"
+          class="flex size-8 shrink-0 items-center justify-center rounded-md text-primary outline-none transition-colors hover:bg-accent disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring/40"
+          :aria-label="$t('repo.smartCommit.regen')"
+          @click="emit('regenerate')"
+        >
+          <Loader2 v-if="regenBusy" :size="15" class="animate-spin" />
+          <Sparkles v-else :size="15" />
+        </button>
+        <template #content>{{ $t("repo.smartCommit.regen") }}</template>
+      </LazyTooltip>
+      <LazyDropdownMenu>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="size-8 shrink-0"
+          :title="tooltipsEnabled ? $t('repo.smartCommit.cardMenu') : undefined"
+          :aria-label="$t('repo.smartCommit.cardMenu')"
+        >
+          <MoreVertical :size="15" />
+        </Button>
+        <template #content>
+          <DropdownMenuContent align="end" class="max-w-48">
+            <DropdownMenuItem :disabled="index === 0" @select="emit('move-up')">
+              <ArrowUp :size="15" /><span>{{ $t("repo.smartCommit.moveUp") }}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem :disabled="index === total - 1" @select="emit('move-down')">
+              <ArrowDown :size="15" /><span>{{ $t("repo.smartCommit.moveDown") }}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem :disabled="index === 0" @select="emit('merge-up')">
+              <Combine :size="15" /><span>{{ $t("repo.smartCommit.mergeUp") }}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem @select="emit('remove')">
+              <Trash2 :size="15" /><span>{{ $t("repo.smartCommit.removeCommit") }}</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </template>
+      </LazyDropdownMenu>
     </div>
 
     <!-- optional body -->
@@ -189,34 +180,34 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
           <DiffStat v-if="statByPath[f]" :stat="statByPath[f]" show="lines" class="shrink-0" />
           <ChevronDown :size="12" :class="cn('shrink-0 text-muted-foreground transition-transform', openDiff === f && 'rotate-180')" />
         </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <button
-              type="button"
-              class="flex shrink-0 items-center border-s border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-              :title="tooltipsEnabled ? $t('repo.smartCommit.fileMenu') : undefined"
-              :aria-label="$t('repo.smartCommit.fileMenu')"
-            >
-              <MoreVertical :size="13" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" class="max-h-72 max-w-60 overflow-y-auto">
-            <DropdownMenuLabel>{{ $t("repo.smartCommit.moveTo") }}</DropdownMenuLabel>
-            <DropdownMenuItem
-              v-for="(other, oi) in groups"
-              :key="other.key"
-              :disabled="other.key === group.key"
-              @select="emit('move-file', f, other.key)"
-            >
-              <GitCommitHorizontal :size="14" />
-              <span class="truncate">{{ oi + 1 }}. {{ other.subjectLine || $t("repo.smartCommit.newCommit") }}</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem @select="emit('move-file', f, 'new')">
-              <Plus :size="14" /><span>{{ $t("repo.smartCommit.newCommit") }}</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <LazyDropdownMenu>
+          <button
+            type="button"
+            class="flex shrink-0 items-center border-s border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            :title="tooltipsEnabled ? $t('repo.smartCommit.fileMenu') : undefined"
+            :aria-label="$t('repo.smartCommit.fileMenu')"
+          >
+            <MoreVertical :size="13" />
+          </button>
+          <template #content>
+            <DropdownMenuContent align="start" class="max-h-72 max-w-60 overflow-y-auto">
+              <DropdownMenuLabel>{{ $t("repo.smartCommit.moveTo") }}</DropdownMenuLabel>
+              <DropdownMenuItem
+                v-for="(other, oi) in groups"
+                :key="other.key"
+                :disabled="other.key === group.key"
+                @select="emit('move-file', f, other.key)"
+              >
+                <GitCommitHorizontal :size="14" />
+                <span class="truncate">{{ oi + 1 }}. {{ other.subjectLine || $t("repo.smartCommit.newCommit") }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @select="emit('move-file', f, 'new')">
+                <Plus :size="14" /><span>{{ $t("repo.smartCommit.newCommit") }}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </template>
+        </LazyDropdownMenu>
       </div>
     </div>
 

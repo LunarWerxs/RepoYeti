@@ -16,8 +16,9 @@ import { useI18n } from "vue-i18n";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Pencil } from "@lucide/vue";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
 import type { ConflictHunk, HunkResolution, ResolutionFlag } from "../../types";
+import LazyTooltip from "@/components/LazyTooltip.vue";
 
 const props = defineProps<{
   hunk: ConflictHunk;
@@ -140,30 +141,28 @@ const lineCount = (text: string): number => (text ? text.replace(/\n$/, "").spli
         {{ resolution?.note || rejectedReason }}
       </span>
 
-      <Tooltip>
-        <TooltipTrigger as-child>
-          <button
-            v-if="resolution"
-            type="button"
-            role="checkbox"
-            :aria-checked="accepted"
-            :aria-label="$t('repo.resolve.acceptAria', { n: hunk.index })"
-            :class="
-              cn(
-                'flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-2xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40',
-                accepted
-                  ? 'bg-success/15 text-success hover:bg-success/25'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-              )
-            "
-            @click="accepted = !accepted"
-          >
-            <Check :size="12" />
-            {{ accepted ? $t("repo.resolve.accepted") : $t("repo.resolve.accept") }}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{{ $t("repo.resolve.acceptHint") }}</TooltipContent>
-      </Tooltip>
+      <LazyTooltip>
+        <button
+          v-if="resolution"
+          type="button"
+          role="checkbox"
+          :aria-checked="accepted"
+          :aria-label="$t('repo.resolve.acceptAria', { n: hunk.index })"
+          :class="
+            cn(
+              'flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-2xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40',
+              accepted
+                ? 'bg-success/15 text-success hover:bg-success/25'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            )
+          "
+          @click="accepted = !accepted"
+        >
+          <Check :size="12" />
+          {{ accepted ? $t("repo.resolve.accepted") : $t("repo.resolve.accept") }}
+        </button>
+        <template #content>{{ $t("repo.resolve.acceptHint") }}</template>
+      </LazyTooltip>
     </div>
 
     <!-- the mechanical audit: above the code, and independent of the model's own confidence -->

@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import LazyTooltip from "@/components/LazyTooltip.vue";
 
 const { t } = useI18n();
 
@@ -223,21 +224,19 @@ async function discard(repo: { id: string; name: string }): Promise<void> {
               <span class="truncate text-ui font-medium text-foreground">{{ repo.name }}</span>
               <span class="mono truncate text-2xs text-muted-foreground">{{ repo.absPath }}</span>
             </span>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <button
-                  type="button"
-                  class="ms-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                  :disabled="removing.includes(repo.id)"
-                  :aria-label="$t('scan.discard')"
-                  @click="discard(repo)"
-                >
-                  <Loader2 v-if="removing.includes(repo.id)" :size="14" class="animate-spin" />
-                  <Trash2 v-else :size="14" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{{ $t("scan.discard") }}</TooltipContent>
-            </Tooltip>
+            <LazyTooltip>
+              <button
+                type="button"
+                class="ms-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                :disabled="removing.includes(repo.id)"
+                :aria-label="$t('scan.discard')"
+                @click="discard(repo)"
+              >
+                <Loader2 v-if="removing.includes(repo.id)" :size="14" class="animate-spin" />
+                <Trash2 v-else :size="14" />
+              </button>
+              <template #content>{{ $t("scan.discard") }}</template>
+            </LazyTooltip>
           </li>
         </ul>
         <p class="text-xs text-muted-foreground">{{ $t("scan.newListHint") }}</p>

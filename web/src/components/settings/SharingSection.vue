@@ -11,7 +11,7 @@
 import { ref, computed, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { AlertTriangle, Check, Copy, Link2, Loader2, RefreshCw, Trash2, Pencil, Users } from "@lucide/vue";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
 import { toast } from "vue-sonner";
 import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
@@ -27,6 +27,7 @@ import InfoHint from "@/shell/InfoHint.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import LazyTooltip from "@/components/LazyTooltip.vue";
 
 const props = defineProps<{ open: boolean }>();
 const store = useStore();
@@ -516,75 +517,63 @@ watch(
                native-disabled button is pointer-events:none, which would swallow the very tooltip
                that now carries the button's only label. The span is the hover proxy: IT stays
                hoverable, so the tooltip explains a greyed icon too. -->
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <span class="inline-flex">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  :disabled="!s.live || !s.url"
-                  :aria-label="s.url ? $t('share.copyLink') : $t('share.copyUnavailable')"
-                  @click="copyRowLink(s)"
-                >
-                  <Check v-if="copiedRow === s.id" />
-                  <Copy v-else />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <!-- A greyed Copy needs to say WHY, or it reads as broken: this link predates the
-                 daemon keeping them, and re-keying is the only way to a copyable URL. -->
-            <TooltipContent>
-              {{ copiedRow === s.id ? $t("share.copied") : s.url ? $t("share.copyLink") : $t("share.copyUnavailable") }}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <span class="inline-flex">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  :disabled="!s.live"
-                  :aria-label="$t('share.edit')"
-                  @click="startEdit(s)"
-                >
-                  <Pencil />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{{ $t("share.edit") }}</TooltipContent>
-          </Tooltip>
-          <!-- Two-step, like revoke: this kills whatever URL is already out there. -->
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <span class="inline-flex">
-                <Button
-                  :variant="confirmRotate === s.id ? 'destructive' : 'ghost'"
-                  size="icon-sm"
-                  :disabled="!s.live"
-                  :aria-label="confirmRotate === s.id ? $t('share.rotateConfirm') : $t('share.rotate')"
-                  @click="rotate(s)"
-                  @blur="confirmRotate = null"
-                >
-                  <RefreshCw />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{{ confirmRotate === s.id ? $t("share.rotateConfirm") : $t("share.rotate") }}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
+          <LazyTooltip>
+            <span class="inline-flex">
               <Button
-                :variant="confirmRevoke === s.id ? 'destructive' : 'ghost'"
+                variant="ghost"
                 size="icon-sm"
-                :aria-label="confirmRevoke === s.id ? $t('share.revokeConfirm') : $t('share.revoke')"
-                @click="revoke(s.id)"
-                @blur="confirmRevoke = null"
+                :disabled="!s.live || !s.url"
+                :aria-label="s.url ? $t('share.copyLink') : $t('share.copyUnavailable')"
+                @click="copyRowLink(s)"
               >
-                <Trash2 />
+                <Check v-if="copiedRow === s.id" />
+                <Copy v-else />
               </Button>
-            </TooltipTrigger>
-            <TooltipContent>{{ confirmRevoke === s.id ? $t("share.revokeConfirm") : $t("share.revoke") }}</TooltipContent>
-          </Tooltip>
+            </span>
+            <template #content>{{ copiedRow === s.id ? $t("share.copied") : s.url ? $t("share.copyLink") : $t("share.copyUnavailable") }}</template>
+          </LazyTooltip>
+          <LazyTooltip>
+            <span class="inline-flex">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :disabled="!s.live"
+                :aria-label="$t('share.edit')"
+                @click="startEdit(s)"
+              >
+                <Pencil />
+              </Button>
+            </span>
+            <template #content>{{ $t("share.edit") }}</template>
+          </LazyTooltip>
+          <!-- Two-step, like revoke: this kills whatever URL is already out there. -->
+          <LazyTooltip>
+            <span class="inline-flex">
+              <Button
+                :variant="confirmRotate === s.id ? 'destructive' : 'ghost'"
+                size="icon-sm"
+                :disabled="!s.live"
+                :aria-label="confirmRotate === s.id ? $t('share.rotateConfirm') : $t('share.rotate')"
+                @click="rotate(s)"
+                @blur="confirmRotate = null"
+              >
+                <RefreshCw />
+              </Button>
+            </span>
+            <template #content>{{ confirmRotate === s.id ? $t("share.rotateConfirm") : $t("share.rotate") }}</template>
+          </LazyTooltip>
+          <LazyTooltip>
+            <Button
+              :variant="confirmRevoke === s.id ? 'destructive' : 'ghost'"
+              size="icon-sm"
+              :aria-label="confirmRevoke === s.id ? $t('share.revokeConfirm') : $t('share.revoke')"
+              @click="revoke(s.id)"
+              @blur="confirmRevoke = null"
+            >
+              <Trash2 />
+            </Button>
+            <template #content>{{ confirmRevoke === s.id ? $t("share.revokeConfirm") : $t("share.revoke") }}</template>
+          </LazyTooltip>
         </div>
       </div>
 

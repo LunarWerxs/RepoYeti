@@ -4,17 +4,11 @@ import type { DiffStat as DiffStatT } from "../../types";
 import SmartCommitFileDiff from "../SmartCommitFileDiff.vue";
 import DiffStat from "../DiffStat.vue";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
+import LazyDropdownMenu from "@/components/LazyDropdownMenu.vue";
 
 interface EditableGroup {
   key: string;
@@ -82,29 +76,29 @@ function statusVariant(letter: string | undefined): "success" | "warning" | "des
           <DiffStat v-if="statByPath[f]" :stat="statByPath[f]" show="lines" class="shrink-0" />
           <ChevronDown :size="12" :class="cn('shrink-0 text-muted-foreground transition-transform', openDiff === f && 'rotate-180')" />
         </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <button
-              type="button"
-              class="flex shrink-0 items-center border-s border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-              :title="tooltipsEnabled ? $t('repo.smartCommit.fileMenu') : undefined"
-              :aria-label="$t('repo.smartCommit.fileMenu')"
-            >
-              <MoreVertical :size="13" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" class="max-h-72 max-w-60 overflow-y-auto">
-            <DropdownMenuLabel>{{ $t("repo.smartCommit.moveTo") }}</DropdownMenuLabel>
-            <DropdownMenuItem v-for="(other, oi) in groups" :key="other.key" @select="emit('move-file', f, other.key)">
-              <GitCommitHorizontal :size="14" />
-              <span class="truncate">{{ oi + 1 }}. {{ other.subjectLine || $t("repo.smartCommit.newCommit") }}</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem @select="emit('move-file', f, 'new')">
-              <Plus :size="14" /><span>{{ $t("repo.smartCommit.newCommit") }}</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <LazyDropdownMenu>
+          <button
+            type="button"
+            class="flex shrink-0 items-center border-s border-border/60 px-1 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            :title="tooltipsEnabled ? $t('repo.smartCommit.fileMenu') : undefined"
+            :aria-label="$t('repo.smartCommit.fileMenu')"
+          >
+            <MoreVertical :size="13" />
+          </button>
+          <template #content>
+            <DropdownMenuContent align="start" class="max-h-72 max-w-60 overflow-y-auto">
+              <DropdownMenuLabel>{{ $t("repo.smartCommit.moveTo") }}</DropdownMenuLabel>
+              <DropdownMenuItem v-for="(other, oi) in groups" :key="other.key" @select="emit('move-file', f, other.key)">
+                <GitCommitHorizontal :size="14" />
+                <span class="truncate">{{ oi + 1 }}. {{ other.subjectLine || $t("repo.smartCommit.newCommit") }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @select="emit('move-file', f, 'new')">
+                <Plus :size="14" /><span>{{ $t("repo.smartCommit.newCommit") }}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </template>
+        </LazyDropdownMenu>
       </div>
     </div>
 

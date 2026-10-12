@@ -80,6 +80,8 @@ function mountHeader(expanded = false) {
         DropdownMenuSeparator: passThrough,
         DropdownMenuTrigger: triggerStub,
         DropdownMenuItem: itemStub,
+        // The identity menu is lazy (mounts on first interest); the assignment tests need its items present.
+        LazyDropdownMenu: { template: '<div><slot /><slot name="content" /></div>' },
         Tooltip: passThrough,
         TooltipTrigger: passThrough,
         TooltipContent: passThrough,

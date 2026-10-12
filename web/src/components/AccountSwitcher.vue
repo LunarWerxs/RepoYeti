@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { GhAccount } from "../types";
+import LazyTooltip from "@/components/LazyTooltip.vue";
 
 // <Select> can't hold an empty value, so "no identity" rides this sentinel.
 const NONE = "__none__";
@@ -139,28 +140,26 @@ async function onMap(a: GhAccount, value: string): Promise<void> {
               <span class="truncate text-2xs text-foreground/80">
                 {{ linkName(a) }}
               </span>
-              <Tooltip v-if="store.identities.length || a.identityId">
-                <TooltipTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    class="size-5 shrink-0"
-                    :aria-label="$t('accounts.linkToggle')"
-                    :aria-expanded="!!linkOpen[accKey(a)]"
-                    @click="toggleLink(a)"
-                  >
-                    <Link2 :size="12" class="text-muted-foreground group-hover/button:text-foreground group-aria-expanded/button:text-foreground" />
-                    <ChevronDown
-                      :size="10"
-                      :class="cn(
-                        'text-muted-foreground transition-transform group-hover/button:text-foreground group-aria-expanded/button:text-foreground',
-                        linkOpen[accKey(a)] && 'rotate-180',
-                      )"
-                    />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{{ $t("accounts.linkToggle") }}</TooltipContent>
-              </Tooltip>
+              <LazyTooltip v-if="store.identities.length || a.identityId">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="size-5 shrink-0"
+                  :aria-label="$t('accounts.linkToggle')"
+                  :aria-expanded="!!linkOpen[accKey(a)]"
+                  @click="toggleLink(a)"
+                >
+                  <Link2 :size="12" class="text-muted-foreground group-hover/button:text-foreground group-aria-expanded/button:text-foreground" />
+                  <ChevronDown
+                    :size="10"
+                    :class="cn(
+                      'text-muted-foreground transition-transform group-hover/button:text-foreground group-aria-expanded/button:text-foreground',
+                      linkOpen[accKey(a)] && 'rotate-180',
+                    )"
+                  />
+                </Button>
+                <template #content>{{ $t("accounts.linkToggle") }}</template>
+              </LazyTooltip>
               <span v-else class="text-2xs text-muted-foreground/70">· {{ $t("accounts.linkEmpty") }}</span>
             </div>
             <ExpandTransition :open="!!linkOpen[accKey(a)] && (store.identities.length > 0 || !!a.identityId) && store.identitiesRelevant">

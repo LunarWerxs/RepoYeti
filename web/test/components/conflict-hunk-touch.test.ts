@@ -10,6 +10,7 @@
  * two-tap control without a failure here.
  */
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ConflictHunkCard from "@/components/conflicts/ConflictHunkCard.vue";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -38,7 +39,7 @@ const resolution: HunkResolution = {
 
 const mounted: Array<{ unmount: () => void }> = [];
 
-function mountCard() {
+async function mountCard() {
   const updates: boolean[] = [];
   const wrapper = mount(
     {
@@ -65,6 +66,9 @@ function mountCard() {
     { global: { plugins: [i18n] }, attachTo: document.body },
   );
   mounted.push(wrapper);
+  // A finger enters the control before it presses; the accept tooltip mounts on that enter.
+  wrapper.get('[role="checkbox"]').element.closest("span.contents")!.dispatchEvent(new Event("pointerenter"));
+  await nextTick();
   return { wrapper, updates, button: wrapper.get('[role="checkbox"]') };
 }
 
@@ -89,7 +93,7 @@ describe("ConflictHunkCard accept control on touch", () => {
   });
 
   it("toggles acceptance on a plain tap", async () => {
-    const { button, updates } = mountCard();
+    const { button, updates } = await mountCard();
 
     await button.trigger("pointerdown", finger());
     await vi.advanceTimersByTimeAsync(150);
@@ -102,7 +106,7 @@ describe("ConflictHunkCard accept control on touch", () => {
   });
 
   it("reveals the accept hint on a long press without also toggling", async () => {
-    const { button, updates } = mountCard();
+    const { button, updates } = await mountCard();
 
     await button.trigger("pointerdown", finger());
     await vi.advanceTimersByTimeAsync(600);

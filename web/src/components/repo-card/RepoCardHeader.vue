@@ -37,14 +37,13 @@ import { minuteClock } from "@/lib/minute-clock";
 import { activateRepo, isSelected, selectionActive } from "@/lib/repo-selection";
 import DiffStat from "../DiffStat.vue";
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import LazyDropdownMenu from "@/components/LazyDropdownMenu.vue";
+import LazyTooltip from "@/components/LazyTooltip.vue";
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import type { Repo } from "../../types";
 
@@ -351,17 +350,16 @@ const detectedReason = computed(() => {
       >
         <EyeOff :size="11" />
       </span>
-      <Tooltip v-if="identityViolation">
-        <TooltipTrigger as-child>
-          <span
-            class="flex shrink-0 items-center gap-1 rounded-md bg-destructive/15 px-1.5 py-0.5 text-destructive"
-            :aria-label="identityViolationTitle"
-          >
-            <ShieldAlert :size="11" />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{{ identityViolationTitle }}</TooltipContent>
-      </Tooltip>
+      <LazyTooltip v-if="identityViolation">
+        <span
+          class="flex shrink-0 items-center gap-1 rounded-md bg-destructive/15 px-1.5 py-0.5 text-destructive"
+          :aria-label="identityViolationTitle"
+        >
+          <ShieldAlert :size="11" />
+        </span>
+      
+        <template #content>{{ identityViolationTitle }}</template>
+      </LazyTooltip>
     </div>
 
     <!-- status indicators — ONE set that morphs between bare "icon + count" text
@@ -374,175 +372,162 @@ const detectedReason = computed(() => {
 
     <div class="flex shrink-0 items-center gap-1.5 text-xs font-medium">
       <!-- attention score: only in the "Needs attention" sort; the tooltip lists every term -->
-      <Tooltip v-if="rank && rank.reasons.length">
-        <TooltipTrigger as-child>
-          <span :class="statusChip('muted')" :aria-label="rankLabel">
-            <Gauge :size="12" /><span class="ms-0.5">{{ rank.score }}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>
-          <div class="flex flex-col gap-0.5">
+      <LazyTooltip v-if="rank && rank.reasons.length">
+        <span :class="statusChip('muted')" :aria-label="rankLabel">
+          <Gauge :size="12" /><span class="ms-0.5">{{ rank.score }}</span>
+        </span>
+      
+        <template #content><div class="flex flex-col gap-0.5">
             <span v-for="r in rank.reasons" :key="r.key" class="flex justify-between gap-3">
               <span>{{ rankReasonText(r) }}</span><span class="mono">{{ rankPoints(r.points) }}</span>
             </span>
-          </div>
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip v-if="st && st.behind > 0">
-        <TooltipTrigger as-child>
-          <!-- `info` (blue), NOT warning: "behind" was previously the same amber as "changed",
-               so two unrelated numbers sitting side by side read as one thing. Blue also matches
-               the remote-presence cloud, so incoming-from-remote shares a colour language:
-               blue = comes from the remote, green = goes to it, amber = uncommitted here. -->
-          <span :class="statusChip('info')" :aria-label="$t('repo.badge.behindLabel', { count: st.behind })">
-            <ArrowDown :size="12" /><span class="ms-0.5">{{ st.behind }}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>
-          {{ $t("repo.badge.behindTooltip", { count: st.behind }) }}{{ st.fetchedAt ? ` · ${fromNow(st.fetchedAt)}` : "" }}
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip v-if="st && st.ahead > 0">
-        <TooltipTrigger as-child>
-          <span :class="statusChip('success')" :aria-label="$t('repo.badge.aheadLabel', { count: st.ahead })">
-            <ArrowUp :size="12" /><span class="ms-0.5">{{ st.ahead }}</span
-            ><span :class="statusWord">&nbsp;{{ $t("repo.badge.ahead") }}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{{ $t("repo.badge.aheadLabel", { count: st.ahead }) }}</TooltipContent>
-      </Tooltip>
+          </div></template>
+      </LazyTooltip>
+      <LazyTooltip v-if="st && st.behind > 0">
+        <!-- `info` (blue), NOT warning: "behind" was previously the same amber as "changed",
+             so two unrelated numbers sitting side by side read as one thing. Blue also matches
+             the remote-presence cloud, so incoming-from-remote shares a colour language:
+             blue = comes from the remote, green = goes to it, amber = uncommitted here. -->
+        <span :class="statusChip('info')" :aria-label="$t('repo.badge.behindLabel', { count: st.behind })">
+          <ArrowDown :size="12" /><span class="ms-0.5">{{ st.behind }}</span>
+        </span>
+      
+        <template #content>{{ $t("repo.badge.behindTooltip", { count: st.behind }) }}{{ st.fetchedAt ? ` · ${fromNow(st.fetchedAt)}` : "" }}</template>
+      </LazyTooltip>
+      <LazyTooltip v-if="st && st.ahead > 0">
+        <span :class="statusChip('success')" :aria-label="$t('repo.badge.aheadLabel', { count: st.ahead })">
+          <ArrowUp :size="12" /><span class="ms-0.5">{{ st.ahead }}</span
+          ><span :class="statusWord">&nbsp;{{ $t("repo.badge.ahead") }}</span>
+        </span>
+      
+        <template #content>{{ $t("repo.badge.aheadLabel", { count: st.ahead }) }}</template>
+      </LazyTooltip>
       <!-- Dirty-tree stats read as a pair: how many FILES, then how many LINES. Collapsed they
            are bare coloured numbers; expanded each fills into a pill and reveals its noun
            ("12 files changed" · "+340 −87 lines"), via the same statusChip/statusWord morph as
            every other indicator here. -->
-      <Tooltip v-if="st && st.dirty > 0">
-        <TooltipTrigger as-child>
-          <span :class="statusChip('warning')" :aria-label="$t('repo.badge.changedLabel', { count: st.dirty })">
-            <Pencil :size="12" /><span class="ms-0.5">{{ st.dirty }}</span
-            ><span :class="statusWord">&nbsp;{{ $t("repo.badge.filesChanged") }}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{{ $t("repo.badge.changedLabel", { count: st.dirty }) }}</TooltipContent>
-      </Tooltip>
+      <LazyTooltip v-if="st && st.dirty > 0">
+        <span :class="statusChip('warning')" :aria-label="$t('repo.badge.changedLabel', { count: st.dirty })">
+          <Pencil :size="12" /><span class="ms-0.5">{{ st.dirty }}</span
+          ><span :class="statusWord">&nbsp;{{ $t("repo.badge.filesChanged") }}</span>
+        </span>
+      
+        <template #content>{{ $t("repo.badge.changedLabel", { count: st.dirty }) }}</template>
+      </LazyTooltip>
       <!-- Aggregate line delta. Present only when the daemon actually computed it (the
            "diff stats" setting drives that — with it off there is no `st.diff` to show). -->
-      <Tooltip v-if="st?.diff && st.dirty > 0">
-        <TooltipTrigger as-child>
-          <span :class="statusChip('muted')" :aria-label="$t('repo.diffStat.lines', { added: st.diff.addedLines, removed: st.diff.removedLines })">
-            <DiffStat :stat="st.diff" show="lines" /><span :class="statusWord">&nbsp;{{ $t("repo.badge.lines") }}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>
-          {{ $t("repo.diffStat.lines", { added: st.diff.addedLines, removed: st.diff.removedLines }) }}
+      <LazyTooltip v-if="st?.diff && st.dirty > 0">
+        <span :class="statusChip('muted')" :aria-label="$t('repo.diffStat.lines', { added: st.diff.addedLines, removed: st.diff.removedLines })">
+          <DiffStat :stat="st.diff" show="lines" /><span :class="statusWord">&nbsp;{{ $t("repo.badge.lines") }}</span>
+        </span>
+      
+        <template #content>{{ $t("repo.diffStat.lines", { added: st.diff.addedLines, removed: st.diff.removedLines }) }}
           ·
-          {{ $t("repo.diffStat.chars", { added: (st.diff.addedChars ?? 0).toLocaleString(), removed: (st.diff.removedChars ?? 0).toLocaleString() }) }}
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip v-if="isClean">
-        <TooltipTrigger as-child>
-          <span :class="statusChip('muted')" :aria-label="$t('repo.badge.clean')">
-            <Check :size="12" /><span :class="statusWord">&nbsp;{{ $t("repo.badge.clean") }}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{{ $t("repo.badge.clean") }}</TooltipContent>
-      </Tooltip>
+          {{ $t("repo.diffStat.chars", { added: (st.diff.addedChars ?? 0).toLocaleString(), removed: (st.diff.removedChars ?? 0).toLocaleString() }) }}</template>
+      </LazyTooltip>
+      <LazyTooltip v-if="isClean">
+        <span :class="statusChip('muted')" :aria-label="$t('repo.badge.clean')">
+          <Check :size="12" /><span :class="statusWord">&nbsp;{{ $t("repo.badge.clean") }}</span>
+        </span>
+      
+        <template #content>{{ $t("repo.badge.clean") }}</template>
+      </LazyTooltip>
       <AlertTriangle v-if="st?.error" :size="14" class="text-destructive" />
     </div>
 
     <!-- identity avatar → dropdown picker (stops row toggle; no Tooltip wrapper —
          stacking two as-child triggers on one element breaks reka's popper anchor, so the
          hover hint is a native :title, gated on the "show tooltips" setting) -->
-    <DropdownMenu
+    <LazyDropdownMenu
       v-if="!selecting && !store.isGuest && (store.ghAccounts.length > 0 || store.identitiesRelevant)"
       @update:open="onMenuToggle"
     >
-      <DropdownMenuTrigger as-child>
-        <button
-          type="button"
-          :title="tooltipsEnabled ? ([
-            repo.syncAccountLogin ? `Syncs as ${repo.syncAccountLogin}` : null,
-            identity ? `${identity.displayName} · ${identity.gitEmail}` : null,
-          ].filter(Boolean).join(' · ') || triggerLabel) : undefined"
-          class="flex size-7 shrink-0 items-center justify-center rounded-full text-2xs font-semibold outline-none transition-no-ring hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50"
-          :class="
-            repo.syncAccountLogin
-              ? 'bg-primary/15 text-primary'
-              : identity
-                ? identityTint(identity.id)
-                : 'bg-secondary text-muted-foreground hover:bg-accent'
-          "
-          :aria-label="triggerLabel"
-          @click.stop
-        >
-          <span v-if="repo.syncAccountLogin">{{ identityInitials(repo.syncAccountLogin) }}</span>
-          <span v-else-if="identity">{{ identityInitials(identity.displayName) }}</span>
-          <User v-else :size="15" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" class="max-w-64">
-        <!-- which GitHub account this repo pushes / pulls as (auto-switched on sync) -->
-        <template v-if="store.ghAccounts.length">
-          <DropdownMenuLabel>{{ $t("repo.syncAccount.dropdownLabel") }}</DropdownMenuLabel>
-          <DropdownMenuItem @select="onAccount(null)">
-            <AtSign :size="15" class="text-muted-foreground" />
-            <div class="min-w-0 flex-1 text-muted-foreground">
-              <div class="truncate">{{ $t("repo.syncAccount.machineDefault") }}</div>
-              <!-- Not pinned, but not a free-for-all either: name the account this repo resolves
-                   to on its own, and why, so "Automatic" isn't read as "syncs as whoever". -->
-              <div v-if="detected" class="truncate text-2xs text-muted-foreground/80">
-                {{ $t("repo.syncAccount.detected", { login: detected.login }) }} · {{ detectedReason }}
+      <button
+        type="button"
+        :title="tooltipsEnabled ? ([
+          repo.syncAccountLogin ? `Syncs as ${repo.syncAccountLogin}` : null,
+          identity ? `${identity.displayName} · ${identity.gitEmail}` : null,
+        ].filter(Boolean).join(' · ') || triggerLabel) : undefined"
+        class="flex size-7 shrink-0 items-center justify-center rounded-full text-2xs font-semibold outline-none transition-no-ring hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50"
+        :class="
+          repo.syncAccountLogin
+            ? 'bg-primary/15 text-primary'
+            : identity
+              ? identityTint(identity.id)
+              : 'bg-secondary text-muted-foreground hover:bg-accent'
+        "
+        :aria-label="triggerLabel"
+        @click.stop
+      >
+        <span v-if="repo.syncAccountLogin">{{ identityInitials(repo.syncAccountLogin) }}</span>
+        <span v-else-if="identity">{{ identityInitials(identity.displayName) }}</span>
+        <User v-else :size="15" />
+      </button>
+      <template #content>
+        <DropdownMenuContent align="end" class="max-w-64">
+          <!-- which GitHub account this repo pushes / pulls as (auto-switched on sync) -->
+          <template v-if="store.ghAccounts.length">
+            <DropdownMenuLabel>{{ $t("repo.syncAccount.dropdownLabel") }}</DropdownMenuLabel>
+            <DropdownMenuItem @select="onAccount(null)">
+              <AtSign :size="15" class="text-muted-foreground" />
+              <div class="min-w-0 flex-1 text-muted-foreground">
+                <div class="truncate">{{ $t("repo.syncAccount.machineDefault") }}</div>
+                <!-- Not pinned, but not a free-for-all either: name the account this repo resolves
+                     to on its own, and why, so "Automatic" isn't read as "syncs as whoever". -->
+                <div v-if="detected" class="truncate text-2xs text-muted-foreground/80">
+                  {{ $t("repo.syncAccount.detected", { login: detected.login }) }} · {{ detectedReason }}
+                </div>
               </div>
-            </div>
-            <Check v-if="!repo.syncAccountLogin" :size="15" class="shrink-0 text-primary" />
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            v-for="a in store.ghAccounts"
-            :key="`${a.host}/${a.login}`"
-            @select="onAccount(a)"
-          >
-            <span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-3xs font-semibold text-muted-foreground">{{ identityInitials(a.login) }}</span>
-            <div class="min-w-0 flex-1">
-              <div class="truncate text-ui">{{ a.login }}</div>
-              <div class="mono truncate text-2xs text-muted-foreground">{{ a.host }}</div>
-            </div>
-            <Check
-              v-if="repo.syncAccountLogin === a.login && (repo.syncAccountHost || 'github.com') === a.host"
-              :size="15"
-              class="ms-1 shrink-0 text-primary"
-            />
-          </DropdownMenuItem>
-          <!-- only divides if there's an identity block below it to divide from -->
-          <DropdownMenuSeparator v-if="store.identitiesRelevant" />
-        </template>
-
-        <!-- git commit author (the name/email commits are made under). Hidden entirely unless
-             the owner actually juggles more than one — with a single identity there is no
-             choice to make here, only noise on every card. See store's `identitiesRelevant`. -->
-        <template v-if="store.identitiesRelevant">
-          <DropdownMenuLabel>{{ $t("repo.identity.dropdownLabel") }}</DropdownMenuLabel>
-          <DropdownMenuItem @select="onIdentity(null)">
-            <User :size="15" class="text-muted-foreground" />
-            <span class="flex-1 text-muted-foreground">{{ $t("repo.identity.noIdentity") }}</span>
-            <Check v-if="!repo.identityId" :size="15" class="text-primary" />
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            v-for="i in store.identities"
-            :key="i.id"
-            @select="onIdentity(i.id)"
-          >
-            <span
-              :class="cn('flex size-6 shrink-0 items-center justify-center rounded-full text-3xs font-semibold', identityTint(i.id))"
-              >{{ identityInitials(i.displayName) }}</span
+              <Check v-if="!repo.syncAccountLogin" :size="15" class="shrink-0 text-primary" />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              v-for="a in store.ghAccounts"
+              :key="`${a.host}/${a.login}`"
+              @select="onAccount(a)"
             >
-            <div class="min-w-0 flex-1">
-              <div class="truncate text-ui">{{ i.displayName }}</div>
-              <div class="mono truncate text-2xs text-muted-foreground">{{ i.gitEmail }}</div>
-            </div>
-            <Check v-if="repo.identityId === i.id" :size="15" class="ms-1 shrink-0 text-primary" />
-          </DropdownMenuItem>
-        </template>
-      </DropdownMenuContent>
-    </DropdownMenu>
+              <span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-3xs font-semibold text-muted-foreground">{{ identityInitials(a.login) }}</span>
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-ui">{{ a.login }}</div>
+                <div class="mono truncate text-2xs text-muted-foreground">{{ a.host }}</div>
+              </div>
+              <Check
+                v-if="repo.syncAccountLogin === a.login && (repo.syncAccountHost || 'github.com') === a.host"
+                :size="15"
+                class="ms-1 shrink-0 text-primary"
+              />
+            </DropdownMenuItem>
+            <!-- only divides if there's an identity block below it to divide from -->
+            <DropdownMenuSeparator v-if="store.identitiesRelevant" />
+          </template>
+          <!-- git commit author (the name/email commits are made under). Hidden entirely unless
+               the owner actually juggles more than one — with a single identity there is no
+               choice to make here, only noise on every card. See store's `identitiesRelevant`. -->
+          <template v-if="store.identitiesRelevant">
+            <DropdownMenuLabel>{{ $t("repo.identity.dropdownLabel") }}</DropdownMenuLabel>
+            <DropdownMenuItem @select="onIdentity(null)">
+              <User :size="15" class="text-muted-foreground" />
+              <span class="flex-1 text-muted-foreground">{{ $t("repo.identity.noIdentity") }}</span>
+              <Check v-if="!repo.identityId" :size="15" class="text-primary" />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              v-for="i in store.identities"
+              :key="i.id"
+              @select="onIdentity(i.id)"
+            >
+              <span
+                :class="cn('flex size-6 shrink-0 items-center justify-center rounded-full text-3xs font-semibold', identityTint(i.id))"
+                >{{ identityInitials(i.displayName) }}</span
+              >
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-ui">{{ i.displayName }}</div>
+                <div class="mono truncate text-2xs text-muted-foreground">{{ i.gitEmail }}</div>
+              </div>
+              <Check v-if="repo.identityId === i.id" :size="15" class="ms-1 shrink-0 text-primary" />
+            </DropdownMenuItem>
+          </template>
+        </DropdownMenuContent>
+      </template>
+    </LazyDropdownMenu>
 
     <!-- expand chevron (keyboard/AT toggle; .stop so the row handler doesn't double-fire).
          Hidden while selecting — the row means "pick this one" then, not "open it". -->
@@ -557,7 +542,6 @@ const detectedReason = computed(() => {
     </button>
   </div>
 </template>
-
 <style scoped>
 /* The status pill's trailing word reveal (statusWord). It animates max-width, a layout property,
    so the transition is spelled out here rather than as an arbitrary transition-[...] utility. */

@@ -26,13 +26,8 @@ import { RESOLVED_COLOR, statusColor } from "@/lib/git-status-colors";
 import DiffBar from "./DiffBar.vue";
 import DiffStat from "./DiffStat.vue";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
+import LazyContextMenu from "@/components/LazyContextMenu.vue";
 
 const { t } = useI18n();
 
@@ -533,217 +528,217 @@ onBeforeUnmount(() => {
            editor / Add to .gitignore / Copy path). Trigger `as-child` merges onto the row wrapper
            (no extra DOM); the menu Content mounts lazily on right-click, so it's far lighter than an
            eager per-row Tooltip. -->
-      <ContextMenu v-else>
-        <ContextMenuTrigger as-child>
-          <div class="tree-row-cv group/file relative">
-        <button
-          type="button"
-          :draggable="!isGuest"
-          class="group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--row-indent) pe-3 text-start text-ui outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-          :class="[isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30', draggingPath === n.path && 'opacity-40']"
-          :style="{ '--row-indent': (depth ?? 0) * 14 + 8 + 'px' }"
-          :title="rowTitle(n)"
-          tabindex="-1"
-          data-tree-row
-          :data-depth="depth ?? 0"
-          @click="open(n)"
-          @keydown="onRowKey($event, n, depth ?? 0)"
-          @dragstart="onFileDragStart($event, n)"
-          @dragend="onFileDragEnd"
+      <LazyContextMenu v-else>
+        <div class="tree-row-cv group/file relative">
+      <button
+        type="button"
+        :draggable="!isGuest"
+        class="group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--row-indent) pe-3 text-start text-ui outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+        :class="[isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30', draggingPath === n.path && 'opacity-40']"
+        :style="{ '--row-indent': (depth ?? 0) * 14 + 8 + 'px' }"
+        :title="rowTitle(n)"
+        tabindex="-1"
+        data-tree-row
+        :data-depth="depth ?? 0"
+        @click="open(n)"
+        @keydown="onRowKey($event, n, depth ?? 0)"
+        @dragstart="onFileDragStart($event, n)"
+        @dragend="onFileDragEnd"
+      >
+        <!-- two reserved columns: the checkbox gutter (matches the folder row's, and dropped in
+             a read-only tree for the same reason), then the chevron column a folder occupies,
+             which keeps file icons aligned under folder icons. -->
+        <span v-if="!readOnly && canControl" class="w-3.5 shrink-0" aria-hidden="true" />
+        <span class="w-3.5 shrink-0" aria-hidden="true" />
+        <component :is="icon" class="shrink-0 text-base" />
+        <span
+          class="truncate"
+          :class="n.status === 'D' ? 'text-muted-foreground line-through' : n.staged ? 'text-file-name-staged' : 'text-file-name'"
         >
-          <!-- two reserved columns: the checkbox gutter (matches the folder row's, and dropped in
-               a read-only tree for the same reason), then the chevron column a folder occupies,
-               which keeps file icons aligned under folder icons. -->
-          <span v-if="!readOnly && canControl" class="w-3.5 shrink-0" aria-hidden="true" />
-          <span class="w-3.5 shrink-0" aria-hidden="true" />
-          <component :is="icon" class="shrink-0 text-base" />
-          <span
-            class="truncate"
-            :class="n.status === 'D' ? 'text-muted-foreground line-through' : n.staged ? 'text-file-name-staged' : 'text-file-name'"
-          >
-            {{ n.name }}<span v-if="flat && rowDir(n.path)" class="ms-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
-          </span>
-          <!-- right side: per-file diff stats (when enabled), a reserved slot for the (overlaid)
-               action buttons, then the git-status letter last — GitHub-Desktop-style, actions to
-               the LEFT of the status letter. The action-button slot is always reserved in-flow
-               (fixed width) so hover/selection never shifts the diff-stat or status letter — the
-               real buttons are absolutely-positioned siblings anchored to the row's right edge,
-               on top of this slot (see below), matching the checkbox's reserve-space convention. -->
-          <span class="mono ms-auto flex shrink-0 items-center gap-1.5">
-            <!-- conflict state, ahead of the numbers: during a merge this is the only thing on the
-                 row that matters, and "still conflicted" vs "already resolved" is the one question
-                 the owner is scanning the list to answer. -->
-            <GitMerge
-              v-if="n.conflict"
-              :size="12"
-              class="shrink-0 text-warning"
-              :aria-label="conflictLabel(n)"
-              :title="conflictLabel(n)"
+          {{ n.name }}<span v-if="flat && rowDir(n.path)" class="ms-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
+        </span>
+        <!-- right side: per-file diff stats (when enabled), a reserved slot for the (overlaid)
+             action buttons, then the git-status letter last — GitHub-Desktop-style, actions to
+             the LEFT of the status letter. The action-button slot is always reserved in-flow
+             (fixed width) so hover/selection never shifts the diff-stat or status letter — the
+             real buttons are absolutely-positioned siblings anchored to the row's right edge,
+             on top of this slot (see below), matching the checkbox's reserve-space convention. -->
+        <span class="mono ms-auto flex shrink-0 items-center gap-1.5">
+          <!-- conflict state, ahead of the numbers: during a merge this is the only thing on the
+               row that matters, and "still conflicted" vs "already resolved" is the one question
+               the owner is scanning the list to answer. -->
+          <GitMerge
+            v-if="n.conflict"
+            :size="12"
+            class="shrink-0 text-warning"
+            :aria-label="conflictLabel(n)"
+            :title="conflictLabel(n)"
+          />
+          <CheckCheck
+            v-else-if="n.resolved"
+            :size="12"
+            class="shrink-0 text-success"
+            :aria-label="conflictLabel(n)"
+            :title="conflictLabel(n)"
+          />
+          <template v-if="n.stat && showStats">
+            <DiffBar
+              v-if="asBars"
+              :added="n.stat.addedLines"
+              :removed="n.stat.removedLines"
+              :max="maxChurn"
+              :label="diffTitle(n.stat)"
+              width="w-14"
             />
-            <CheckCheck
-              v-else-if="n.resolved"
-              :size="12"
-              class="shrink-0 text-success"
-              :aria-label="conflictLabel(n)"
-              :title="conflictLabel(n)"
-            />
-            <template v-if="n.stat && showStats">
-              <DiffBar
-                v-if="asBars"
-                :added="n.stat.addedLines"
-                :removed="n.stat.removedLines"
-                :max="maxChurn"
-                :label="diffTitle(n.stat)"
-                width="w-14"
-              />
-              <DiffStat v-else :stat="n.stat" :show="statShow" :title="diffTitle(n.stat)" />
-            </template>
-            <span class="w-21 shrink-0" aria-hidden="true" />
-            <!-- A resolved conflict keeps its ordinary staged letter (M/A/D) on purpose — the
-                 daemon never invents a letter for it, so nothing downstream that keys off `status`
-                 has to learn a new code. The green tint is what marks it. -->
-            <span
-              class="ps-1 text-2xs font-bold text-(--status-color)"
-              :style="{ '--status-color': n.resolved ? RESOLVED_COLOR : statusColor(n.status) }"
-              :title="statusLabel(n)"
-              >{{ n.status }}</span
-            >
-          </span>
-        </button>
-        <!-- per-file selection checkbox: sits in the leading gutter column on the left so it
-             never shifts the row (the row's first `w-3.5` spacer above always reserves this space,
-             whether or not the checkbox itself is visible). Toggling it adds/removes this file
-             from the shared selection that drives RepoCard's "Commit selected (N)". A sibling
-             (not nested) since the row is a <button>; tabindex -1 to stay out of the tree's
-             roving tabindex (matches discard). Native `title` (like the row itself) rather than a
-             reka Tooltip: two Tooltip instances per file row made mounting a 2000-file tree
-             measurably janky.
-             Visibility (never layout): hidden at rest, revealed on THIS row's hover/focus, on
-             touch (pointer-coarse — phones have no :hover), on THIS file's own selection, or on
-             ANY file being selected anywhere in the tree (so a partial selection stays visible
-             across every row, not just the one under the pointer). -->
-        <!-- Not rendered in a read-only tree (the pull preview): selection exists to drive
-             "Commit selected", and there is nothing to commit there. It was previously only
-             transparent, so it stayed hoverable and clickable — offering to tick files for a
-             pull, which is all-or-nothing and cannot honour a subset.
-             Also dropped for a view-tier guest (canControl false): the only consumer of the
-             selection is the control-tier "Commit selected" bar, so ticking a row for them writes
-             persisted state and shows checked/destructive-tinted visuals but can never act. -->
-        <button
-          v-if="!readOnly && canControl"
-          type="button"
-          role="checkbox"
-          tabindex="-1"
-          :aria-checked="selection.isSelected(n.path)"
-          :aria-label="$t('repo.changes.select', { name: n.name })"
-          :title="$t('repo.changes.selectFile')"
-          class="absolute top-1/2 left-(--box-left) flex size-6 -translate-y-1/2 items-center justify-center rounded opacity-0 outline-none transition-opacity pointer-coarse:opacity-100 group-hover/file:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
-          :class="(selection.isSelected(n.path) || selection.count.value > 0) && 'opacity-100'"
-          :style="{ '--box-left': (depth ?? 0) * 14 + 3 + 'px' }"
-          @click.stop="selection.toggle(n.path)"
-        >
+            <DiffStat v-else :stat="n.stat" :show="statShow" :title="diffTitle(n.stat)" />
+          </template>
+          <span class="w-21 shrink-0" aria-hidden="true" />
+          <!-- A resolved conflict keeps its ordinary staged letter (M/A/D) on purpose — the
+               daemon never invents a letter for it, so nothing downstream that keys off `status`
+               has to learn a new code. The green tint is what marks it. -->
           <span
-            class="flex size-3.5 items-center justify-center rounded-sm border transition-colors"
-            :class="
-              selection.isSelected(n.path)
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border/70 bg-card/70'
-            "
+            class="ps-1 text-2xs font-bold text-(--status-color)"
+            :style="{ '--status-color': n.resolved ? RESOLVED_COLOR : statusColor(n.status) }"
+            :title="statusLabel(n)"
+            >{{ n.status }}</span
           >
-            <Check v-if="selection.isSelected(n.path)" :size="11" />
-          </span>
-        </button>
-        <!-- row actions (GitHub-Desktop-style): reveal-in-folder, stage, discard — positioned to
-             the LEFT of the status letter (right offset clears the letter + row padding), sitting
-             over the reserved 74px slot above so they never shift the diff-stat/status letter.
-             Hidden-until-hover on pointer devices, but always visible on touch (pointer-coarse) —
-             phones have no :hover, so hover-only reveal would make them unreachable there. -->
-        <div
-          class="absolute top-1/2 right-8 flex -translate-y-1/2 items-center gap-0.5 opacity-0 pointer-coarse:opacity-70 group-hover/file:opacity-100 focus-within:opacity-100"
+        </span>
+      </button>
+      <!-- per-file selection checkbox: sits in the leading gutter column on the left so it
+           never shifts the row (the row's first `w-3.5` spacer above always reserves this space,
+           whether or not the checkbox itself is visible). Toggling it adds/removes this file
+           from the shared selection that drives RepoCard's "Commit selected (N)". A sibling
+           (not nested) since the row is a <button>; tabindex -1 to stay out of the tree's
+           roving tabindex (matches discard). Native `title` (like the row itself) rather than a
+           reka Tooltip: two Tooltip instances per file row made mounting a 2000-file tree
+           measurably janky.
+           Visibility (never layout): hidden at rest, revealed on THIS row's hover/focus, on
+           touch (pointer-coarse — phones have no :hover), on THIS file's own selection, or on
+           ANY file being selected anywhere in the tree (so a partial selection stays visible
+           across every row, not just the one under the pointer). -->
+      <!-- Not rendered in a read-only tree (the pull preview): selection exists to drive
+           "Commit selected", and there is nothing to commit there. It was previously only
+           transparent, so it stayed hoverable and clickable — offering to tick files for a
+           pull, which is all-or-nothing and cannot honour a subset.
+           Also dropped for a view-tier guest (canControl false): the only consumer of the
+           selection is the control-tier "Commit selected" bar, so ticking a row for them writes
+           persisted state and shows checked/destructive-tinted visuals but can never act. -->
+      <button
+        v-if="!readOnly && canControl"
+        type="button"
+        role="checkbox"
+        tabindex="-1"
+        :aria-checked="selection.isSelected(n.path)"
+        :aria-label="$t('repo.changes.select', { name: n.name })"
+        :title="$t('repo.changes.selectFile')"
+        class="absolute top-1/2 left-(--box-left) flex size-6 -translate-y-1/2 items-center justify-center rounded opacity-0 outline-none transition-opacity pointer-coarse:opacity-100 group-hover/file:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/40"
+        :class="(selection.isSelected(n.path) || selection.count.value > 0) && 'opacity-100'"
+        :style="{ '--box-left': (depth ?? 0) * 14 + 3 + 'px' }"
+        @click.stop="selection.toggle(n.path)"
+      >
+        <span
+          class="flex size-3.5 items-center justify-center rounded-sm border transition-colors"
+          :class="
+            selection.isSelected(n.path)
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-border/70 bg-card/70'
+          "
         >
-          <!-- reveal this file's repo in the OS file manager (same convention as "Open with…" → File Explorer/Finder). -->
-          <button
-            v-if="!isGuest"
-            type="button"
-            tabindex="-1"
-            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-            :aria-label="$t('repo.changes.revealAction')"
-            :title="$t('repo.changes.revealAction')"
-            @click.stop="emit('reveal', n.path)"
-          >
-            <FolderOpen :size="12" />
-          </button>
-          <!-- stage this file's working-tree change into the index (non-destructive; doesn't commit). -->
-          <button
-            v-if="canControl"
-            type="button"
-            tabindex="-1"
-            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-primary/15 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40"
-            :aria-label="$t('repo.changes.stageAction')"
-            :title="$t('repo.changes.stageAction')"
-            @click.stop="emit('stage', n.path)"
-          >
-            <Plus :size="12" />
-          </button>
-          <!-- discard this file's working-tree changes (RepoCard confirms first). -->
-          <button
-            v-if="!isGuest"
-            type="button"
-            tabindex="-1"
-            class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40"
-            :aria-label="$t('repo.discard.action')"
-            :title="$t('repo.discard.action')"
-            @click.stop="emit('discard', n.path)"
-          >
-            <Undo2 :size="12" />
-          </button>
+          <Check v-if="selection.isSelected(n.path)" :size="11" />
+        </span>
+      </button>
+      <!-- row actions (GitHub-Desktop-style): reveal-in-folder, stage, discard — positioned to
+           the LEFT of the status letter (right offset clears the letter + row padding), sitting
+           over the reserved 74px slot above so they never shift the diff-stat/status letter.
+           Hidden-until-hover on pointer devices, but always visible on touch (pointer-coarse) —
+           phones have no :hover, so hover-only reveal would make them unreachable there. -->
+      <div
+        class="absolute top-1/2 right-8 flex -translate-y-1/2 items-center gap-0.5 opacity-0 pointer-coarse:opacity-70 group-hover/file:opacity-100 focus-within:opacity-100"
+      >
+        <!-- reveal this file's repo in the OS file manager (same convention as "Open with…" → File Explorer/Finder). -->
+        <button
+          v-if="!isGuest"
+          type="button"
+          tabindex="-1"
+          class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          :aria-label="$t('repo.changes.revealAction')"
+          :title="$t('repo.changes.revealAction')"
+          @click.stop="emit('reveal', n.path)"
+        >
+          <FolderOpen :size="12" />
+        </button>
+        <!-- stage this file's working-tree change into the index (non-destructive; doesn't commit). -->
+        <button
+          v-if="canControl"
+          type="button"
+          tabindex="-1"
+          class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-primary/15 hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/40"
+          :aria-label="$t('repo.changes.stageAction')"
+          :title="$t('repo.changes.stageAction')"
+          @click.stop="emit('stage', n.path)"
+        >
+          <Plus :size="12" />
+        </button>
+        <!-- discard this file's working-tree changes (RepoCard confirms first). -->
+        <button
+          v-if="!isGuest"
+          type="button"
+          tabindex="-1"
+          class="flex size-6 items-center justify-center rounded bg-card/80 text-muted-foreground outline-none transition-no-ring hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/40"
+          :aria-label="$t('repo.discard.action')"
+          :title="$t('repo.discard.action')"
+          @click.stop="emit('discard', n.path)"
+        >
+          <Undo2 :size="12" />
+        </button>
+      </div>
         </div>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem v-if="!readOnly" @select="open(n)">
-            <Eye :size="15" />
-            <span>{{ $t("repo.changes.ctxOpen") }}</span>
-          </ContextMenuItem>
-          <ContextMenuItem v-if="!isGuest" @select="emit('editor', n.path)">
-            <SquarePen :size="15" />
-            <span>{{ $t("repo.changes.ctxEditor") }}</span>
-          </ContextMenuItem>
-          <ContextMenuItem v-if="!isGuest" @select="emit('reveal', n.path)">
-            <FolderOpen :size="15" />
-            <span>{{ $t("repo.changes.revealAction") }}</span>
-          </ContextMenuItem>
-          <ContextMenuItem @select="emit('copyPath', n.path)">
-            <Copy :size="15" />
-            <span>{{ $t("repo.changes.ctxCopyPath") }}</span>
-          </ContextMenuItem>
-          <!-- Separators are conditional on the group they introduce actually having items. In a
-               read-only tree (the pull preview) every action below is hidden and only Copy path
-               survives, which used to leave two dividers floating under a single item. -->
-          <ContextMenuSeparator v-if="canControl || !isGuest" />
-          <ContextMenuItem v-if="canControl" @select="emit('stage', n.path)">
-            <Plus :size="15" />
-            <span>{{ $t("repo.changes.stageAction") }}</span>
-          </ContextMenuItem>
-          <ContextMenuItem v-if="!isGuest" @select="emit('gitignore', n.path)">
-            <Ban :size="15" />
-            <span>{{ $t("repo.changes.ctxGitignore") }}</span>
-          </ContextMenuItem>
-          <ContextMenuSeparator v-if="!isGuest" />
-          <ContextMenuItem v-if="!isGuest" variant="destructive" @select="emit('discard', n.path)">
-            <Undo2 :size="15" />
-            <span>{{ $t("repo.discard.action") }}</span>
-          </ContextMenuItem>
-          <!-- Delete supersedes discard rather than duplicating it: discard restores the file to
-               its committed state (a tracked file comes straight back), delete removes it from
-               disk and stages the deletion. Files only — a recursive folder delete is a different
-               blast radius and the daemon refuses a directory outright. -->
-          <ContextMenuItem v-if="!isGuest" variant="destructive" @select="emit('deleteFile', n.path)">
-            <Trash2 :size="15" />
-            <span>{{ $t("repo.deleteFile.action") }}</span>
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
+        <template #content>
+          <ContextMenuContent>
+            <ContextMenuItem v-if="!readOnly" @select="open(n)">
+              <Eye :size="15" />
+              <span>{{ $t("repo.changes.ctxOpen") }}</span>
+            </ContextMenuItem>
+            <ContextMenuItem v-if="!isGuest" @select="emit('editor', n.path)">
+              <SquarePen :size="15" />
+              <span>{{ $t("repo.changes.ctxEditor") }}</span>
+            </ContextMenuItem>
+            <ContextMenuItem v-if="!isGuest" @select="emit('reveal', n.path)">
+              <FolderOpen :size="15" />
+              <span>{{ $t("repo.changes.revealAction") }}</span>
+            </ContextMenuItem>
+            <ContextMenuItem @select="emit('copyPath', n.path)">
+              <Copy :size="15" />
+              <span>{{ $t("repo.changes.ctxCopyPath") }}</span>
+            </ContextMenuItem>
+            <!-- Separators are conditional on the group they introduce actually having items. In a
+                 read-only tree (the pull preview) every action below is hidden and only Copy path
+                 survives, which used to leave two dividers floating under a single item. -->
+            <ContextMenuSeparator v-if="canControl || !isGuest" />
+            <ContextMenuItem v-if="canControl" @select="emit('stage', n.path)">
+              <Plus :size="15" />
+              <span>{{ $t("repo.changes.stageAction") }}</span>
+            </ContextMenuItem>
+            <ContextMenuItem v-if="!isGuest" @select="emit('gitignore', n.path)">
+              <Ban :size="15" />
+              <span>{{ $t("repo.changes.ctxGitignore") }}</span>
+            </ContextMenuItem>
+            <ContextMenuSeparator v-if="!isGuest" />
+            <ContextMenuItem v-if="!isGuest" variant="destructive" @select="emit('discard', n.path)">
+              <Undo2 :size="15" />
+              <span>{{ $t("repo.discard.action") }}</span>
+            </ContextMenuItem>
+            <!-- Delete supersedes discard rather than duplicating it: discard restores the file to
+                 its committed state (a tracked file comes straight back), delete removes it from
+                 disk and stages the deletion. Files only — a recursive folder delete is a different
+                 blast radius and the daemon refuses a directory outright. -->
+            <ContextMenuItem v-if="!isGuest" variant="destructive" @select="emit('deleteFile', n.path)">
+              <Trash2 :size="15" />
+              <span>{{ $t("repo.deleteFile.action") }}</span>
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </template>
+      </LazyContextMenu>
       <!-- children render only while this folder is expanded -->
       <ExpandTransition v-if="n.children && n.children.length" :open="isOpen(n.path)">
         <ChangesTree

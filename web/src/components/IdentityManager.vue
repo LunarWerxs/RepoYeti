@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { DetectedIdentity, DetectedIdentitySource, Identity } from "../types";
+import LazyTooltip from "@/components/LazyTooltip.vue";
 
 const { t } = useI18n();
 
@@ -296,20 +297,18 @@ async function remove(id: string): Promise<void> {
               <Plus />
               {{ $t("identity.detected.use") }}
             </Button>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost-destructive-muted"
-                  size="icon-sm"
-                  class="shrink-0"
-                  :aria-label="$t('identity.detected.dismiss')"
-                  @click="dismiss(d)"
-                >
-                  <X />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{{ $t("identity.detected.dismiss") }}</TooltipContent>
-            </Tooltip>
+            <LazyTooltip>
+              <Button
+                variant="ghost-destructive-muted"
+                size="icon-sm"
+                class="shrink-0"
+                :aria-label="$t('identity.detected.dismiss')"
+                @click="dismiss(d)"
+              >
+                <X />
+              </Button>
+              <template #content>{{ $t("identity.detected.dismiss") }}</template>
+            </LazyTooltip>
           </div>
         </div>
         <div
@@ -383,44 +382,38 @@ async function remove(id: string): Promise<void> {
                   <Check />
                   {{ $t("identity.action.confirmDelete") }}
                 </Button>
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.cancel')" @click="confirmId = null">
-                      <X />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{{ $t("identity.action.cancel") }}</TooltipContent>
-                </Tooltip>
+                <LazyTooltip>
+                  <Button variant="ghost" size="icon-sm" :aria-label="$t('identity.action.cancel')" @click="confirmId = null">
+                    <X />
+                  </Button>
+                  <template #content>{{ $t("identity.action.cancel") }}</template>
+                </LazyTooltip>
               </div>
               <div v-else class="flex shrink-0 items-center gap-0.5">
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      :aria-label="editingId === i.id ? $t('identity.action.cancel') : $t('identity.action.edit')"
-                      :aria-expanded="editingId === i.id"
-                      @click="openEdit(i)"
-                    >
-                      <X v-if="editingId === i.id" />
-                      <Pencil v-else />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{{ editingId === i.id ? $t("identity.action.cancel") : $t("identity.action.edit") }}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <Button
-                      variant="ghost-destructive-muted"
-                      size="icon-sm"
-                      :aria-label="$t('identity.action.delete')"
-                      @click="confirmId = i.id"
-                    >
-                      <Trash2 />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{{ $t("identity.action.delete") }}</TooltipContent>
-                </Tooltip>
+                <LazyTooltip>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    :aria-label="editingId === i.id ? $t('identity.action.cancel') : $t('identity.action.edit')"
+                    :aria-expanded="editingId === i.id"
+                    @click="openEdit(i)"
+                  >
+                    <X v-if="editingId === i.id" />
+                    <Pencil v-else />
+                  </Button>
+                  <template #content>{{ editingId === i.id ? $t("identity.action.cancel") : $t("identity.action.edit") }}</template>
+                </LazyTooltip>
+                <LazyTooltip>
+                  <Button
+                    variant="ghost-destructive-muted"
+                    size="icon-sm"
+                    :aria-label="$t('identity.action.delete')"
+                    @click="confirmId = i.id"
+                  >
+                    <Trash2 />
+                  </Button>
+                  <template #content>{{ $t("identity.action.delete") }}</template>
+                </LazyTooltip>
               </div>
             </div>
 

@@ -19,14 +19,9 @@ import { openFile, isViewing, viewerMode } from "@/lib/file-viewer";
 import { useFileBrowser } from "@/lib/file-browser";
 import { statusColor } from "@/lib/git-status-colors";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-} from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import type { ChangedFile, RepoTreeEntry } from "../types";
+import LazyContextMenu from "@/components/LazyContextMenu.vue";
 
 defineOptions({ name: "RepoFileTree" });
 
@@ -189,57 +184,57 @@ async function open(entry: RepoTreeEntry): Promise<void> {
     </div>
 
     <!-- file row — opens the same read-only viewer the changed-files tree uses -->
-    <ContextMenu v-else>
-      <ContextMenuTrigger as-child>
-        <div class="group/file relative">
-          <button
-            type="button"
-            class="group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--row-indent) pe-3 text-start text-ui outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
-            :class="isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30'"
-            :style="{ '--row-indent': (searching ? 8 : depth * 14 + 8 + 22) + 'px' }"
-            :title="n.ignored ? $t('repo.files.ignoredTitle', { path: n.path }) : n.path"
-            @click="open(n)"
+    <LazyContextMenu v-else>
+      <div class="group/file relative">
+        <button
+          type="button"
+          class="group flex h-6 w-full items-center gap-1.5 rounded-md ps-(--row-indent) pe-3 text-start text-ui outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60"
+          :class="isViewing(repoId, n.path) && 'bg-accent/80 ring-1 ring-primary/30'"
+          :style="{ '--row-indent': (searching ? 8 : depth * 14 + 8 + 22) + 'px' }"
+          :title="n.ignored ? $t('repo.files.ignoredTitle', { path: n.path }) : n.path"
+          @click="open(n)"
+        >
+          <component :is="iconFor(n)" class="shrink-0 text-base" :class="n.ignored && 'opacity-40'" />
+          <span class="truncate" :class="n.ignored ? 'text-file-name/45' : 'text-file-name'">
+            {{ n.name }}<span v-if="searching && rowDir(n.path)" class="ms-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
+          </span>
+          <!-- A file that is ALSO in the changed list keeps its status letter, so switching to
+               "All files" never loses the one signal the changes view existed to give. -->
+          <span
+            v-if="changedFor(n.path)"
+            class="mono ms-auto shrink-0 ps-1 text-2xs font-bold text-(--status-color)"
+            :style="{ '--status-color': statusColor(changedFor(n.path)!.status) }"
+            >{{ changedFor(n.path)!.status }}</span
           >
-            <component :is="iconFor(n)" class="shrink-0 text-base" :class="n.ignored && 'opacity-40'" />
-            <span class="truncate" :class="n.ignored ? 'text-file-name/45' : 'text-file-name'">
-              {{ n.name }}<span v-if="searching && rowDir(n.path)" class="ms-1.5 text-muted-foreground/55">{{ rowDir(n.path) }}</span>
-            </span>
-            <!-- A file that is ALSO in the changed list keeps its status letter, so switching to
-                 "All files" never loses the one signal the changes view existed to give. -->
-            <span
-              v-if="changedFor(n.path)"
-              class="mono ms-auto shrink-0 ps-1 text-2xs font-bold text-(--status-color)"
-              :style="{ '--status-color': statusColor(changedFor(n.path)!.status) }"
-              >{{ changedFor(n.path)!.status }}</span
-            >
-          </button>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem @select="open(n)">
-          <Eye :size="15" />
-          <span>{{ $t("repo.changes.ctxOpen") }}</span>
-        </ContextMenuItem>
-        <ContextMenuSeparator v-if="!isGuest" />
-        <ContextMenuItem v-if="!isGuest" @select="emit('editor', n.path)">
-          <SquarePen :size="15" />
-          <span>{{ $t("repo.changes.ctxEditor") }}</span>
-        </ContextMenuItem>
-        <ContextMenuItem v-if="!isGuest" @select="emit('reveal', n.path)">
-          <FolderOpen :size="15" />
-          <span>{{ $t("repo.changes.revealAction") }}</span>
-        </ContextMenuItem>
-        <ContextMenuItem @select="emit('copyPath', n.path)">
-          <Copy :size="15" />
-          <span>{{ $t("repo.changes.ctxCopyPath") }}</span>
-        </ContextMenuItem>
-        <ContextMenuSeparator v-if="!isGuest" />
-        <ContextMenuItem v-if="!isGuest" @select="emit('gitignore', n.path)">
-          <Ban :size="15" />
-          <span>{{ $t("repo.changes.ctxGitignore") }}</span>
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+        </button>
+      </div>
+      <template #content>
+        <ContextMenuContent>
+          <ContextMenuItem @select="open(n)">
+            <Eye :size="15" />
+            <span>{{ $t("repo.changes.ctxOpen") }}</span>
+          </ContextMenuItem>
+          <ContextMenuSeparator v-if="!isGuest" />
+          <ContextMenuItem v-if="!isGuest" @select="emit('editor', n.path)">
+            <SquarePen :size="15" />
+            <span>{{ $t("repo.changes.ctxEditor") }}</span>
+          </ContextMenuItem>
+          <ContextMenuItem v-if="!isGuest" @select="emit('reveal', n.path)">
+            <FolderOpen :size="15" />
+            <span>{{ $t("repo.changes.revealAction") }}</span>
+          </ContextMenuItem>
+          <ContextMenuItem @select="emit('copyPath', n.path)">
+            <Copy :size="15" />
+            <span>{{ $t("repo.changes.ctxCopyPath") }}</span>
+          </ContextMenuItem>
+          <ContextMenuSeparator v-if="!isGuest" />
+          <ContextMenuItem v-if="!isGuest" @select="emit('gitignore', n.path)">
+            <Ban :size="15" />
+            <span>{{ $t("repo.changes.ctxGitignore") }}</span>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </template>
+    </LazyContextMenu>
   </template>
 
   <!-- an oversized directory was capped server-side; say so rather than silently showing a head -->

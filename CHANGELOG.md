@@ -14,6 +14,14 @@ All notable changes to RepoYeti are documented here. The format is based on
   folder that turns out to be gone is now dropped within a second, and a repo that still needs
   watching moves to polling.
 
+- **The repo list no longer lags on a long list of repos.** Every row mounted its hover tooltips,
+  right-click menus and kebab menu up front, although each one stays hidden until it is hovered or
+  clicked, so N rows meant N idle overlay trees before anyone touched one. The architect check
+  `overlay-mounted-per-row` found 22 such sites. Each now renders its bare trigger and mounts the
+  overlay on the first pointer enter or focus, and stays mounted after that, so the open and close
+  behaviour is unchanged. Right-click with the keyboard menu key now takes two presses the first
+  time, because the first press mounts the menu.
+
 ## [1.3.0] - 2026-10-05
 
 ### Added
