@@ -16,7 +16,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { rmRetry } from "../tests/helpers/rm-retry.ts";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
@@ -679,21 +680,13 @@ function main(): void {
     // Retry the wipe. The previous run's demo daemon had this tree indexed and Windows can hold
     // handles open for a moment after the process exits, so a single rmSync loses a race with
     // its own teardown and fails the whole pipeline with a confusing EBUSY.
-    let lastErr: unknown;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        rmSync(target, { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
-        lastErr = undefined;
-        break;
-      } catch (err) {
-        lastErr = err;
-        Bun.sleepSync(500);
-      }
-    }
-    if (lastErr) {
+    // rmRetry loops itself: Bun's rmSync ignores maxRetries/retryDelay, so passing them tries once.
+    try {
+      rmRetry(target);
+    } catch (err) {
       throw new Error(
         `could not clear ${target} (something still has it open — a demo daemon from a previous run?): ${
-          lastErr instanceof Error ? lastErr.message : String(lastErr)
+          err instanceof Error ? err.message : String(err)
         }`,
       );
     }
