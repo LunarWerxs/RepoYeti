@@ -6,6 +6,12 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **The header now has the Connections app switcher.** It is the grid icon in the header. Signed out
+  it tells you to sign in to access the tools; signed in it lists every LunarWerx tool, and More
+  shows the Connections planes in their own section.
+
 ### Fixed
 
 - **Deleting a watched repo no longer pins a CPU core on Windows.** Windows never ends a watch on
