@@ -13,7 +13,8 @@
  */
 import DiscordMark from "./DiscordMark.vue";
 
-// An empty url shows the name as plain text, for an app with no public site to link to.
+// An empty url shows the name as plain text, for an app with no public site to link to. The url
+// default is the app's `footerUrl` in kit.config (the kit's sync fills it in).
 withDefaults(defineProps<{ name?: string; url?: string; discord?: string }>(), {
   name: "LunarWerx Studios",
   url: "https://lunarwerx.com/",
