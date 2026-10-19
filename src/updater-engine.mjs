@@ -17,8 +17,9 @@
  * runtime-agnostic (Bun + Node): node:child_process spawn runs in both. Part of the
  * shared kit, keep it app-agnostic.
  */
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
+
 import { spawn } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 const CHECK_TIMEOUT_MS = 30_000;
@@ -207,46 +208,63 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     // hash-object hashes every working file, where the old loop spent up to two spawns per edit
     // (2026-10-16). A batch that fails, or whose answer doesn't map one-to-one onto the edits,
     // falls back to the per-edit loop, so failure handling stays exactly as it was.
-    const wanted = new Set(edits.map((e) => e.path));
+    const inTarget = await batchedTargetTree(target, new Set(edits.map((e) => e.path)));
+    const hash = inTarget && (await batchedHashes(top, edits.filter((e) => !e.deleted)));
+    if (hash) return batchedVerdict(edits, hash, inTarget);
+    return (await perEditVerdict(edits, top, target)) ? edits : null;
+  }
+
+  // One ls-tree answers every edit's presence, oid and mode in `target`. Null when the batch failed
+  // or a pathspec matched a child (its answer is then not one-to-one with the edits).
+  async function batchedTargetTree(target, wanted) {
     const tree = await git(["--literal-pathspecs", "ls-tree", "-z", target, "--", ...wanted]);
+    if (!tree.ok) return null;
     const inTarget = new Map(); // path -> [mode, type, oid] in the target; absent when gone there
-    let batched = tree.ok;
-    if (tree.ok)
-      for (const line of tree.stdout.split("\0").filter(Boolean)) {
-        // "<mode> <type> <oid>\t<path>": the path follows a TAB; the three fields before it are spaced.
-        const tab = line.indexOf("\t");
-        const path = line.slice(tab + 1);
-        if (!wanted.has(path)) {
-          batched = false; // a pathspec matched a child: not one-to-one with the edits
-          break;
-        }
-        inTarget.set(path, line.slice(0, tab).split(" "));
-      }
-    if (batched) {
-      const present = edits.filter((e) => !e.deleted);
-      const hashed = present.length
-        ? await git(["hash-object", "--", ...present.map((e) => join(top, e.path))])
-        : { ok: true, stdout: "" };
-      const lines = hashed.ok ? hashed.stdout.split("\n").filter(Boolean) : null;
-      if (lines?.length === present.length) {
-        const hash = new Map(present.map((e, i) => [e.path, lines[i]]));
-        for (const e of edits) {
-          const want = inTarget.get(e.path)?.[2] ?? null;
-          // A deleted edit must be gone in the target; every other must hash to the target's blob.
-          if (e.deleted ? want : hash.get(e.path) !== want) return null;
-        }
-        const modified = edits.filter((e) => !e.deleted && !e.untracked).map((e) => e.path);
-        return (await modesMatch(modified, new Map([...inTarget].map(([p, m]) => [p, m[0]])))) ? edits : null;
-      }
+    for (const line of tree.stdout.split("\0").filter(Boolean)) {
+      // "<mode> <type> <oid>\t<path>": the path follows a TAB; the three fields before it are spaced.
+      const tab = line.indexOf("\t");
+      const path = line.slice(tab + 1);
+      if (!wanted.has(path)) return null; // a pathspec matched a child: not one-to-one with the edits
+      inTarget.set(path, line.slice(0, tab).split(" "));
     }
-    // The per-edit fallback: one rev-parse per edit and one hash-object per working file.
+    return inTarget;
+  }
+
+  // One hash-object hashes every working file: path -> hash. Null when the batch failed or answered a different count.
+  async function batchedHashes(top, present) {
+    const hashed = present.length
+      ? await git(["hash-object", "--", ...present.map((e) => join(top, e.path))])
+      : { ok: true, stdout: "" };
+    const lines = hashed.ok ? hashed.stdout.split("\n").filter(Boolean) : null;
+    if (lines?.length !== present.length) return null;
+    return new Map(present.map((e, i) => [e.path, lines[i]]));
+  }
+
+  // The batched verdict: a deleted edit must be gone in the target, every other must hash to the
+  // target's blob, and the modified files' modes must match.
+  async function batchedVerdict(edits, hash, inTarget) {
+    for (const e of edits) {
+      const want = inTarget.get(e.path)?.[2] ?? null;
+      if (e.deleted ? want : hash.get(e.path) !== want) return null;
+    }
+    const modes = new Map([...inTarget].map(([p, m]) => [p, m[0]]));
+    return (await modesMatch(modifiedPaths(edits), modes)) ? edits : null;
+  }
+
+  // The per-edit fallback: one rev-parse per edit and one hash-object per working file.
+  async function perEditVerdict(edits, top, target) {
     for (const e of edits) {
       const want = await gitText(["rev-parse", "--verify", "--quiet", `${target}:${e.path}`]);
-      if (e.deleted ? want : !want || (await gitText(["hash-object", "--", join(top, e.path)])) !== want) return null;
+      if (e.deleted ? want : !want || (await gitText(["hash-object", "--", join(top, e.path)])) !== want) return false;
     }
-    const modified = edits.filter((e) => !e.deleted && !e.untracked).map((e) => e.path);
+    const modified = modifiedPaths(edits);
     const modes = modified.length ? await targetModes(target, modified) : new Map();
-    return modes && (await modesMatch(modified, modes)) ? edits : null;
+    return !!modes && (await modesMatch(modified, modes));
+  }
+
+  // The paths whose content or mode is compared in the target: the edits that are neither new nor deleted.
+  function modifiedPaths(edits) {
+    return edits.filter((e) => !e.deleted && !e.untracked).map((e) => e.path);
   }
 
   // Through realpath, so a junction or a short name to the checkout still matches git's own top level.

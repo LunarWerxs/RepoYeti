@@ -52,6 +52,11 @@ const SENTINEL_INTERVAL_MS: u32 = 500;
 /// CONSECUTIVE failed probes before a daemon counts as dead. Must be > 1: a single miss is a
 /// hiccup, and reviving on one turns a slow tick into a spurious restart.
 const REVIVE_AFTER_MISSES: u32 = 3;
+/// How long a silent daemon whose port still takes connections is left alone: busy, not dead.
+/// A daemon can freeze for tens of seconds at a time under heavy load, and three missed probes (about
+/// 15 s) had the watchdog kill one that was only busy. A daemon still silent after this is wedged,
+/// and is revived as a dead one.
+const BUSY_PATIENCE: Duration = Duration::from_secs(120);
 /// After firing a relaunch, wait this long for it to bind before considering another.
 const REVIVE_GRACE: Duration = Duration::from_secs(20);
 /// Crash-loop guard: this many restarts inside the window pauses auto-restart entirely.
@@ -469,6 +474,8 @@ enum StandDown {
     Grace,
     /// The crash-loop guard paused auto-restart.
     Paused,
+    /// Its port still takes connections: a blocked event loop, given BUSY_PATIENCE to clear.
+    Slow,
 }
 
 impl StandDown {
@@ -485,6 +492,10 @@ impl StandDown {
             StandDown::Paused => format!(
                 "auto-restart is paused by the crash-loop guard {}",
                 rearm_hint()
+            ),
+            StandDown::Slow => format!(
+                "its port still takes connections, so it is busy, not dead (revived if still silent after {}s)",
+                BUSY_PATIENCE.as_secs()
             ),
         }
     }
@@ -526,14 +537,25 @@ struct Watchdog {
     restart_times: Vec<Instant>,
     /// Since when the daemon has answered. Only a death resets it, never a hiccup.
     healthy_since: Option<Instant>,
+    /// The first missed probe of the current silence; an answer or a revive ends it.
+    silent_since: Option<Instant>,
     /// The stand-down last written to the tray log, so a standing guard is reported once.
     reported: Option<StandDown>,
 }
 
 impl Watchdog {
-    fn tick(&mut self, now: Instant, alive: bool, busy: bool, not_ours: bool) -> Verdict {
+    /// `listening`: the probe got no answer, but the daemon's port still takes connections.
+    fn tick(
+        &mut self,
+        now: Instant,
+        alive: bool,
+        listening: bool,
+        busy: bool,
+        not_ours: bool,
+    ) -> Verdict {
         if alive {
             self.misses = 0;
+            self.silent_since = None;
             let since = *self.healthy_since.get_or_insert(now);
             // The pause must not outlive the crash loop. A daemon that has answered for the whole
             // window has, by the guard's own definition, stopped crash-looping, and a pause kept
@@ -547,9 +569,14 @@ impl Watchdog {
             return Verdict::Alive;
         }
 
+        let silent_since = *self.silent_since.get_or_insert(now);
         self.misses += 1;
         if self.misses < REVIVE_AFTER_MISSES {
             return Verdict::Hiccup;
+        }
+        // Busy, not dead: killing it would end every chat and request it is in the middle of.
+        if listening && now.duration_since(silent_since) < BUSY_PATIENCE {
+            return Verdict::StandDown(StandDown::Slow);
         }
         // Dead from here. Every guard below stands the revive down, and says which it was.
         self.healthy_since = None;
@@ -578,6 +605,7 @@ impl Watchdog {
         self.restart_times.push(now);
         self.grace_until = Some(now + REVIVE_GRACE);
         self.misses = 0;
+        self.silent_since = None;
         Verdict::Revive
     }
 
@@ -641,6 +669,7 @@ fn health_tick() {
     let probe = daemon::live_probe(&a.cfg, daemon::PROBE_POLL);
     let health = probe.as_ref().map(|(_, health)| health.clone());
     let url = probe.map(|(url, _)| url);
+    let listening = url.is_none() && daemon::port_accepts(&a.cfg, daemon::PROBE_POLL);
     let busy = a.busy.load(Ordering::Relaxed);
     // Ownership gate: for token apps, leave a daemon another session owns alone. An app can opt out
     // (watchdogRequiresOwnership = false) to revive whatever is there, which is what AgentHydra
@@ -650,7 +679,7 @@ fn health_tick() {
         && a.cfg.watchdog_requires_ownership;
     let (verdict, line) = {
         let mut watchdog = a.watchdog.lock().unwrap();
-        let verdict = watchdog.tick(Instant::now(), url.is_some(), busy, not_ours);
+        let verdict = watchdog.tick(Instant::now(), url.is_some(), listening, busy, not_ours);
         (verdict, watchdog.report(verdict))
     };
     if let Some(line) = line {
@@ -711,8 +740,9 @@ fn revive(a: &App) {
     // the orphan still holding its handles. Repeat that a few times and the pile is the problem.
     //
     // This is a deliberate improvement on the PowerShell host, which also re-spawned without
-    // reaping. Safe here because the grace period means we only reach this after ~15s of silence:
-    // a daemon that has not bound by then is not about to, and taskkill /T takes the cmd.exe
+    // reaping. Safe here because the grace period means we only reach this after ~15s of silence
+    // with its port closed (an open port earns BUSY_PATIENCE first): a daemon that has not bound by
+    // then is not about to, and taskkill /T takes the cmd.exe
     // wrapper's whole tree with it. CHILD_PID is 0 once that wrapper has exited, so this never
     // kills a recycled pid.
     let previous = daemon::CHILD_PID.swap(0, Ordering::SeqCst);
@@ -1284,7 +1314,7 @@ mod watchdog_tests {
     fn die(w: &mut Watchdog, now: &mut Instant) -> Verdict {
         loop {
             *now += TICK;
-            let v = w.tick(*now, false, false, false);
+            let v = w.tick(*now, false, false, false, false);
             if v != Verdict::Hiccup && v != Verdict::StandDown(StandDown::Grace) {
                 return v;
             }
@@ -1305,7 +1335,7 @@ mod watchdog_tests {
         // Paused and dead: the tray log hears it once, not every 5 s.
         for _ in 0..10 {
             now += TICK;
-            let v = w.tick(now, false, false, false);
+            let v = w.tick(now, false, false, false, false);
             assert_eq!(v, Verdict::StandDown(StandDown::Paused));
             assert_eq!(w.report(v), None);
         }
@@ -1313,7 +1343,7 @@ mod watchdog_tests {
         let mut lifted = false;
         for _ in 0..=CRASH_LOOP_WINDOW.as_secs() / TICK.as_secs() {
             now += TICK;
-            lifted |= w.tick(now, true, false, false) == Verdict::Rearmed;
+            lifted |= w.tick(now, true, false, false, false) == Verdict::Rearmed;
         }
         assert!(
             lifted,
@@ -1321,6 +1351,54 @@ mod watchdog_tests {
         );
         // Then it is killed, and that death is a new one: it gets revived.
         assert_eq!(die(&mut w, &mut now), Verdict::Revive);
+    }
+
+    #[test]
+    fn a_daemon_whose_port_still_takes_connections_is_busy_until_its_patience_runs_out() {
+        let mut w = Watchdog::default();
+        let mut now = Instant::now();
+        w.tick(now, true, false, false, false);
+        // A 38 s freeze with the port open. Three misses used to revive it.
+        let mut silent = Duration::ZERO;
+        while silent < Duration::from_secs(38) {
+            now += TICK;
+            silent += TICK;
+            let v = w.tick(now, false, true, false, false);
+            assert!(
+                matches!(v, Verdict::Hiccup | Verdict::StandDown(StandDown::Slow)),
+                "{v:?} after {silent:?}"
+            );
+        }
+        // Its stand-down is reported once, and the answer that ends it says so.
+        assert!(w.report(Verdict::StandDown(StandDown::Slow)).is_some());
+        assert_eq!(w.report(Verdict::StandDown(StandDown::Slow)), None);
+        now += TICK;
+        let back = w.tick(now, true, false, false, false);
+        assert_eq!(back, Verdict::Alive);
+        assert!(w.report(back).is_some());
+
+        // Still silent past the patience with the port open: wedged, and revived like a death.
+        let mut verdict = Verdict::Hiccup;
+        let mut silent = Duration::ZERO;
+        while verdict != Verdict::Revive {
+            now += TICK;
+            silent += TICK;
+            verdict = w.tick(now, false, true, false, false);
+            assert!(silent <= BUSY_PATIENCE + TICK, "never revived");
+        }
+        assert!(silent >= BUSY_PATIENCE);
+
+        // A closed port is a death on the third miss, as before.
+        let mut misses = 0;
+        let mut w = Watchdog::default();
+        loop {
+            now += TICK;
+            misses += 1;
+            if w.tick(now, false, false, false, false) == Verdict::Revive {
+                break;
+            }
+        }
+        assert_eq!(misses, REVIVE_AFTER_MISSES);
     }
 }
 

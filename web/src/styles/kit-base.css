@@ -116,15 +116,23 @@
 
 /* box-shadow is deliberately NOT crossfaded: Tailwind draws the keyboard focus ring as a box-shadow,
    and a ring must be fully there on its first frame, even mid theme swap (focus-ring-first-frame). */
+/* Motion tokens: every transition and keyframe in this file takes its timing from here. */
+:root {
+  --dur-fast: 200ms;
+  --dur-theme: 280ms;
+  --dur-pan: 6s;
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* Smooth crossfade when toggling light/dark. The theme composable adds
    `html.theme-transitioning` around the class swap, then removes it. */
 html.theme-transitioning,
 html.theme-transitioning *,
 html.theme-transitioning *::before,
 html.theme-transitioning *::after {
-  transition-duration: 280ms !important;
+  transition-duration: var(--dur-theme) !important;
   transition-property: background-color, border-color, color, fill, stroke, opacity !important;
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+  transition-timing-function: var(--ease-soft) !important;
 }
 @media (prefers-reduced-motion: reduce) {
   html.theme-transitioning,
@@ -205,7 +213,7 @@ html.theme-transitioning *::after {
   background-size: 200% 100%;
 }
 @utility animate-gemini-pan {
-  animation: gemini-pan 6s linear infinite;
+  animation: gemini-pan var(--dur-pan) linear infinite;
   @media (prefers-reduced-motion: reduce) {
     animation: none;
   }
@@ -253,7 +261,7 @@ html.theme-transitioning *::after {
 }
 .kit-expand-enter-active,
 .kit-expand-leave-active {
-  transition: grid-template-rows 0.2s ease;
+  transition: grid-template-rows var(--dur-fast) ease;
 }
 .kit-expand-enter-from,
 .kit-expand-leave-to {
@@ -267,5 +275,5 @@ html.theme-transitioning *::after {
 .kit-tab-indicator {
   transform: translateX(var(--indicator-x));
   width: var(--indicator-w);
-  transition: transform 200ms ease-out, width 200ms ease-out;
+  transition: transform var(--dur-fast) ease-out, width var(--dur-fast) ease-out;
 }

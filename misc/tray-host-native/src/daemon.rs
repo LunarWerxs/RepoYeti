@@ -219,6 +219,33 @@ pub fn live_probe(cfg: &Config, timeout: Duration) -> Option<(String, Health)> {
     None
 }
 
+/// Whether the daemon's port still takes a connection, for a daemon that did not answer its
+/// health probe.
+///
+/// Windows completes a TCP handshake from the listen backlog without the process's help, so a
+/// daemon whose event loop is blocked still accepts here and a dead one does not. Measured
+/// against a Bun server frozen in a busy loop: the connect took under 1 ms while the request got
+/// nothing for the whole freeze. The watchdog reads this as busy, not dead.
+pub fn port_accepts(cfg: &Config, timeout: Duration) -> bool {
+    let pointer = std::fs::read_to_string(&cfg.info_file)
+        .ok()
+        .and_then(|s| crate::json::parse(&s));
+    let mut targets = Vec::new();
+    if let Some(target) = pointer
+        .as_ref()
+        .and_then(|v| v.str_at("url"))
+        .and_then(split_url)
+    {
+        targets.push(target);
+    }
+    if cfg.port != 0 {
+        targets.push((cfg.url_host.clone(), cfg.port));
+    }
+    targets.iter().any(|(host, port)| {
+        resolve(host, *port).is_some_and(|addr| TcpStream::connect_timeout(&addr, timeout).is_ok())
+    })
+}
+
 /// Launch the daemon.
 ///
 /// Via `cmd.exe /c` so a start command carrying shell syntax keeps working, matching Start-Daemon.

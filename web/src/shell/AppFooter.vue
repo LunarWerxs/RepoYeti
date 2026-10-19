@@ -13,6 +13,7 @@
  */
 import DiscordMark from "./DiscordMark.vue";
 
+// An empty url shows the name as plain text, for an app with no public site to link to.
 withDefaults(defineProps<{ name?: string; url?: string; discord?: string }>(), {
   name: "LunarWerx Studios",
   url: "https://lunarwerx.com/",
@@ -27,12 +28,14 @@ withDefaults(defineProps<{ name?: string; url?: string; discord?: string }>(), {
     <span>
       Created by
       <a
+        v-if="url"
         :href="url"
         target="_blank"
         rel="noopener noreferrer"
         class="font-medium text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline"
         >{{ name }}</a
       >
+      <span v-else>{{ name }}</span>
     </span>
     <span aria-hidden="true">·</span>
     <a
