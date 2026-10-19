@@ -6,6 +6,17 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-19
+
+**TL;DR** The header gets the Connections app switcher, and two performance problems are gone: a
+pinned CPU core after deleting a watched repo, and a laggy repo list.
+
+* **The header now has the Connections app switcher** (the grid icon).
+* **Deleting a watched repo no longer pins a CPU core on Windows.**
+* **The repo list no longer lags on a long list of repos.**
+
+**Everything in 1.4.0**
+
 ### Added
 
 - **The header now has the Connections app switcher.** It is the grid icon in the header. Signed out
@@ -2405,6 +2416,7 @@ Initial public tag of the daemon + dashboard, before the release-hardening pass.
 
 [#22]: https://github.com/LunarWerxs/RepoYeti/issues/22
 [#21]: https://github.com/LunarWerxs/RepoYeti/issues/21
+[1.4.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LunarWerxs/RepoYeti/compare/v1.0.3...v1.1.0
