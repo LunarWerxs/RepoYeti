@@ -17,9 +17,8 @@
  * runtime-agnostic (Bun + Node): node:child_process spawn runs in both. Part of the
  * shared kit, keep it app-agnostic.
  */
-
-import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
 
 const CHECK_TIMEOUT_MS = 30_000;
