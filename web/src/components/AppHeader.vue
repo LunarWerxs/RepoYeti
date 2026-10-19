@@ -20,6 +20,8 @@ import { useRepoFeedback } from "@/lib/repo-feedback";
 import { startSelecting } from "@/lib/repo-selection";
 import { SOURCE_URL } from "@/lib/links";
 import { toastUpdateFailure } from "@/lib/update-failure";
+import { useTheme } from "@/lib/theme";
+import "@cnct/connect/apps";
 
 defineProps<{ connected: boolean; repoCount: number }>();
 const emit = defineEmits<{
@@ -31,6 +33,10 @@ const emit = defineEmits<{
 
 const store = useStore();
 const { t } = useI18n();
+// Connections app switcher: signed in = the daemon has a Connections owner session (store.owner is
+// null for signed-out and for share-link guests). Theme follows the app's own light/dark state.
+const connectionsSignedIn = computed(() => !!store.owner);
+const { isDark } = useTheme();
 const { friendly } = useRepoFeedback();
 const actionsOpen = ref(false);
 const actionsMenuRef = useTemplateRef<HTMLElement>("actionsMenuRef");
@@ -360,6 +366,14 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="flex items-center gap-1">
+        <!-- Connections app switcher: shows in both states; Sign in links to the existing OIDC route. -->
+        <connections-apps
+          class="connections-apps"
+          :signed-in="connectionsSignedIn ? '' : 'false'"
+          current="repoyeti"
+          sign-in-href="/oauth/login"
+          :theme="isDark ? 'dark' : 'light'"
+        />
         <!-- remote-access button, with the live/offline dot pinned to its top-right corner -->
         <div v-if="!store.isGuest" class="relative">
           <Tooltip>
@@ -791,6 +805,18 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* Map the switcher onto the app's own tokens so it matches the header in light and dark. */
+.connections-apps {
+  --cnct-apps-surface: var(--popover);
+  --cnct-apps-card: var(--card);
+  --cnct-apps-text: var(--foreground);
+  --cnct-apps-muted: var(--muted-foreground);
+  --cnct-apps-mark: var(--foreground);
+  --cnct-apps-hover: var(--accent);
+  --cnct-apps-accent: var(--primary);
+  --cnct-apps-on-accent: var(--primary-foreground);
+}
+
 /* The Add button's hover label. It grows the button by animating max-width and its leading margin,
    both layout properties, on purpose: the label has to take real space in the header row. So the
    transition names exactly those two plus opacity, here rather than in a utility, the same way

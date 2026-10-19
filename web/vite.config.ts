@@ -116,7 +116,8 @@ export default defineConfig({
     },
   },
   plugins: [
-    stripRemoteFontImport(), vue(),
+    stripRemoteFontImport(),
+    vue({ template: { compilerOptions: { isCustomElement: (tag) => tag === "connections-apps" } } }),
     tailwindcss(),
     // File-type glyphs for the changes tree (vscode-icons set), inlined at build time
     // and tree-shaken to only the icons imported in @/lib/file-icons. No runtime fetch.
