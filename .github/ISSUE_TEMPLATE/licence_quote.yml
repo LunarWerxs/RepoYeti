@@ -1,0 +1,53 @@
+name: Commercial licence request
+description: Using RepoYeti commercially, or building it into a paid product or service.
+title: "Commercial licence request: "
+labels: ["licensing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        RepoYeti is free for noncommercial use under the PolyForm Noncommercial License 1.0.0.
+        Commercial use is **US$79 per installation** ([buy](https://checkout.connectionsapi.com/licence/3fd2c9a5-0806-428f-b0fd-4a1ff7898fcd) · [terms](https://repoyeti.com/pricing.md)).
+        This form is for everything else, such as building RepoYeti into a paid product or service, or needing a licence that differs from the published terms.
+
+        Only what you type here becomes public; if you would rather not post a company name, say
+        so and we will move the conversation to email.
+  - type: textarea
+    id: use
+    attributes:
+      label: How would you use RepoYeti?
+      description: Commercial setting, number of people, and whether it runs on your own machines or on machines you provide to others.
+    validations:
+      required: true
+  - type: input
+    id: installations
+    attributes:
+      label: How many installations?
+      description: The licence is priced per installation.
+    validations:
+      required: true
+  - type: dropdown
+    id: payment
+    attributes:
+      label: Payment method
+      options:
+        - Card
+        - Purchase order / invoice
+        - Bank transfer
+        - Not sure yet
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Anything else?
+      description: Timeline, support needs, or questions about the terms.
+    validations:
+      required: false
+  - type: input
+    id: contact
+    attributes:
+      label: Where should we reply?
+      description: An email address or a Discord handle.
+    validations:
+      required: true

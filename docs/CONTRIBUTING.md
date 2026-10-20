@@ -191,8 +191,11 @@ Two things to watch for:
 
 ## License
 
-By contributing you agree your contributions are licensed under the
-[PolyForm Noncommercial License 1.0.0](../LICENSE). Only submit material you have
-the right to contribute under those terms, and preserve third-party license and
-copyright notices. See [licensing details](../LICENSING.md) for the treatment of
+RepoYeti is released under the [PolyForm Noncommercial License 1.0.0](../LICENSE).
+By contributing you agree to the contribution terms in
+[.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md#contribution-terms-please-read-before-opening-a-pr):
+you grant LunarWerx LLC (LunarWerx Studios) a perpetual, irrevocable right to use,
+modify and relicense your contribution, including commercially. Only submit material
+you have the right to contribute under those terms, and preserve third-party license
+and copyright notices. See [licensing details](../LICENSING.md) for the treatment of
 earlier MIT releases and dependencies.

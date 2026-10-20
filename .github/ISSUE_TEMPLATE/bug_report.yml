@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in RepoYeti crashes, breaks, or does not do what it says.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. The exact steps and your version are the fastest route to a fix.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of RepoYeti?
+      options:
+        - Dashboard (phone or browser)
+        - Git graph and history
+        - Per-repo identities
+        - Cloudflare Artifacts remotes
+        - Private tunnel (--tunnel)
+        - AI features
+        - Install, CLI or daemon
+        - Updater or tray
+        - Something else, or not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: RepoYeti version
+      description: The release you downloaded (for example 1.4.0 from the releases page), or the version field in package.json if you run from a clone.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: For example Windows 11, macOS on Apple Silicon, or Linux with the distro name.
+    validations:
+      required: true
+  - type: input
+    id: other
+    attributes:
+      label: Other software involved, and its version
+      description: For example cloudflared, Git, or the browser you opened the dashboard in. Leave blank if none.
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Logs or screenshots help. Remove private data first (tokens, API keys, repo names, remote URLs, file paths).
+    validations:
+      required: false
