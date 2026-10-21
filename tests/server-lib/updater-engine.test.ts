@@ -10,9 +10,9 @@
 // each call and can be made to fail on demand, so "did install/build actually run, how many times,
 // and in what order" is checkable after the fact. All git operations are local (file:// clones of
 // tmpdir repos) — no network — so the suite is hermetic and deterministic.
-import { afterEach, test, expect } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";

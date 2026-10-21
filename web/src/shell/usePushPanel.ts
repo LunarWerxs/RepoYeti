@@ -1,14 +1,14 @@
+import { useMediaQuery, useWindowSize } from "@vueuse/core";
 import {
   computed,
   getCurrentScope,
+  type MaybeRefOrGetter,
   onScopeDispose,
+  type Ref,
   ref,
   toValue,
   watch,
-  type MaybeRefOrGetter,
-  type Ref,
 } from "vue";
-import { useMediaQuery, useWindowSize } from "@vueuse/core";
 import { contributeContentInset } from "@/lib/content-inset";
 
 /**

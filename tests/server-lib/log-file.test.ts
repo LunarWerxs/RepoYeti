@@ -7,12 +7,12 @@
 // The daemon self-logs its console output to <CONFIG_DIR>/logs/daemon.log so a crash reason
 // survives the (hidden-console) process. These tests pin the two things that make it useful:
 // it actually captures console.* to the file, and it rotates before the file grows unbounded.
-import { test, expect, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from "node:fs";
+import { afterEach, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { initFileLogging, restoreFileLogging, logFilePath } from "../../src/log-file.mjs";
+import { initFileLogging, logFilePath, restoreFileLogging } from "../../src/log-file.mjs";
 
 // The true native console methods, snapshotted before any test patches them. initFileLogging
 // captures console.* via `.bind(console)` and restoreFileLogging re-installs that bound copy, so

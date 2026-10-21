@@ -1,4 +1,4 @@
-import { computed, shallowReactive, watchEffect, type Ref } from "vue";
+import { computed, type Ref, shallowReactive, watchEffect } from "vue";
 
 /**
  * Tracks how many pixels of the viewport's right edge are covered by docked push panels

@@ -4,8 +4,8 @@
 // `../../src/find-free-port.mjs` import resolves only from that synced location — sync.mjs
 // validates the placement — so this file is NOT runnable inside the kit repo itself.
 import { afterEach, expect, test } from "bun:test";
-import { createServer } from "node:net";
 import type { AddressInfo, Server } from "node:net";
+import { createServer } from "node:net";
 import { findFreePort } from "../../src/find-free-port.mjs";
 
 const open = new Set<Server>();

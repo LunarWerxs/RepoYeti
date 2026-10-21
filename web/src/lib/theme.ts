@@ -1,5 +1,5 @@
+import { usePreferredDark, useStorage } from "@vueuse/core";
 import { computed, getCurrentInstance, onBeforeUnmount, watch } from "vue";
-import { useStorage, usePreferredDark } from "@vueuse/core";
 import { prefersReducedMotion } from "./utils";
 
 /**

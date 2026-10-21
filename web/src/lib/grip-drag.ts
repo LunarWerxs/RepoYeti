@@ -22,7 +22,7 @@
 //   · window blur (alt-tab / focus steal mid-drag) and component unmount
 // onEnd runs exactly once per started drag, no matter which signal ends it.
 
-import { onBeforeUnmount, ref, type Ref } from "vue";
+import { onBeforeUnmount, type Ref, ref } from "vue";
 import { prefersReducedMotion } from "./utils";
 
 export interface GripDragHandlers {

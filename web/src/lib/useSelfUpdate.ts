@@ -1,4 +1,4 @@
-import { ref, type Ref } from "vue";
+import { type Ref, ref } from "vue";
 
 /**
  * Shared self-update state machine for all LunarWerx apps. Wraps an app's two

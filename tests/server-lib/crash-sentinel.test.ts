@@ -13,10 +13,10 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  SAFE_MODE_ENV,
   clearRunSentinels,
   isSafeModeRequested,
   openCrashSentinel,
+  SAFE_MODE_ENV,
 } from "../../src/crash-sentinel.mjs";
 
 const dirs: string[] = [];
