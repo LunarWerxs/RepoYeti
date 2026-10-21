@@ -4,5 +4,5 @@ contact_links:
     url: https://discord.gg/PsWpeNUzhk
     about: Questions, ideas and help from the LunarWerx community, with the people who build these tools in the room.
   - name: Security problem
-    url: https://github.com/LunarWerxs/RepoYeti/blob/main/.github/SECURITY.md
-    about: Please report vulnerabilities privately rather than in a public issue.
+    url: https://github.com/LunarWerxs/RepoYeti/security/advisories/new
+    about: Report it privately through GitHub's Report a vulnerability form, never in a public issue. SECURITY.md says what to include.
