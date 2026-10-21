@@ -16,8 +16,8 @@
  *                to equal it (rejects a foreign daemon that happened to grab the port)
  *   host         host used in the recorded url (default "127.0.0.1")
  */
-import { readFileSync, rmSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 /** Gap between findLiveInstance re-probes (see `attempts` there). Short enough that a
  *  multi-attempt guard still adds well under a second to a genuine cold start. */
@@ -137,20 +137,26 @@ export function createInstancePointer({ configDir, serviceName, host = "127.0.0.
     for (let i = 0; i < tries; i++) {
       // Space out retries so a busy event loop gets a chance to drain before the next probe.
       if (i > 0) await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-      try {
-        const res = await fetch(`${info.url}/api/health`, {
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        if (!res.ok) continue; // transient (503 while booting) → re-probe
-        const body = await res.json();
-        if (!body?.ok) continue;
-        if (serviceName && body.service !== serviceName) return null; // definitive: not ours
-        return info;
-      } catch {
-        // unreachable / timed out / malformed body → re-probe, then treat as not running
-      }
+      const verdict = await probeHealth(info.url, timeoutMs);
+      if (verdict === "live") return info;
+      if (verdict === "foreign") return null; // definitive: not ours
     }
     return null;
+  }
+
+  /** One probe of `${url}/api/health`: "live", "foreign" (another service owns the port) or
+   *  "transient" (re-probe). */
+  async function probeHealth(url, timeoutMs) {
+    try {
+      const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!res.ok) return "transient"; // 503 while booting
+      const body = await res.json();
+      if (!body?.ok) return "transient";
+      return serviceName && body.service !== serviceName ? "foreign" : "live";
+    } catch {
+      // unreachable / timed out / malformed body → re-probe, then treat as not running
+      return "transient";
+    }
   }
 
   return {

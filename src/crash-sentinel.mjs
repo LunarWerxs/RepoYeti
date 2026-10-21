@@ -74,7 +74,9 @@ function readRun(path, launchId) {
   let parsed = null;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
-  } catch {}
+  } catch {
+    // Unreadable or corrupt: `parsed` stays null, so the run is still reported, with its owner unknown.
+  }
   const pid = Number.isInteger(parsed?.pid) && parsed.pid > 0 ? parsed.pid : null;
   return {
     launchId,
@@ -127,40 +129,16 @@ export function openCrashSentinel(options) {
   const ownName = `${RUN_PREFIX}${launchId}`;
   const file = join(dir, ownName);
 
+  // An unwritable directory is not fatal: the write below fails the same way and `written` says so.
   try {
     mkdirSync(dir, { recursive: true });
-  } catch {}
-  let names = [];
-  try {
-    names = readdirSync(dir);
-  } catch {}
-
-  let bootedAt = null;
-  try {
-    bootedAt = bootTime();
-  } catch {}
-  const uncleanRuns = [];
-  for (const name of names) {
-    if (!name.startsWith(RUN_PREFIX) || name === ownName) continue;
-    const path = join(dir, name);
-    const run = readRun(path, name.slice(RUN_PREFIX.length));
-    // A live owner is an overlapping sibling (a predecessor still draining after an update
-    // relaunch), not a crash. Our own pid on another launch's file is a recycled pid: dead. So is
-    // a live pid on a file from an earlier boot: no process survives a reboot.
-    const earlierBoot =
-      run.bootedAt !== null && bootedAt !== null && Math.abs(run.bootedAt - bootedAt) > BOOT_TOLERANCE_MS;
-    if (run.pid !== null && run.pid !== pid && !earlierBoot && isAlive(run.pid)) continue;
-    const { bootedAt: _boot, ...reported } = run;
-    uncleanRuns.push(reported);
-    tryUnlink(path);
+  } catch {
+    // Left to the write below, which reports `written: false`.
   }
-
-  let written = false;
-  try {
-    const record = { pid, startedAt: now().toISOString(), safeMode, bootedAt };
-    writeFileSync(file, `${JSON.stringify(record)}\n`);
-    written = true;
-  } catch {}
+  const names = listDir(dir);
+  const bootedAt = currentBootTime(bootTime);
+  const uncleanRuns = sweepUncleanRuns({ dir, names, ownName, pid, bootedAt, isAlive });
+  const written = writeRunFile(file, () => ({ pid, startedAt: now().toISOString(), safeMode, bootedAt }));
 
   let closed = false;
   const close = () => {
@@ -185,6 +163,69 @@ export function openCrashSentinel(options) {
   };
 }
 
+/** Entry names in `dir`, or none when it cannot be read: no directory means no earlier run to report. */
+function listDir(dir) {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** When this launch's machine booted, or null when it cannot be told: the boot check is then skipped. */
+function currentBootTime(bootTime) {
+  try {
+    return bootTime();
+  } catch {
+    return null;
+  }
+}
+
+/** Write this launch's run file. Returns false when it cannot be written: the daemon still starts. */
+function writeRunFile(file, makeRecord) {
+  try {
+    writeFileSync(file, `${JSON.stringify(makeRecord())}\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Report and delete the run files of earlier launches whose owner did not shut down cleanly.
+ * Returns the reported runs, without their boot time.
+ */
+function sweepUncleanRuns({ dir, names, ownName, pid, bootedAt, isAlive }) {
+  const uncleanRuns = [];
+  for (const name of names) {
+    if (!name.startsWith(RUN_PREFIX) || name === ownName) continue;
+    const path = join(dir, name);
+    const run = readRun(path, name.slice(RUN_PREFIX.length));
+    if (ownerStillRunning(run, { pid, bootedAt, isAlive })) continue;
+    const { bootedAt: _boot, ...reported } = run;
+    uncleanRuns.push(reported);
+    tryUnlink(path);
+  }
+  return uncleanRuns;
+}
+
+/**
+ * A live owner is an overlapping sibling (a predecessor still draining after an update relaunch),
+ * not a crash. Our own pid on another launch's file is a recycled pid: dead. So is a live pid on a
+ * file from an earlier boot: no process survives a reboot.
+ */
+function ownerStillRunning(run, { pid, bootedAt, isAlive }) {
+  if (run.pid === null || run.pid === pid) return false;
+  if (fromEarlierBoot(run.bootedAt, bootedAt)) return false;
+  return isAlive(run.pid);
+}
+
+function fromEarlierBoot(runBootedAt, bootedAt) {
+  return (
+    runBootedAt !== null && bootedAt !== null && Math.abs(runBootedAt - bootedAt) > BOOT_TOLERANCE_MS
+  );
+}
+
 /**
  * Delete every run file in `dir`. For a caller that just stopped the daemon ON PURPOSE by force,
  * so the next launch does not report that stop as a crash. Returns how many were removed.
@@ -192,14 +233,8 @@ export function openCrashSentinel(options) {
  * @returns {number}
  */
 export function clearRunSentinels(dir) {
-  let names = [];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return 0;
-  }
   let removed = 0;
-  for (const name of names) {
+  for (const name of listDir(dir)) {
     if (name.startsWith(RUN_PREFIX) && tryUnlink(join(dir, name))) removed++;
   }
   return removed;

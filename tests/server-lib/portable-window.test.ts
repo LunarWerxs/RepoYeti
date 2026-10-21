@@ -11,8 +11,8 @@
 // installed (a valid outcome on a headless CI box).
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   appWindowPlacementKey,
   buildPortableSpawn,
@@ -30,8 +30,8 @@ const KNOWN_NAMES = [
   "microsoft-edge",
 ];
 
-test("resolveChromiumBrowser returns null, or a real existing executable with a known name", () => {
-  const found = resolveChromiumBrowser();
+test("resolveChromiumBrowser returns null, or a real existing executable with a known name", async () => {
+  const found = await resolveChromiumBrowser();
   if (found === null) return; // no Chromium-family browser on this host — a valid result
   expect(KNOWN_NAMES).toContain(found.name);
   expect(typeof found.path).toBe("string");

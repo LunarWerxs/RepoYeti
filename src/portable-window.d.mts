@@ -13,7 +13,7 @@ export type PortableWindowResult =
  * Locate a Chromium-family browser that can host an `--app=` window.
  * Returns null when none is installed.
  */
-export function resolveChromiumBrowser(): ChromiumBrowser | null;
+export function resolveChromiumBrowser(): Promise<ChromiumBrowser | null>;
 
 /** The `(command, args, detached)` used to spawn the window so it escapes the daemon's tree. */
 export interface PortableSpawn {

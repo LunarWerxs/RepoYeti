@@ -103,28 +103,34 @@ async function handleToolsCall(id, msg, ctx, signal) {
   const args = params.arguments && typeof params.arguments === "object" ? params.arguments : {};
   try {
     const value = await tool.run(args, signal);
-    // Compact on purpose: this text lands in the calling model's context and stays in its
-    // transcript, and pretty-printing (newline + indent per key) adds roughly 20-40% to the
-    // tokens of a nested result while telling the model nothing.
-    const content = [{ type: "text", text: JSON.stringify(value) }];
-    if (signal?.aborted) {
-      // A `notifications/cancelled` arrived for this id, but the tool doesn't check `signal`
-      // (or checked and pressed on anyway), so it ran to completion regardless — say so rather
-      // than silently returning the result as if no cancellation had ever been requested.
-      content.push({
-        type: "text",
-        text: "Note: a cancellation was requested for this call, but the tool does not support cancellation and ran to completion.",
-      });
-    }
-    return rpcResult(id, { content });
+    return rpcResult(id, { content: toolResultContent(value, signal) });
   } catch (e) {
-    const text = signal?.aborted
-      ? `Cancelled: ${e?.message ? e.message : String(e)}`
-      : e?.message
-        ? e.message
-        : String(e);
+    const text = signal?.aborted ? `Cancelled: ${errorMessage(e)}` : errorMessage(e);
     return rpcResult(id, { content: [{ type: "text", text }], isError: true });
   }
+}
+
+/** The MCP `content` array for a tool's successful return value. */
+function toolResultContent(value, signal) {
+  // Compact on purpose: this text lands in the calling model's context and stays in its
+  // transcript, and pretty-printing (newline + indent per key) adds roughly 20-40% to the
+  // tokens of a nested result while telling the model nothing.
+  const content = [{ type: "text", text: JSON.stringify(value) }];
+  if (signal?.aborted) {
+    // A `notifications/cancelled` arrived for this id, but the tool doesn't check `signal`
+    // (or checked and pressed on anyway), so it ran to completion regardless — say so rather
+    // than silently returning the result as if no cancellation had ever been requested.
+    content.push({
+      type: "text",
+      text: "Note: a cancellation was requested for this call, but the tool does not support cancellation and ran to completion.",
+    });
+  }
+  return content;
+}
+
+/** A thrown value's message, or its string form when it carries no `message`. */
+function errorMessage(e) {
+  return e?.message ? e.message : String(e);
 }
 
 /**

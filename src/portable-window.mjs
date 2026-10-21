@@ -20,9 +20,11 @@
  * Runtime-agnostic (Bun + Node). Synced from the shared kit, do not edit in an
  * app; the `.d.mts` sibling types the import for the TypeScript apps.
  */
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join, delimiter } from "node:path";
+
 import { spawn } from "node:child_process";
+import { mkdirSync, readFileSync } from "node:fs";
+import { access } from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import { buildDetachedSpawn } from "./detached-spawn.mjs";
 
 /**
@@ -66,15 +68,22 @@ function candidates() {
  * Locate a Chromium-family browser that can host an `--app=` window.
  * Returns `{ name, path }` or null when none is installed.
  */
-export function resolveChromiumBrowser() {
-  for (const c of candidates()) {
-    try {
-      if (existsSync(c.path)) return c;
-    } catch {
-      /* unreadable candidate path; keep scanning */
-    }
+export async function resolveChromiumBrowser() {
+  const list = candidates();
+  // Every candidate is probed at once; the first one present in list order still wins.
+  const present = await Promise.all(list.map((c) => exists(c.path)));
+  const first = present.indexOf(true);
+  return first === -1 ? null : list[first];
+}
+
+/** Whether `path` exists. An unreadable candidate path counts as absent, so the scan keeps going. */
+async function exists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
   }
-  return null;
 }
 
 /**
@@ -199,8 +208,8 @@ function windowSizeArg(size) {
  * accept Chromium's own default, which is roughly the whole work area — far too big for
  * a small single-purpose window, which is the reason this option exists.
  */
-export function openPortableWindow(url, opts = {}) {
-  const browser = resolveChromiumBrowser();
+export async function openPortableWindow(url, opts = {}) {
+  const browser = await resolveChromiumBrowser();
   if (!browser) return Promise.resolve({ ok: false, reason: "no-browser" });
   const args = [];
   if (opts.profileDir) {

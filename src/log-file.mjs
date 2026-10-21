@@ -21,10 +21,11 @@
  * opposite of the point), so every fs call is guarded and a hard failure just disables file logging
  * and leaves the real console untouched.
  */
-import { join } from "node:path";
-import { mkdirSync, openSync, writeSync, closeSync, statSync, renameSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { gzipSync } from "node:zlib";
+
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { inspect } from "node:util";
+import { gzipSync } from "node:zlib";
 
 /** Roll the log over at this size, at start and while running; old generations are gzipped. */
 const DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
@@ -42,13 +43,20 @@ export function rotateLog(path, keep = KEEP) {
   try {
     rmSync(`${path}.1`, { force: true });
     rmSync(`${path}.${keep}.gz`, { force: true });
-    for (let i = keep - 1; i >= 1; i--) {
-      if (existsSync(`${path}.${i}.gz`)) renameSync(`${path}.${i}.gz`, `${path}.${i + 1}.gz`);
-    }
+    for (let i = keep - 1; i >= 1; i--) moveIfPresent(`${path}.${i}.gz`, `${path}.${i + 1}.gz`);
     writeFileSync(`${path}.1.gz`, gzipSync(readFileSync(path)));
     rmSync(path, { force: true });
   } catch {
     /* raced or unwritable: the caller opens whatever is there */
+  }
+}
+
+/** Rename `from` to `to` when `from` exists; a missing generation is simply skipped. */
+function moveIfPresent(from, to) {
+  try {
+    renameSync(from, to);
+  } catch (err) {
+    if (err?.code !== "ENOENT") throw err;
   }
 }
 
@@ -102,45 +110,54 @@ export function initFileLogging(dir, opts) {
   if (opts && opts.maxBytes > 0) MAX_BYTES = opts.maxBytes;
   if (patched && fd !== null) return currentPath;
 
-  const logDir = join(dir, "logs");
-  const path = join(logDir, "daemon.log");
-  try {
-    mkdirSync(logDir, { recursive: true });
-    // Rotate before opening so a run's own crash still lands in the fresh file, and the rotated
-    // copies hold the previous run(s).
-    try {
-      if (statSync(path).size > MAX_BYTES) rotateLog(path);
-    } catch {
-      /* no existing log yet, or stat raced — just open fresh */
-    }
-    fd = openSync(path, "a");
-    currentPath = path;
-    try {
-      written = statSync(path).size;
-    } catch {
-      written = 0;
-    }
-  } catch {
-    fd = null;
-    currentPath = null;
-    return null; // logging dir unwritable — leave the console as-is
-  }
-
-  if (!patched) {
-    for (const m of CONSOLE_METHODS) {
-      const orig = console[m].bind(console);
-      original[m] = orig;
-      console[m] = (...args) => {
-        orig(...args); // real stdout/stderr, unchanged
-        writeLine(LEVEL[m], formatArgs(args));
-      };
-    }
-    patched = true;
-  }
+  const path = join(dir, "logs", "daemon.log");
+  if (!openLogFile(path)) return null; // logging dir unwritable — leave the console as-is
+  if (!patched) patchConsole();
 
   // Boot marker so runs are visually separated across restarts sharing one file.
   writeLine("INFO ", `── daemon process ${process.pid} starting (${process.argv.slice(1).join(" ")}) ──`);
   return currentPath;
+}
+
+/** Open `path` for appending, rolling a previous log that is already too big first. False when the
+ *  directory cannot be made or the file cannot be opened. */
+function openLogFile(path) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    // Rotate before opening so a run's own crash still lands in the fresh file, and the rotated
+    // copies hold the previous run(s).
+    if (sizeOf(path) > MAX_BYTES) rotateLog(path);
+    fd = openSync(path, "a");
+    currentPath = path;
+    written = sizeOf(path);
+    return true;
+  } catch {
+    fd = null;
+    currentPath = null;
+    return false;
+  }
+}
+
+/** The size of `path`, or 0 when it cannot be read: no log yet, or the stat raced. */
+function sizeOf(path) {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
+/** Route every console.* method through the log file as well as the real console. */
+function patchConsole() {
+  for (const m of CONSOLE_METHODS) {
+    const orig = console[m].bind(console);
+    original[m] = orig;
+    console[m] = (...args) => {
+      orig(...args); // real stdout/stderr, unchanged
+      writeLine(LEVEL[m], formatArgs(args));
+    };
+  }
+  patched = true;
 }
 
 /** The current log-file path, or null if file logging isn't active. */

@@ -110,17 +110,21 @@ function trayIo(deps) {
 async function writeTrayToolkit(dir, embedded, deps, io, wrote) {
   const { joinPath, dirOf, baseOf, exists, sizeOf, readBytes, readText, writeBytes, writeText } = io
   io.mkdir(dir)
-  for (const name of [trayHostExeFor(deps.configFile), deps.iconFile]) {
-    const from = embedded[name]
-    if (!from) continue
-    const to = joinPath(dir, name)
-    const bytes = await readBytes(from)
-    // Same version, same size: already placed by an earlier run. Rewriting risks the lock on a
-    // host that is running right now, for no gain.
-    if (exists(to) && sizeOf(to) === bytes.byteLength) continue
-    await writeBytes(to, bytes)
-    wrote.push(name)
+  const names = [trayHostExeFor(deps.configFile), deps.iconFile].filter((name) => embedded[name])
+  // Both sources are read at once; the writes below stay in order, so `wrote` lists them as before.
+  const bodies = await Promise.all(names.map((name) => readBytes(embedded[name])))
+  // Same version, same size: already placed by an earlier run. Rewriting risks the lock on a
+  // host that is running right now, for no gain.
+  const pending = names
+    .map((name, i) => ({ name, to: joinPath(dir, name), bytes: bodies[i] }))
+    .filter(({ to, bytes }) => !(exists(to) && sizeOf(to) === bytes.byteLength))
+  const results = await Promise.allSettled(pending.map(({ to, bytes }) => writeBytes(to, bytes)))
+  // `wrote` keeps the names in order and lists every one that landed; the first failure is thrown after them.
+  for (const [i, result] of results.entries()) {
+    if (result.status === 'fulfilled') wrote.push(pending[i].name)
   }
+  const failed = results.find((result) => result.status === 'rejected')
+  if (failed) throw failed.reason
   // The config is rewritten whenever its content would differ, because a single-file exe MOVES
   // between runs - it lives wherever it was dropped - and appRoot has to follow it.
   const configSource = embedded[deps.configFile]

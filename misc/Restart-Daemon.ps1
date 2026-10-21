@@ -246,11 +246,11 @@ function Get-StaleTargets {
   # even if the daemon somehow isn't running under a bun/node image.
   if ($PointerPort) { $probe.Add($PointerPort) }
   # The bun/node prefilter keeps the sweep cheap (a 2s probe per listening port would crawl).
+  $daemonPids = @(Get-Process -Name @('bun', 'node') -ErrorAction SilentlyContinue).Id
   foreach ($conn in (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue)) {
-    $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
     # A dead OwningProcess is a zombie socket (a killed daemon's port not yet reaped); it answers
     # nothing and can't be killed, so it drops out naturally.
-    if ($proc -and $proc.ProcessName -in @('bun', 'node')) { $probe.Add([int]$conn.LocalPort) }
+    if ($conn.OwningProcess -in $daemonPids) { $probe.Add([int]$conn.LocalPort) }
   }
 
   $targets = @{}
