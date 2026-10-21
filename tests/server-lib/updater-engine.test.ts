@@ -631,6 +631,148 @@ test("cooldownDays adopts the newest aged commit and holds back a younger tip", 
   expect(after.reason).toContain("7-day update cooldown");
 }, REAL_GIT_TEST_MS); // real git+install+build - see the note on the tests above.
 
+// ── Steps and the restart, by what the update changed ───────────────────────────────────────────
+// An app whose install and build read only part of its checkout passes `steps`, and a restart is asked for only the paths
+// `restartWhen` names. The paths are git's own, so a commit that moves HEAD without touching them runs and restarts nothing
+// (2026-10-21: 44 of 59 daemon relaunches in 18 h changed no file the daemon loads).
+
+/** Lands `body` at `rel` in the remote as one commit. */
+async function landFile(remote: string, rel: string, body: string): Promise<void> {
+  mkdirSync(join(remote, rel, ".."), { recursive: true });
+  writeFileSync(join(remote, rel), body);
+  await $`git -C ${remote} -c user.name=S -c user.email=s@s.io add -A`.quiet();
+  await $`git -C ${remote} -c user.name=S -c user.email=s@s.io commit -q -m ${rel}`.quiet();
+}
+
+/** A `bun -e` step that appends the base name of the folder it runs in, so a test can see where a step ran. */
+function cwdCmd(logPath: string): string[] {
+  const script = `require("fs").appendFileSync(${JSON.stringify(logPath)}, require("path").basename(process.cwd()) + "\\n")`;
+  return [process.execPath, "-e", script];
+}
+
+test("a README-only update runs no install and restarts nothing: the steps and the restart answer by the paths changed", async () => {
+  const remote = await remoteRepo();
+  const local = await cloneRepo(remote);
+  await landFile(remote, "NOTES.md", "notes\n");
+  const log = join(scratchDir("ue-scratch-"), "steps.log");
+  const updater = createUpdater({
+    appRoot: local,
+    serviceName: "testsvc",
+    appLabel: "TestSvc",
+    updateRepoEnvVar: "UE_TEST_UPDATE_REPO_UNUSED",
+    steps: [
+      { cmd: loggingCmd(log, "install"), when: (changed) => changed.includes("package.json") },
+      { cmd: loggingCmd(log, "build") },
+    ],
+    restartWhen: (changed) => changed.some((p) => p.startsWith("src/")),
+  });
+
+  const result = await updater.applyUpdate();
+  expect(result.ok).toBe(true);
+  expect(result.restartRequired).toBe(false);
+  expect(result.message).toBe("TestSvc was updated. The code it runs did not change, so no restart is needed.");
+  expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["build"]);
+  expect(readFileSync(join(local, "NOTES.md"), "utf8").replace(/\r\n/g, "\n")).toBe("notes\n");
+}, REAL_GIT_TEST_MS);
+
+test("a file moved out of a daemon path counts as changed there, so the restart it needs is not missed", async () => {
+  const remote = await remoteRepo();
+  await landFile(remote, "src/a.ts", "export const a = 1;\n");
+  const local = await cloneRepo(remote);
+  mkdirSync(join(remote, "lib"));
+  await $`git -C ${remote} mv src/a.ts lib/a.ts`.quiet();
+  await $`git -C ${remote} -c user.name=S -c user.email=s@s.io commit -q -m moved`.quiet();
+  const seen: string[] = [];
+  const updater = createUpdater({
+    appRoot: local,
+    serviceName: "testsvc",
+    appLabel: "TestSvc",
+    updateRepoEnvVar: "UE_TEST_UPDATE_REPO_UNUSED",
+    steps: [],
+    restartWhen: (changed) => {
+      seen.push(...changed);
+      return changed.some((p) => p.startsWith("src/"));
+    },
+  });
+
+  const result = await updater.applyUpdate();
+  expect(seen.sort()).toEqual(["lib/a.ts", "src/a.ts"]);
+  expect(result.restartRequired).toBe(true);
+  expect(existsSync(join(local, "lib", "a.ts"))).toBe(true);
+}, REAL_GIT_TEST_MS);
+
+test("a commit that moves HEAD without changing any path runs no step and restarts nothing", async () => {
+  const remote = await remoteRepo();
+  const local = await cloneRepo(remote);
+  await $`git -C ${remote} -c user.name=S -c user.email=s@s.io commit -q --allow-empty -m empty`.quiet();
+  const log = join(scratchDir("ue-scratch-"), "steps.log");
+  const updater = createUpdater({
+    appRoot: local,
+    serviceName: "testsvc",
+    appLabel: "TestSvc",
+    updateRepoEnvVar: "UE_TEST_UPDATE_REPO_UNUSED",
+    steps: [
+      { cmd: loggingCmd(log, "install"), when: (changed) => changed.includes("package.json") },
+      { cmd: loggingCmd(log, "build"), when: (changed) => changed.length > 0 },
+    ],
+  });
+
+  const result = await updater.applyUpdate();
+  expect(result.ok).toBe(true);
+  expect(result.restartRequired).toBe(false);
+  expect(existsSync(log)).toBe(false);
+  expect((await $`git -C ${local} rev-parse HEAD`.text()).trim()).toBe((await $`git -C ${remote} rev-parse HEAD`.text()).trim());
+}, REAL_GIT_TEST_MS);
+
+test("a step runs in its own folder under the checkout", async () => {
+  const remote = await remoteRepo();
+  const local = await cloneRepo(remote);
+  await landFile(remote, "NOTES.md", "notes\n");
+  mkdirSync(join(local, "sub"));
+  const log = join(scratchDir("ue-scratch-"), "steps.log");
+  const updater = createUpdater({
+    appRoot: local,
+    serviceName: "testsvc",
+    appLabel: "TestSvc",
+    updateRepoEnvVar: "UE_TEST_UPDATE_REPO_UNUSED",
+    steps: [
+      { cmd: loggingCmd(log, "install"), when: (changed) => changed.includes("package.json") },
+      { cmd: cwdCmd(log), dir: "sub" },
+    ],
+  });
+
+  expect((await updater.applyUpdate()).ok).toBe(true);
+  expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["sub"]);
+}, REAL_GIT_TEST_MS);
+
+test("a failed step rolls back, and the rollback reruns only the steps this update made due", async () => {
+  const remote = await remoteRepo();
+  const local = await cloneRepo(remote);
+  await landFile(remote, "NOTES.md", "notes\n");
+  mkdirSync(join(local, "sub"));
+  const scratch = scratchDir("ue-scratch-");
+  const log = join(scratch, "steps.log");
+  const updater = createUpdater({
+    appRoot: local,
+    serviceName: "testsvc",
+    appLabel: "TestSvc",
+    updateRepoEnvVar: "UE_TEST_UPDATE_REPO_UNUSED",
+    steps: [
+      { cmd: loggingCmd(log, "install"), when: (changed) => changed.includes("package.json") },
+      // Fails on its first call only: the forward pass fails, and the rollback's rebuild succeeds.
+      { cmd: failsOnCallsCmd(log, "build", join(scratch, "build.count"), [1]), dir: "sub" },
+    ],
+  });
+
+  const message = await updater.applyUpdate().then(
+    () => "applyUpdate unexpectedly succeeded",
+    (e: unknown) => (e instanceof Error ? e.message : String(e)),
+  );
+  expect(message).toContain("boom; rolled back to the previous version");
+  // No install: the update did not make it due, so the rollback does not run it either.
+  expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["build", "build"]);
+}, REAL_GIT_TEST_MS);
+
 // Windows locks a running program's image against overwrite, so a fast-forward that replaces it
 // fails with "unable to unlink old" partway through the checkout. It can still rename that file,
 // and the process keeps running from the renamed copy, so the engine moves it aside before advancing.

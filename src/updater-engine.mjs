@@ -8,11 +8,18 @@
  *   serviceName       the `service` field on UpdateStatus (e.g. "repoyeti")
  *   appLabel          display name used in the apply messages (e.g. "RepoYeti")
  *   updateRepoEnvVar  env var that overrides the update remote (e.g. REPOYETI_UPDATE_REPO)
- *   installCmd        install step, e.g. ["bun", "install"]
- *   buildCmd          build step, e.g. ["bun", "run", "--cwd", "web", "build"]
+ *   installCmd        install step, e.g. ["bun", "install"] (unused when steps is given)
+ *   buildCmd          build step, e.g. ["bun", "run", "--cwd", "web", "build"] (unused when steps is given)
  *   cooldownDays      optional; when > 0, only commits at least this many days old are adopted
  *   run               optional; runs each command instead of the engine's own spawn (an app whose
  *                     daemon serves every route on one thread passes an off-thread runner)
+ *   steps             optional; instead of installCmd and buildCmd, the install and build steps in order, each
+ *                     { cmd, dir?, when? }: `dir` is a folder under appRoot (default: the root), and `when(changed)` says
+ *                     whether the step is due for the paths the update changed (a step with no `when` always is). Only the
+ *                     due steps run, and a rollback reruns those same ones (2026-10-21: an app whose install and build read
+ *                     only part of its checkout does not run them for a change they do not read).
+ *   restartWhen       optional; (changed) => boolean, whether the update needs the app restarted. Default: any path changed.
+ *                     The paths are git's own (`git diff --name-only`, renames split): a file moved out of a path counts.
  *
  * runtime-agnostic (Bun + Node): node:child_process spawn runs in both. Part of the
  * shared kit, keep it app-agnostic.
@@ -28,10 +35,19 @@ const BUILD_TIMEOUT_MS = 240_000;
 
 const DAY_SECONDS = 86_400;
 
-export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar, installCmd, buildCmd, cooldownDays = 0, run = null }) {
+export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar, installCmd, buildCmd, cooldownDays = 0, run = null, steps = null, restartWhen = null }) {
   // Normalized once so a string or negative option is never echoed back in status or reasons.
   const cooldownDaysN = Math.max(0, Number(cooldownDays) || 0);
   const cooldownSeconds = cooldownDaysN * DAY_SECONDS;
+  // The install and build steps: the app's `steps`, or its two commands as steps that always run. `dir` is shown in the
+  // transcript; `cwd` is where the step runs.
+  const plan = (steps ?? [{ cmd: installCmd }, { cmd: buildCmd }]).map((step) => ({
+    cmd: step.cmd,
+    when: step.when ?? null,
+    dir: step.dir ?? "",
+    cwd: step.dir ? join(appRoot, step.dir) : appRoot,
+  }));
+  const anyChange = (paths) => paths.length > 0;
 
   function packageVersion() {
     try {
@@ -48,8 +64,8 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
   // deprecation fires) and retry once through a shell only when the raw spawn ENOENTs on Windows,
   // which is exactly the `.cmd`-shim case. Every arg here is a fixed literal or a git URL (no
   // spaces or shell metacharacters), so the shell's arg concatenation is safe.
-  function runCommand(args, timeoutMs) {
-    if (run) return runThrough(args, timeoutMs);
+  function runCommand(args, timeoutMs, cwd = appRoot) {
+    if (run) return runThrough(args, timeoutMs, cwd);
     return new Promise((resolve) => {
       let settled = false;
       const finish = (r) => {
@@ -60,7 +76,7 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
       };
       const attempt = (useShell) => {
         const child = spawn(args[0], args.slice(1), {
-          cwd: appRoot,
+          cwd,
           windowsHide: true,
           shell: useShell,
           env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
@@ -104,9 +120,9 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
 
   // The app's own runner (`run`): the same argv, root, environment and deadline, its answer read
   // the way the spawn above reads a child. One that throws is a failed step, never an unhandled one.
-  async function runThrough(args, timeoutMs) {
+  async function runThrough(args, timeoutMs, cwd) {
     try {
-      const r = await run(args, { cwd: appRoot, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeoutMs });
+      const r = await run(args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeoutMs });
       return { ok: r.code === 0 && !r.timedOut, code: r.code, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut };
     } catch (err) {
       return { ok: false, code: null, stdout: "", stderr: err?.message ?? String(err), timedOut: false };
@@ -451,10 +467,10 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     return status;
   }
 
-  function commandSummary(args, result) {
+  function commandSummary(args, result, where = "") {
     const text = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n").trim();
     const suffix = result.timedOut ? "timed out" : result.ok ? "ok" : `exit ${result.code ?? "unknown"}`;
-    return `$ ${args.join(" ")}\n${text || suffix}`;
+    return `$ ${args.join(" ")}${where ? ` (in ${where})` : ""}\n${text || suffix}`;
   }
   /** Lines that name a failure, so the excerpt below can prefer them over surrounding noise. */
   const ERRORISH =
@@ -488,9 +504,22 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     return msg.length > STEP_ERROR_CHARS ? `${msg.slice(0, STEP_ERROR_CHARS - 1)}…` : msg;
   }
 
-  async function runStep(args, timeoutMs, output) {
-    const result = await runCommand(args, timeoutMs);
-    output.push(commandSummary(args, result));
+  /** The paths the advance changed, from `from` to HEAD. Renames are split (--no-renames), so a path moved away counts as
+   *  changed there too. Null when git cannot say: every step is then due, and the app restarts. */
+  async function changedPaths(from) {
+    if (!from) return null;
+    const diff = await git(["diff", "--name-only", "--no-renames", "-z", from, "HEAD"], CHECK_TIMEOUT_MS);
+    return diff.ok ? diff.stdout.split("\0").filter(Boolean) : null;
+  }
+
+  /** The steps the update makes due: each one whose `when` holds for `changed`, and all of them when it is unknown. */
+  function dueSteps(changed) {
+    return plan.filter((step) => !step.when || changed === null || step.when(changed));
+  }
+
+  async function runStep(args, timeoutMs, output, cwd = appRoot, where = "") {
+    const result = await runCommand(args, timeoutMs, cwd);
+    output.push(commandSummary(args, result, where));
     if (!result.ok) throw new Error(stepFailureMessage(args, result));
   }
 
@@ -535,7 +564,7 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     }
   }
 
-  async function resetAndRebuild(currentCommit, output, landed = null, target = null) {
+  async function resetAndRebuild(currentCommit, output, landed = null, target = null, due = []) {
     const resetArgs = ["git", "reset", "--hard", currentCommit];
     const reset = await runCommand(resetArgs, APPLY_TIMEOUT_MS);
     output.push(commandSummary(resetArgs, reset));
@@ -543,9 +572,10 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     if (reset.ok) {
       if (landed?.length && target) await restoreLandedEdits(landed, target, output);
       restored = true;
-      for (const cmd of [installCmd, buildCmd]) {
-        const r = await runCommand(cmd, BUILD_TIMEOUT_MS);
-        output.push(commandSummary(cmd, r));
+      // The steps the update made due: the reset puts back the same paths, so the same installs and builds are stale.
+      for (const step of due) {
+        const r = await runCommand(step.cmd, BUILD_TIMEOUT_MS, step.cwd);
+        output.push(commandSummary(step.cmd, r, step.dir));
         if (!r.ok) {
           restored = false;
           break;
@@ -577,7 +607,7 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
   // cannot be inspected, or the stash fails, the reset does NOT run - a half-updated
   // checkout is recoverable by hand; a deleted edit is not. Edits the update had taken as its
   // own (`landed`, already the target's) are put back unstaged after the reset. Always throws.
-  async function rollbackAfterFailedUpdate(err, before, output, landed = null) {
+  async function rollbackAfterFailedUpdate(err, before, output, landed = null, due = []) {
     const msg = err instanceof Error ? err.message : String(err);
     const statusArgs = ["git", "status", "--porcelain"];
     const statusNow = await runCommand(statusArgs, CHECK_TIMEOUT_MS);
@@ -589,7 +619,7 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     }
     const changedDuring = statusNow.stdout.split(/\r?\n/).filter(Boolean);
     const stashName = await stashChangedFiles(changedDuring, msg, output);
-    const { reset, restored } = await resetAndRebuild(before.currentCommit, output, landed, before.remoteCommit);
+    const { reset, restored } = await resetAndRebuild(before.currentCommit, output, landed, before.remoteCommit, due);
     throw new Error(buildRollbackMessage(msg, reset, restored, stashName, changedDuring.length));
   }
 
@@ -762,17 +792,23 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
       }
       throw err;
     }
+    // What the advance changed decides which installs and builds are due, and whether the app restarts.
+    const changed = await changedPaths(before.currentCommit);
+    const due = dueSteps(changed);
     try {
-      await runStep(installCmd, BUILD_TIMEOUT_MS, output);
-      await runStep(buildCmd, BUILD_TIMEOUT_MS, output);
+      for (const step of due) await runStep(step.cmd, BUILD_TIMEOUT_MS, output, step.cwd, step.dir);
     } catch (err) {
-      await rollbackAfterFailedUpdate(err, before, output, landed);
+      await rollbackAfterFailedUpdate(err, before, output, landed, due);
     }
 
+    // An unknown change set restarts: the app's own code may be among what changed.
+    const restartRequired = changed === null ? true : await (restartWhen ?? anyChange)(changed);
     return {
       ok: true,
-      message: `${appLabel} was updated. Restart the daemon to run the new code.`,
-      restartRequired: true,
+      message: restartRequired
+        ? `${appLabel} was updated. Restart the daemon to run the new code.`
+        : `${appLabel} was updated. The code it runs did not change, so no restart is needed.`,
+      restartRequired,
       status: await checkForUpdate(),
       output,
     };

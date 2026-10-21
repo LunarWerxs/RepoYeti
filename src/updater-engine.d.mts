@@ -50,6 +50,13 @@ export interface UpdateApplyError extends Error {
   output: string[];
 }
 
+/** One install or build step: `cmd` runs in `dir` (a folder under the checkout root; default the root) when `when` holds. */
+export interface UpdaterStep {
+  cmd: string[];
+  dir?: string;
+  when?: (changed: string[]) => boolean;
+}
+
 /** What an UpdaterOptions `run` answers for one command. */
 export interface UpdaterRunResult {
   /** The exit code; null when the command could not be started or did not exit on its own. */
@@ -69,10 +76,15 @@ export interface UpdaterOptions {
   appLabel: string;
   /** Env var whose value overrides the update remote (URL or remote name). */
   updateRepoEnvVar: string;
-  /** Install step, e.g. ["bun", "install"]. */
-  installCmd: string[];
-  /** Build step, e.g. ["bun", "run", "--cwd", "web", "build"]. */
-  buildCmd: string[];
+  /** Install step, e.g. ["bun", "install"]. Unused when `steps` is given. */
+  installCmd?: string[];
+  /** Build step, e.g. ["bun", "run", "--cwd", "web", "build"]. Unused when `steps` is given. */
+  buildCmd?: string[];
+  /** The install and build steps in order, in place of installCmd and buildCmd. Only the steps `when` makes due for the
+   *  paths the update changed run, forward and in a rollback. */
+  steps?: UpdaterStep[];
+  /** Whether the update needs the app restarted, given the paths it changed (renames split). Default: any path changed. */
+  restartWhen?: (changed: string[]) => boolean | Promise<boolean>;
   /** Adopt only commits at least this many days old (committer date, first-parent history of the
    *  remote branch), so a bad push can be caught before installs run it. Default 0: off, the tip is
    *  adopted as soon as it is seen. Not a defence against a compromised push: the committer date is
