@@ -77,10 +77,10 @@ pub struct Config {
     /// Additionally append `?window-size=WxH`, for apps whose web build applies it via resizeTo.
     pub portable_window_size_hint: bool,
     /// What Open runs instead of opening the daemon's URL, for an app whose window is its own
-    /// native host rather than a browser page (AgentHydra opens Hydra Desk 2 this way).
+    /// native host rather than a browser page (AgentHydra opens its window this way).
     pub open_command: Option<OpenCommand>,
     /// What Quit (and the web UI's "Shut down") also starts, for an app whose window outlives the
-    /// daemon: AgentHydra closes its Desk window and stops Desk's server this way. Started, never
+    /// daemon: AgentHydra closes its window and stops the window server this way. Started, never
     /// waited on, so Quit stays as quick as it was. Same shape as `openCommand`.
     pub quit_command: Option<OpenCommand>,
 

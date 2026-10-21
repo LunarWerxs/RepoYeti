@@ -85,6 +85,10 @@ export interface UpdaterOptions {
   steps?: UpdaterStep[];
   /** Whether the update needs the app restarted, given the paths it changed (renames split). Default: any path changed. */
   restartWhen?: (changed: string[]) => boolean | Promise<boolean>;
+  /** Folder outside the work tree (same volume) that a running program the update replaces is moved into
+   *  (Windows), so `git status` stays clean; a program that cannot be moved there refuses the update.
+   *  Default null: the copy is left beside the program, hidden by the clone's local git exclude. */
+  asideDir?: string | null;
   /** Adopt only commits at least this many days old (committer date, first-parent history of the
    *  remote branch), so a bad push can be caught before installs run it. Default 0: off, the tip is
    *  adopted as soon as it is seen. Not a defence against a compromised push: the committer date is

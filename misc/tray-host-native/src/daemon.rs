@@ -246,6 +246,22 @@ pub fn port_accepts(cfg: &Config, timeout: Duration) -> bool {
     })
 }
 
+/// The ports a replacement daemon would collide on: the configured one and the one the runtime
+/// pointer names.
+pub fn revive_ports(cfg: &Config) -> Vec<u16> {
+    let mut ports = Vec::new();
+    let pointed = std::fs::read_to_string(&cfg.info_file)
+        .ok()
+        .and_then(|s| crate::json::parse(&s))
+        .and_then(|v| v.str_at("url").and_then(port_of));
+    for p in [Some(cfg.port), pointed].into_iter().flatten() {
+        if p > 0 && !ports.contains(&p) {
+            ports.push(p);
+        }
+    }
+    ports
+}
+
 /// Launch the daemon.
 ///
 /// Via `cmd.exe /c` so a start command carrying shell syntax keeps working, matching Start-Daemon.

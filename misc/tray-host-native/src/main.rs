@@ -730,6 +730,26 @@ fn health_tick() {
     }
 }
 
+/// Kill whatever listens on the daemon's port until nothing does (a few rounds), returning the pids
+/// still listening afterwards. A revive may spawn only when this is empty.
+fn reap_port_owners(
+    mut owners: impl FnMut() -> Vec<u32>,
+    mut kill: impl FnMut(u32),
+    mut settle: impl FnMut(),
+) -> Vec<u32> {
+    for _ in 0..6 {
+        let pids = owners();
+        if pids.is_empty() {
+            return pids;
+        }
+        for pid in pids {
+            kill(pid);
+        }
+        settle();
+    }
+    owners()
+}
+
 fn revive(a: &App) {
     a.started_by_us.store(true, Ordering::Relaxed);
 
@@ -749,6 +769,30 @@ fn revive(a: &App) {
     if previous > 0 {
         daemon::taskkill(previous);
     }
+
+    // AgentHydra, 2026-10-21: a daemon frozen 222 s was not the wrapper's child any more, the kill
+    // above missed it, and the spawn below started a second daemon beside it. Whatever still owns
+    // the daemon's port is the old daemon: kill it, and spawn only once the port is free.
+    let ports = daemon::revive_ports(&a.cfg);
+    let left = reap_port_owners(
+        || ports.iter().flat_map(|p| daemon::port_pids(*p)).collect(),
+        daemon::taskkill,
+        || std::thread::sleep(Duration::from_millis(500)),
+    );
+    if !left.is_empty() {
+        daemon::tray_log(
+            &a.cfg,
+            &format!(
+                "watchdog: NOT reviving: pid {:?} still holds the daemon's port after a kill, so a second daemon would run beside it (will try again after the grace)",
+                left
+            ),
+        );
+        return;
+    }
+    daemon::tray_log(
+        &a.cfg,
+        "watchdog: the old daemon's port is free, spawning the replacement",
+    );
 
     daemon::spawn(&a.cfg, &a.token, "watchdog revive");
     balloon(
@@ -790,7 +834,7 @@ fn quit_app(hwnd: HWND) {
     }
     a.cancel.store(true, Ordering::Relaxed);
 
-    // What else goes with the app (AgentHydra: its Desk window and Desk's server). First, so it runs
+    // What else goes with the app (AgentHydra: its window and the window server). First, so it runs
     // beside the daemon's stop instead of after it, and not waited on: it is its own process and
     // outlives this one.
     if let Some(q) = a.cfg.quit_command.as_ref().filter(|q| q.ready()) {
@@ -1306,6 +1350,24 @@ unsafe fn remove_tray_icon() {
 #[cfg(test)]
 mod watchdog_tests {
     use super::*;
+
+    /// AgentHydra, 2026-10-21: a revive spawned beside a frozen daemon. A pid that survives every
+    /// kill must keep the revive from spawning; one that dies lets it.
+    #[test]
+    fn a_revive_waits_while_the_old_daemon_still_holds_the_port() {
+        let mut killed = Vec::new();
+        let left = reap_port_owners(|| vec![4242], |p| killed.push(p), || {});
+        assert_eq!(left, vec![4242]);
+        assert!(killed.len() >= 2, "it keeps trying to kill it");
+
+        let alive = std::cell::Cell::new(true);
+        let left = reap_port_owners(
+            || if alive.get() { vec![7] } else { vec![] },
+            |_| alive.set(false),
+            || {},
+        );
+        assert!(left.is_empty());
+    }
 
     const TICK: Duration = Duration::from_millis(HEALTH_INTERVAL_MS as u64);
 

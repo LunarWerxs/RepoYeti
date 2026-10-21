@@ -26,7 +26,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 const CHECK_TIMEOUT_MS = 30_000;
@@ -35,7 +35,7 @@ const BUILD_TIMEOUT_MS = 240_000;
 
 const DAY_SECONDS = 86_400;
 
-export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar, installCmd, buildCmd, cooldownDays = 0, run = null, steps = null, restartWhen = null }) {
+export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar, installCmd, buildCmd, cooldownDays = 0, run = null, steps = null, restartWhen = null, asideDir = null }) {
   // Normalized once so a string or negative option is never echoed back in status or reasons.
   const cooldownDaysN = Math.max(0, Number(cooldownDays) || 0);
   const cooldownSeconds = cooldownDaysN * DAY_SECONDS;
@@ -648,7 +648,19 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
 
   // A copy moved aside while its program was still running cannot be deleted by the apply that made it.
   // Try to delete every such leftover now; one that is still running is retried by a later apply.
+  function sweepAsideDir() {
+    if (!asideDir || !existsSync(asideDir)) return;
+    for (const entry of readdirSync(asideDir)) {
+      try {
+        unlinkSync(join(asideDir, entry));
+      } catch {
+        /* still running: a later apply retries */
+      }
+    }
+  }
+
   async function removeLeftoverCopies() {
+    sweepAsideDir();
     const listed = await git(["ls-files", "-z"]);
     if (!listed.ok) return;
     for (const path of listed.stdout.split("\0")) {
@@ -673,9 +685,10 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     }
   }
 
-  // Windows only, run before the advance. `target` is the commit the fast-forward lands on. A move that
-  // fails is recorded and the advance runs as it does today; a checkout that fails after a move is put
-  // back before the failure is thrown, so the path is never left missing.
+  // Windows only, run before the advance. `target` is the commit the fast-forward lands on. Without
+  // `asideDir` a move that fails is recorded and the advance runs as it does today; with one it refuses the
+  // update. A checkout or copy-back that fails after a move is put back before the failure is thrown, so
+  // the path is never left missing.
   async function moveAsideRunningPrograms(target, output) {
     await removeLeftoverCopies();
     const diffArgs = ["git", "diff", "--name-only", "-z", "--no-renames", "--diff-filter=MD", "HEAD", target];
@@ -686,7 +699,9 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     }
     const programs = diff.stdout.split("\0").filter((path) => PROGRAM_FILE.test(path) && existsSync(join(appRoot, path)));
     if (!programs.length) return;
-    if (!(await excludeReplacedCopies().catch(() => false))) {
+    // With an aside folder (outside the work tree, same volume) the move never shows in `git status`; without
+    // one the copy sits beside the program and git's local exclude hides it.
+    if (!asideDir && !(await excludeReplacedCopies().catch(() => false))) {
       output.push("could not exclude the moved-aside program copies from git; running programs were not moved aside");
       return;
     }
@@ -694,14 +709,31 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
     for (const path of programs) {
       const full = join(appRoot, path);
-      const copy = `${full}${REPLACED_COPY}${stamp}`;
+      const flat = path.replace(/[\\/]/g, "_");
+      const copy = asideDir ? join(asideDir, `${flat}${REPLACED_COPY}${stamp}`) : `${full}${REPLACED_COPY}${stamp}`;
       try {
+        if (asideDir) mkdirSync(asideDir, { recursive: true });
         renameSync(full, copy);
       } catch (err) {
-        output.push(`could not move ${path} aside: ${err instanceof Error ? err.message : String(err)}`);
+        const why = err instanceof Error ? err.message : String(err);
+        if (asideDir) throw new Error(`could not move ${path} aside, so nothing was updated: ${why}`);
+        output.push(`could not move ${path} aside: ${why}`);
         continue;
       }
-      output.push(`moved ${path} aside to ${basename(copy)}`);
+      output.push(`moved ${path} aside to ${asideDir ? copy : basename(copy)}`);
+      if (asideDir) {
+        try {
+          copyFileSync(copy, full);
+        } catch (err) {
+          try {
+            renameSync(copy, full);
+          } catch {
+            /* reported below with where the bytes are */
+          }
+          throw new Error(`could not put ${path} back after moving it aside, so nothing was updated: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        continue;
+      }
       const checkoutArgs = ["git", "checkout", "HEAD", "--", path];
       const checkout = await runCommand(checkoutArgs, CHECK_TIMEOUT_MS);
       output.push(commandSummary(checkoutArgs, checkout));
