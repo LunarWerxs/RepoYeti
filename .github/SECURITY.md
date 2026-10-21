@@ -14,6 +14,9 @@ MCP tools, a sign-in or token leaking, a repository or file exposed beyond your 
 tunnel reaching more than it should, or anything else that looks exploitable) **please report it
 privately** rather than opening a public issue, so it can be fixed before it's disclosed:
 
+- **Preferred:** GitHub's private
+  **[Report a vulnerability](https://github.com/LunarWerxs/RepoYeti/security/advisories/new)**
+  (the repository's *Security, Advisories* tab), or
 - open a normal issue **asking us to contact you** (don't include the exploit details there), or
 - message the maintainers on [Discord](https://discord.gg/PsWpeNUzhk) and ask for a private
   channel.
