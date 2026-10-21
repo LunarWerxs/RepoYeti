@@ -838,9 +838,10 @@ test.skipIf(process.platform !== "win32")(
 );
 
 // An app that names `asideDir` gets the running program's old copy moved there, outside the work
-// tree, instead of beside the program; the next apply deletes copies whose program has exited.
+// tree, instead of beside the program; the next apply deletes copies whose program has exited, and
+// nothing else in the folder.
 test.skipIf(process.platform !== "win32")(
-  "with asideDir, a running program's old copy goes to that folder, not beside it, and the next apply sweeps it",
+  "with asideDir, a running program's old copy goes to that folder, not beside it, and the next apply sweeps only its copies",
   async () => {
     const { remote, local } = await programRepo();
     const aside = join(scratchDir("ue-aside-"), "update-aside");
@@ -854,14 +855,15 @@ test.skipIf(process.platform !== "win32")(
       await expectAtRemoteHead(local, remote);
       expect(readdirSync(join(local, "bin"))).toEqual(["tool.exe"]);
       expect(readdirSync(aside)).toHaveLength(1);
-      expect(readdirSync(aside)[0]).toStartWith("bin_tool.exe");
+      expect(readdirSync(aside)[0]).toStartWith("bin%2Ftool.exe.replaced-");
     } finally {
       await program.stop();
     }
 
+    writeFileSync(join(aside, "keep.txt"), "not the updater's\n");
     await advanceRemote(remote, "0.3.0");
     expect((await updater.applyUpdate()).ok).toBe(true);
-    expect(readdirSync(aside)).toEqual([]);
+    expect(readdirSync(aside)).toEqual(["keep.txt"]);
   },
   REAL_GIT_TEST_MS,
 );

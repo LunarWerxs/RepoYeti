@@ -648,9 +648,11 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
 
   // A copy moved aside while its program was still running cannot be deleted by the apply that made it.
   // Try to delete every such leftover now; one that is still running is retried by a later apply.
+  // Only names this updater made: anything else in the folder is not its to delete.
   function sweepAsideDir() {
     if (!asideDir || !existsSync(asideDir)) return;
     for (const entry of readdirSync(asideDir)) {
+      if (!entry.includes(REPLACED_COPY)) continue;
       try {
         unlinkSync(join(asideDir, entry));
       } catch {
@@ -709,7 +711,8 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
     const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
     for (const path of programs) {
       const full = join(appRoot, path);
-      const flat = path.replace(/[\\/]/g, "_");
+      // One flat name per path that no other path can share (`a/b_c.exe` and `a_b/c.exe` stay apart).
+      const flat = encodeURIComponent(path);
       const copy = asideDir ? join(asideDir, `${flat}${REPLACED_COPY}${stamp}`) : `${full}${REPLACED_COPY}${stamp}`;
       try {
         if (asideDir) mkdirSync(asideDir, { recursive: true });
