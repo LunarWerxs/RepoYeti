@@ -6,6 +6,8 @@
  *  - GIT_OPTIONAL_LOCKS=0  → read-only commands (status) never rewrite .git/index,
  *    so our own reads don't trip the .git watcher into a feedback loop.
  *  - GIT_TERMINAL_PROMPT=0 → git never blocks on an interactive credential prompt.
+ *  - GCM_INTERACTIVE=never → Git Credential Manager (the Git for Windows default helper, which an
+ *    unauthenticated op falls through to) answers or fails, never opening its sign-in window.
  *  - BLOCKED_GIT_ENV stripped → no daemon op should ever open an editor, pager or credential
  *    prompt, and nothing ambient may redirect git's config/binaries. simple-git's guard also
  *    HARD-FAILS every call when one of these is present at all (CVE guard), so forwarding the
@@ -14,11 +16,12 @@
  * Phase 3 layers per-operation identity on top via `.env(GIT_SSH_COMMAND=…)` and
  * `git -c user.name/user.email` — never by mutating global or repo config.
  */
-import { simpleGit, type SimpleGit } from "simple-git";
+
 import { existsSync, statSync } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { type SimpleGit, simpleGit } from "simple-git";
 import type { Identity } from "./db.ts";
 import { readTextStreamLimited } from "./process-output.ts";
 
@@ -84,6 +87,7 @@ export function safeGitEnv(): Record<string, string> {
   }
   env.GIT_OPTIONAL_LOCKS = "0";
   env.GIT_TERMINAL_PROMPT = "0";
+  env.GCM_INTERACTIVE = "never";
   return env;
 }
 

@@ -21,6 +21,10 @@ import {
 // without every other test in the suite tripping it.
 process.env.REPOYETI_HOME = mkdtempSync(join(scratchRoot(), "repoyeti-test-home-"));
 process.env.GIT_TERMINAL_PROMPT = "0";
+// GIT_TERMINAL_PROMPT only silences git's own prompt. A fixture remote that answers 401 (the fake
+// Artifacts host) falls through to the machine's Git Credential Manager, which opens a sign-in
+// window on the owner's desktop for every such fetch unless told never to.
+process.env.GCM_INTERACTIVE = "never";
 // Secret operations are process-local in tests. Filesystem isolation alone is insufficient:
 // a route test once minted a relay identity under the default Windows Credential Manager service
 // and silently replaced the live daemon's signing key. No test may touch an OS credential store.

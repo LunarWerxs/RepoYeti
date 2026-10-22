@@ -17,13 +17,17 @@
  * counts and a file you have merely created does not. It is the same view a fresh clone gets, run
  * before the push instead of after it.
  *
+ * The importing files are read from the index too, not from disk. Reading them from the working
+ * tree failed every commit while someone else in the same checkout had an unstaged edit importing a
+ * file they had not added yet, even a commit that touched neither file; the commit ships the staged
+ * text, so that is the text to check.
+ *
  * Deliberately NOT a module resolver: bare package specifiers ("vue", "node:fs", "virtual:…") are
  * skipped outright. Only paths this repo owns are checked, which is the only class of import that
  * can go missing in a commit.
  *
  * Run: `bun run check:imports` (wired into `bun run check` and .githooks/pre-commit).
  */
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { $ } from "bun";
 
@@ -65,16 +69,40 @@ interface Problem {
   specifier: string;
 }
 
-/** Tracked paths, i.e. the INDEX: a staged new file counts, an unstaged one does not — which is
- *  exactly the distinction that makes this check catch what the working-tree gates cannot. */
-async function trackedPaths(): Promise<Set<string>> {
-  const out = await $`git -C ${ROOT} ls-files`.quiet().text();
-  return new Set(
-    out
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean),
-  );
+/** Tracked paths, i.e. the INDEX, each mapped to the blob it holds there: a staged new file counts,
+ *  an unstaged one does not — which is exactly the distinction that makes this check catch what the
+ *  working-tree gates cannot. `-z` keeps unusual path characters unquoted. */
+async function indexEntries(): Promise<Map<string, string>> {
+  const out = await $`git -C ${ROOT} ls-files -s -z`.quiet().text();
+  const entries = new Map<string, string>();
+  for (const record of out.split("\0")) {
+    // "<mode> <blob> <stage>\t<path>"
+    const tab = record.indexOf("\t");
+    if (tab === -1) continue;
+    const blob = record.slice(0, tab).split(" ")[1];
+    if (blob) entries.set(record.slice(tab + 1), blob);
+  }
+  return entries;
+}
+
+/** The staged text of each blob, read in one `git cat-file --batch` round trip. */
+async function blobTexts(blobs: string[]): Promise<Map<string, string>> {
+  const input = Buffer.from(`${[...new Set(blobs)].join("\n")}\n`);
+  const out = Buffer.from(await $`git -C ${ROOT} cat-file --batch < ${input}`.quiet().arrayBuffer());
+  const texts = new Map<string, string>();
+  let at = 0;
+  while (at < out.length) {
+    const eol = out.indexOf(10, at);
+    if (eol === -1) break;
+    // "<blob> <type> <size>\n<content>\n", or "<blob> missing\n"
+    const [blob, type, size] = out.toString("utf8", at, eol).split(" ");
+    at = eol + 1;
+    if (!blob || type === "missing" || size === undefined) continue;
+    const end = at + Number(size);
+    texts.set(blob, out.toString("utf8", at, end));
+    at = end + 1;
+  }
+  return texts;
 }
 
 /** Normalize a POSIX-ish path, resolving `.` and `..` segments. Paths here are always repo-relative
@@ -134,13 +162,7 @@ const SIDE_EFFECT_RE = /^\s*import\s+["']([^"']+)["']/;
 /** Specifiers in `file`, with 1-based line numbers. Comment lines are skipped rather than stripped:
  *  this repo's doc comments quote old module paths (`src/ai.ts:6`, `src/git-actions/commit.ts:62`),
  *  and a gate that fails on prose is a gate people learn to bypass. */
-function specifiersIn(file: string): Array<{ line: number; specifier: string }> {
-  let text: string;
-  try {
-    text = readFileSync(join(ROOT, file), "utf8");
-  } catch {
-    return []; // vanished between listing and reading (a concurrent checkout)
-  }
+function specifiersIn(text: string): Array<{ line: number; specifier: string }> {
   const found: Array<{ line: number; specifier: string }> = [];
   const lines = text.split(/\r?\n/);
   for (const [index, raw] of lines.entries()) {
@@ -160,12 +182,16 @@ function specifiersIn(file: string): Array<{ line: number; specifier: string }> 
   return found;
 }
 
-const tracked = await trackedPaths();
+const index = await indexEntries();
+const tracked = new Set(index.keys());
 const sources = [...tracked].filter((p) => SOURCE_EXT.test(p));
+const texts = await blobTexts(sources.map((p) => index.get(p) ?? ""));
 
 const problems: Problem[] = [];
 for (const file of sources) {
-  for (const { line, specifier } of specifiersIn(file)) {
+  const text = texts.get(index.get(file) ?? "");
+  if (text === undefined) continue;
+  for (const { line, specifier } of specifiersIn(text)) {
     const base = basePathFor(file, specifier);
     if (base === null || resolves(base, tracked)) continue;
     problems.push({ file, line, specifier });
