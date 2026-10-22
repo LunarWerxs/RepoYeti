@@ -37,6 +37,18 @@ pub enum Json {
 /// are a handful of levels deep.
 const MAX_DEPTH: u32 = 1000;
 
+/// The one-byte escapes a string may use; `\u` is handled apart, as it reads four more digits.
+const SIMPLE_ESCAPES: [(u8, char); 8] = [
+    (b'"', '"'),
+    (b'\\', '\\'),
+    (b'/', '/'),
+    (b'b', '\u{8}'),
+    (b'f', '\u{c}'),
+    (b'n', '\n'),
+    (b'r', '\r'),
+    (b't', '\t'),
+];
+
 impl Json {
     pub fn get(&self, key: &str) -> Option<&Json> {
         match self {
@@ -351,10 +363,7 @@ impl Parser<'_> {
                     self.i += 1;
                     return Some(out);
                 }
-                b'\\' => {
-                    self.i += 1;
-                    out.push(self.escape()?);
-                }
+                b'\\' => self.escape_into(&mut out)?,
                 // A raw control character, which JSON does not allow inside a string.
                 _ => return None,
             }
@@ -373,22 +382,24 @@ impl Parser<'_> {
         std::str::from_utf8(&self.s[start..self.i]).ok()
     }
 
+    /// Consumes one escape sequence (its `\` included) and pushes what it stands for onto `out`.
+    fn escape_into(&mut self, out: &mut String) -> Option<()> {
+        self.i += 1;
+        out.push(self.escape()?);
+        Some(())
+    }
+
     /// The character an escape sequence stands for; the `\` is already consumed.
     fn escape(&mut self) -> Option<char> {
         let e = self.peek()?;
         self.i += 1;
-        Some(match e {
-            b'"' => '"',
-            b'\\' => '\\',
-            b'/' => '/',
-            b'b' => '\u{8}',
-            b'f' => '\u{c}',
-            b'n' => '\n',
-            b'r' => '\r',
-            b't' => '\t',
-            b'u' => self.escaped_char()?,
-            _ => return None,
-        })
+        if e == b'u' {
+            return self.escaped_char();
+        }
+        SIMPLE_ESCAPES
+            .iter()
+            .find(|(byte, _)| *byte == e)
+            .map(|&(_, c)| c)
     }
 
     /// The character after `\u`, joining a surrogate pair. A lone surrogate has no Rust `char`;

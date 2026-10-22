@@ -31,7 +31,8 @@ import {
 } from "@/lib/changes-view";
 import { provideFileBrowser } from "@/lib/file-browser";
 import { shortcutsActive } from "@/lib/hotkeys";
-import { releasedHeight, useGripDrag, useGripGlide } from "@/lib/grip-drag";
+import { useGripDrag, useGripGlide } from "@/lib/grip-drag";
+import { releasedHeight } from "@/lib/grip-drag-release";
 import { useTooltipConfig } from "@/lib/tooltip-config";
 import ViewOptions, { type ViewOptionRow } from "@/components/ui/ViewOptions.vue";
 import ChangesTree from "../ChangesTree.vue";

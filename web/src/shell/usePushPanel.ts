@@ -1,4 +1,4 @@
-import { useMediaQuery, useWindowSize } from "@vueuse/core";
+import { tryOnMounted, useEventListener, useMediaQuery } from "@vueuse/core";
 import {
   computed,
   getCurrentScope,
@@ -6,6 +6,7 @@ import {
   onScopeDispose,
   type Ref,
   ref,
+  shallowRef,
   toValue,
   watch,
 } from "vue";
@@ -67,11 +68,23 @@ export function usePushPanel(open: Ref<boolean>, options: UsePushPanelOptions = 
 
   const isDesktop = useMediaQuery(query);
   const side = ref<PushPanelSide>(isDesktop.value ? "right" : "bottom");
+  // The viewport width is read when the panel opens, after mount if it starts open, and on
+  // resize, never at setup: a setup-time read of the layout runs inside the mounting task.
+  // It only matters while the panel is open.
+  const viewportWidth = shallowRef(0);
+  const syncViewport = () => {
+    viewportWidth.value = window.innerWidth;
+  };
   watch(open, (isOpen) => {
-    if (isOpen) side.value = isDesktop.value ? "right" : "bottom";
+    if (!isOpen) return;
+    side.value = isDesktop.value ? "right" : "bottom";
+    syncViewport();
   });
-
-  const { width: viewportWidth } = useWindowSize();
+  tryOnMounted(() => {
+    if (open.value) syncViewport();
+  });
+  // No target: vueuse listens on the default window and does nothing without one.
+  useEventListener(["resize", "orientationchange"], syncViewport, { passive: true });
 
   const shiftPx = computed(() => {
     if (!open.value || side.value !== "right") return 0;

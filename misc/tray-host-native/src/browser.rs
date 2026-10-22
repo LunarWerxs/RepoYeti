@@ -5,7 +5,7 @@
 //! `POST /api/portable-window` make the SAME decision. Diverging here means a window that jumps
 //! size depending on which path opened it.
 
-use crate::config::Config;
+use crate::config::{Config, WindowSize};
 use crate::json::Json;
 use crate::win::{shell_open, shell_open_with};
 use std::path::{Path, PathBuf};
@@ -50,24 +50,32 @@ pub fn remembered_placement(profile_dir: &Path, url: &str) -> Option<Placement> 
     let prefs = std::fs::read_to_string(profile_dir.join("Default").join("Preferences")).ok()?;
     let root = crate::json::parse(&prefs)?;
     let placements = root.get("browser")?.get("app_window_placement")?;
+    rect_placement(saved_node(placements, &key)?)
+}
 
-    let node = match placements.get(&key) {
+/// The object Chromium saved under `key`: the flat key first, then the dotted walk.
+fn saved_node<'a>(placements: &'a Json, key: &str) -> Option<&'a Json> {
+    let node = match placements.get(key) {
         Some(n) => n,
-        None => {
-            let mut cursor = placements;
-            for segment in key.split('.') {
-                if !matches!(cursor, Json::Obj(_)) {
-                    return None;
-                }
-                cursor = cursor.get(segment)?;
-            }
-            cursor
-        }
+        None => dotted_node(placements, key)?,
     };
-    if !matches!(node, Json::Obj(_)) {
-        return None;
-    }
+    matches!(node, Json::Obj(_)).then_some(node)
+}
 
+/// Walks `key` as a dotted path, one object per segment.
+fn dotted_node<'a>(placements: &'a Json, key: &str) -> Option<&'a Json> {
+    let mut cursor = placements;
+    for segment in key.split('.') {
+        if !matches!(cursor, Json::Obj(_)) {
+            return None;
+        }
+        cursor = cursor.get(segment)?;
+    }
+    Some(cursor)
+}
+
+/// The rect a saved object holds, or None when it is not one usable as a size.
+fn rect_placement(node: &Json) -> Option<Placement> {
     // All four edges must be present AND numeric. A missing/string/bool edge is not a rect.
     let left = node.num_at("left")?;
     let top = node.num_at("top")?;
@@ -120,34 +128,31 @@ fn portable_mode(cfg: &Config) -> bool {
 /// rather than opening nothing. An app with `openCommand` opens its own window that way instead,
 /// once the file the command requires is there.
 pub fn open_ui(cfg: &Config, url: &str) {
-    if let Some(open) = cfg.open_command.as_ref().filter(|o| o.ready()) {
-        if crate::win::spawn_in(&open.exe, &open.args_for(url), &open.cwd) {
-            return;
-        }
-    }
-    if !portable_mode(cfg) {
-        shell_open(url);
+    if open_with_command(cfg, url) {
         return;
     }
-    let Some(browser) = chromium_browser() else {
-        shell_open(url);
-        return;
+    let browser = if portable_mode(cfg) {
+        chromium_browser()
+    } else {
+        None
     };
-
-    // Dedicated profile beside runtime.json, so the app window remembers its own geometry instead
-    // of fighting over the default profile. Same convention the daemon's own open path uses.
-    let profile_dir = cfg
-        .info_file
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("portable-profile");
-    let mut args: Vec<String> = Vec::new();
-    if std::fs::create_dir_all(&profile_dir).is_ok() {
-        args.push(format!("--user-data-dir={}", profile_dir.display()));
-        args.push("--no-first-run".into());
-        args.push("--no-default-browser-check".into());
+    match browser {
+        Some(browser) => open_portable(cfg, url, browser),
+        None => shell_open(url),
     }
+}
 
+/// True when the app's own `openCommand` ran and opened the window.
+fn open_with_command(cfg: &Config, url: &str) -> bool {
+    let Some(open) = cfg.open_command.as_ref().filter(|o| o.ready()) else {
+        return false;
+    };
+    crate::win::spawn_in(&open.exe, &open.args_for(url), &open.cwd)
+}
+
+fn open_portable(cfg: &Config, url: &str, browser: PathBuf) {
+    let profile_dir = portable_profile_dir(cfg);
+    let mut args = profile_args(&profile_dir);
     let mut target = url.to_string();
     if let Some(size) = cfg.portable_window_size {
         let placement = remembered_placement(&profile_dir, url);
@@ -159,20 +164,49 @@ pub fn open_ui(cfg: &Config, url: &str) {
             args.push(format!("--window-size={},{}", size.width, size.height));
         }
         if cfg.portable_window_size_hint {
-            let hint = match &placement {
-                None => Some((size.width, size.height)),
-                Some(p) if !p.maximized => Some((p.width, p.height)),
-                // Never hint a maximized window: the page's resizeTo would visibly un-maximize it.
-                Some(_) => None,
-            };
-            if let Some((w, h)) = hint {
-                let sep = if target.contains('?') { '&' } else { '?' };
-                target = format!("{target}{sep}window-size={w}x{h}");
+            if let Some((w, h)) = window_size_hint(size, placement.as_ref()) {
+                target = with_window_size_hint(&target, w, h);
             }
         }
     }
     args.push(format!("--app={target}"));
     shell_open_with(&browser, &args);
+}
+
+/// Dedicated profile beside runtime.json, so the app window remembers its own geometry instead
+/// of fighting over the default profile. Same convention the daemon's own open path uses.
+fn portable_profile_dir(cfg: &Config) -> PathBuf {
+    cfg.info_file
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("portable-profile")
+}
+
+/// The profile flags, or none when the profile directory cannot be created.
+fn profile_args(profile_dir: &Path) -> Vec<String> {
+    if std::fs::create_dir_all(profile_dir).is_err() {
+        return Vec::new();
+    }
+    vec![
+        format!("--user-data-dir={}", profile_dir.display()),
+        "--no-first-run".into(),
+        "--no-default-browser-check".into(),
+    ]
+}
+
+/// The size to tell the page through `window-size=`, or None to send no hint.
+fn window_size_hint(size: WindowSize, placement: Option<&Placement>) -> Option<(i32, i32)> {
+    match placement {
+        None => Some((size.width, size.height)),
+        Some(p) if !p.maximized => Some((p.width, p.height)),
+        // Never hint a maximized window: the page's resizeTo would visibly un-maximize it.
+        Some(_) => None,
+    }
+}
+
+fn with_window_size_hint(target: &str, w: i32, h: i32) -> String {
+    let sep = if target.contains('?') { '&' } else { '?' };
+    format!("{target}{sep}window-size={w}x{h}")
 }
 
 #[cfg(test)]

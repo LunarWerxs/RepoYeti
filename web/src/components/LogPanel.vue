@@ -48,7 +48,8 @@ import {
   MIN_HISTORY_PX,
   setHistoryOverride,
 } from "@/lib/history-view";
-import { releasedHeight, useGripDrag, useGripGlide } from "@/lib/grip-drag";
+import { useGripDrag, useGripGlide } from "@/lib/grip-drag";
+import { releasedHeight } from "@/lib/grip-drag-release";
 import { shortcutsActive } from "@/lib/hotkeys";
 import {
   historyActivityEnabled,
