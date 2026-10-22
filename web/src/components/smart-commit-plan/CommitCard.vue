@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 
-import { useTooltipConfig } from "@/lib/tooltip-config";
+import { useTooltipConfig } from "@/components/ui/tooltip";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
 import LazyTooltip from "@/components/LazyTooltip.vue";
 import LazyDropdownMenu from "@/components/LazyDropdownMenu.vue";

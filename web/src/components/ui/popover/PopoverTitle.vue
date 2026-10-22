@@ -1,17 +1,7 @@
-<script setup lang="ts">
-import type { HTMLAttributes } from "vue"
-import { cn } from "@/lib/utils"
+<script lang="ts">
+import * as skin from "@ui-skin/popover"
+import { cn } from "@ui-skin/cn"
+import { defineSlotBox } from "../core/slot-box"
 
-const props = defineProps<{
-  class?: HTMLAttributes["class"]
-}>()
+export default defineSlotBox("popover-title", cn("font-medium cn-font-heading", skin.title))
 </script>
-
-<template>
-  <div
-    data-slot="popover-title"
-    :class="cn('text-sm font-medium cn-font-heading', props.class)"
-  >
-    <slot />
-  </div>
-</template>

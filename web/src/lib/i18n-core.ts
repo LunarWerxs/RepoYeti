@@ -76,7 +76,7 @@ export function createAppI18n(
     } catch {
       /* best-effort persistence */
     }
-    if (typeof document !== "undefined") {
+    if (typeof document !== "undefined" && document.documentElement) {
       document.documentElement.lang = locale;
     }
   }
@@ -84,7 +84,7 @@ export function createAppI18n(
   // Reflect the boot locale onto <html lang> for a11y / SEO from the first paint.
   // (The property form, not setAttribute: it is the same attribute, and it is the form the
   // Architect's document-language-declared check reads as "the runtime lang is synced".)
-  if (typeof document !== "undefined") {
+  if (typeof document !== "undefined" && document.documentElement) {
     document.documentElement.lang = i18n.global.locale.value;
   }
 

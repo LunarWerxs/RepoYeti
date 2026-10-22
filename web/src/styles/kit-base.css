@@ -154,6 +154,15 @@ html.theme-transitioning *::after {
   --text-2xs: 0.6875rem;
   --text-ui: 0.8125rem;
 
+  /* Type roles for the kit's shell: a size with the line height it is read at. caption is text-xs, hint is text-xs
+     read tight (a description under a label, a tooltip's text), label is text-sm. */
+  --text-caption: 0.75rem;
+  --text-caption--line-height: calc(1 / 0.75);
+  --text-hint: 0.75rem;
+  --text-hint--line-height: 1.375;
+  --text-label: 0.875rem;
+  --text-label--line-height: calc(1.25 / 0.875);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -194,31 +203,10 @@ html.theme-transitioning *::after {
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-
-  --animate-collapsible-down: collapsible-down 0.22s ease-out;
-  --animate-collapsible-up: collapsible-up 0.2s ease-out;
 }
 
-@keyframes collapsible-down { from { height: 0; } to { height: var(--reka-collapsible-content-height); } }
-@keyframes collapsible-up { from { height: var(--reka-collapsible-content-height); } to { height: 0; } }
-
-/* --- Button variant="gemini": the Gemini-style animated rainbow of an AI action ---
-   Lifted from RepoYeti's scoped .gemini-auto (RepoCardCommit.vue), which restyled the kit Button.
-   The five-stop gradient cannot be spelled with bg-linear/from/via/to, and an arbitrary
-   bg-[linear-gradient(...)] would put raw literals past no-arbitrary-values, so both halves live
-   here as named utilities. Reduced motion is baked into the animation utility, so no caller can
-   forget it; every button sharing it pans in sync because they all start on first paint. */
-@utility bg-gemini {
-  background-image: linear-gradient(110deg, #4285f4 0%, #9b72cb 28%, #d96570 50%, #9b72cb 72%, #4285f4 100%);
-  background-size: 200% 100%;
-}
-@utility animate-gemini-pan {
-  animation: gemini-pan var(--dur-pan) linear infinite;
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-@keyframes gemini-pan { to { background-position: -200% 0; } }
+/* The collapsible's keyframes and the Gemini button's utilities are kit-motion.css's, which each app's sheet
+   imports beside this one (the window's too, which takes none of the rest of this file). */
 
 @layer base {
   * {

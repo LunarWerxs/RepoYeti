@@ -28,7 +28,7 @@
   },
   "overrides": [
     {
-      "includes": ["web/src/components/ui/**"],
+      "includes": ["web/src/components/ui/**", "web/src/ui-skin/**"],
       "linter": { "enabled": false }
     }
   ]

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue";
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/utils";
 
 /**
  * AppContainer, the single source of the unified content width. The width is the

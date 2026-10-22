@@ -2,7 +2,7 @@
 import type { TooltipProviderProps } from "reka-ui"
 import { TooltipProvider } from "reka-ui"
 import { computed, provide } from "vue"
-import { useTooltipConfig } from "@/lib/tooltip-config"
+import { useTooltipConfig } from "./tooltip-config"
 import { TOOLTIP_DISABLED_KEY } from "./touch"
 
 const props = withDefaults(defineProps<TooltipProviderProps>(), {
@@ -13,18 +13,21 @@ const props = withDefaults(defineProps<TooltipProviderProps>(), {
   // fallback below never triggers (the kit-wide tooltip kill-switch silently does nothing).
   // An explicit `undefined` default overrides that implicit coercion.
   disabled: undefined,
+  // Same trap, same fix: focus that is not keyboard focus (reka returning focus to a DropdownMenu or
+  // Dialog trigger as it closes) must not open a tooltip, because the pointer is elsewhere and nothing
+  // would ever close it. Keyboard :focus-visible focus still opens one; an explicit prop still wins.
+  ignoreNonKeyboardFocus: true,
 })
 
-// Global kill-switch: unless a caller pins `disabled` explicitly, follow the shared
-// "show tooltips" setting (lib/tooltip-config.ts) so one Settings toggle silences every
-// tooltip under this provider. InfoHint nests its own `:disabled="false"` provider to
-// stay exempt.
+// Global kill-switch: unless a caller pins `disabled` explicitly, follow the app's "show tooltips"
+// setting (tooltip-config.ts) so one Settings toggle silences every tooltip under this
+// provider. InfoHint nests its own `:disabled="false"` provider to stay exempt.
 const { enabled } = useTooltipConfig()
 const resolvedDisabled = computed(() => props.disabled ?? !enabled.value)
 
-// reka keeps its provider context to itself, but the touch gestures in TooltipTrigger are ours and
-// have to obey the same kill-switch — otherwise "show tooltips: off" would silence hover while a
-// long press still popped one open. Republish the resolved state for them to read.
+// reka keeps its provider context to itself, but the touch gestures in TooltipTrigger are ours and have to obey
+// the same kill-switch — otherwise "show tooltips: off" would silence hover while a long press still popped one
+// open. Republish the resolved state for them to read.
 provide(TOOLTIP_DISABLED_KEY, resolvedDisabled)
 </script>
 

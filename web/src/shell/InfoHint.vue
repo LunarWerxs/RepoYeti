@@ -4,7 +4,7 @@
 // tucked behind the icon. Pass `text`, or default-slot content for richer bodies. Needs a
 // <TooltipProvider> ancestor (mounted once at the App root).
 import { InfoIcon } from '@lucide/vue';
-import { LazyTooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '../components/ui/tooltip';
 
 defineProps<{ text?: string }>();
 </script>
@@ -34,7 +34,7 @@ defineProps<{ text?: string }>();
           <InfoIcon class="size-3.5" />
         </button>
       </TooltipTrigger>
-      <TooltipContent><span class="leading-snug"><slot>{{ text }}</slot></span></TooltipContent>
+      <TooltipContent><span class="text-hint"><slot>{{ text }}</slot></span></TooltipContent>
     </LazyTooltip>
   </TooltipProvider>
 </template>

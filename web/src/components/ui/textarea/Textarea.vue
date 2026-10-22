@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
 import { useVModel } from "@vueuse/core"
-import type { TextareaVariants } from "./textarea-variants"
-import { cn } from "@/lib/utils"
+import { cn } from "@ui-skin/cn"
 import { textareaVariants } from "./textarea-variants"
 
+// The variant names are textarea-variants.ts's table, typed here as literal unions.
 const props = defineProps<{
   class?: HTMLAttributes["class"]
   defaultValue?: string | number
   modelValue?: string | number
-  variant?: TextareaVariants["variant"]
-  textSize?: TextareaVariants["textSize"]
-  density?: TextareaVariants["density"]
-  trailing?: TextareaVariants["trailing"]
+  variant?: "default" | "mono" | null
+  textSize?: "default" | "2xs" | "xs" | "ui" | null
+  density?: "default" | "compact" | null
+  trailing?: "none" | "action" | "actions" | null
 }>()
 
 const emits = defineEmits<{

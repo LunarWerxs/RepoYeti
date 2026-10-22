@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { Search, X, Check, ChevronDown, User, GitBranch, SlidersHorizontal, EyeOff } from "@lucide/vue";
 import { useStore, type StatusKey } from "../store";
 import { cn } from "@/lib/utils";
-import { useTooltipConfig } from "@/lib/tooltip-config";
+import { useTooltipConfig } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";

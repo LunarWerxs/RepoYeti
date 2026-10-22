@@ -2,6 +2,7 @@
    comes from the shared LunarWerx kit files in ./styles/. Only RepoYeti-specific
    bits live here; keep the kit files app-agnostic. */
 @import "./styles/kit-base.css";
+@import "./styles/kit-motion.css";
 @import "./styles/kit-accent.css";
 
 /* ---------------------------------------------------------------------------

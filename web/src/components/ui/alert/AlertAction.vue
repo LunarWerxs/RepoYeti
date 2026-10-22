@@ -1,17 +1,5 @@
-<script setup lang="ts">
-import type { HTMLAttributes } from "vue"
-import { cn } from "@/lib/utils"
+<script lang="ts">
+import { defineSlotBox } from "../core/slot-box"
 
-const props = defineProps<{
-  class?: HTMLAttributes["class"]
-}>()
+export default defineSlotBox("alert-action", "absolute top-1.5 right-2")
 </script>
-
-<template>
-  <div
-    data-slot="alert-action"
-    :class="cn('absolute top-1.5 right-2', props.class)"
-  >
-    <slot />
-  </div>
-</template>

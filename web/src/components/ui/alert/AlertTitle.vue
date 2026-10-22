@@ -1,17 +1,7 @@
-<script setup lang="ts">
-import type { HTMLAttributes } from "vue"
-import { cn } from "@/lib/utils"
+<script lang="ts">
+import * as skin from "@ui-skin/alert"
+import { cn } from "@ui-skin/cn"
+import { defineSlotBox } from "../core/slot-box"
 
-const props = defineProps<{
-  class?: HTMLAttributes["class"]
-}>()
+export default defineSlotBox("alert-title", cn("font-medium group-has-[>svg]/alert:col-start-2 [&_a]:underline [&_a]:underline-offset-3", skin.title))
 </script>
-
-<template>
-  <div
-    data-slot="alert-title"
-    :class="cn('font-medium group-has-[>svg]/alert:col-start-2 cn-font-heading [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground', props.class)"
-  >
-    <slot />
-  </div>
-</template>

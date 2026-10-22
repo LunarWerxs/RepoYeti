@@ -1,15 +1,5 @@
-<script setup lang="ts">
-import type { HTMLAttributes } from "vue"
-import { cn } from "@/lib/utils"
+<script lang="ts">
+import { defineSlotBox } from "../core/slot-box"
 
-const props = defineProps<{ class?: HTMLAttributes["class"] }>()
+export default defineSlotBox("sheet-footer", "gap-2 p-6 mt-auto flex flex-col")
 </script>
-
-<template>
-  <div
-    data-slot="sheet-footer"
-    :class="cn('gap-2 p-6 mt-auto flex flex-col', props.class)"
-  >
-    <slot />
-  </div>
-</template>

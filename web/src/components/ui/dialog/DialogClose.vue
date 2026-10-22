@@ -1,15 +1,6 @@
-<script setup lang="ts">
-import type { DialogCloseProps } from "reka-ui"
+<script lang="ts">
 import { DialogClose } from "reka-ui"
+import { defineForwardPart } from "../core/forward-part"
 
-const props = defineProps<DialogCloseProps>()
+export default defineForwardPart(DialogClose, "dialog-close")
 </script>
-
-<template>
-  <DialogClose
-    data-slot="dialog-close"
-    v-bind="props"
-  >
-    <slot />
-  </DialogClose>
-</template>

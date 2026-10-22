@@ -57,12 +57,11 @@ import {
   historyChangesDisplay,
   historyGraphEnabled,
 } from "@/lib/history-appearance";
-import { useTooltipConfig } from "@/lib/tooltip-config";
 import ViewOptions, { type ViewOptionRow } from "@/components/ui/ViewOptions.vue";
 import CommitFilesTree from "./CommitFilesTree.vue";
 import DiffBar from "./DiffBar.vue";
 import HistoryActivity from "./HistoryActivity.vue";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, useTooltipConfig } from "@/components/ui/tooltip";
 import {
   ContextMenu,
   ContextMenuTrigger,

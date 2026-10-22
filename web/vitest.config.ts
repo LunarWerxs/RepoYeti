@@ -1,7 +1,7 @@
-import { defineConfig } from "vitest/config";
 import { availableParallelism } from "node:os";
 import { fileURLToPath, URL } from "node:url";
 import vue from "@vitejs/plugin-vue";
+import { defineConfig } from "vitest/config";
 
 // Dedicated test config (kept separate from vite.config.ts so the PWA / proxy / icon plugins —
 // none of which the unit + component tests need — stay out of the test pipeline). The `@` alias
@@ -16,6 +16,7 @@ export default defineConfig({
     // crossing: the identity-firewall mirror importing the daemon's glob matcher).
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@ui-skin": fileURLToPath(new URL("./src/ui-skin", import.meta.url)),
       "@daemon": fileURLToPath(new URL("../src", import.meta.url)),
     },
   },

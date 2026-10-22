@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
-import type { ButtonGroupVariants } from "./button-group-variants"
-import { cn } from "@/lib/utils"
-import { buttonGroupVariants } from "./button-group-variants"
+import { cn } from "@ui-skin/cn"
+import { buttonGroupVariants } from "@ui-skin/button-group"
 
 const props = defineProps<{
   class?: HTMLAttributes["class"]
-  orientation?: ButtonGroupVariants["orientation"]
-  divider?: ButtonGroupVariants["divider"]
+  orientation?: "horizontal" | "vertical"
+  divider?: "none" | "shade" | "on-primary"
 }>()
 </script>
 

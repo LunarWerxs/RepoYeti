@@ -6,7 +6,7 @@
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "allowImportingTsExtensions": true,
-    "paths": { "@/*": ["./src/*"], "@daemon/*": ["../src/*"] },
+    "paths": { "@/*": ["./src/*"], "@daemon/*": ["../src/*"], "@ui-skin/*": ["./src/ui-skin/*"] },
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "jsx": "preserve",
     "strict": true,

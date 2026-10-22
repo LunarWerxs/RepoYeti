@@ -6,7 +6,7 @@ import DiffStat from "../DiffStat.vue";
 import { cn } from "@/lib/utils";
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { useTooltipConfig } from "@/lib/tooltip-config";
+import { useTooltipConfig } from "@/components/ui/tooltip";
 import ExpandTransition from "@/shell/ExpandTransition.vue";
 import LazyDropdownMenu from "@/components/LazyDropdownMenu.vue";
 

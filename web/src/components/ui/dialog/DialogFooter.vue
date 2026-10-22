@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
 import { DialogClose } from "reka-ui"
-import { cn } from "@/lib/utils"
-import { Button } from '@/components/ui/button'
+import { cn } from "@ui-skin/cn"
+import * as skin from "@ui-skin/dialog"
+import { Button } from "../button"
 
 const props = withDefaults(defineProps<{
   class?: HTMLAttributes["class"]
@@ -10,6 +11,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   showCloseButton: false,
 })
+const labels = skin.useLabels()
 </script>
 
 <template>
@@ -20,7 +22,7 @@ const props = withDefaults(defineProps<{
     <slot />
     <DialogClose v-if="showCloseButton" as-child>
       <Button variant="outline">
-        Close
+        {{ labels.close }}
       </Button>
     </DialogClose>
   </div>

@@ -41,6 +41,9 @@ export function cleanScratchDirs(): void {
   }
 }
 
+// The backstop for a test file that registers no afterEach: whatever is left goes when the process exits.
+process.on("exit", cleanScratchDirs);
+
 export async function remoteRepo(): Promise<string> {
   const dir = scratchDir("ue-remote-");
   await $`git -c init.defaultBranch=main init -q ${dir}`.quiet();

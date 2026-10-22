@@ -10,7 +10,7 @@ import {
   toValue,
   watch,
 } from "vue";
-import { contributeContentInset } from "@/lib/content-inset";
+import { contributeContentInset } from "../lib/content-inset";
 
 /**
  * usePushPanel, the shared "settings slide-in that PUSHES content" behaviour.

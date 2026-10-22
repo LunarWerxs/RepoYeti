@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import LazyDropdownMenu from "@/components/LazyDropdownMenu.vue";
 import LazyTooltip from "@/components/LazyTooltip.vue";
-import { useTooltipConfig } from "@/lib/tooltip-config";
+import { useTooltipConfig } from "@/components/ui/tooltip";
 import type { Repo } from "../../types";
 
 const props = withDefaults(

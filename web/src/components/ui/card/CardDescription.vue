@@ -1,17 +1,6 @@
-<script setup lang="ts">
-import type { HTMLAttributes } from "vue"
-import { cn } from "@/lib/utils"
+<script lang="ts">
+import * as skin from "@ui-skin/card"
+import { defineSlotBox } from "../core/slot-box"
 
-const props = defineProps<{
-  class?: HTMLAttributes["class"]
-}>()
+export default defineSlotBox("card-description", skin.description)
 </script>
-
-<template>
-  <div
-    data-slot="card-description"
-    :class="cn('text-muted-foreground text-xs/relaxed', props.class)"
-  >
-    <slot />
-  </div>
-</template>

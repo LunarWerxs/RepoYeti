@@ -1,4 +1,5 @@
 <script setup lang="ts" generic="T extends string">
+import { prefersReducedMotion } from '../lib/utils';
 // Segmented tab bar for a settings panel: flat buttons in a bordered pill row with the
 // active tab lifted onto the page background. Promoted from RepoYeti's Settings
 // (2026-07-10) when DevWebUI needed the identical bar; the tab CONTENT stays app-local,
@@ -30,7 +31,7 @@ function setButtonEl(id: T, el: Element | ComponentPublicInstance | null) {
 
 /** The --dur-fast motion token in ms; 0 under reduced motion. */
 function slideMs(el: HTMLElement): number {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return 0;
+  if (prefersReducedMotion()) return 0;
   const raw = getComputedStyle(el).getPropertyValue('--dur-fast').trim();
   const n = Number.parseFloat(raw);
   if (!Number.isFinite(n)) return 0;

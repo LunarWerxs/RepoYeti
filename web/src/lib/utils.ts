@@ -1,10 +1,5 @@
-import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-/** Standard shadcn-vue class merge helper. Shared verbatim across all apps. */
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+/** The class merge, from the app's skin (ui-skin/cn.ts): its tailwind-merge knows the app's type scale. */
+export { cn } from "@ui-skin/cn";
 
 /**
  * The ONE prefers-reduced-motion read for every kit module (the theme crossfade, the resize-grip

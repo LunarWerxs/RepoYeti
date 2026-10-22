@@ -33,7 +33,6 @@ import { provideFileBrowser } from "@/lib/file-browser";
 import { shortcutsActive } from "@/lib/hotkeys";
 import { useGripDrag, useGripGlide } from "@/lib/grip-drag";
 import { releasedHeight } from "@/lib/grip-drag-release";
-import { useTooltipConfig } from "@/lib/tooltip-config";
 import ViewOptions, { type ViewOptionRow } from "@/components/ui/ViewOptions.vue";
 import ChangesTree from "../ChangesTree.vue";
 import RepoFileTree from "../RepoFileTree.vue";
@@ -49,7 +48,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, useTooltipConfig } from "@/components/ui/tooltip";
 import type { Repo, RepoTreeEntry, TreeNode } from "../../types";
 
 const props = defineProps<{ repo: Repo }>();

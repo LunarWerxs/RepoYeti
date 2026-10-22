@@ -1,17 +1,7 @@
-<script setup lang="ts">
-import type { HTMLAttributes } from "vue"
-import { cn } from "@/lib/utils"
+<script lang="ts">
+import * as skin from "@ui-skin/popover"
+import { cn } from "@ui-skin/cn"
+import { defineSlotBox } from "../core/slot-box"
 
-const props = defineProps<{
-  class?: HTMLAttributes["class"]
-}>()
+export default defineSlotBox("popover-header", cn("flex flex-col gap-1", skin.header))
 </script>
-
-<template>
-  <div
-    data-slot="popover-header"
-    :class="cn('flex flex-col gap-1 text-xs', props.class)"
-  >
-    <slot />
-  </div>
-</template>

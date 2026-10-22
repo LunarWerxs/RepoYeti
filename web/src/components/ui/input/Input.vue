@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
-import { useVModel } from "@vueuse/core"
+import { cn } from "@ui-skin/cn"
 import type { InputVariants } from "./input-variants"
-import { cn } from "@/lib/utils"
 import { inputVariants } from "./input-variants"
+import { useTextFieldModel } from "./use-text-field-model"
 
 const props = defineProps<{
   defaultValue?: string | number
@@ -19,10 +19,7 @@ const emits = defineEmits<{
   (e: "update:modelValue", payload: string | number): void
 }>()
 
-const modelValue = useVModel(props, "modelValue", emits, {
-  passive: true,
-  defaultValue: props.defaultValue,
-})
+const modelValue = useTextFieldModel(props, emits)
 </script>
 
 <template>

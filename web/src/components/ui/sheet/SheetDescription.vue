@@ -1,21 +1,7 @@
-<script setup lang="ts">
-import type { DialogDescriptionProps } from "reka-ui"
-import type { HTMLAttributes } from "vue"
-import { reactiveOmit } from "@vueuse/core"
+<script lang="ts">
 import { DialogDescription } from "reka-ui"
-import { cn } from "@/lib/utils"
+import * as skin from "@ui-skin/sheet"
+import { defineForwardPart } from "../core/forward-part"
 
-const props = defineProps<DialogDescriptionProps & { class?: HTMLAttributes["class"] }>()
-
-const delegatedProps = reactiveOmit(props, "class")
+export default defineForwardPart(DialogDescription, "sheet-description", skin.description)
 </script>
-
-<template>
-  <DialogDescription
-    data-slot="sheet-description"
-    :class="cn('text-muted-foreground text-xs/relaxed', props.class)"
-    v-bind="delegatedProps"
-  >
-    <slot />
-  </DialogDescription>
-</template>

@@ -1,15 +1,6 @@
-<script setup lang="ts">
-import type { DialogTriggerProps } from "reka-ui"
+<script lang="ts">
 import { DialogTrigger } from "reka-ui"
+import { defineForwardPart } from "../core/forward-part"
 
-const props = defineProps<DialogTriggerProps>()
+export default defineForwardPart(DialogTrigger, "sheet-trigger")
 </script>
-
-<template>
-  <DialogTrigger
-    data-slot="sheet-trigger"
-    v-bind="props"
-  >
-    <slot />
-  </DialogTrigger>
-</template>

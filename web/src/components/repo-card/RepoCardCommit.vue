@@ -12,7 +12,6 @@ import { useStore } from "../../store";
 import { api, ApiError } from "../../api";
 import { defaultCommitAction, resolveDefaultCommitAction } from "@/lib/commit-default";
 import { useRepoFeedback } from "@/lib/repo-feedback";
-import { useTooltipConfig } from "@/lib/tooltip-config";
 import { shortcutsActive } from "@/lib/hotkeys";
 import SmartCommitPlan from "../SmartCommitPlan.vue";
 import { Button } from "@/components/ui/button";
@@ -26,7 +25,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, useTooltipConfig } from "@/components/ui/tooltip";
 import type { TreeSelectionApi } from "@/lib/changes-selection";
 import type { Repo } from "../../types";
 

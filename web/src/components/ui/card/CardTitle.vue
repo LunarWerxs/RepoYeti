@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
-import { cn } from "@/lib/utils"
+import { cn } from "@ui-skin/cn"
+import * as skin from "@ui-skin/card"
 
 const props = defineProps<{
   class?: HTMLAttributes["class"]
+  size?: "default" | "lg"
+  tone?: "default" | "destructive"
 }>()
 </script>
 
 <template>
   <div
     data-slot="card-title"
-    :class="cn('text-sm font-medium cn-font-heading', props.class)"
+    :class="cn('font-medium', skin.title, size === 'lg' && skin.titleLg, tone === 'destructive' && skin.titleDestructive, props.class)"
   >
     <slot />
   </div>

@@ -1,17 +1,7 @@
-<script setup lang="ts">
-import type { HTMLAttributes } from "vue"
-import { cn } from "@/lib/utils"
+<script lang="ts">
+import * as skin from "@ui-skin/alert"
+import { cn } from "@ui-skin/cn"
+import { defineSlotBox } from "../core/slot-box"
 
-const props = defineProps<{
-  class?: HTMLAttributes["class"]
-}>()
+export default defineSlotBox("alert-description", cn("text-balance md:text-pretty [&_p:not(:last-child)]:mb-4 [&_a]:underline [&_a]:underline-offset-3", skin.description))
 </script>
-
-<template>
-  <div
-    data-slot="alert-description"
-    :class="cn('text-muted-foreground text-xs/relaxed text-balance md:text-pretty [&_p:not(:last-child)]:mb-4 [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground', props.class)"
-  >
-    <slot />
-  </div>
-</template>

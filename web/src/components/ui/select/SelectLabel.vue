@@ -2,7 +2,8 @@
 import type { SelectLabelProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { SelectLabel } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn } from "@ui-skin/cn"
+import * as skin from "@ui-skin/select"
 
 const props = defineProps<SelectLabelProps & { class?: HTMLAttributes["class"] }>()
 </script>
@@ -10,7 +11,7 @@ const props = defineProps<SelectLabelProps & { class?: HTMLAttributes["class"] }
 <template>
   <SelectLabel
     data-slot="select-label"
-    :class="cn('text-muted-foreground px-2 py-1.5 text-xs', props.class)"
+    :class="cn(skin.label, 'px-2 py-1.5', props.class)"
   >
     <slot />
   </SelectLabel>

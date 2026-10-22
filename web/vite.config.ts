@@ -112,6 +112,7 @@ export default defineConfig({
     // here beats spelling it as a `../../../` climb that reads like a misplaced file.
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@ui-skin": fileURLToPath(new URL("./src/ui-skin", import.meta.url)),
       "@daemon": fileURLToPath(new URL("../src", import.meta.url)),
     },
   },

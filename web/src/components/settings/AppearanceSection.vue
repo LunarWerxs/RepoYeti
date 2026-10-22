@@ -5,7 +5,7 @@ import { useStore } from "../../store";
 import { changesViewSize } from "@/lib/changes-view";
 import { defaultCommitAction } from "@/lib/commit-default";
 import { useTheme } from "@/lib/theme";
-import { useTooltipConfig } from "@/lib/tooltip-config";
+import { useTooltipConfig } from "@/components/ui/tooltip";
 import SettingsGroup from "@/shell/SettingsGroup.vue";
 import SettingsRow from "@/shell/SettingsRow.vue";
 import InfoHint from "@/shell/InfoHint.vue";

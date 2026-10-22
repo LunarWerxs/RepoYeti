@@ -21,13 +21,13 @@ withDefaults(
     <component :is="icon" v-if="icon" class="size-4.5 shrink-0 text-muted-foreground" />
     <slot v-else name="icon" />
     <span class="min-w-0 flex-1">
-      <span class="flex items-center gap-1.5 text-sm text-foreground">
+      <span class="flex items-center gap-1.5 text-label text-foreground">
         <slot name="label">{{ label }}</slot>
         <slot name="info" />
       </span>
       <span
         v-if="description || $slots.description"
-        class="mt-0.5 block text-xs leading-snug text-muted-foreground"
+        class="mt-0.5 block text-hint text-muted-foreground"
       >
         <slot name="description">{{ description }}</slot>
       </span>

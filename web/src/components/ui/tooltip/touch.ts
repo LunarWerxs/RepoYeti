@@ -38,7 +38,7 @@ import { ref } from "vue"
 /** How a finger reveals this trigger's tooltip. `"off"` opts a trigger out entirely. */
 export type TooltipTouchMode = "long-press" | "tap" | "off"
 
-/** Per-`Tooltip` API, provided by `Tooltip.vue` and consumed by `TooltipTrigger.vue`. */
+/** Per-`Tooltip` API, provided by `Tooltip.vue` and consumed by `TooltipTrigger.vue` and `TooltipContent.vue`. */
 export interface TooltipTouchContext {
   /** Is this tooltip showing right now? Lets a trigger tell a first tap from a second one. */
   isOpen: Readonly<Ref<boolean>>
@@ -49,6 +49,11 @@ export interface TooltipTouchContext {
   endHold: () => void
   /** Dismiss now, refusal and all. */
   closeByTouch: () => void
+  /** The real trigger element, registered once it is mounted (null when it goes). Lets the
+   *  open-tooltip watchdog tell THIS tooltip's trigger from every other element on the page. */
+  setTrigger: (el: HTMLElement | null) => void
+  /** Where the portaled content is, asked at check time (null when it goes). */
+  setContent: (get: (() => unknown) | null) => void
 }
 
 export const TOOLTIP_TOUCH_KEY: InjectionKey<TooltipTouchContext> = Symbol("lunarwerx-tooltip-touch")

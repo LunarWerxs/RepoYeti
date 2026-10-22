@@ -8,7 +8,6 @@ import { useI18n } from "vue-i18n";
 import { Archive, ChevronDown, CornerDownLeft, Trash2, Loader2 } from "@lucide/vue";
 import { useStore } from "../store";
 import { useRepoFeedback } from "@/lib/repo-feedback";
-import { useTooltipConfig } from "@/lib/tooltip-config";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -16,7 +15,7 @@ import {
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, useTooltipConfig } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { PrimitiveProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
-import type { ButtonVariants } from "./button-variants"
 import { Primitive } from "reka-ui"
-import { cn } from "@/lib/utils"
-import { buttonVariants } from "./button-variants"
+import { buttonVariants } from "@ui-skin/button"
+import { cn } from "@ui-skin/cn"
 
+// The variant and size names are the app's own (its skin's buttonVariants); index.ts types them for callers.
 interface Props extends PrimitiveProps {
-  variant?: ButtonVariants["variant"]
-  size?: ButtonVariants["size"]
+  variant?: string | null
+  size?: string | null
   class?: HTMLAttributes["class"]
 }
 
@@ -24,7 +24,7 @@ const props = withDefaults(defineProps<Props>(), {
     :data-size="size"
     :as="as"
     :as-child="asChild"
-    :class="cn(buttonVariants({ variant, size }), props.class)"
+    :class="cn(buttonVariants({ variant, size } as never), props.class)"
   >
     <slot />
   </Primitive>

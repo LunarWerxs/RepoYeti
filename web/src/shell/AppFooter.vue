@@ -24,7 +24,7 @@ withDefaults(defineProps<{ name?: string; url?: string; discord?: string }>(), {
 
 <template>
   <footer
-    class="mx-auto flex w-full max-w-(--container-max) flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-6 pt-4 text-center text-xs text-muted-foreground/60 sm:px-6"
+    class="mx-auto flex w-full max-w-(--container-max) flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-6 pt-4 text-center text-caption text-muted-foreground/60 sm:px-6"
   >
     <span>
       Created by

@@ -1,17 +1,9 @@
 <script lang="ts" setup>
-import {
-  CircleCheckIcon,
-  InfoIcon,
-  TriangleAlertIcon,
-  OctagonXIcon,
-  Loader2Icon,
-  XIcon,
-} from '@lucide/vue';
-
 import type { ToasterProps } from "vue-sonner"
 import { Toaster as Sonner } from "vue-sonner"
 import { reactiveOmit } from "@vueuse/core"
-import { cn } from "@/lib/utils"
+import { cn } from "@ui-skin/cn"
+import * as skin from "@ui-skin/sonner"
 
 // vue-sonner defaults its close button to the toast's TOP-LEFT corner, where it reads as a
 // stray control floating beside the card rather than that card's dismiss. Every other dismiss
@@ -25,40 +17,30 @@ const forwarded = reactiveOmit(props, "class", "toastOptions")
 
 <template>
   <Sonner
-    :class="cn('toaster group', props.class)"
-    :style="{
-      '--normal-bg': 'var(--popover)',
-      '--normal-text': 'var(--popover-foreground)',
-      '--normal-border': 'var(--border)',
-      '--border-radius': 'var(--radius)',
-      '--gray2': 'var(--muted)',
-      '--gray3': 'var(--border)',
-      '--gray4': 'var(--border)',
-      '--gray5': 'var(--border)',
-      '--gray12': 'var(--popover-foreground)',
-    }"
+    :class="cn(skin.toasterClass, 'group', props.class)"
+    :style="skin.toasterStyle"
     :toast-options="props.toastOptions ?? { classes: { toast: 'rounded-md' } }"
     v-bind="forwarded"
   >
     <template #success-icon>
-      <CircleCheckIcon class="size-4" />
+      <skin.CircleCheckIcon class="size-4" />
     </template>
     <template #info-icon>
-      <InfoIcon class="size-4" />
+      <skin.InfoIcon class="size-4" />
     </template>
     <template #warning-icon>
-      <TriangleAlertIcon class="size-4" />
+      <skin.TriangleAlertIcon class="size-4" />
     </template>
     <template #error-icon>
-      <OctagonXIcon class="size-4" />
+      <skin.OctagonXIcon class="size-4" />
     </template>
     <template #loading-icon>
       <div>
-        <Loader2Icon class="size-4 animate-spin" />
+        <skin.Loader2Icon class="size-4 animate-spin" />
       </div>
     </template>
     <template #close-icon>
-      <XIcon class="size-4" />
+      <skin.XIcon class="size-4" />
     </template>
   </Sonner>
 </template>

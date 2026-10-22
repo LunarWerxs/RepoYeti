@@ -1,19 +1,14 @@
 <script setup lang="ts">
-import type { DialogRootEmits, DialogRootProps } from "reka-ui"
-import { DialogRoot, useForwardPropsEmits } from "reka-ui"
-
-const props = defineProps<DialogRootProps>()
-const emits = defineEmits<DialogRootEmits>()
-
-const forwarded = useForwardPropsEmits(props, emits)
+import DialogRootShell from "../dialog/DialogRootShell.vue"
 </script>
 
 <template>
-  <DialogRoot
-    v-slot="slotProps"
+  <DialogRootShell
+    v-bind="$attrs"
     data-slot="sheet"
-    v-bind="forwarded"
   >
-    <slot v-bind="slotProps" />
-  </DialogRoot>
+    <template #default="slotProps">
+      <slot v-bind="slotProps" />
+    </template>
+  </DialogRootShell>
 </template>
