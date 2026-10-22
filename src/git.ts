@@ -120,9 +120,16 @@ export function gitFor(absPath: string, blockMs = 30_000, extraEnv?: Record<stri
   // invocations actually carrying a token (credentialEnv put it here), so a stray
   // `credential.helper` argument on any other git call is still refused rather than blanket-allowed.
   const withCredential = extraEnv?.[GH_TOKEN_ENV] !== undefined;
+  const env = { ...safeGitEnv(), ...extraEnv };
   return simpleGit({
     baseDir: absPath,
     timeout: { block: blockMs },
+    // simple-git 4 runs its environment guard over the env handed to `.env()` too, and refuses
+    // any key it was not told to allow (GIT_OPTIONAL_LOCKS would throw, every status read would
+    // fall back to zeros). The keys listed here are exactly the ones safeGitEnv() and extraEnv set
+    // ourselves; the guard list is already deleted from them above, so this is v3's inherited env
+    // minus the blocked names, not a wider allowance.
+    allowEnvironment: Object.keys(env),
     // We intentionally inject the identity's SSH key via `-c core.sshCommand`
     // (identityConfigArgs). simple-git blocks that by default; the value is derived
     // from the owner's own stored key path — trusted input — so we opt in here.
@@ -130,7 +137,7 @@ export function gitFor(absPath: string, blockMs = 30_000, extraEnv?: Record<stri
       allowUnsafeSshCommand: true,
       ...(withCredential ? { allowUnsafeCredentialHelper: true } : {}),
     },
-  }).env({ ...safeGitEnv(), ...extraEnv });
+  }).env(env);
 }
 
 /**

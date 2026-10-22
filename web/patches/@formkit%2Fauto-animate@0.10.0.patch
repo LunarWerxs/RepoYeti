@@ -1,0 +1,14 @@
+diff --git a/package.json b/package.json
+index 5f76ab93ab4b4b438c2832cb64940a7ac8d3eb5a..a7e0a751cb47d3973615f4aaa06ddd6d04fa4405 100644
+--- a/package.json
++++ b/package.json
+@@ -61,5 +61,8 @@
+       "default": "./index.mjs"
+     }
+   },
+-  "packageManager": "pnpm@10.14.0+sha512.ad27a79641b49c3e481a16a805baa71817a04bbe06a38d17e60e2eaee83f6a146c6a688125f5792e48dd5ba30e7da52a5cda4c3992b9ccf333f9ce223af84748"
++  "packageManager": "pnpm@10.14.0+sha512.ad27a79641b49c3e481a16a805baa71817a04bbe06a38d17e60e2eaee83f6a146c6a688125f5792e48dd5ba30e7da52a5cda4c3992b9ccf333f9ce223af84748",
++  "peerDependencies": {
++    "vue": "^3.0.0"
++  }
+ }

@@ -16,14 +16,15 @@
 // Mounted the same way LogPanel.test.ts / AppHeader.test.ts wrap Tooltip-bearing components: a
 // tiny host component supplies TooltipProvider, since SharingSection's row actions are Tooltip
 // triggers, not plain buttons.
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
 import { mount } from "@vue/test-utils";
-import { setActivePinia, createPinia } from "pinia";
-import { i18n } from "@/i18n";
-import { useStore } from "@/store";
+import { createPinia, setActivePinia } from "pinia";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/api";
 import SharingSection from "@/components/settings/SharingSection.vue";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { i18n } from "@/i18n";
+import { useStore } from "@/store";
 import type { Share } from "@/types";
 
 vi.mock("vue-sonner", () => ({
@@ -176,8 +177,8 @@ describe("SharingSection.vue — per-row Copy link button", () => {
     const [liveUrlBtn, liveNoUrlBtn, expiredBtn] = copyButtons(wrapper);
 
     // Before any click: every row still shows the plain Copy glyph.
-    expect(liveUrlBtn!.find("svg.lucide-copy-icon").exists()).toBe(true);
-    expect(liveUrlBtn!.find("svg.lucide-check-icon").exists()).toBe(false);
+    expect(liveUrlBtn!.find("svg.lucide-copy").exists()).toBe(true);
+    expect(liveUrlBtn!.find("svg.lucide-check").exists()).toBe(false);
 
     await liveUrlBtn!.trigger("click");
     await flush();
@@ -187,11 +188,11 @@ describe("SharingSection.vue — per-row Copy link button", () => {
 
     // Only the clicked row swapped to the check — copiedRow is a single share id, so the other
     // two rows (one disabled-no-url, one disabled-expired) must still show Copy, not Check.
-    expect(liveUrlBtn!.find("svg.lucide-check-icon").exists()).toBe(true);
-    expect(liveNoUrlBtn!.find("svg.lucide-check-icon").exists()).toBe(false);
-    expect(liveNoUrlBtn!.find("svg.lucide-copy-icon").exists()).toBe(true);
-    expect(expiredBtn!.find("svg.lucide-check-icon").exists()).toBe(false);
-    expect(expiredBtn!.find("svg.lucide-copy-icon").exists()).toBe(true);
+    expect(liveUrlBtn!.find("svg.lucide-check").exists()).toBe(true);
+    expect(liveNoUrlBtn!.find("svg.lucide-check").exists()).toBe(false);
+    expect(liveNoUrlBtn!.find("svg.lucide-copy").exists()).toBe(true);
+    expect(expiredBtn!.find("svg.lucide-check").exists()).toBe(false);
+    expect(expiredBtn!.find("svg.lucide-copy").exists()).toBe(true);
   });
 
   it("a disabled row's Copy button is inert — no click reaches the disabled-but-url-bearing expired row", async () => {
@@ -209,6 +210,6 @@ describe("SharingSection.vue — per-row Copy link button", () => {
     // A native `disabled` button doesn't dispatch click to its handler — nothing should have been
     // copied, and the row stays on the plain Copy glyph.
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
-    expect(expiredBtn!.find("svg.lucide-check-icon").exists()).toBe(false);
+    expect(expiredBtn!.find("svg.lucide-check").exists()).toBe(false);
   });
 });
