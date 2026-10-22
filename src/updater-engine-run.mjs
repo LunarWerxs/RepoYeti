@@ -97,10 +97,13 @@ function spawnAttempt(args, timeoutMs, cwd, useShell, finish, retryInShell) {
 }
 
 /** The transcript line of one step: the command, where it ran, and its output (or how it ended). */
-/** Runs `step` on each item, one after the other: each async fs call in flight holds a Bun I/O thread
- *  that is never given back, so a list sized by data is never fanned out. */
+/** Runs `step` on each item, one after the other, and resolves to their results in order: each async fs
+ *  call in flight holds a Bun I/O thread that is never given back, so no list is fanned out. */
 export function oneAtATime(items, step) {
-  return items.reduce((done, item) => done.then(() => step(item)), Promise.resolve());
+  const results = [];
+  return items
+    .reduce((done, item) => done.then(() => step(item)).then((result) => void results.push(result)), Promise.resolve())
+    .then(() => results);
 }
 
 export function commandSummary(args, result, where = "") {

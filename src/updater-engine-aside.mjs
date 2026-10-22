@@ -44,19 +44,21 @@ export function createAsideMover({ appRoot, asideDir, git, gitText, runCommand }
   // Every such leftover is deleted now; one still running is retried by a later apply. Only names this
   // updater made: anything else in those folders is not its to delete.
   async function removeLeftoverCopies() {
-    const sweeps = asideDir ? [deleteCopies(asideDir, (entry) => entry.includes(REPLACED_COPY))] : [];
     const listed = await git(["ls-files", "-z"]);
     const programs = listed.ok ? listed.stdout.split("\0").filter((path) => PROGRAM_FILE.test(path)) : [];
     const prefixesByDir = new Map(); // folder -> the `<program>.replaced-` prefixes of the programs in it
     for (const path of programs) {
       const full = join(appRoot, path);
       const dir = dirname(full);
-      prefixesByDir.set(dir, [...(prefixesByDir.get(dir) ?? []), `${basename(full)}${REPLACED_COPY}`]);
+      const prefix = `${basename(full)}${REPLACED_COPY}`;
+      const prefixes = prefixesByDir.get(dir);
+      if (prefixes) prefixes.push(prefix);
+      else prefixesByDir.set(dir, [prefix]);
     }
-    for (const [dir, prefixes] of prefixesByDir) {
-      sweeps.push(deleteCopies(dir, (entry) => prefixes.some((prefix) => entry.startsWith(prefix))));
-    }
-    await Promise.all(sweeps);
+    const sweeps = [...prefixesByDir].map(([dir, prefixes]) => ({ dir, isCopy: (entry) => prefixes.some((prefix) => entry.startsWith(prefix)) }));
+    if (asideDir) sweeps.unshift({ dir: asideDir, isCopy: (entry) => entry.includes(REPLACED_COPY) });
+    // One folder at a time, as each folder's copies are: every async fs call in flight holds a Bun I/O thread.
+    await oneAtATime(sweeps, ({ dir, isCopy }) => deleteCopies(dir, isCopy));
   }
 
   /** The program files the advance to `target` modifies or deletes that are on disk now; null when git cannot say. */
@@ -68,51 +70,46 @@ export function createAsideMover({ appRoot, asideDir, git, gitText, runCommand }
       return null;
     }
     const named = diff.stdout.split("\0").filter((path) => PROGRAM_FILE.test(path));
-    // fanout-ok: one per program file the update changes, the app's own few binaries (exe, dll, node).
-    const present = await Promise.all(named.map((path) => stat(join(appRoot, path)).then(() => path, () => null)));
+    const present = await oneAtATime(named, (path) => stat(join(appRoot, path)).then(() => path, () => null));
     return present.filter(Boolean);
   }
 
   // With an aside folder (outside the work tree, same volume) the move never shows in `git status`: each
   // program is moved there and copied back, and one that cannot be refuses the update. Every path is put
-  // back before the failure is thrown, so none is left missing.
+  // back before the failure is thrown, so none is left missing. One program at a time, like every fs call here.
   async function moveIntoAsideDir(programs, stamp, output) {
-    // fanout-ok: one per program file the update changes, the app's own few binaries (exe, dll, node).
-    const moves = await Promise.allSettled(
-      programs.map(async (path) => {
-        const full = join(appRoot, path);
-        // One flat name per path that no other path can share (`a/b_c.exe` and `a_b/c.exe` stay apart).
-        const copy = join(asideDir, `${encodeURIComponent(path)}${REPLACED_COPY}${stamp}`);
-        await mkdir(asideDir, { recursive: true })
-          .then(() => rename(full, copy))
-          .catch((err) => {
-            throw new Error(`could not move ${path} aside, so nothing was updated: ${reason(err)}`);
-          });
-        output.push(`moved ${path} aside to ${copy}`);
-        await copyFile(copy, full).catch(async (err) => {
-          await rename(copy, full).catch(() => {}); // reported below with where the bytes are
-          throw new Error(`could not put ${path} back after moving it aside, so nothing was updated: ${reason(err)}`);
+    const failures = await oneAtATime(programs, (path) => moveOneAside(path).then(() => null, (err) => err));
+    const failed = failures.find(Boolean);
+    if (failed) throw failed;
+
+    async function moveOneAside(path) {
+      const full = join(appRoot, path);
+      // One flat name per path that no other path can share (`a/b_c.exe` and `a_b/c.exe` stay apart).
+      const copy = join(asideDir, `${encodeURIComponent(path)}${REPLACED_COPY}${stamp}`);
+      await mkdir(asideDir, { recursive: true })
+        .then(() => rename(full, copy))
+        .catch((err) => {
+          throw new Error(`could not move ${path} aside, so nothing was updated: ${reason(err)}`);
         });
-      }),
-    );
-    const failed = moves.find((m) => m.status === "rejected");
-    if (failed) throw failed.reason;
+      output.push(`moved ${path} aside to ${copy}`);
+      await copyFile(copy, full).catch(async (err) => {
+        await rename(copy, full).catch(() => {}); // reported below with where the bytes are
+        throw new Error(`could not put ${path} back after moving it aside, so nothing was updated: ${reason(err)}`);
+      });
+    }
   }
 
   // Without one, the copy sits beside the program, hidden by git's local exclude, and one checkout puts
   // every moved path back at HEAD. A move that fails is recorded and the advance runs as it would have.
   async function moveBesideAndCheckout(programs, stamp, output) {
-    // fanout-ok: one per program file the update changes, the app's own few binaries (exe, dll, node).
-    const tries = await Promise.all(
-      programs.map((path) => {
-        const full = join(appRoot, path);
-        const copy = `${full}${REPLACED_COPY}${stamp}`;
-        return rename(full, copy).then(
-          () => ({ path, full, copy, err: null }),
-          (err) => ({ path, full, copy, err }),
-        );
-      }),
-    );
+    const tries = await oneAtATime(programs, (path) => {
+      const full = join(appRoot, path);
+      const copy = `${full}${REPLACED_COPY}${stamp}`;
+      return rename(full, copy).then(
+        () => ({ path, full, copy, err: null }),
+        (err) => ({ path, full, copy, err }),
+      );
+    });
     for (const t of tries) {
       output.push(t.err ? `could not move ${t.path} aside: ${reason(t.err)}` : `moved ${t.path} aside to ${basename(t.copy)}`);
     }
@@ -123,8 +120,7 @@ export function createAsideMover({ appRoot, asideDir, git, gitText, runCommand }
     output.push(commandSummary(checkoutArgs, checkout));
     if (checkout.ok) return;
     const failure = stepFailureMessage(checkoutArgs, checkout);
-    // fanout-ok: one per program file the update changes, the app's own few binaries (exe, dll, node).
-    const stranded = (await Promise.all(moved.map((m) => rename(m.copy, m.full).then(() => null, () => m)))).filter(Boolean);
+    const stranded = (await oneAtATime(moved, (m) => rename(m.copy, m.full).then(() => null, () => m))).filter(Boolean);
     if (!stranded.length) throw new Error(failure);
     throw new Error(`${failure}; ${stranded.map((m) => `${m.path} could not be moved back and is at ${basename(m.copy)}`).join("; ")}`);
   }
