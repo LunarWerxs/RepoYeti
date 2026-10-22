@@ -33,7 +33,7 @@
 // (Create-Shortcut.ps1) — and, on Windows, by actually regenerating + resolving it
 // and by running the tray's headless self-test.
 // ───────────────────────────────────────────────────────────────────────────────
-import { test, expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { useSuiteTimeout } from "./helpers/timeouts.ts";
@@ -67,8 +67,14 @@ const REQUIRED = [
   "Tray-Launch.vbs",
   "RepoYeti-Tray.ps1",
   "Tray-Host.ps1",
+  "Tray-Host-Control.ps1",
+  "Tray-Host-Window.ps1",
   "RepoYeti.ico",
 ] as const;
+
+// The shared engine is Tray-Host.ps1 plus the two parts it dot-sources from beside it.
+const ENGINE_PARTS = ["Tray-Host.ps1", "Tray-Host-Control.ps1", "Tray-Host-Window.ps1"] as const;
+const readEngine = (): string => ENGINE_PARTS.map((n) => read(join(MISC, n))).join("\n");
 
 test("launcher machinery exists, is non-empty, and is COMMITTED (a clone must be able to make the shortcut)", () => {
   for (const name of REQUIRED) {
@@ -103,7 +109,7 @@ test("the tray icon is a real .ico file (so the tray icon can't silently be brok
 });
 
 test("the engine file is the real shared tray-host engine (not a hand-edited fork)", () => {
-  const engine = read(join(MISC, "Tray-Host.ps1"));
+  const engine = readEngine();
   assert(
     /function\s+Start-TrayHost/.test(engine),
     "misc/Tray-Host.ps1 is missing function Start-TrayHost — is this the shared engine, or a hand-edited fork?",
@@ -170,7 +176,7 @@ test("launcher chain is wired: shortcut → wscript → Tray-Launch.vbs (auto-di
   assert(!/RepoYeti-Tray\.ps1/.test(vbs), "Tray-Launch.vbs must be app-agnostic — it must NOT hard-code RepoYeti-Tray.ps1 by name");
 
   const tray = read(join(MISC, "RepoYeti-Tray.ps1"));
-  const engine = read(join(MISC, "Tray-Host.ps1"));
+  const engine = readEngine();
 
   // Daemon entry / start command: RepoYeti-specific, now lives in the adapter's config.
   assert(/src\\index\.ts/.test(tray), "RepoYeti-Tray.ps1's config doesn't reference the daemon entry (src\\index.ts)");

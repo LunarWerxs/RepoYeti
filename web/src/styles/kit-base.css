@@ -254,26 +254,24 @@ html.theme-transitioning *::after {
 .scroll-slim::-webkit-scrollbar { width: 8px; height: 8px; }
 .scroll-slim::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
 
-/* --- shell/ExpandTransition.vue: grid-rows 0fr<->1fr expand/collapse (Transition name="kit-expand") --- */
-.kit-expand-grid {
-  display: grid;
-  grid-template-rows: 1fr;
-}
+/* --- shell/ExpandTransition.vue: expand/collapse (Transition name="kit-expand") ---
+   The block's height snaps and its content fades and settles in: only opacity and transform
+   animate, so no frame re-lays-out the content below it (a grid-rows 0fr<->1fr transition did). */
 .kit-expand-enter-active,
 .kit-expand-leave-active {
-  transition: grid-template-rows var(--dur-fast) ease;
+  transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 .kit-expand-enter-from,
 .kit-expand-leave-to {
-  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 /* --- shell/SettingsTabs.vue: the sliding active-tab indicator ---
-   It animates a layout property (width), so its transition lives here as a named class rather
-   than an arbitrary transition-[...] utility. measure() feeds the geometry in through the two
-   custom properties. */
+   measure() writes the geometry into the two custom properties and slides the bar by transform
+   alone (its width applies at once, a scaleX from the old width eases into it). */
 .kit-tab-indicator {
   transform: translateX(var(--indicator-x));
   width: var(--indicator-w);
-  transition: transform var(--dur-fast) ease-out, width var(--dur-fast) ease-out;
+  transform-origin: left center;
 }

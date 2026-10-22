@@ -7,9 +7,11 @@
 // section first mounted by a later tab click never runs that watcher.
 //
 // The active segment is a sliding indicator (absolutely positioned div measured against
-// the active button's offsetLeft/offsetWidth) rather than a per-button background swap,
-// so switching tabs animates instead of jump-cutting. Re-measures on tabs/model change and
-// window resize (ResizeObserver would be overkill for a handful of flex-basis buttons).
+// the active button's rect) rather than a per-button background swap, so switching tabs
+// animates instead of jump-cutting. Re-measures on tabs/model change and window resize
+// (ResizeObserver would be overkill for a handful of flex-basis buttons). The geometry is
+// written straight onto the indicator's style, never into reactive state, so a resize
+// re-renders nothing; a tab switch slides it by transform alone (see measure()).
 import { nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue';
 
 const props = defineProps<{ tabs: readonly { id: T; label: string }[] }>();
@@ -17,42 +19,67 @@ const props = defineProps<{ tabs: readonly { id: T; label: string }[] }>();
 const model = defineModel<T>({ required: true });
 
 const tablistEl = ref<HTMLElement | null>(null);
+const indicatorEl = ref<HTMLElement | null>(null);
 const buttonEls = ref<Record<string, HTMLElement | undefined>>({});
-const indicator = ref<{ left: number; width: number }>({ left: 0, width: 0 });
-const indicatorReady = ref(false);
+// What the indicator shows now; null until the first measure.
+let shown: { left: number; width: number } | null = null;
 
 function setButtonEl(id: T, el: Element | ComponentPublicInstance | null) {
   buttonEls.value[id] = (el as HTMLElement) || undefined;
 }
 
-function measure() {
+/** The --dur-fast motion token in ms; 0 under reduced motion. */
+function slideMs(el: HTMLElement): number {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return 0;
+  const raw = getComputedStyle(el).getPropertyValue('--dur-fast').trim();
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n)) return 0;
+  return raw.endsWith('ms') ? n : n * 1000;
+}
+
+/** Puts the indicator under the active tab. With `slide`, a moved indicator gets there by transform
+ *  alone (FLIP): its new width applies at once and a scaleX from the old width eases into it, so no
+ *  frame re-lays-out the bar. */
+function measure(slide = true) {
   const active = buttonEls.value[model.value];
-  if (!active || !tablistEl.value) return;
+  const list = tablistEl.value;
+  const bar = indicatorEl.value;
+  if (!active || !list || !bar) return;
   // The indicator is absolutely positioned, so its origin is the tablist's PADDING box, while
   // this measured delta is border-edge to border-edge — hence the clientLeft (= border-left
-  // width) subtraction. Previously the indicator sat at `left-1` AND translated by the full
-  // offset, double-counting the container's 4px pad and sliding every pill right of its own
-  // label (dead space on the right of a wide tab like "Automation", none on the left).
+  // width) subtraction; without it every pill sat right of its own label by the container's pad.
   // Rect-based rather than offsetLeft so a zoomed/transformed ancestor stays consistent.
-  const listRect = tablistEl.value.getBoundingClientRect();
+  const listRect = list.getBoundingClientRect();
   const rect = active.getBoundingClientRect();
-  const left = rect.left - listRect.left - tablistEl.value.clientLeft;
-  indicator.value = { left, width: rect.width };
-  indicatorReady.value = true;
+  const next = { left: rect.left - listRect.left - list.clientLeft, width: rect.width };
+  const from = shown;
+  shown = next;
+  bar.style.setProperty('--indicator-x', `${next.left}px`);
+  bar.style.setProperty('--indicator-w', `${next.width}px`);
+  const ms = slide && from && next.width > 0 ? slideMs(bar) : 0;
+  if (!ms || !from || (from.left === next.left && from.width === next.width)) return;
+  bar.animate(
+    [
+      { transform: `translateX(${from.left}px) scaleX(${from.width / next.width})` },
+      { transform: `translateX(${next.left}px) scaleX(1)` },
+    ],
+    { duration: ms, easing: 'ease-out' },
+  );
 }
 
 function onResize() {
-  measure();
+  measure(false);
 }
 
+// One string, so the watch fires when the active tab or the tab list changes, not on every read.
 watch(
-  () => [model.value, props.tabs.map((tb) => tb.id).join('|')],
-  () => void nextTick(measure),
+  () => `${model.value}|${props.tabs.map((tb) => tb.id).join('|')}`,
+  () => void nextTick(() => measure()),
   { immediate: true },
 );
 
 onMounted(() => {
-  void nextTick(measure);
+  void nextTick(() => measure(false));
   window.addEventListener('resize', onResize);
 });
 onBeforeUnmount(() => {
@@ -67,9 +94,9 @@ onBeforeUnmount(() => {
     class="relative flex shrink-0 gap-1 rounded-lg border border-border/60 bg-secondary/30 p-1"
   >
     <div
-      v-if="indicatorReady"
+      ref="indicatorEl"
       class="kit-tab-indicator pointer-events-none absolute inset-y-1 left-0 rounded-md bg-background shadow-sm"
-      :style="{ '--indicator-x': indicator.left + 'px', '--indicator-w': indicator.width + 'px' }"
+      style="--indicator-x: 0px; --indicator-w: 0px"
       aria-hidden="true"
     />
     <button

@@ -1,4 +1,4 @@
-import { type Ref, ref } from "vue";
+import { ref, shallowRef } from "vue";
 
 /**
  * Shared self-update state machine for all LunarWerx apps. Wraps an app's two
@@ -16,7 +16,8 @@ export function useSelfUpdate<TStatus, TApply extends { status: TStatus }>(api: 
   checkUpdate(): Promise<TStatus>;
   applyUpdate(): Promise<TApply>;
 }) {
-  const updateStatus = ref<TStatus | null>(null) as Ref<TStatus | null>;
+  // Replaced whole by the server's reply, never edited in place: a shallowRef skips the deep proxy.
+  const updateStatus = shallowRef<TStatus | null>(null);
   const updateChecking = ref(false);
   const updateApplying = ref(false);
 
