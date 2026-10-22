@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mount } from "@vue/test-utils";
-import { setActivePinia, createPinia } from "pinia";
 import { autoAnimatePlugin } from "@formkit/auto-animate/vue";
-import { i18n } from "@/i18n";
-import { useStore } from "@/store";
+import { mount } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AccountSwitcher from "@/components/AccountSwitcher.vue";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { i18n } from "@/i18n";
+import { useStore } from "@/store";
 import type { GhAccount } from "@/types";
 
 vi.mock("vue-sonner", () => ({
@@ -80,7 +80,7 @@ describe("AccountSwitcher.vue", () => {
 
     expect(first!.attributes("aria-expanded")).toBe("true");
     expect(second!.attributes("aria-expanded")).toBe("false");
-    expect(wrapper.findAll(".kit-expand-grid").length).toBe(1);
+    expect(wrapper.findAll(`[aria-label="${i18n.global.t("accounts.linkLabel")}"]`).length).toBe(1);
   });
 
   it("does not report a real link as 'Not set' while identities are unloaded", async () => {
