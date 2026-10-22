@@ -50,7 +50,9 @@ working tree. Everything else here compiles the files on disk, where a module yo
 present whether or not you ever `git add`ed it, so lint and both typechecks will happily pass on a
 commit that ships the imports without their target. That is not hypothetical: it put an unbuildable
 `main` in front of every source self-update for three days ([#24](https://github.com/LunarWerxs/RepoYeti/issues/24)).
-It is also the cheapest step, so a doomed commit is rejected before anything compiles.
+It is also the cheapest step, so a doomed commit is rejected before anything compiles. It reads
+each file's staged text as well, so someone else's unstaged edit in the same checkout never blocks
+your commit.
 
 The subprocess test timeout lives in the test files, not on the command line. Nearly every test
 here shells out to git, and a subprocess test times the machine rather than its own assertions: a

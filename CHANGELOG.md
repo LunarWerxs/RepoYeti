@@ -6,6 +6,13 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **RepoYeti no longer opens the Git Credential Manager sign-in window on Windows.** A fetch or
+  push with no saved login used to fall through to Git for Windows' credential helper, which put its
+  sign-in window on the desktop every time, during test runs too. Now that git call simply fails,
+  and the window never opens.
+
 ## [1.4.0] - 2026-10-19
 
 **TL;DR** The header gets the Connections app switcher, and two performance problems are gone: a
