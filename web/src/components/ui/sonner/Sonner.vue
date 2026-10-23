@@ -36,6 +36,7 @@ const forwarded = reactiveOmit(props, "class", "toastOptions")
     </template>
     <template #loading-icon>
       <div>
+        <!-- arkitect-allow: endless-animation-not-stepped - a kit default: each app sets its own --animate-spin timing (the AgentHydra window steps it) -->
         <skin.Loader2Icon class="size-4 animate-spin" />
       </div>
     </template>
