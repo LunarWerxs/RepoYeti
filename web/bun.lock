@@ -25,7 +25,7 @@
         "vue-sonner": "^2.0.9",
       },
       "devDependencies": {
-        "@iconify-json/vscode-icons": "^1.2.91",
+        "@iconify-json/vscode-icons": "^1.2.92",
         "@playwright/test": "^1.64.1",
         "@tailwindcss/vite": "^4.3.3",
         "@types/qrcode": "^1.5.6",
@@ -260,7 +260,7 @@
 
     "@formkit/drag-and-drop": ["@formkit/drag-and-drop@0.6.1", "", { "peerDependencies": { "@marko/runtime-tags": ">=6.0.166" }, "optionalPeers": ["@marko/runtime-tags"] }, "sha512-DNKoPqdg9RW7k0zZlF2FH636Cc16V3tuGDVKWNHpSXr3amF4nmQZfieoLNVRxqWxXVFJq2DY+vf8SCD10JyjAA=="],
 
-    "@iconify-json/vscode-icons": ["@iconify-json/vscode-icons@1.2.91", "", { "dependencies": { "@iconify/types": "*" } }, "sha512-IGoT2rRZ5NiHlq8c6+iEfsdcqswbK9JFuKZtWwTpYKV3Y/PCWopOmDYCSyLrfT9KhWgTjlfxa0s285CXE6kphw=="],
+    "@iconify-json/vscode-icons": ["@iconify-json/vscode-icons@1.2.92", "", { "dependencies": { "@iconify/types": "*" } }, "sha512-P+64v3wS8SieFDvxSIThGK7NLf+Nbp6wLZuF8MRPv0aml+JipFIawDeYAKGJnh/7qHt3544Xq2cFNT0nwsXu5g=="],
 
     "@iconify/types": ["@iconify/types@2.0.0", "", {}, "sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg=="],
 

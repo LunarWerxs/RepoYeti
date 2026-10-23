@@ -39,7 +39,7 @@
     "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
-    "@iconify-json/vscode-icons": "^1.2.91",
+    "@iconify-json/vscode-icons": "^1.2.92",
     "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/qrcode": "^1.5.6",
