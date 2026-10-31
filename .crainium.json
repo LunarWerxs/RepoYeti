@@ -1,0 +1,16 @@
+{
+  "docs": {
+    "home": "cloud",
+    "since": "2026-10-31",
+    "repo": "lunarwerxs/repoyeti",
+    "read": "docs tool: search, get",
+    "write": "docs tool: edit then put",
+    "keep": [
+      "docs/APPROVAL_WEBHOOK.md",
+      "docs/ARCHITECTURE.md",
+      "docs/BUZZ.md",
+      "docs/CONTRIBUTING.md",
+      "docs/STABLE_ADDRESS.md"
+    ]
+  }
+}
