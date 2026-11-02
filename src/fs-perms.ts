@@ -17,6 +17,22 @@
  * here must never stop the daemon from starting, and the file is no worse off than before.
  */
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+
+/**
+ * The account's SID, never its name: where an account shares its name with the PC, icacls reads the
+ * name as the machine, and the file comes out locked against the one user it was meant for.
+ * Windows' own whoami by its full path: Git Bash's comes first on its PATH and has no /user.
+ */
+function currentUserSid(): string | null {
+  const whoami = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe");
+  const got = spawnSync(whoami, ["/user", "/fo", "csv", "/nh"], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 5000,
+  });
+  return /S-1-[\d-]+/.exec(got.stdout ?? "")?.[0] ?? null;
+}
 
 /**
  * Restrict `path` to the current user (plus SYSTEM, which is needed for backup/AV and cannot
@@ -27,12 +43,12 @@ import { spawnSync } from "node:child_process";
  */
 export function restrictToCurrentUser(path: string): void {
   if (process.platform !== "win32") return;
-  const user = process.env.USERNAME;
-  if (!user) return;
   try {
+    const sid = currentUserSid();
+    if (!sid) return;
     spawnSync(
       "icacls",
-      [path, "/inheritance:r", "/grant:r", `${user}:F`, "/grant:r", "*S-1-5-18:F"],
+      [path, "/inheritance:r", "/grant:r", `*${sid}:F`, "/grant:r", "*S-1-5-18:F"],
       { stdio: "ignore", windowsHide: true, timeout: 5000 },
     );
   } catch {
@@ -49,12 +65,12 @@ export function restrictToCurrentUser(path: string): void {
  */
 export function restrictDirToCurrentUser(dir: string): void {
   if (process.platform !== "win32") return;
-  const user = process.env.USERNAME;
-  if (!user) return;
   try {
+    const sid = currentUserSid();
+    if (!sid) return;
     spawnSync(
       "icacls",
-      [dir, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`, "/grant:r", "*S-1-5-18:(OI)(CI)F"],
+      [dir, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`, "/grant:r", "*S-1-5-18:(OI)(CI)F"],
       { stdio: "ignore", windowsHide: true, timeout: 5000 },
     );
   } catch {
