@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { restrictDirToCurrentUser, restrictToCurrentUser } from "../src/fs-perms.ts";
+import { mkScratchDir } from "./helpers/scratch.ts";
 import { useSuiteTimeout } from "./helpers/timeouts.ts";
 
 // whoami and icacls are real processes here, not spies.
@@ -14,7 +14,7 @@ describe.if(process.platform === "win32")("owner-only on Windows", () => {
   const dirs: string[] = [];
 
   function scratchDir(): string {
-    const dir = mkdtempSync(join(tmpdir(), "fs-perms-"));
+    const dir = mkScratchDir("fs-perms-");
     dirs.push(dir);
     return dir;
   }
