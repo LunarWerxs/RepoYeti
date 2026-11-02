@@ -8,6 +8,9 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Fixed
 
+- **Your key and settings stay yours on a PC named like your account.** Where a Windows account has
+  the same name as the PC, RepoYeti locked its own signing key and config folder against you. It now
+  locks them to your account properly.
 - **RepoYeti no longer opens the Git Credential Manager sign-in window on Windows.** A fetch or
   push with no saved login used to fall through to Git for Windows' credential helper, which put its
   sign-in window on the desktop every time, during test runs too. Now that git call simply fails,
