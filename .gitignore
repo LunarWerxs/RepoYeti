@@ -50,7 +50,6 @@ vendor/cloudflared/
 # with a clone, or the next scan anywhere else reports findings this repo has already
 # answered. Same shape MonkeyWerx uses.
 .arkitect/*
-!.arkitect/arkitect.config.json
 !.arkitect/policies/
 
 # Claude Code local config (dev tooling, not part of the project)
