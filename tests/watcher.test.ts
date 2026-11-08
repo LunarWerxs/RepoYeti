@@ -1,13 +1,13 @@
-import { test, expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { existsSync, unlinkSync, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, type FSWatcher, unlinkSync, writeFileSync } from "node:fs";
 
 import { join } from "node:path";
 import { $ } from "bun";
-import { watchRepo, type WatchFactory } from "../src/watcher.ts";
+import { type WatchFactory, watchRepo } from "../src/watcher.ts";
 import { mkScratchDir } from "./helpers/scratch.ts";
-import { rmrf } from "./rmrf.ts";
 import { useSuiteTimeout } from "./helpers/timeouts.ts";
+import { rmrf } from "./rmrf.ts";
 
 // Real git subprocesses: 20s, not bun's 5s default, so `bun test` and `bun run test` agree.
 useSuiteTimeout();
@@ -227,6 +227,38 @@ test("deleting the repo drops its native watches and reports unhealthy, so polli
     expect(watcher.watching).toBe(true);
     await rmrf(dir);
     expect(existsSync(dir)).toBe(false); // rmrf is best-effort: a failed delete fails here, by name
+    await waitFor(() => !watcher.watching, 4_000).catch(() => {});
+    expect(watcher.watching).toBe(false);
+    expect(unhealthy).toBe(1);
+  } finally {
+    watcher.close();
+  }
+});
+
+test("a watch whose directory goes after its last event is still dropped", async () => {
+  // The existence check used to run once per burst, a second after the first event. A directory
+  // that finished going after that check (no event for the final removal) was never looked at
+  // again, so the repo stayed "watching" with no .git on disk.
+  const dir = await gitRepo();
+  let emit: ((eventType?: string, filename?: string | null) => void) | undefined;
+  const factory: WatchFactory = (_path, _opts, listener) => {
+    emit ??= listener;
+    const handle = new EventEmitter() as FSWatcher;
+    handle.close = () => {};
+    handle.ref = () => handle;
+    handle.unref = () => handle;
+    return handle;
+  };
+  let unhealthy = 0;
+  const watcher = watchRepo(dir, () => {}, ".git", 250, () => {
+    unhealthy++;
+  }, factory);
+  try {
+    expect(watcher.watching).toBe(true);
+    emit?.("change", "HEAD");
+    await new Promise((resolve) => setTimeout(resolve, 1_500)); // past the first check: still there
+    expect(watcher.watching).toBe(true);
+    await rmrf(dir);
     await waitFor(() => !watcher.watching, 4_000).catch(() => {});
     expect(watcher.watching).toBe(false);
     expect(unhealthy).toBe(1);

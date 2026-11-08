@@ -15,6 +15,12 @@ All notable changes to RepoYeti are documented here. The format is based on
   push with no saved login used to fall through to Git for Windows' credential helper, which put its
   sign-in window on the desktop every time, during test runs too. Now that git call simply fails,
   and the window never opens.
+- **A deleted repo stops being watched even when its last event came too early.** The watcher checked
+  whether a watched folder still existed once, a second after the first event of a burst. When the
+  folder finished going after that check and raised no further event, the check never ran again, so
+  the repo stayed marked as watched with no folder on disk. The check now keeps looking for ten seconds
+  after the last event. A test with an injected watch factory fails on the old code (watch still
+  "watching" after its folder is removed) and passes now.
 
 ## [1.4.0] - 2026-10-19
 

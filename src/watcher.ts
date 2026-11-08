@@ -37,11 +37,11 @@
  * than .git churn. REPOYETI_NO_WORKTREE_WATCH=1 disables this bonus watch entirely.
  */
 import {
-  watch,
   existsSync,
+  type FSWatcher,
   readFileSync,
   statSync,
-  type FSWatcher,
+  watch,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -155,6 +155,9 @@ function markerLayout(absPath: string, marker: string): MarkerLayout {
   return { markerPath, gitDir, commonDir, isGit: true };
 }
 
+/** How long after a watch's last event its existence check keeps looking (see addWatch). */
+const EXISTS_GRACE_MS = 10_000;
+
 export function watchRepo(
   absPath: string,
   onChange: () => void,
@@ -240,16 +243,29 @@ export function watchRepo(
       // error: a required one hands the repo to the polling fallback. Any event arms ONE existence
       // check a second later (never one per event: the recursive worktree watch can see thousands
       // a second during a build), and the last event of a burst always gets a check after it.
+      // The last event this watch saw. A check that finds the path still there keeps looking
+      // until the events have been quiet for EXISTS_GRACE_MS: the directory can finish going
+      // after the last event for it (the deletion's final rmdir often raises none), so a single
+      // check per burst could find it present and never look again, and the watch would stay
+      // "watching" a repo that is gone. The window is bounded, so a live repo costs one stat per
+      // second only for that long after its last event.
+      let lastEventAt = 0;
+      const armExistsCheck = (): void => {
+        existsChecks.set(
+          path,
+          setTimeout(() => {
+            existsChecks.delete(path);
+            if (!existsSync(path)) {
+              drop();
+              return;
+            }
+            if (Date.now() - lastEventAt < EXISTS_GRACE_MS) armExistsCheck();
+          }, 1_000),
+        );
+      };
       const handle = watchFactory(path, { persistent: true, recursive }, (eventType, filename) => {
-        if (!existsChecks.has(path)) {
-          existsChecks.set(
-            path,
-            setTimeout(() => {
-              existsChecks.delete(path);
-              if (!existsSync(path)) drop();
-            }, 1_000),
-          );
-        }
+        lastEventAt = Date.now();
+        if (!existsChecks.has(path)) armExistsCheck();
         listener(eventType, filename);
       });
       // FSWatcher reports some native failures asynchronously. Consume the EventEmitter error
