@@ -27,10 +27,10 @@
  *    under the prefix, and `X-Forwarded-Prefix` tells the app where it lives.
  */
 import type { Context, Hono } from "hono";
-import type { Deps } from "../deps.ts";
-import type { RepoYetiConfig } from "../../config.ts";
 import { DAEMON_COOKIE_NAMES, isOwnerRequest, publicOrigin, validBearerToken } from "../../auth.ts";
+import type { RepoYetiConfig } from "../../config.ts";
 import { getServerPort } from "../../runtime.ts";
+import type { Deps } from "../deps.ts";
 
 /** Headers that describe one connection, not the message: never forwarded in either direction. */
 const HOP_BY_HOP = [
@@ -220,6 +220,9 @@ async function proxy(c: Context, cfg: RepoYetiConfig): Promise<Response> {
         // Pass the upstream's bytes through as they are: decompressing would leave Content-Encoding
         // and Content-Length describing a body the browser no longer receives.
         decompress: false,
+        // WHY: this hop is always loopback to the dev server. A machine-wide HTTP(S)_PROXY must not
+        // carry it, or the proxy would try to reach 127.0.0.1 through a box that cannot see it.
+        proxy: false,
       });
       answeredOn.set(port, host);
       break;
