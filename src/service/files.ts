@@ -6,13 +6,13 @@
  */
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, renameSync, statSync, unlinkSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { pathWithin, normalizeRelPath, realPathConfined } from "../paths.ts";
+import { dirname, resolve } from "node:path";
 import { getRepo } from "../db.ts";
-import { enqueue } from "../opqueue.ts";
 import { gitFor, safeGitEnv } from "../git.ts";
-import { backendFor } from "../vcs/index.ts";
+import { enqueue } from "../opqueue.ts";
+import { normalizeRelPath, pathWithin, realPathConfined } from "../paths.ts";
 import { readBytesStreamLimited, readTextStreamLimited } from "../process-output.ts";
+import { backendFor } from "../vcs/index.ts";
 
 /** A single file's contents for the read-only source-control viewer. */
 export interface FileContentResult {
@@ -811,6 +811,33 @@ export async function writeFileContent(
   return enqueue(repoId, () => writeFileContentQueued(repo, relPath, content, options));
 }
 
+/** Codes a rename over a file raises on Windows while another process holds that file open. */
+const RENAME_TRANSIENT = new Set(["EPERM", "EBUSY", "EACCES"]);
+
+/**
+ * rename(tmp, dst) for a save. On Windows the rename fails with EPERM while a git child (a
+ * `git status` the daemon started after the previous save reads the file to refresh its index)
+ * or an antivirus scan still has the target open: the save answered ERROR (HTTP 400) for a
+ * handle that closes within milliseconds. Those codes are retried with a short, growing pause,
+ * about 0.7 s in all; any other error, or the last attempt's, is thrown as before.
+ */
+export async function renameReplacing(
+  from: string,
+  to: string,
+  rename: (from: string, to: string) => void = renameSync,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      rename(from, to);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code ?? "";
+      if (!RENAME_TRANSIENT.has(code) || attempt >= 8) throw e;
+      await Bun.sleep(25 * attempt);
+    }
+  }
+}
+
 const STALE: WriteFileResult = {
   ok: false,
   code: "FILE_STALE",
@@ -907,7 +934,7 @@ async function writeFileContentQueued(
       }
       return STALE;
     }
-    renameSync(tmp, r.abs);
+    await renameReplacing(tmp, r.abs);
     return { ok: true, code: "OK", path: r.clean, size, hash: fileContentHash(content) };
   } catch (e) {
     try {

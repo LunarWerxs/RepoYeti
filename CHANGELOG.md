@@ -8,6 +8,13 @@ All notable changes to RepoYeti are documented here. The format is based on
 
 ### Fixed
 
+- **Saving an edited file on Windows no longer fails when another process has the file open.** A
+  save writes a temp file and renames it over the target. On Windows that rename fails with EPERM
+  while a git child (the `git status` the daemon starts after the previous save) or a scan still
+  holds the target open, and the save answered "ERROR" (HTTP 400) even though the handle closes
+  within milliseconds. The rename now retries those codes with a short pause, about 0.7 s in all.
+  Measured: `tests/file-write.test.ts` failed 1 of 10 paired runs on Windows with
+  `EPERM: operation not permitted, rename ... readme.md.repoyeti-*.tmp`; it passed 10 of 10 after.
 - **Your key and settings stay yours on a PC named like your account.** Where a Windows account has
   the same name as the PC, RepoYeti locked its own signing key and config folder against you. It now
   locks them to your account properly.
