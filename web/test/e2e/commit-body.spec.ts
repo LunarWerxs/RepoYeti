@@ -1,4 +1,7 @@
-import { test, expect } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, test } from "@playwright/test";
 
 // Open a repo card and its History panel WITHOUT assuming they are shut. Blindly clicking the
 // toggles collapses whatever was already open, and the panel state can carry over between runs,
@@ -12,7 +15,8 @@ async function openHistory(card: import("@playwright/test").Locator, page: impor
   await page.waitForTimeout(400);
 }
 
-const OUT = "C:/Users/blogi/AppData/Local/Temp/claude/D--PublicProjects/a98d36bd-dec2-4b49-b47f-ca3985f03327/scratchpad";
+const OUT = join(tmpdir(), "repoyeti-commit-body-e2e");
+mkdirSync(OUT, { recursive: true });
 
 test("long commit body clamps with an animated Show more", async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 900 });
