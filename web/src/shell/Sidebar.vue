@@ -11,8 +11,12 @@ import {
   DialogTitle,
 } from "reka-ui";
 import { X } from "@lucide/vue";
+import * as sheetSkin from "@ui-skin/sheet";
 import { cn } from "../lib/utils";
 import { type PushPanelSide, DEFAULT_PANEL_WIDTH, maxOpenPushPanelWidth } from "./usePushPanel";
+
+// The close button's words come from this app's skin, as the sheet's do (the app's language where it has one).
+const labels = sheetSkin.useLabels();
 
 /**
  * Sidebar, the ONE slide-in panel every LunarWerx app uses (settings, drawers,
@@ -141,8 +145,8 @@ if (import.meta.env.DEV) {
 
         <DialogClose
           class="ring-offset-background focus:ring-ring absolute top-3 right-3 z-20 rounded-sm p-1 opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:outline-hidden"
-          aria-label="Close"
-          title="Close"
+          :aria-label="labels.close"
+          :title="labels.close"
         >
           <X class="size-4" />
         </DialogClose>
