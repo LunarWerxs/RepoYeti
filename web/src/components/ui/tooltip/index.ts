@@ -1,3 +1,4 @@
+export { TIP_GRACE_MS, useTipGrace } from "./grace"
 export { default as LazyTooltip } from "./LazyTooltip.vue"
 export { default as Tip } from "./Tip.vue"
 export { default as Tooltip } from "./Tooltip.vue"
